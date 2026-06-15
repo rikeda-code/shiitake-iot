@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>収穫状況ダッシュボード</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2e3148;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
+    header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+    #last-updated { font-size: 0.8rem; color: var(--muted); }
+    #refresh-btn {
+      background: var(--border); border: none; color: var(--text);
+      padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+      transition: background 0.2s;
+    }
+    #refresh-btn:hover { background: #3a3f5c; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      background: var(--surface);
+    }
+    .tab-btn {
+      padding: 12px 24px;
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 0.9rem; font-weight: 500;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    /* ── Main ── */
+    main { padding: 28px 32px; display: flex; flex-direction: column; gap: 28px; }
+
+    .section-title {
+      font-size: 1rem; font-weight: 600; margin-bottom: 14px;
+    }
+    .section-title .sub {
+      color: var(--muted); font-size: 0.78rem; font-weight: 400; margin-left: 8px;
+    }
+
+    /* ── KPI cards ── */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+      gap: 12px;
+    }
+    .container-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      cursor: default;
+      transition: border-color 0.15s;
+    }
+    .container-card:hover { border-color: #4a5070; }
+    .card-no { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .card-name { font-size: 0.88rem; font-weight: 600; margin: 4px 0 10px; }
+    .card-total { font-size: 1.55rem; font-weight: 700; }
+    .card-unit { font-size: 0.7rem; font-weight: 400; color: var(--muted); }
+    .card-breakdown { display: flex; gap: 5px; margin-top: 10px; flex-wrap: wrap; }
+    .size-chip {
+      font-size: 0.68rem; padding: 2px 7px; border-radius: 4px; font-weight: 600;
+    }
+
+    /* ── Chart sections ── */
+    .chart-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .chart-wrap { height: 340px; position: relative; }
+
+    /* ── Container selector ── */
+    .selector-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .selector-row label { font-size: 0.83rem; color: var(--muted); }
+    .selector-row select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px; font-size: 0.83rem;
+    }
+
+    /* ── States ── */
+    .loading {
+      display: flex; align-items: center; justify-content: center;
+      height: 100px; color: var(--muted); font-size: 0.9rem;
+    }
+    .error-msg { color: #f87171; font-size: 0.85rem; padding: 16px; line-height: 1.6; }
+    .setup-notice {
+      background: rgba(251,191,36,0.08);
+      border: 1px solid rgba(251,191,36,0.25);
+      border-radius: 10px;
+      padding: 20px 24px;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: var(--text);
+    }
+    .setup-notice strong { color: #fbbf24; }
+    .setup-notice code {
+      background: rgba(255,255,255,0.08);
+      padding: 1px 6px; border-radius: 3px; font-size: 0.82rem;
+    }
+
+    @media (max-width: 640px) {
+      header, main { padding: 16px; }
+      .tabs { padding: 0 16px; }
+      .tab-btn { padding: 10px 14px; font-size: 0.82rem; }
+      .chart-wrap { height: 260px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🍄 収穫状況ダッシュボード</h1>
+    <div class="subtitle">コンテナ別収穫可視化</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="loadCurrentSite(true)">↻ 更新</button>
+  </div>
+</header>
+
+<div class="tabs" id="tabs"></div>
+<main id="main"></main>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────────
+
+const SITES = [
+  { name: 'いなべ', id: '1TWOwAAFlV4ufYwaicbWGZ_Agv3ZF-rbDXZQDxYqHAiQ', color: '#38bdf8' },
+  { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#a78bfa' },
+  { name: '南丹',   id: '1bAdmTLPGtwn6JH6C16m2nzr3RJhZpgAuSMaVtIL1aRc', color: '#34d399' },
+];
+
+const SIZES = [
+  { key: 'm',       label: 'M秀',  color: '#38bdf8' },
+  { key: 'l',       label: 'L秀',  color: '#34d399' },
+  { key: 'xl',      label: '2L秀', color: '#a78bfa' },
+  { key: 'premium', label: '優',   color: '#f97316' },
+];
+
+const CONTAINER_PALETTE = [
+  '#38bdf8','#34d399','#a78bfa','#f97316','#fb7185','#facc15',
+  '#4ade80','#c084fc','#f472b6','#60a5fa','#fb923c','#2dd4bf',
+  '#818cf8','#e879f9','#a3e635','#fbbf24',
+];
+
+// ── State ──────────────────────────────────────────────────────────────────────
+
+let currentSiteIdx = 0;
+const cache = {}; // { [siteId]: { containers: string[], data: { [name]: row[] } } }
+let chartCumul = null;
+let chartStack = null;
+
+// ── Data helpers ───────────────────────────────────────────────────────────────
+
+async function fetchSheet(sheetId, sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
+  return json.table;
+}
+
+function gvizDateStr(v, f) {
+  // Prefer formatted string
+  if (f && typeof f === 'string') return f;
+  if (!v) return null;
+  const s = String(v);
+  // "Date(2025,5,14)" → month is 0-based
+  const m = s.match(/Date\((\d+),(\d+),(\d+)\)/);
+  if (m) return `${m[1]}/${parseInt(m[2]) + 1}/${m[3]}`;
+  return s;
+}
+
+async function fetchContainerList(siteId) {
+  const table = await fetchSheet(siteId, 'コンテナ一覧');
+  return (table.rows || []).map(row => {
+    const c = row.c?.[0];
+    const v = c?.v != null ? String(c.v).trim() : (c?.f ?? '').trim();
+    return v;
+  }).filter(Boolean);
+}
+
+function parseContainerRows(table) {
+  const colMap = {};
+  (table.cols || []).forEach((c, i) => {
+    const lbl = (c.label || '').replace(/\s/g, '');
+    if (lbl.includes('日付'))      colMap.date    = i;
+    if (/^M秀/.test(lbl))          colMap.m       = i;
+    if (/^L秀/.test(lbl))          colMap.l       = i;
+    if (/^2L秀/.test(lbl))         colMap.xl      = i;
+    if (/^優/.test(lbl))           colMap.premium = i;
+  });
+
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    if (colMap.date == null) return;
+    const dc = cells[colMap.date];
+    const date = gvizDateStr(dc?.v, dc?.f);
+    if (!date) return;
+
+    const m       = parseFloat(cells[colMap.m]?.v)       || 0;
+    const l       = parseFloat(cells[colMap.l]?.v)       || 0;
+    const xl      = parseFloat(cells[colMap.xl]?.v)      || 0;
+    const premium = parseFloat(cells[colMap.premium]?.v) || 0;
+    const total   = m + l + xl + premium;
+    if (total > 0) rows.push({ date, m, l, xl, premium, total });
+  });
+
+  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// "47(6/14)志摩L3" → { no:"47", startDate:"6/14", location:"志摩", type:"L3" }
+function parseContainerName(raw) {
+  const s = String(raw);
+  const m = s.match(/^(\d+)\(([^)]+)\)(.+?)([A-Za-z]\d*)$/);
+  if (m) return { no: m[1], startDate: m[2], location: m[3], type: m[4], raw: s };
+  return { no: s, startDate: '', location: '', type: '', raw: s };
+}
+
+// ── Chart helpers ──────────────────────────────────────────────────────────────
+
+const tooltipDefaults = {
+  backgroundColor: '#1e2235',
+  borderColor: '#3a3f5c',
+  borderWidth: 1,
+  titleColor: '#e2e8f0',
+  bodyColor: '#a0aec0',
+};
+
+function destroyCharts() {
+  if (chartCumul) { chartCumul.destroy(); chartCumul = null; }
+  if (chartStack) { chartStack.destroy(); chartStack = null; }
+}
+
+function buildCumulChart(containers, data) {
+  const allDates = new Set();
+  containers.forEach(n => (data[n] || []).forEach(r => allDates.add(r.date)));
+  const dates = Array.from(allDates).sort();
+  if (!dates.length) return;
+
+  const datasets = containers.map((name, idx) => {
+    const byDate = {};
+    (data[name] || []).forEach(r => byDate[r.date] = r.total);
+    let cum = 0;
+    const vals = dates.map(d => { cum += byDate[d] || 0; return +cum.toFixed(3); });
+    const info = parseContainerName(name);
+    const color = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
+    return {
+      label: `No.${info.no} ${info.location}${info.type}`,
+      data: vals,
+      borderColor: color,
+      backgroundColor: color + '18',
+      borderWidth: 2,
+      pointRadius: 2.5,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      fill: false,
+    };
+  });
+
+  const ctx = document.getElementById('cumul-chart').getContext('2d');
+  chartCumul = new Chart(ctx, {
+    type: 'line',
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 14, padding: 16 },
+        },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kg`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45, maxTicksLimit: 20 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} kg` },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+}
+
+function buildStackChart(rows) {
+  if (!rows || !rows.length) return;
+  const labels = rows.map(r => r.date);
+  const datasets = SIZES.map(s => ({
+    label: s.label,
+    data: rows.map(r => r[s.key]),
+    backgroundColor: s.color + 'cc',
+    borderColor: s.color,
+    borderWidth: 1,
+    borderRadius: 3,
+  }));
+
+  const ctx = document.getElementById('stack-chart').getContext('2d');
+  chartStack = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 14, padding: 16 },
+        },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kg`,
+            footer: items => {
+              const total = items.reduce((s, i) => s + i.parsed.y, 0);
+              return `合計: ${total.toFixed(2)} kg`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45, maxTicksLimit: 20 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          stacked: true,
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} kg` },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────────
+
+function renderSetupNotice() {
+  return `<div class="setup-notice">
+    <strong>⚠ コンテナ一覧シートが見つかりません</strong><br>
+    以下の手順でセットアップしてください：<br>
+    1. このスプレッドシートに <strong>コンテナ一覧</strong> という名前のシートを追加する<br>
+    2. A列にコンテナシート名を1行1件で入力する（例: <code>47(6/14)志摩L3</code>）<br>
+    3. スプレッドシートを「ファイル → 共有 → <strong>ウェブに公開</strong>」で公開する<br>
+    4. このページを更新する
+  </div>`;
+}
+
+function renderCards(containers, data, siteColor) {
+  if (!containers.length) return renderSetupNotice();
+
+  const html = containers.map((name, idx) => {
+    const info  = parseContainerName(name);
+    const rows  = data[name] || [];
+    const totals = { m: 0, l: 0, xl: 0, premium: 0 };
+    rows.forEach(r => { totals.m += r.m; totals.l += r.l; totals.xl += r.xl; totals.premium += r.premium; });
+    const grand = totals.m + totals.l + totals.xl + totals.premium;
+    const color = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
+
+    const chips = SIZES.filter(s => totals[s.key] > 0).map(s =>
+      `<span class="size-chip" style="background:${s.color}22;color:${s.color}">${s.label} ${totals[s.key].toFixed(1)}</span>`
+    ).join('');
+
+    return `<div class="container-card">
+      <div class="card-no">No.${info.no} · ${info.startDate}</div>
+      <div class="card-name" style="color:${color}">${info.location}${info.type}</div>
+      <div class="card-total" style="color:${color}">${grand.toFixed(1)}<span class="card-unit"> kg</span></div>
+      <div class="card-breakdown">${chips}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="cards-grid">${html}</div>`;
+}
+
+function renderMain(site, containers, data) {
+  destroyCharts();
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+
+  // Section 1 – KPI cards
+  const s1 = document.createElement('section');
+  s1.innerHTML = `<div class="section-title">現時点収穫量<span class="sub">コンテナ別累計</span></div>
+    ${renderCards(containers, data, site.color)}`;
+  main.appendChild(s1);
+
+  if (!containers.length) return;
+
+  // Section 2 – Cumulative line
+  const s2 = document.createElement('section');
+  s2.className = 'chart-section';
+  s2.innerHTML = `<div class="section-title">累計収穫量推移<span class="sub">コンテナ別折れ線</span></div>
+    <div class="chart-wrap"><canvas id="cumul-chart"></canvas></div>`;
+  main.appendChild(s2);
+
+  // Section 3 – Stacked bar
+  const options = containers.map(name => {
+    const info = parseContainerName(name);
+    return `<option value="${name}">No.${info.no} ${info.location}${info.type}（${info.startDate}）</option>`;
+  }).join('');
+
+  const s3 = document.createElement('section');
+  s3.className = 'chart-section';
+  s3.innerHTML = `<div class="section-title">日次サイズ別収穫量<span class="sub">積み上げ棒グラフ</span></div>
+    <div class="selector-row">
+      <label>コンテナ：</label>
+      <select id="container-select" onchange="onContainerChange()">${options}</select>
+    </div>
+    <div class="chart-wrap"><canvas id="stack-chart"></canvas></div>`;
+  main.appendChild(s3);
+
+  requestAnimationFrame(() => {
+    buildCumulChart(containers, data);
+    buildStackChart(data[containers[0]] || []);
+  });
+}
+
+function onContainerChange() {
+  const sel = document.getElementById('container-select');
+  if (!sel) return;
+  const site = SITES[currentSiteIdx];
+  const rows = (cache[site.id]?.data || {})[sel.value] || [];
+  if (chartStack) { chartStack.destroy(); chartStack = null; }
+  buildStackChart(rows);
+}
+
+// ── Load ───────────────────────────────────────────────────────────────────────
+
+async function loadCurrentSite(forceRefresh = false) {
+  const site = SITES[currentSiteIdx];
+
+  if (!forceRefresh && cache[site.id]) {
+    const { containers, data } = cache[site.id];
+    renderMain(site, containers, data);
+    return;
+  }
+
+  document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
+  document.getElementById('last-updated').textContent = '';
+
+  let containers = [];
+  let listError  = null;
+
+  try {
+    containers = await fetchContainerList(site.id);
+  } catch (e) {
+    listError = e.message || String(e);
+  }
+
+  const data = {};
+  if (containers.length) {
+    await Promise.all(containers.map(async name => {
+      try {
+        const table = await fetchSheet(site.id, name);
+        data[name] = parseContainerRows(table);
+      } catch {
+        data[name] = [];
+      }
+    }));
+  }
+
+  cache[site.id] = { containers, data };
+  renderMain(site, containers, data);
+
+  if (listError) {
+    const msg = document.createElement('div');
+    msg.className = 'error-msg';
+    msg.textContent = `データ取得エラー: ${listError}`;
+    document.getElementById('main').prepend(msg);
+  }
+
+  document.getElementById('last-updated').textContent =
+    `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+
+function initTabs() {
+  const tabsEl = document.getElementById('tabs');
+  SITES.forEach((site, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
+    btn.textContent = site.name;
+    if (i === 0) {
+      btn.style.color = site.color;
+      btn.style.borderBottomColor = site.color;
+    }
+    btn.addEventListener('click', () => {
+      if (currentSiteIdx === i) return;
+      currentSiteIdx = i;
+      tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
+        const s = SITES[j];
+        b.classList.toggle('active', j === i);
+        if (j === i) { b.style.color = s.color; b.style.borderBottomColor = s.color; }
+        else          { b.style.color = ''; b.style.borderBottomColor = ''; }
+      });
+      loadCurrentSite();
+    });
+    tabsEl.appendChild(btn);
+  });
+}
+
+initTabs();
+loadCurrentSite();
+</script>
+</body>
+</html>
