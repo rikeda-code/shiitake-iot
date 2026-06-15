@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>収穫モニター</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2e3148;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --accent-inabe: #38bdf8;
+      --accent-gunma: #a78bfa;
+      --accent-nandan: #34d399;
+      --target: #f97316;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      min-height: 100vh;
+    }
+    header {
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
+    .header-nav { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .back-link {
+      font-size: 0.82rem;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .back-link:hover { color: var(--text); border-color: #4a4f6c; }
+    #last-updated { font-size: 0.8rem; color: var(--muted); }
+    #refresh-btn {
+      background: var(--border);
+      border: none;
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: background 0.2s;
+    }
+    #refresh-btn:hover { background: #3a3f5c; }
+
+    nav {
+      display: flex;
+      gap: 0;
+      padding: 0 32px;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    nav button {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      padding: 14px 20px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    nav button:hover { color: var(--text); }
+    nav button.active { color: var(--text); border-bottom-color: var(--accent-inabe); }
+
+    main { padding: 28px 32px; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .card-header h2 { font-size: 1.05rem; font-weight: 600; }
+    .card-subtitle { font-size: 0.8rem; color: var(--muted); }
+    .chart-wrap { padding: 20px 24px; height: 360px; position: relative; }
+    .chart-wrap-tall { padding: 20px 24px; height: 420px; position: relative; }
+    .loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.9rem; color: var(--muted);
+    }
+    .error-msg { color: #f87171; font-size: 0.85rem; padding: 20px 24px; }
+
+    .selector-row {
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .selector-row label { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+    .selector-row select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .data-table-wrap {
+      padding: 0 24px 24px;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(46, 49, 72, 0.5);
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    @media (max-width: 640px) {
+      header, main { padding: 16px; }
+      nav { padding: 0 16px; }
+      .chart-wrap { height: 280px; }
+      .chart-wrap-tall { height: 320px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>収穫モニター</h1>
+  <div class="header-nav">
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
+    <a href="index.html" class="back-link">← ダッシュボードへ</a>
+  </div>
+</header>
+
+<nav>
+  <button class="active" onclick="switchTab('current')">現時点収穫量</button>
+  <button onclick="switchTab('cumulative')">累計収穫量</button>
+  <button onclick="switchTab('bysize')">サイズ別収穫量</button>
+  <button onclick="switchTab('substrate')">菌床管理</button>
+</nav>
+
+<main>
+  <div id="tab-current" class="tab-panel active">
+    <div class="card">
+      <div class="card-header">
+        <h2>コンテナ別の現時点収穫量</h2>
+        <span class="card-subtitle" id="current-date-label"></span>
+      </div>
+      <div class="chart-wrap" id="current-wrap">
+        <div class="loading">データを読み込み中...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-cumulative" class="tab-panel">
+    <div class="card">
+      <div class="card-header">
+        <h2>収穫量累計</h2>
+        <span class="card-subtitle">コンテナ別・累計収穫量 (g)</span>
+      </div>
+      <div class="chart-wrap-tall" id="cumulative-wrap">
+        <div class="loading">データを読み込み中...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-bysize" class="tab-panel">
+    <div class="card">
+      <div class="card-header">
+        <h2>日々サイズ別積み上げ</h2>
+        <span class="card-subtitle">S / M / L サイズ別収穫量 (g)</span>
+      </div>
+      <div class="selector-row">
+        <label for="bysize-select">コンテナ:</label>
+        <select id="bysize-select" onchange="renderBySizeChart()"></select>
+      </div>
+      <div class="chart-wrap-tall" id="bysize-wrap">
+        <div class="loading">データを読み込み中...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-substrate" class="tab-panel">
+    <div class="card">
+      <div class="card-header">
+        <h2>菌床管理データ</h2>
+        <span class="card-subtitle">コンテナ別・菌床重量推移 (g)</span>
+      </div>
+      <div class="selector-row">
+        <label for="substrate-select">コンテナ:</label>
+        <select id="substrate-select" onchange="renderSubstrateView()"></select>
+      </div>
+      <div class="chart-wrap-tall" id="substrate-wrap">
+        <div class="loading">データを読み込み中...</div>
+      </div>
+      <div class="data-table-wrap" id="substrate-table"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const SHEET_ID = '1RBIXcz6SGZ9AoVN6Ym4SsrGSqVVg2iM-YO_yxYLrR6Q';
+
+const CONTAINER_PALETTE = [
+  '#38bdf8', '#a78bfa', '#34d399', '#f97316', '#f43f5e',
+  '#facc15', '#22d3ee', '#e879f9', '#86efac', '#fb923c',
+];
+
+const SIZE_COLORS = {
+  S: '#38bdf8',
+  M: '#a78bfa',
+  L: '#34d399',
+};
+
+const SUBSTRATE_COLORS = [
+  '#38bdf8', '#a78bfa', '#34d399', '#f97316', '#f43f5e',
+];
+
+let harvestData = [];
+let substrateData = [];
+let containerColors = {};
+let charts = {};
+
+async function fetchSheet(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  return json.table;
+}
+
+function colIndex(cols, ...keywords) {
+  for (const kw of keywords) {
+    const idx = cols.findIndex(c => (c.label || '').replace(/\s/g, '').includes(kw));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
+function cellVal(cells, idx) {
+  if (idx < 0 || idx >= cells.length) return null;
+  const c = cells[idx];
+  if (!c) return null;
+  return c.v ?? c.f ?? null;
+}
+
+function parseDate(v) {
+  if (!v) return null;
+  if (typeof v === 'string' && v.startsWith('Date(')) {
+    const parts = v.slice(5, -1).split(',').map(Number);
+    return new Date(parts[0], parts[1], parts[2]);
+  }
+  if (typeof v === 'string') {
+    const s = v.trim().replace(/\//g, '-');
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof v === 'number') {
+    return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+  }
+  return null;
+}
+
+function formatDate(d) {
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
+
+function parseHarvestTable(table) {
+  const cols = table.cols;
+  const iContainer = colIndex(cols, 'コンテナID');
+  const iDate = colIndex(cols, '日付');
+  const iS = colIndex(cols, 'Sサイズ');
+  const iM = colIndex(cols, 'Mサイズ');
+  const iL = colIndex(cols, 'Lサイズ');
+  const iTotal = colIndex(cols, '合計');
+
+  const rows = [];
+  for (const row of (table.rows || [])) {
+    const c = row.c || [];
+    const container = String(cellVal(c, iContainer) ?? '').trim();
+    if (!container) continue;
+
+    const rawDate = cellVal(c, iDate);
+    const date = parseDate(rawDate);
+    if (!date) continue;
+
+    const s = parseFloat(cellVal(c, iS)) || 0;
+    const m = parseFloat(cellVal(c, iM)) || 0;
+    const l = parseFloat(cellVal(c, iL)) || 0;
+    const totalCell = iTotal >= 0 ? parseFloat(cellVal(c, iTotal)) : NaN;
+    const total = isNaN(totalCell) || totalCell === 0 ? s + m + l : totalCell;
+
+    rows.push({ container, date, s, m, l, total });
+  }
+  return rows;
+}
+
+function parseSubstrateTable(table) {
+  const cols = table.cols;
+  const iContainer = colIndex(cols, 'コンテナID');
+  const iDate = colIndex(cols, '日付');
+  const iInit = colIndex(cols, '初期重量');
+  const iAfterWater = colIndex(cols, '散水後重量');
+  const iBudTrim = colIndex(cols, '芽かき量');
+  const iPreInject = colIndex(cols, '注水前菌床重量');
+  const iPostInject = colIndex(cols, '注水後菌床重量');
+
+  const rows = [];
+  for (const row of (table.rows || [])) {
+    const c = row.c || [];
+    const container = String(cellVal(c, iContainer) ?? '').trim();
+    if (!container) continue;
+
+    const rawDate = cellVal(c, iDate);
+    const date = parseDate(rawDate);
+    if (!date) continue;
+
+    rows.push({
+      container,
+      date,
+      init: parseFloat(cellVal(c, iInit)) || 0,
+      afterWater: parseFloat(cellVal(c, iAfterWater)) || 0,
+      budTrim: parseFloat(cellVal(c, iBudTrim)) || 0,
+      preInject: parseFloat(cellVal(c, iPreInject)) || 0,
+      postInject: parseFloat(cellVal(c, iPostInject)) || 0,
+    });
+  }
+  return rows;
+}
+
+function assignContainerColors(containers) {
+  containers.sort().forEach((id, i) => {
+    containerColors[id] = CONTAINER_PALETTE[i % CONTAINER_PALETTE.length];
+  });
+}
+
+function destroyChart(key) {
+  if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+}
+
+function darkTooltipDefaults() {
+  return {
+    backgroundColor: '#1e2235',
+    borderColor: '#3a3f5c',
+    borderWidth: 1,
+    titleColor: '#e2e8f0',
+    bodyColor: '#a0aec0',
+  };
+}
+
+function darkScaleDefaults() {
+  return {
+    x: {
+      ticks: { color: '#8892a4', font: { size: 11 } },
+      grid: { color: '#1e2235' },
+    },
+    y: {
+      ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} g` },
+      grid: { color: '#1e2235' },
+    },
+  };
+}
+
+function renderCurrentChart() {
+  const wrap = document.getElementById('current-wrap');
+  if (!harvestData.length) {
+    wrap.innerHTML = '<div class="loading">データがありません</div>';
+    return;
+  }
+
+  const allDates = harvestData.map(r => r.date.getTime());
+  const latestTs = Math.max(...allDates);
+  const latestStr = formatDate(new Date(latestTs));
+
+  document.getElementById('current-date-label').textContent = `最新データ: ${latestStr}`;
+
+  const latestRows = harvestData.filter(r => formatDate(r.date) === latestStr);
+
+  const containerTotals = {};
+  for (const r of latestRows) {
+    containerTotals[r.container] = (containerTotals[r.container] || 0) + r.total;
+  }
+
+  const sorted = Object.entries(containerTotals).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([id]) => id);
+  const values = sorted.map(([, v]) => v);
+  const bgColors = labels.map(id => (containerColors[id] || CONTAINER_PALETTE[0]) + 'cc');
+  const borderColors = labels.map(id => containerColors[id] || CONTAINER_PALETTE[0]);
+
+  wrap.innerHTML = '<canvas id="chart-current"></canvas>';
+  const ctx = document.getElementById('chart-current').getContext('2d');
+
+  destroyChart('current');
+  charts['current'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '収穫量 (g)',
+        data: values,
+        backgroundColor: bgColors,
+        borderColor: borderColors,
+        borderWidth: 1.5,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: darkTooltipDefaults(),
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} g` },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          ticks: { color: '#8892a4', font: { size: 12 } },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+}
+
+function renderCumulativeChart() {
+  const wrap = document.getElementById('cumulative-wrap');
+  if (!harvestData.length) {
+    wrap.innerHTML = '<div class="loading">データがありません</div>';
+    return;
+  }
+
+  const containers = [...new Set(harvestData.map(r => r.container))].sort();
+  const allDateStrs = [...new Set(harvestData.map(r => formatDate(r.date)))].sort();
+
+  const datasets = containers.map(id => {
+    const color = containerColors[id] || CONTAINER_PALETTE[0];
+    let cumulative = 0;
+    const dataPoints = allDateStrs.map(dateStr => {
+      const dayRows = harvestData.filter(r => r.container === id && formatDate(r.date) === dateStr);
+      cumulative += dayRows.reduce((s, r) => s + r.total, 0);
+      return cumulative;
+    });
+    return {
+      label: id,
+      data: dataPoints,
+      borderColor: color,
+      backgroundColor: color + '22',
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      fill: false,
+      tension: 0.3,
+    };
+  });
+
+  wrap.innerHTML = '<canvas id="chart-cumulative"></canvas>';
+  const ctx = document.getElementById('chart-cumulative').getContext('2d');
+
+  destroyChart('cumulative');
+  charts['cumulative'] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: allDateStrs, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: darkTooltipDefaults(),
+      },
+      scales: darkScaleDefaults(),
+      interaction: { mode: 'index', intersect: false },
+    },
+  });
+}
+
+function populateBySizeSelect() {
+  const sel = document.getElementById('bysize-select');
+  const containers = [...new Set(harvestData.map(r => r.container))].sort();
+  sel.innerHTML = containers.map(id => `<option value="${id}">${id}</option>`).join('');
+}
+
+function renderBySizeChart() {
+  const wrap = document.getElementById('bysize-wrap');
+  const container = document.getElementById('bysize-select').value;
+
+  if (!container) {
+    wrap.innerHTML = '<div class="loading">データがありません</div>';
+    return;
+  }
+
+  const rows = harvestData.filter(r => r.container === container);
+  const dateStrs = [...new Set(rows.map(r => formatDate(r.date)))].sort();
+
+  const sum = (key, d) => rows.filter(r => formatDate(r.date) === d).reduce((s, r) => s + r[key], 0);
+
+  wrap.innerHTML = '<canvas id="chart-bysize"></canvas>';
+  const ctx = document.getElementById('chart-bysize').getContext('2d');
+
+  destroyChart('bysize');
+  charts['bysize'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dateStrs,
+      datasets: [
+        { label: 'S サイズ', data: dateStrs.map(d => sum('s', d)), backgroundColor: SIZE_COLORS.S + 'cc', borderColor: SIZE_COLORS.S, borderWidth: 1 },
+        { label: 'M サイズ', data: dateStrs.map(d => sum('m', d)), backgroundColor: SIZE_COLORS.M + 'cc', borderColor: SIZE_COLORS.M, borderWidth: 1 },
+        { label: 'L サイズ', data: dateStrs.map(d => sum('l', d)), backgroundColor: SIZE_COLORS.L + 'cc', borderColor: SIZE_COLORS.L, borderWidth: 1 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: darkTooltipDefaults(),
+      },
+      scales: {
+        x: darkScaleDefaults().x,
+        y: { ...darkScaleDefaults().y, stacked: true },
+      },
+      interaction: { mode: 'index', intersect: false },
+    },
+  });
+}
+
+function populateSubstrateSelect() {
+  const sel = document.getElementById('substrate-select');
+  const containers = [...new Set(substrateData.map(r => r.container))].sort();
+  sel.innerHTML = containers.map(id => `<option value="${id}">${id}</option>`).join('');
+}
+
+function renderSubstrateView() {
+  const wrap = document.getElementById('substrate-wrap');
+  const tableWrap = document.getElementById('substrate-table');
+  const container = document.getElementById('substrate-select').value;
+
+  if (!container) {
+    wrap.innerHTML = '<div class="loading">データがありません</div>';
+    tableWrap.innerHTML = '';
+    return;
+  }
+
+  const rows = substrateData
+    .filter(r => r.container === container)
+    .sort((a, b) => a.date - b.date);
+
+  const dateStrs = rows.map(r => formatDate(r.date));
+  const fields = [
+    { key: 'init',       label: '初期重量',       color: SUBSTRATE_COLORS[0] },
+    { key: 'afterWater', label: '散水後重量',      color: SUBSTRATE_COLORS[1] },
+    { key: 'budTrim',    label: '芽かき量',        color: SUBSTRATE_COLORS[2] },
+    { key: 'preInject',  label: '注水前菌床重量',  color: SUBSTRATE_COLORS[3] },
+    { key: 'postInject', label: '注水後菌床重量',  color: SUBSTRATE_COLORS[4] },
+  ];
+
+  wrap.innerHTML = '<canvas id="chart-substrate"></canvas>';
+  const ctx = document.getElementById('chart-substrate').getContext('2d');
+
+  destroyChart('substrate');
+  charts['substrate'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dateStrs,
+      datasets: fields.map(f => ({
+        label: f.label,
+        data: rows.map(r => r[f.key]),
+        backgroundColor: f.color + 'cc',
+        borderColor: f.color,
+        borderWidth: 1.5,
+        borderRadius: 3,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: darkTooltipDefaults(),
+      },
+      scales: darkScaleDefaults(),
+      interaction: { mode: 'index', intersect: false },
+    },
+  });
+
+  const thead = `<thead><tr><th>日付</th>${fields.map(f => `<th>${f.label}</th>`).join('')}</tr></thead>`;
+  const tbody = '<tbody>' + rows.map(r =>
+    `<tr><td>${formatDate(r.date)}</td>${fields.map(f => `<td>${r[f.key] ? r[f.key].toLocaleString() + ' g' : '—'}</td>`).join('')}</tr>`
+  ).join('') + '</tbody>';
+  tableWrap.innerHTML = `<table>${thead}${tbody}</table>`;
+}
+
+const TAB_IDS = ['current', 'cumulative', 'bysize', 'substrate'];
+
+function switchTab(name) {
+  TAB_IDS.forEach(id => {
+    document.getElementById(`tab-${id}`).classList.toggle('active', id === name);
+  });
+  document.querySelectorAll('nav button').forEach((btn, i) => {
+    btn.classList.toggle('active', TAB_IDS[i] === name);
+  });
+}
+
+async function loadAll() {
+  document.getElementById('last-updated').textContent = '';
+
+  const wrapIds = ['current-wrap', 'cumulative-wrap', 'bysize-wrap', 'substrate-wrap'];
+  wrapIds.forEach(id => {
+    document.getElementById(id).innerHTML = '<div class="loading">データを読み込み中...</div>';
+  });
+  document.getElementById('substrate-table').innerHTML = '';
+  document.getElementById('current-date-label').textContent = '';
+
+  try {
+    const [harvestTable, substrateTable] = await Promise.all([
+      fetchSheet('収穫記録'),
+      fetchSheet('菌床管理'),
+    ]);
+
+    harvestData = parseHarvestTable(harvestTable);
+    substrateData = parseSubstrateTable(substrateTable);
+
+    const allContainers = [...new Set([
+      ...harvestData.map(r => r.container),
+      ...substrateData.map(r => r.container),
+    ])];
+    assignContainerColors(allContainers);
+
+    renderCurrentChart();
+    renderCumulativeChart();
+    populateBySizeSelect();
+    renderBySizeChart();
+    populateSubstrateSelect();
+    renderSubstrateView();
+
+  } catch (e) {
+    wrapIds.forEach(id => {
+      document.getElementById(id).innerHTML = `<div class="error-msg">データ取得エラー: ${e.message || e}</div>`;
+    });
+  }
+
+  document.getElementById('last-updated').textContent =
+    `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+}
+
+loadAll();
+</script>
+</body>
+</html>
