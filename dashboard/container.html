@@ -130,6 +130,23 @@
       padding: 1px 6px; border-radius: 3px; font-size: 0.82rem;
     }
 
+    /* ── Mgmt table ── */
+    .mgmt-table-wrap { overflow-x: auto; margin-top: 4px; }
+    .mgmt-table { width: 100%; border-collapse: collapse; font-size: 0.79rem; }
+    .mgmt-table th, .mgmt-table td {
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+      text-align: right; white-space: nowrap;
+    }
+    .mgmt-table th { color: var(--muted); font-weight: 500; background: rgba(0,0,0,0.25); position: sticky; top: 0; }
+    .mgmt-table td:first-child, .mgmt-table th:first-child,
+    .mgmt-table td:nth-child(2), .mgmt-table th:nth-child(2),
+    .mgmt-table td:nth-child(3), .mgmt-table th:nth-child(3),
+    .mgmt-table td:nth-child(4), .mgmt-table th:nth-child(4) { text-align: left; }
+    .mgmt-table tr:hover td { background: rgba(255,255,255,0.03); }
+    .mgmt-table .col-increase { color: #34d399; }
+    .mgmt-table .col-decrease { color: #f87171; }
+    .mgmt-sub-header { font-size: 0.72rem; color: var(--muted); margin: 20px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+
     @media (max-width: 640px) {
       header, main { padding: 16px; }
       .tabs { padding: 0 16px; }
@@ -170,6 +187,8 @@ const SIZES = [
   { key: 'premium', label: '優',   color: '#f97316' },
 ];
 
+const MGMT_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
+
 const CONTAINER_PALETTE = [
   '#38bdf8','#34d399','#a78bfa','#f97316','#fb7185','#facc15',
   '#4ade80','#c084fc','#f472b6','#60a5fa','#fb923c','#2dd4bf',
@@ -179,7 +198,8 @@ const CONTAINER_PALETTE = [
 // ── State ──────────────────────────────────────────────────────────────────────
 
 let currentSiteIdx = 0;
-const cache = {}; // { [siteId]: { containers: string[], data: { [name]: row[] } } }
+const cache     = {}; // { [siteId]: { containers: string[], data: { [name]: row[] } } }
+const mgmtCache = {}; // { [siteName]: { sansui: [], chusui: [], mekaki: [] } }
 let chartCumul = null;
 let chartStack = null;
 
@@ -416,6 +436,170 @@ function renderCards(containers, data, siteColor) {
   return `<div class="cards-grid">${html}</div>`;
 }
 
+// ── Mgmt data ─────────────────────────────────────────────────────────────────
+
+function parseMgmtRows(table) {
+  const colMap = {};
+  (table.cols || []).forEach((c, i) => {
+    const lbl = (c.label || '').replace(/\s/g, '');
+    if (lbl.includes('菌床種類'))                    colMap.type     = i;
+    if (lbl.includes('散水開始時間'))                 colMap.time     = i;
+    if (lbl.includes('栽培開始日'))                   colMap.startD   = i;
+    if (lbl.includes('号機'))                         colMap.no       = i;
+    if (lbl.includes('上下段'))                       colMap.ud       = i;
+    // Avoid matching "(ave.)" columns
+    if (lbl.includes('散水前重量') && !lbl.includes('ave')) colMap.before  = i;
+    if (lbl.includes('散水20h')   && !lbl.includes('ave')) colMap.after20 = i;
+    if (/^0-20h増加量/.test(lbl)  && !lbl.includes('ave')) colMap.inc20   = i;
+    // 注水 sheets may use same col names; also accept 注水前 / 注水後
+    if (lbl.includes('注水前重量') && !lbl.includes('ave')) colMap.before  = i;
+    if (lbl.includes('注水20h')   && !lbl.includes('ave')) colMap.after20 = i;
+  });
+
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const get = (idx) => {
+      if (idx == null) return null;
+      const c = cells[idx];
+      if (!c) return null;
+      return c.v ?? c.f ?? null;
+    };
+    const no = get(colMap.no);
+    if (no == null || String(no).trim() === '') return;
+
+    const startD  = get(colMap.startD);
+    const ud      = get(colMap.ud);
+    const type    = get(colMap.type);
+    const time    = get(colMap.time);
+    const before  = parseFloat(get(colMap.before))  || null;
+    const after20 = parseFloat(get(colMap.after20)) || null;
+    const inc20   = parseFloat(get(colMap.inc20))   || null;
+
+    rows.push({
+      no: String(no).trim(),
+      startD: startD != null ? String(startD).trim() : '',
+      ud:     ud     != null ? String(ud).trim()     : '',
+      type:   type   != null ? String(type).trim()   : '',
+      time:   time   != null ? String(time).trim()   : '',
+      before, after20, inc20,
+    });
+  });
+  return rows;
+}
+
+function parseMekakiRows(table) {
+  // 1回目収穫芽かき: flexible — find 号機/上下段/栽培開始日/芽かき量
+  const colMap = {};
+  (table.cols || []).forEach((c, i) => {
+    const lbl = (c.label || '').replace(/\s/g, '');
+    if (lbl.includes('号機'))      colMap.no    = i;
+    if (lbl.includes('上下段'))    colMap.ud    = i;
+    if (lbl.includes('栽培開始日')) colMap.startD = i;
+    if (lbl.includes('菌床種類'))  colMap.type  = i;
+    if (lbl.includes('芽かき'))    colMap.mekaki = i;
+  });
+
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const get = (idx) => {
+      if (idx == null) return null;
+      const c = cells[idx];
+      return c ? (c.v ?? c.f ?? null) : null;
+    };
+    const no = get(colMap.no);
+    if (no == null || String(no).trim() === '') return;
+    rows.push({
+      no:     String(no).trim(),
+      startD: get(colMap.startD) != null ? String(get(colMap.startD)).trim() : '',
+      ud:     get(colMap.ud)     != null ? String(get(colMap.ud)).trim()     : '',
+      type:   get(colMap.type)   != null ? String(get(colMap.type)).trim()   : '',
+      mekaki: parseFloat(get(colMap.mekaki)) || null,
+    });
+  });
+  return rows;
+}
+
+function fmt(v) {
+  if (v == null) return '<span style="color:var(--muted)">—</span>';
+  return v.toLocaleString('ja-JP');
+}
+
+function fmtInc(v) {
+  if (v == null) return '<span style="color:var(--muted)">—</span>';
+  const cls = v >= 0 ? 'col-increase' : 'col-decrease';
+  return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toLocaleString('ja-JP')}</span>`;
+}
+
+function renderMgmtTable(rows, cols) {
+  if (!rows.length) return '<div class="loading" style="height:60px">データなし</div>';
+  const head = cols.map(c => `<th>${c.label}</th>`).join('');
+  const body = rows.map(row =>
+    `<tr>${cols.map(c => `<td>${c.render(row)}</td>`).join('')}</tr>`
+  ).join('');
+  return `<div class="mgmt-table-wrap">
+    <table class="mgmt-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+  </div>`;
+}
+
+function renderMgmtSection(siteName, mgmt) {
+  const sansuiCols = [
+    { label: '号機',     render: r => r.no },
+    { label: '上下段',   render: r => r.ud },
+    { label: '栽培開始日', render: r => r.startD },
+    { label: '菌床種類', render: r => r.type },
+    { label: '散水前重量(g)', render: r => fmt(r.before) },
+    { label: '散水20h(g)',    render: r => fmt(r.after20) },
+    { label: '0-20h増加量(g)', render: r => fmtInc(r.inc20) },
+  ];
+  const chusuiCols = [
+    { label: '号機',     render: r => r.no },
+    { label: '上下段',   render: r => r.ud },
+    { label: '栽培開始日', render: r => r.startD },
+    { label: '菌床種類', render: r => r.type },
+    { label: '注水前重量(g)', render: r => fmt(r.before) },
+    { label: '注水20h(g)',    render: r => fmt(r.after20) },
+    { label: '増加量(g)',     render: r => fmtInc(r.inc20) },
+  ];
+  const mekakiCols = [
+    { label: '号機',     render: r => r.no },
+    { label: '上下段',   render: r => r.ud },
+    { label: '栽培開始日', render: r => r.startD },
+    { label: '菌床種類', render: r => r.type },
+    { label: '芽かき量(g)', render: r => fmt(r.mekaki) },
+  ];
+
+  let html = '';
+  if (mgmt.sansui.length) {
+    html += `<div class="mgmt-sub-header">散水データ</div>${renderMgmtTable(mgmt.sansui, sansuiCols)}`;
+  }
+  if (mgmt.chusui.length) {
+    html += `<div class="mgmt-sub-header">注水データ</div>${renderMgmtTable(mgmt.chusui, chusuiCols)}`;
+  }
+  if (mgmt.mekaki.length) {
+    html += `<div class="mgmt-sub-header">芽かきデータ</div>${renderMgmtTable(mgmt.mekaki, mekakiCols)}`;
+  }
+  if (!html) html = renderSetupNotice().replace('コンテナ一覧シート', '菌床管理シート');
+
+  return html;
+}
+
+async function loadMgmt(siteName, forceRefresh = false) {
+  if (!forceRefresh && mgmtCache[siteName]) return mgmtCache[siteName];
+
+  const results = { sansui: [], chusui: [], mekaki: [] };
+  await Promise.all([
+    fetchSheet(MGMT_ID, siteName).then(t => { results.sansui = parseMgmtRows(t); }).catch(() => {}),
+    fetchSheet(MGMT_ID, `${siteName}注水`).then(t => { results.chusui = parseMgmtRows(t); }).catch(() => {}),
+    fetchSheet(MGMT_ID, '1回目収穫芽かき').then(t => { results.mekaki = parseMekakiRows(t); }).catch(() => {}),
+  ]);
+  mgmtCache[siteName] = results;
+  return results;
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
 function renderMain(site, containers, data) {
   destroyCharts();
   const main = document.getElementById('main');
@@ -456,6 +640,21 @@ function renderMain(site, containers, data) {
     buildCumulChart(containers, data);
     buildStackChart(data[containers[0]] || []);
   });
+
+  // Section 4 – Mgmt data (async, fills in after load)
+  const s4 = document.createElement('section');
+  s4.className = 'chart-section';
+  s4.id = 'mgmt-section';
+  s4.innerHTML = `<div class="section-title">菌床管理データ<span class="sub">散水・注水・芽かき</span></div>
+    <div class="loading" style="height:60px">読み込み中...</div>`;
+  main.appendChild(s4);
+
+  loadMgmt(site.name).then(mgmt => {
+    const sec = document.getElementById('mgmt-section');
+    if (!sec) return;
+    sec.innerHTML = `<div class="section-title">菌床管理データ<span class="sub">散水・注水・芽かき</span></div>
+      ${renderMgmtSection(site.name, mgmt)}`;
+  }).catch(() => {});
 }
 
 function onContainerChange() {
@@ -477,6 +676,8 @@ async function loadCurrentSite(forceRefresh = false) {
     renderMain(site, containers, data);
     return;
   }
+
+  if (forceRefresh) delete mgmtCache[site.name];
 
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('last-updated').textContent = '';
