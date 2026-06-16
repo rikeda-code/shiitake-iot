@@ -147,11 +147,40 @@
     .mgmt-table .col-decrease { color: #f87171; }
     .mgmt-sub-header { font-size: 0.72rem; color: var(--muted); margin: 20px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
 
+    /* ── Weekly charts ── */
+    #weekly-section .section-title { margin-bottom: 0; }
+    .weekly-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .weekly-chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px 16px;
+    }
+    .weekly-chart-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .weekly-legend {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      font-size: 0.72rem; margin-bottom: 6px;
+    }
+    .weekly-legend-item { display: flex; align-items: center; gap: 4px; }
+    .weekly-legend-dot { width: 10px; height: 3px; border-radius: 2px; }
+
     @media (max-width: 640px) {
       header, main { padding: 16px; }
       .tabs { padding: 0 16px; }
       .tab-btn { padding: 10px 14px; font-size: 0.82rem; }
       .chart-wrap { height: 260px; }
+      #weekly-section { margin: 0 16px 32px; }
+      .weekly-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -164,12 +193,13 @@
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <span id="last-updated"></span>
-    <button id="refresh-btn" onclick="loadCurrentSite(true)">↻ 更新</button>
+    <button id="refresh-btn" onclick="loadCurrentSite(true);loadWeeklySection()">↻ 更新</button>
   </div>
 </header>
 
 <div class="tabs" id="tabs"></div>
 <main id="main"></main>
+<section id="weekly-section" style="margin:0 32px 40px;"></section>
 
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────────
@@ -202,6 +232,13 @@ const cache     = {}; // { [siteId]: { summary: [], containers: [], data: {} } }
 const mgmtCache = {}; // { [siteName]: { sansui: [], chusui: [], mekaki: [] } }
 let chartCumul = null;
 let chartStack = null;
+let weeklyCharts = [];
+
+const SITE_WEEKLY_COLORS = {
+  'いなべ': '#3b82f6',
+  '群馬':   '#f97316',
+  '南丹':   '#34d399',
+};
 
 // ── Data helpers ───────────────────────────────────────────────────────────────
 
@@ -334,6 +371,210 @@ function parseContainerRows(table) {
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
+// Parse O列(index 14) daily total + H3(row[1].c[7]) bed count for weekly chart
+function parseContainerRowsV2(table) {
+  const bedCountRaw = table.rows?.[1]?.c?.[7]?.v;
+  const bedCount    = bedCountRaw != null ? parseFloat(bedCountRaw) : null;
+
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const dc    = cells[0];
+    const date  = gvizDateStr(dc?.v, dc?.f);
+    if (!date) return;
+    const daily = parseFloat(cells[14]?.v) || 0; // O列
+    rows.push({ date, daily });
+  });
+
+  return { bedCount, rows: rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)) };
+}
+
+// Return Sun-Sat week info for a date string (e.g. "2025/6/14")
+function getSunSatWeek(dateStr) {
+  const p = dateStr.split('/');
+  if (p.length < 3) return null;
+  const d   = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+  if (isNaN(d)) return null;
+  const dow = d.getDay(); // 0=Sun
+  const sun = new Date(d); sun.setDate(d.getDate() - dow);
+  const sat = new Date(d); sat.setDate(d.getDate() + (6 - dow));
+  const fmt = dt => `${dt.getMonth() + 1}/${dt.getDate()}`;
+  return {
+    key:   sun.toISOString().slice(0, 10),
+    label: `${fmt(sun)}~${fmt(sat)}`,
+  };
+}
+
+// Parse date string "2025/6/14" → Date object
+function parseDateStr(s) {
+  if (!s) return null;
+  const p = s.split('/');
+  if (p.length < 3) return null;
+  const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+  return isNaN(d) ? null : d;
+}
+
+async function loadWeeklySection() {
+  const section = document.getElementById('weekly-section');
+  if (!section) return;
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+    <div class="loading" style="height:60px">全拠点データを読み込み中...</div>`;
+
+  try {
+    // Load summaries from all 3 sites
+    const allSummaries = (await Promise.all(SITES.map(site =>
+      fetchSummaryRows(site)
+        .then(rows => rows.map(r => ({ ...r, siteName: site.name, siteId: site.id })))
+        .catch(() => [])
+    ))).flat().filter(r => r.startDate);
+
+    // Fetch individual container sheets (O列 + H3)
+    const containerData = await Promise.all(allSummaries.map(async c => {
+      try {
+        const table = await fetchSheet(c.siteId, c.name);
+        const { bedCount, rows } = parseContainerRowsV2(table);
+        return { ...c, bedCount, rows };
+      } catch {
+        return { ...c, bedCount: null, rows: [] };
+      }
+    }));
+
+    // Group by Sun-Sat week of startDate
+    const weekGroups = {};
+    containerData.forEach(c => {
+      if (!c.rows.length || !c.bedCount || c.bedCount <= 0) return;
+      const week = getSunSatWeek(c.startDate);
+      if (!week) return;
+      if (!weekGroups[week.key]) weekGroups[week.key] = { label: week.label, containers: [] };
+      weekGroups[week.key].containers.push(c);
+    });
+
+    const weekKeys = Object.keys(weekGroups).sort();
+    if (!weekKeys.length) {
+      section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+        <div class="error-msg" style="padding:16px 0">表示できるデータがありません（シートが公開されているか確認してください）</div>`;
+      return;
+    }
+
+    const cardsHtml = weekKeys.map(k => `
+      <div class="weekly-chart-card">
+        <div class="weekly-chart-title">${weekGroups[k].label}</div>
+        <div class="chart-wrap" style="height:260px"><canvas id="weekly-${k}"></canvas></div>
+      </div>`).join('');
+
+    const legendHtml = Object.entries(SITE_WEEKLY_COLORS).map(([name, color]) =>
+      `<div class="weekly-legend-item"><span class="weekly-legend-dot" style="background:${color}"></span>${name}</div>`
+    ).join('');
+
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+      <div class="weekly-legend">${legendHtml}</div>
+      <div class="weekly-grid">${cardsHtml}</div>`;
+
+    weeklyCharts.forEach(c => c.destroy());
+    weeklyCharts = [];
+
+    requestAnimationFrame(() => {
+      weekKeys.forEach(k => buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers));
+    });
+
+  } catch (e) {
+    section.innerHTML = `<div class="section-title">週別 累計収穫量推移</div>
+      <div class="error-msg" style="padding:16px 0">エラー: ${e.message}</div>`;
+  }
+}
+
+// Target line: (0,0) → (30,660) → (60,800)
+const WEEKLY_TARGET = Array.from({ length: 61 }, (_, day) => ({
+  x: day,
+  y: day <= 30 ? Math.round(day * 660 / 30) : Math.round(660 + (day - 30) * 140 / 30),
+}));
+
+function buildWeeklyLineChart(canvasId, containers) {
+  const ctx = document.getElementById(canvasId)?.getContext('2d');
+  if (!ctx) return;
+
+  const datasets = containers.map(c => {
+    const color   = SITE_WEEKLY_COLORS[c.siteName] || '#888';
+    const sdDate  = parseDateStr(c.startDate);
+    let cumKg = 0;
+    const points = [];
+    c.rows.forEach(r => {
+      cumKg += r.daily;
+      const rowDate = parseDateStr(r.date);
+      if (!rowDate || !sdDate) return;
+      const dayNum = Math.round((rowDate - sdDate) / 86400000) + 1;
+      if (dayNum < 0 || dayNum > 60) return;
+      points.push({ x: dayNum, y: Math.round((cumKg * 1000) / c.bedCount) });
+    });
+    return {
+      label: `${c.siteName} ${c.name}`,
+      data: points,
+      borderColor: color,
+      backgroundColor: color + '18',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0.3,
+      fill: false,
+    };
+  });
+
+  // Target line
+  datasets.push({
+    label: '目標',
+    data: WEEKLY_TARGET,
+    borderColor: '#94a3b8',
+    borderWidth: 1.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    tension: 0,
+    fill: false,
+    order: -1,
+  });
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      parsing: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === '目標') return `目標: ${ctx.parsed.y} g/菌床`;
+              return `${ctx.dataset.label}: ${ctx.parsed.y} g/菌床`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: 0, max: 60,
+          title: { display: true, text: '栽培日数', color: '#8892a4', font: { size: 10 } },
+          ticks: { color: '#8892a4', font: { size: 10 }, stepSize: 10 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          min: 0,
+          ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}g` },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+
+  weeklyCharts.push(chart);
+}
+
 // "47(6/14)志摩L3" → { no:"47", startDate:"6/14", location:"志摩", type:"L3" }
 function parseContainerName(raw) {
   const s = String(raw);
@@ -353,7 +594,6 @@ const tooltipDefaults = {
 };
 
 function destroyCharts() {
-  if (chartCumul) { chartCumul.destroy(); chartCumul = null; }
   if (chartStack) { chartStack.destroy(); chartStack = null; }
 }
 
@@ -692,13 +932,6 @@ function renderMain(site, summary, containers, data) {
 
   if (!containers.length) return;
 
-  // Section 2 – Cumulative line
-  const s2 = document.createElement('section');
-  s2.className = 'chart-section';
-  s2.innerHTML = `<div class="section-title">累計収穫量推移<span class="sub">コンテナ別折れ線</span></div>
-    <div class="chart-wrap"><canvas id="cumul-chart"></canvas></div>`;
-  main.appendChild(s2);
-
   // Section 3 – Stacked bar
   const options = containers.map(name =>
     `<option value="${name}">${name}</option>`
@@ -715,7 +948,6 @@ function renderMain(site, summary, containers, data) {
   main.appendChild(s3);
 
   requestAnimationFrame(() => {
-    buildCumulChart(containers, data);
     buildStackChart(data[containers[0]] || []);
   });
 
@@ -826,6 +1058,7 @@ function initTabs() {
 
 initTabs();
 loadCurrentSite();
+loadWeeklySection();
 </script>
 </body>
 </html>
