@@ -535,7 +535,11 @@ async function loadWeeklySection() {
     weeklyCharts = [];
     console.log('[weekly] calling buildWeeklyLineChart for keys:', weekKeys);
     setTimeout(() => {
-      weekKeys.forEach(k => buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers));
+      console.log('[weekly] setTimeout fired, building', weekKeys.length, 'charts');
+      weekKeys.forEach(k => {
+        console.log('[weekly] building chart for', k, 'canvas?', !!document.getElementById(`weekly-${k}`));
+        buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers);
+      });
     }, 200);
 
   } catch (e) {
