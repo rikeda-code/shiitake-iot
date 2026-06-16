@@ -198,7 +198,7 @@ const CONTAINER_PALETTE = [
 // ── State ──────────────────────────────────────────────────────────────────────
 
 let currentSiteIdx = 0;
-const cache     = {}; // { [siteId]: { containers: string[], data: { [name]: row[] } } }
+const cache     = {}; // { [siteId]: { summary: [], containers: [], data: {} } }
 const mgmtCache = {}; // { [siteName]: { sansui: [], chusui: [], mekaki: [] } }
 let chartCumul = null;
 let chartStack = null;
@@ -226,15 +226,22 @@ function gvizDateStr(v, f) {
   return s;
 }
 
-async function fetchContainerList(site) {
+async function fetchSummaryRows(site) {
   const table = await fetchSheet(site.id, site.indexSheet);
-  // F列(index 5)=コンテナ名, C列(index 2)=栽培開始日, D列(index 3)=栽培終了日, J列(index 9)=1菌床当たり収穫量g
-  const COL_NAME = 5; // F
-  return (table.rows || []).map(row => {
-    const c = row.c?.[COL_NAME];
-    const v = c?.v != null ? String(c.v).trim() : (c?.f ?? '').trim();
-    return v;
-  }).filter(v => v && v !== 'コンテナ名');
+  // C(2)=栽培開始日 E(4)=栽培日数 F(5)=コンテナ名 J(9)=1菌床当たり収穫量g
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const nameCell = cells[5];
+    const name = nameCell?.v != null ? String(nameCell.v).trim() : (nameCell?.f ?? '').trim();
+    if (!name || name === 'コンテナ名' || name === '号機' || name === '見本') return;
+
+    const startDate = gvizDateStr(cells[2]?.v, cells[2]?.f) ?? '';
+    const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
+    const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+    rows.push({ name, startDate, days, harvest });
+  });
+  return rows;
 }
 
 function parseContainerRows(table) {
@@ -412,26 +419,22 @@ function renderSetupNotice() {
   </div>`;
 }
 
-function renderCards(containers, data, siteColor) {
-  if (!containers.length) return renderSetupNotice();
+function renderCards(summary) {
+  if (!summary.length) return renderSetupNotice();
 
-  const html = containers.map((name, idx) => {
-    const info  = parseContainerName(name);
-    const rows  = data[name] || [];
-    const totals = { m: 0, l: 0, xl: 0, premium: 0 };
-    rows.forEach(r => { totals.m += r.m; totals.l += r.l; totals.xl += r.xl; totals.premium += r.premium; });
-    const grand = totals.m + totals.l + totals.xl + totals.premium;
-    const color = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
-
-    const chips = SIZES.filter(s => totals[s.key] > 0).map(s =>
-      `<span class="size-chip" style="background:${s.color}22;color:${s.color}">${s.label} ${totals[s.key].toFixed(1)}</span>`
-    ).join('');
+  const html = summary.map((row, idx) => {
+    const color   = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
+    const harvest = row.harvest != null ? row.harvest.toLocaleString('ja-JP') : '—';
+    const days    = row.days    != null ? row.days : '—';
+    const sd      = row.startDate || '—';
 
     return `<div class="container-card">
-      <div class="card-no">No.${info.no} · ${info.startDate}</div>
-      <div class="card-name" style="color:${color}">${info.location}${info.type}</div>
-      <div class="card-total" style="color:${color}">${grand.toFixed(1)}<span class="card-unit"> kg</span></div>
-      <div class="card-breakdown">${chips}</div>
+      <div class="card-no">栽培開始: ${sd}</div>
+      <div class="card-name" style="color:${color}">${row.name}</div>
+      <div class="card-total" style="color:${color}">${harvest}<span class="card-unit"> g/菌床</span></div>
+      <div class="card-breakdown">
+        <span class="size-chip" style="background:#ffffff11;color:var(--muted)">栽培日数 ${days}日</span>
+      </div>
     </div>`;
   }).join('');
 
@@ -602,15 +605,15 @@ async function loadMgmt(siteName, forceRefresh = false) {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-function renderMain(site, containers, data) {
+function renderMain(site, summary, containers, data) {
   destroyCharts();
   const main = document.getElementById('main');
   main.innerHTML = '';
 
-  // Section 1 – KPI cards
+  // Section 1 – KPI cards (from 収穫実績集計表: C=栽培開始日 E=栽培日数 F=コンテナ名 J=収穫量g/菌床)
   const s1 = document.createElement('section');
-  s1.innerHTML = `<div class="section-title">現時点収穫量<span class="sub">コンテナ別累計</span></div>
-    ${renderCards(containers, data, site.color)}`;
+  s1.innerHTML = `<div class="section-title">現時点収穫量<span class="sub">1菌床当たり (g)</span></div>
+    ${renderCards(summary)}`;
   main.appendChild(s1);
 
   if (!containers.length) return;
@@ -623,10 +626,9 @@ function renderMain(site, containers, data) {
   main.appendChild(s2);
 
   // Section 3 – Stacked bar
-  const options = containers.map(name => {
-    const info = parseContainerName(name);
-    return `<option value="${name}">No.${info.no} ${info.location}${info.type}（${info.startDate}）</option>`;
-  }).join('');
+  const options = containers.map(name =>
+    `<option value="${name}">${name}</option>`
+  ).join('');
 
   const s3 = document.createElement('section');
   s3.className = 'chart-section';
@@ -674,8 +676,8 @@ async function loadCurrentSite(forceRefresh = false) {
   const site = SITES[currentSiteIdx];
 
   if (!forceRefresh && cache[site.id]) {
-    const { containers, data } = cache[site.id];
-    renderMain(site, containers, data);
+    const { summary, containers, data } = cache[site.id];
+    renderMain(site, summary, containers, data);
     return;
   }
 
@@ -684,11 +686,13 @@ async function loadCurrentSite(forceRefresh = false) {
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('last-updated').textContent = '';
 
+  let summary    = [];
   let containers = [];
   let listError  = null;
 
   try {
-    containers = await fetchContainerList(site);
+    summary    = await fetchSummaryRows(site);
+    containers = summary.map(r => r.name);
   } catch (e) {
     listError = e.message || String(e);
   }
@@ -705,8 +709,8 @@ async function loadCurrentSite(forceRefresh = false) {
     }));
   }
 
-  cache[site.id] = { containers, data };
-  renderMain(site, containers, data);
+  cache[site.id] = { summary, containers, data };
+  renderMain(site, summary, containers, data);
 
   if (listError) {
     const msg = document.createElement('div');
