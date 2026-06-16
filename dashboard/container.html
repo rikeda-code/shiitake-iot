@@ -242,8 +242,8 @@ const SITE_WEEKLY_COLORS = {
 
 // ── Data helpers ───────────────────────────────────────────────────────────────
 
-async function fetchSheet(sheetId, sheetName) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
+async function fetchSheet(sheetId, sheetName, headers = 1) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
   const text = await res.text();
@@ -373,39 +373,55 @@ function parseContainerRows(table) {
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-// Parse O列 daily total + H3(row[1].c[7]) bed count for weekly chart
+// Parse "M/D" or "M月D日" short dates — uses current year as default
+function parseDateMD(v, f) {
+  const s = String(v ?? f ?? '');
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (m) return new Date(new Date().getFullYear(), parseInt(m[1]) - 1, parseInt(m[2]));
+  m = s.match(/^(\d{1,2})月(\d{1,2})日/);
+  if (m) return new Date(new Date().getFullYear(), parseInt(m[1]) - 1, parseInt(m[2]));
+  return null;
+}
+
+// Parse O列 daily total + H3 bed count (headers=0 raw mode)
+// Sheet: row1=title, row2=col-headers(日付/合計…), row3=H3(bedCount), row4+=data
 function parseContainerRowsV2(table) {
-  // Bed count: try H3 = rows[1].c[7], then scan all rows/cols for plausible value
+  const allRows = table.rows || [];
+  if (!allRows.length) return { bedCount: null, rows: [] };
+
+  // H3 = allRows[2].c[7] (row3, col H=index7)
   let bedCount = null;
-  for (let ri = 0; ri <= 3 && bedCount == null; ri++) {
-    const cell = table.rows?.[ri]?.c?.[7];
-    const v = cell?.v ?? parseFloat(cell?.f);
-    if (v > 0 && v < 10000) bedCount = v;
+  const h3v = allRows[2]?.c?.[7]?.v;
+  if (h3v != null && parseFloat(h3v) > 0) bedCount = parseFloat(h3v);
+
+  // Find header row: scan first 5 rows for cell containing '日付'
+  let headerRowIdx = 1, dateIdx = 0, oIdx = 14;
+  outer: for (let ri = 0; ri < Math.min(5, allRows.length); ri++) {
+    const cells = allRows[ri]?.c || [];
+    for (let ci = 0; ci < cells.length; ci++) {
+      const lbl = String(cells[ci]?.v ?? cells[ci]?.f ?? '').replace(/\s/g, '');
+      if (lbl.includes('日付') || lbl.includes('日時')) {
+        headerRowIdx = ri; dateIdx = ci;
+        // Also scan this row for '合計'
+        cells.forEach((cell, j) => {
+          const l2 = String(cell?.v ?? cell?.f ?? '').replace(/\s/g, '');
+          if (l2.includes('合計')) oIdx = j;
+        });
+        break outer;
+      }
+    }
   }
 
-  // Find O列: label "合計（kg）" など "合計" を含む列、なければ index 14
-  let oIdx = 14;
-  (table.cols || []).forEach((c, i) => {
-    const lbl = (c.label || '').replace(/\s/g, '');
-    if (lbl.includes('合計') || lbl === 'O' || lbl === '計') oIdx = i;
-  });
-
-  // Find date column (A=0 usually)
-  let dateIdx = 0;
-  (table.cols || []).forEach((c, i) => {
-    const lbl = (c.label || '').replace(/\s/g, '');
-    if (lbl.includes('日付') || lbl.includes('日時')) dateIdx = i;
-  });
-
+  // Data rows start after header row
   const rows = [];
-  (table.rows || []).forEach(row => {
-    const cells = row.c || [];
-    const dc    = cells[dateIdx];
-    const rowDate = cellToDate(dc?.v, dc?.f);
-    if (!rowDate) return;
+  for (let ri = headerRowIdx + 1; ri < allRows.length; ri++) {
+    const cells = allRows[ri]?.c || [];
+    const dc = cells[dateIdx];
+    const rowDate = cellToDate(dc?.v, dc?.f) ?? parseDateMD(dc?.v, dc?.f);
+    if (!rowDate) continue;
     const daily = parseFloat(cells[oIdx]?.v) || 0;
     rows.push({ rowDate, daily });
-  });
+  }
 
   rows.sort((a, b) => a.rowDate - b.rowDate);
   return { bedCount, rows };
@@ -473,7 +489,7 @@ async function loadWeeklySection() {
     // Fetch individual container sheets (O列 + H3)
     const containerData = await Promise.all(allSummaries.map(async c => {
       try {
-        const table = await fetchSheet(c.siteId, c.name);
+        const table = await fetchSheet(c.siteId, c.name, 0);
         const { bedCount, rows } = parseContainerRowsV2(table);
         if (allSummaries.indexOf(c) < 3) {
           console.log(`[weekly] ${c.siteName} ${c.name}: bedCount=${bedCount}, rows=${rows.length}, oSample=`, rows[0]);
