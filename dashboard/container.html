@@ -383,39 +383,32 @@ function parseDateMD(v, f) {
   return null;
 }
 
-// Parse O列 daily total + H3 bed count (headers=1 mode)
-// With headers=1: table.cols = row1 labels (title), table.rows[0] = row2 (actual headers),
-// table.rows[1] = row3 (H3=bedCount), table.rows[2]+ = actual data rows
+// Parse individual container sheet (headers=1):
+// Layout: row1=title, row2=blank, row3=bedCount at H(col7),
+//         data rows: col1=dayIdx(0-based), col5=Date, col13=dailyKg, col17=cumulGPerBed
 function parseContainerRowsV2(table) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // H3 = row3 = table.rows[1].c[7] (col H = index 7)
+  // bedCount: table.rows[1].c[7] = sheet H3
   let bedCount = null;
   const h3v = allRows[1]?.c?.[7]?.v;
   if (h3v != null && parseFloat(h3v) > 0) bedCount = parseFloat(h3v);
 
-  // Find column indices from table.rows[0] (the actual header row = sheet row2)
-  let dateIdx = 0, oIdx = 14;
-  const headerCells = allRows[0]?.c || [];
-  headerCells.forEach((cell, i) => {
-    const lbl = String(cell?.v ?? cell?.f ?? '').replace(/\s/g, '');
-    if (lbl.includes('日付') || lbl.includes('日時')) dateIdx = i;
-    if (lbl.includes('合計')) oIdx = i;
-  });
-
-  // Data starts from table.rows[2] (sheet row4)
+  // Data rows: those where col1 is a number (day index 0,1,2...)
   const rows = [];
-  for (let ri = 2; ri < allRows.length; ri++) {
+  for (let ri = 0; ri < allRows.length; ri++) {
     const cells = allRows[ri]?.c || [];
-    const dc = cells[dateIdx];
-    const rowDate = cellToDate(dc?.v, dc?.f) ?? parseDateMD(dc?.v, dc?.f);
+    const dayIdx = cells[1]?.v;
+    if (typeof dayIdx !== 'number') continue;
+    const dateCell = cells[5];
+    const rowDate = cellToDate(dateCell?.v, dateCell?.f);
     if (!rowDate) continue;
-    const daily = parseFloat(cells[oIdx]?.v) || 0;
-    rows.push({ rowDate, daily });
+    const daily = parseFloat(cells[13]?.v) || 0; // col13 = daily total kg
+    rows.push({ rowDate, dayNum: Math.round(dayIdx) + 1, daily });
   }
 
-  rows.sort((a, b) => a.rowDate - b.rowDate);
+  rows.sort((a, b) => a.dayNum - b.dayNum);
   return { bedCount, rows };
 }
 
@@ -483,31 +476,11 @@ async function loadWeeklySection() {
       try {
         const table = await fetchSheet(c.siteId, c.name, 1);
         const { bedCount, rows } = parseContainerRowsV2(table);
-        if (allSummaries.indexOf(c) < 3) {
-          console.log(`[weekly] ${c.siteName} ${c.name}: bedCount=${bedCount}, rows=${rows.length}, oSample=`, rows[0]);
-          const rawRows = table.rows || [];
-          console.log('  total rows:', rawRows.length, 'cols:', table.cols?.length);
-          // Show rows that have ANY non-empty value (up to 20 rows)
-          let shown = 0;
-          for (let ri = 0; ri < rawRows.length && shown < 20; ri++) {
-            const cells = rawRows[ri]?.c || [];
-            const hasData = cells.some(cell => cell?.v != null || cell?.f != null);
-            if (hasData) {
-              const vals = cells.slice(0, 20).map(cell => cell?.v ?? cell?.f ?? '·');
-              console.log(`  row${ri}:`, JSON.stringify(vals));
-              shown++;
-            }
-          }
-        }
         return { ...c, bedCount, rows };
-      } catch (e) {
-        console.warn(`[weekly] fetch failed: ${c.name}`, e.message);
+      } catch {
         return { ...c, bedCount: null, rows: [] };
       }
     }));
-
-    const passed = containerData.filter(c => c.rows.length && c.bedCount > 0);
-    console.log('[weekly] containers passing filter:', passed.length);
 
     // Group by Sun-Sat week of startDate
     const weekGroups = {};
@@ -575,11 +548,8 @@ function buildWeeklyLineChart(canvasId, containers) {
     const points = [];
     c.rows.forEach(r => {
       cumKg += r.daily;
-      const rowDate = r.rowDate; // already a Date object from parseContainerRowsV2
-      if (!rowDate || !sdDate) return;
-      const dayNum = Math.round((rowDate - sdDate) / 86400000) + 1;
-      if (dayNum < 1 || dayNum > 60) return;
-      points.push({ x: dayNum, y: Math.round((cumKg * 1000) / c.bedCount) });
+      if (r.dayNum < 1 || r.dayNum > 65) return;
+      points.push({ x: r.dayNum, y: Math.round((cumKg * 1000) / c.bedCount) });
     });
     return {
       label: `${c.siteName} ${c.name}`,
