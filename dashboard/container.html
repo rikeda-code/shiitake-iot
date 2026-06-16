@@ -553,66 +553,88 @@ function buildWeeklyLineChart(canvasId, containers) {
     setTimeout(() => buildWeeklyLineChart(canvasId, containers), 300);
     return;
   }
-  const ctx = document.getElementById(canvasId)?.getContext('2d');
-  if (!ctx) { setTimeout(() => buildWeeklyLineChart(canvasId, containers), 100); return; }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) { setTimeout(() => buildWeeklyLineChart(canvasId, containers), 100); return; }
+  const ctx = canvas.getContext('2d');
+
+  // X axis labels: day 0..65
+  const MAX_DAY = 65;
+  const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
 
   const datasets = containers.map(c => {
     const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
+    // Build cumulative array indexed by dayNum
+    const cumArr = new Array(MAX_DAY + 1).fill(null);
     let cumKg = 0;
-    const points = [];
     c.rows.forEach(r => {
       cumKg += r.daily;
-      if (r.dayNum < 1 || r.dayNum > 65) return;
-      points.push({ x: r.dayNum, y: Math.round((cumKg * 1000) / c.bedCount) });
+      const d = Math.round(r.dayNum);
+      if (d >= 0 && d <= MAX_DAY) {
+        cumArr[d] = c.bedCount > 0 ? Math.round((cumKg * 1000) / c.bedCount) : null;
+      }
     });
+    // Forward-fill nulls between existing data points so line connects
+    let last = null;
+    for (let i = 0; i <= MAX_DAY; i++) {
+      if (cumArr[i] !== null) { last = cumArr[i]; }
+      else if (last !== null) { cumArr[i] = last; }
+    }
+    console.log(`[chart:${canvasId}] ${c.siteName} ${c.name}: bedCount=${c.bedCount} rows=${c.rows.length} nonNullPts=${cumArr.filter(v=>v!==null).length} lastVal=${cumArr[MAX_DAY]}`);
     return {
       label: `${c.siteName} ${c.name}`,
-      data: points,
-      showLine: true,
+      data: cumArr,
       borderColor: color,
       backgroundColor: 'transparent',
       borderWidth: 1.5,
       pointRadius: 0,
       pointHoverRadius: 4,
-      tension: 0.3,
+      tension: 0.2,
+      spanGaps: false,
     };
   });
 
   // Target line
+  const targetArr = xLabels.map(d =>
+    d <= 30 ? Math.round(d * 660 / 30) : Math.round(660 + (d - 30) * 140 / 30)
+  );
   datasets.push({
     label: '目標',
-    data: WEEKLY_TARGET,
-    showLine: true,
+    data: targetArr,
     borderColor: '#94a3b8',
+    backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderDash: [6, 4],
     pointRadius: 0,
     tension: 0,
+    spanGaps: false,
   });
 
   const chart = new Chart(ctx, {
-    type: 'scatter',
-    data: { datasets },
+    type: 'line',
+    data: { labels: xLabels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      showLine: true,
+      animation: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
           ...tooltipDefaults,
           callbacks: {
-            label: c => `${c.dataset.label}: ${c.parsed.y} g/菌床`,
+            title: items => `栽培${items[0].label}日目`,
+            label: c => c.raw !== null ? `${c.dataset.label}: ${c.raw}g/菌床` : null,
           },
         },
       },
       scales: {
         x: {
-          type: 'linear',
-          min: 0, max: 65,
+          type: 'category',
           title: { display: true, text: '栽培日数', color: '#8892a4', font: { size: 10 } },
-          ticks: { color: '#8892a4', font: { size: 10 }, stepSize: 10 },
+          ticks: {
+            color: '#8892a4', font: { size: 10 },
+            callback: (val, idx) => idx % 10 === 0 ? xLabels[idx] : '',
+          },
           grid: { color: '#1e2235' },
         },
         y: {
