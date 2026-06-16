@@ -557,8 +557,7 @@ function buildWeeklyLineChart(canvasId, containers) {
   if (!ctx) { setTimeout(() => buildWeeklyLineChart(canvasId, containers), 100); return; }
 
   const datasets = containers.map(c => {
-    const color   = SITE_WEEKLY_COLORS[c.siteName] || '#888';
-    const sdDate  = parseDateStr(c.startDate);
+    const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
     let cumKg = 0;
     const points = [];
     c.rows.forEach(r => {
@@ -569,13 +568,13 @@ function buildWeeklyLineChart(canvasId, containers) {
     return {
       label: `${c.siteName} ${c.name}`,
       data: points,
+      showLine: true,
       borderColor: color,
-      backgroundColor: color + '18',
+      backgroundColor: 'transparent',
       borderWidth: 1.5,
       pointRadius: 0,
       pointHoverRadius: 4,
       tension: 0.3,
-      fill: false,
     };
   });
 
@@ -583,39 +582,35 @@ function buildWeeklyLineChart(canvasId, containers) {
   datasets.push({
     label: '目標',
     data: WEEKLY_TARGET,
+    showLine: true,
     borderColor: '#94a3b8',
     borderWidth: 1.5,
     borderDash: [6, 4],
     pointRadius: 0,
     tension: 0,
-    fill: false,
-    order: -1,
   });
 
   const chart = new Chart(ctx, {
-    type: 'line',
+    type: 'scatter',
     data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      parsing: false,
+      showLine: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
           ...tooltipDefaults,
           callbacks: {
-            label: ctx => {
-              if (ctx.dataset.label === '目標') return `目標: ${ctx.parsed.y} g/菌床`;
-              return `${ctx.dataset.label}: ${ctx.parsed.y} g/菌床`;
-            },
+            label: c => `${c.dataset.label}: ${c.parsed.y} g/菌床`,
           },
         },
       },
       scales: {
         x: {
           type: 'linear',
-          min: 0, max: 60,
+          min: 0, max: 65,
           title: { display: true, text: '栽培日数', color: '#8892a4', font: { size: 10 } },
           ticks: { color: '#8892a4', font: { size: 10 }, stepSize: 10 },
           grid: { color: '#1e2235' },
