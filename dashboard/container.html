@@ -532,6 +532,7 @@ async function loadWeeklySection() {
     weeklyCharts.forEach(c => c.destroy());
     weeklyCharts = [];
 
+    console.log('[weekly] calling buildWeeklyLineChart for keys:', weekKeys);
     setTimeout(() => {
       weekKeys.forEach(k => buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers));
     }, 100);
@@ -549,6 +550,7 @@ const WEEKLY_TARGET = Array.from({ length: 61 }, (_, day) => ({
 }));
 
 function buildWeeklyLineChart(canvasId, containers) {
+  console.log('[buildChart] called:', canvasId, 'Chart?', typeof Chart, 'canvas?', !!document.getElementById(canvasId));
   if (typeof Chart === 'undefined') {
     setTimeout(() => buildWeeklyLineChart(canvasId, containers), 300);
     return;
