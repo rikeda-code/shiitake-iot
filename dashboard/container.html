@@ -483,7 +483,11 @@ async function loadWeeklySection() {
       }
     }));
     const dbg = containerData.filter(c => c.rows.length > 0);
-    console.log('[weekly] containers with rows:', dbg.length, 'sample:', dbg[0]?.name, 'rows=', dbg[0]?.rows.length, 'bedCount=', dbg[0]?.bedCount);
+    console.log('[weekly] containers with rows:', dbg.length);
+    console.log('[weekly] sample startDates+weeks:', dbg.slice(0,3).map(c => ({
+      name: c.name, startDate: c.startDate, bedCount: c.bedCount,
+      week: getSunSatWeek(c.startDate)
+    })));
 
     // Group by Sun-Sat week of startDate
     const weekGroups = {};
