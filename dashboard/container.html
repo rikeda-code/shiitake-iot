@@ -545,17 +545,15 @@ async function loadWeeklySection() {
       <div class="weekly-legend">${legendHtml}</div>
       <div class="weekly-grid">${cardsHtml}</div>`;
 
-    console.log('[weekly] about to destroy old charts, count:', weeklyCharts.length);
-    weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) { console.warn('destroy err', e); } });
+    console.log('[weekly] calling buildWeeklyLineChart directly (no setTimeout)');
+    weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
     weeklyCharts = [];
-    console.log('[weekly] calling buildWeeklyLineChart for keys:', weekKeys);
-    setTimeout(() => {
-      console.log('[weekly] setTimeout fired, building', weekKeys.length, 'charts');
-      weekKeys.forEach(k => {
-        console.log('[weekly] building chart for', k, 'canvas?', !!document.getElementById(`weekly-${k}`));
-        buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers);
-      });
-    }, 200);
+    weekKeys.forEach(k => {
+      const canvasId = `weekly-${k}`;
+      const canvas = document.getElementById(canvasId);
+      console.log('[weekly] building', canvasId, 'canvas?', !!canvas);
+      if (canvas) buildWeeklyLineChart(canvasId, weekGroups[k].containers);
+    });
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
@@ -571,14 +569,10 @@ const WEEKLY_TARGET = Array.from({ length: 61 }, (_, day) => ({
 }));
 
 function buildWeeklyLineChart(canvasId, containers) {
-  console.log('[buildChart] called:', canvasId, 'Chart?', typeof Chart, 'canvas?', !!document.getElementById(canvasId));
-  if (typeof Chart === 'undefined') {
-    setTimeout(() => buildWeeklyLineChart(canvasId, containers), 300);
-    return;
-  }
   const canvas = document.getElementById(canvasId);
-  if (!canvas) { setTimeout(() => buildWeeklyLineChart(canvasId, containers), 100); return; }
+  if (!canvas) { console.warn('[buildChart] canvas not found:', canvasId); return; }
   const ctx = canvas.getContext('2d');
+  console.log('[buildChart]', canvasId, 'containers:', containers.length, 'Chart?', typeof Chart !== 'undefined');
 
   // X axis labels: day 0..65
   const MAX_DAY = 65;
