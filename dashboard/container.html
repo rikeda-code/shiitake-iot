@@ -467,16 +467,26 @@ async function loadWeeklySection() {
         .catch(() => [])
     ))).flat().filter(r => r.startDate);
 
+    console.log('[weekly] allSummaries count:', allSummaries.length);
+    console.log('[weekly] sample startDates:', allSummaries.slice(0,3).map(r => r.startDate));
+
     // Fetch individual container sheets (O列 + H3)
     const containerData = await Promise.all(allSummaries.map(async c => {
       try {
         const table = await fetchSheet(c.siteId, c.name);
         const { bedCount, rows } = parseContainerRowsV2(table);
+        if (allSummaries.indexOf(c) < 3) {
+          console.log(`[weekly] ${c.siteName} ${c.name}: bedCount=${bedCount}, rows=${rows.length}, oSample=`, rows[0]);
+        }
         return { ...c, bedCount, rows };
-      } catch {
+      } catch (e) {
+        console.warn(`[weekly] fetch failed: ${c.name}`, e.message);
         return { ...c, bedCount: null, rows: [] };
       }
     }));
+
+    const passed = containerData.filter(c => c.rows.length && c.bedCount > 0);
+    console.log('[weekly] containers passing filter:', passed.length);
 
     // Group by Sun-Sat week of startDate
     const weekGroups = {};
