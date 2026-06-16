@@ -244,12 +244,18 @@ const SITE_WEEKLY_COLORS = {
 
 async function fetchSheet(sheetId, sheetName, headers = 1) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
-  const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
-  if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
-  return json.table;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
+    const text = await res.text();
+    const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+    if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function gvizDateStr(v, f) {
@@ -472,17 +478,26 @@ async function loadWeeklySection() {
     console.log('[weekly] allSummaries count:', allSummaries.length);
     console.log('[weekly] sample startDates:', allSummaries.slice(0,3).map(r => r.startDate));
 
-    // Fetch individual container sheets (col13=dailyKg, col7@row3=bedCount)
-    const containerData = await Promise.all(allSummaries.map(async c => {
+    // Fetch individual container sheets with concurrency limit
+    async function fetchWithLimit(items, fn, limit = 15) {
+      const results = [];
+      for (let i = 0; i < items.length; i += limit) {
+        const batch = items.slice(i, i + limit);
+        const batchResults = await Promise.all(batch.map(fn));
+        results.push(...batchResults);
+        console.log(`[weekly] fetch progress: ${Math.min(i + limit, items.length)}/${items.length}`);
+      }
+      return results;
+    }
+    const containerData = await fetchWithLimit(allSummaries, async c => {
       try {
         const table = await fetchSheet(c.siteId, c.name, 1);
         const { bedCount, rows } = parseContainerRowsV2(table);
         return { ...c, bedCount, rows };
       } catch (e) {
-        if (allSummaries.indexOf(c) < 5) console.warn('[weekly] fetch error:', c.name, e.message);
         return { ...c, bedCount: null, rows: [] };
       }
-    }));
+    });
     const dbg = containerData.filter(c => c.rows.length > 0);
     console.log('[weekly] containers with rows:', dbg.length);
     console.log('[weekly] sample startDates+weeks:', dbg.slice(0,3).map(c => ({
