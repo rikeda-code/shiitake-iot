@@ -310,7 +310,9 @@ async function fetchSummaryRows(site) {
     const name = (nameCell?.v != null ? String(nameCell.v) : (nameCell?.f ?? '')).trim();
     if (SKIP.has(name)) return;
 
-    const startDate = gvizDateStr(cells[2]?.v, cells[2]?.f) ?? '';
+    // Prefer raw Date() value for reliable parsing downstream
+    const sdCell = cells[2];
+    const startDate = sdCell?.v ? (gvizDateStr(sdCell.v, null) ?? gvizDateStr(null, sdCell?.f) ?? '') : (gvizDateStr(null, sdCell?.f) ?? '');
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
     const packRaw   = cells[12]?.v;
@@ -371,22 +373,42 @@ function parseContainerRows(table) {
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-// Parse O列(index 14) daily total + H3(row[1].c[7]) bed count for weekly chart
+// Parse O列 daily total + H3(row[1].c[7]) bed count for weekly chart
 function parseContainerRowsV2(table) {
-  const bedCountRaw = table.rows?.[1]?.c?.[7]?.v;
-  const bedCount    = bedCountRaw != null ? parseFloat(bedCountRaw) : null;
+  // Bed count: try H3 = rows[1].c[7], then scan all rows/cols for plausible value
+  let bedCount = null;
+  for (let ri = 0; ri <= 3 && bedCount == null; ri++) {
+    const cell = table.rows?.[ri]?.c?.[7];
+    const v = cell?.v ?? parseFloat(cell?.f);
+    if (v > 0 && v < 10000) bedCount = v;
+  }
+
+  // Find O列: prefer col labeled "合計" or "O" near index 14, else use index 14
+  let oIdx = 14;
+  (table.cols || []).forEach((c, i) => {
+    const lbl = (c.label || '').replace(/\s/g, '');
+    if (lbl === '合計' || lbl === 'O' || lbl === '計') oIdx = i;
+  });
+
+  // Find date column (A=0 usually)
+  let dateIdx = 0;
+  (table.cols || []).forEach((c, i) => {
+    const lbl = (c.label || '').replace(/\s/g, '');
+    if (lbl.includes('日付') || lbl.includes('日時')) dateIdx = i;
+  });
 
   const rows = [];
   (table.rows || []).forEach(row => {
     const cells = row.c || [];
-    const dc    = cells[0];
-    const date  = gvizDateStr(dc?.v, dc?.f);
-    if (!date) return;
-    const daily = parseFloat(cells[14]?.v) || 0; // O列
-    rows.push({ date, daily });
+    const dc    = cells[dateIdx];
+    const rowDate = cellToDate(dc?.v, dc?.f);
+    if (!rowDate) return;
+    const daily = parseFloat(cells[oIdx]?.v) || 0;
+    rows.push({ rowDate, daily });
   });
 
-  return { bedCount, rows: rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)) };
+  rows.sort((a, b) => a.rowDate - b.rowDate);
+  return { bedCount, rows };
 }
 
 // Return Sun-Sat week info for a date string (e.g. "2025/6/14")
@@ -405,13 +427,28 @@ function getSunSatWeek(dateStr) {
   };
 }
 
-// Parse date string "2025/6/14" → Date object
+// Parse date string to Date object — handles "2025/6/14", "2025年6月14日", "R7/6/14" etc.
 function parseDateStr(s) {
   if (!s) return null;
-  const p = s.split('/');
-  if (p.length < 3) return null;
-  const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+  // "2025/6/14" or "2025/06/14"
+  let m = String(s).match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  // "2025年6月14日"
+  m = String(s).match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  // Fallback: let browser parse
+  const d = new Date(s);
   return isNaN(d) ? null : d;
+}
+
+// Extract a JS Date directly from a gviz cell value (prefer raw Date() value over formatted string)
+function cellToDate(v, f) {
+  if (v) {
+    const s = String(v);
+    const m = s.match(/Date\((\d+),(\d+),(\d+)\)/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3])); // month is 0-based from gviz
+  }
+  return parseDateStr(f);
 }
 
 async function loadWeeklySection() {
@@ -503,10 +540,10 @@ function buildWeeklyLineChart(canvasId, containers) {
     const points = [];
     c.rows.forEach(r => {
       cumKg += r.daily;
-      const rowDate = parseDateStr(r.date);
+      const rowDate = r.rowDate; // already a Date object from parseContainerRowsV2
       if (!rowDate || !sdDate) return;
       const dayNum = Math.round((rowDate - sdDate) / 86400000) + 1;
-      if (dayNum < 0 || dayNum > 60) return;
+      if (dayNum < 1 || dayNum > 60) return;
       points.push({ x: dayNum, y: Math.round((cumKg * 1000) / c.bedCount) });
     });
     return {
