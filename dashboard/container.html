@@ -490,14 +490,22 @@ async function loadWeeklySection() {
     })));
 
     // Group by Sun-Sat week of startDate
+    // Use rowDate of first data row as fallback for startDate
     const weekGroups = {};
     containerData.forEach(c => {
       if (!c.rows.length || !c.bedCount || c.bedCount <= 0) return;
-      const week = getSunSatWeek(c.startDate);
+      // Try startDate first, then fallback to first row's date
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) {
+        const rd = c.rows[0].rowDate;
+        const ds = `${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`;
+        week = getSunSatWeek(ds);
+      }
       if (!week) return;
       if (!weekGroups[week.key]) weekGroups[week.key] = { label: week.label, containers: [] };
       weekGroups[week.key].containers.push(c);
     });
+    console.log('[weekly] weekKeys:', Object.keys(weekGroups).length, Object.keys(weekGroups).slice(0,3));
 
     const weekKeys = Object.keys(weekGroups).sort();
     if (!weekKeys.length) {
