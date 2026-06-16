@@ -147,6 +147,30 @@
     .mgmt-table .col-decrease { color: #f87171; }
     .mgmt-sub-header { font-size: 0.72rem; color: var(--muted); margin: 20px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
 
+    /* ── Sort bar ── */
+    .weekly-sort-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .sort-label { font-size: 0.78rem; color: var(--muted); }
+    .sort-btn {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); padding: 4px 10px; border-radius: 5px;
+      cursor: pointer; font-size: 0.78rem; transition: all 0.15s;
+    }
+    .sort-btn:hover { border-color: #4a5568; color: var(--text); }
+    .sort-btn.active { background: #3b82f622; border-color: #3b82f6; color: #93c5fd; }
+
+    /* ── Card colors ── */
+    .card-cn { font-size: 0.95rem; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+    .card-sd { font-size: 0.72rem; color: var(--muted); margin-bottom: 6px; }
+    .card-harvest { font-size: 1.1rem; font-weight: 700; color: #60a5fa; margin-bottom: 6px; }
+    .card-harvest.card-red { color: #f87171; }
+    .card-unit { font-size: 0.7rem; font-weight: 400; color: var(--muted); }
+    .card-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+    .card-chip {
+      font-size: 0.72rem; padding: 2px 7px; border-radius: 4px;
+      background: #ffffff11; color: var(--muted);
+    }
+    .card-chip-red { background: #ef444422 !important; color: #f87171 !important; }
+
     /* ── Weekly charts ── */
     #weekly-section .section-title { margin-bottom: 0; }
     .weekly-grid {
@@ -339,8 +363,10 @@ async function fetchSummaryRows(site) {
     if (SKIP.has(name)) return;
 
     // Prefer raw Date() value for reliable parsing downstream
-    const sdCell = cells[2];
+    const sdCell    = cells[2];
     const startDate = sdCell?.v ? (gvizDateStr(sdCell.v, null) ?? gvizDateStr(null, sdCell?.f) ?? '') : (gvizDateStr(null, sdCell?.f) ?? '');
+    const edCell    = cells[3];
+    const endDate   = edCell?.v ? (gvizDateStr(edCell.v, null) ?? gvizDateStr(null, edCell?.f) ?? '') : (gvizDateStr(null, edCell?.f) ?? '');
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
     const packRaw   = cells[12]?.v;
@@ -350,7 +376,7 @@ async function fetchSummaryRows(site) {
       const n = parseFloat(packRaw);
       if (!isNaN(n)) packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
     }
-    raw.push({ name, startDate, days, harvest, packRate, no: extractContainerNo(name) });
+    raw.push({ name, startDate, endDate, days, harvest, packRate, no: extractContainerNo(name) });
   });
 
   // 同一コンテナNo.の重複処理: 栽培日数が短い（null=0扱い）方を残す
@@ -480,8 +506,30 @@ function cellToDate(v, f) {
   return parseDateStr(f);
 }
 
+// Try to fetch target line data from any of the harvest spreadsheets
+async function fetchTargetLine() {
+  for (const site of SITES) {
+    try {
+      const table = await fetchSheet(site.id, '目標ライン(800g)', 1);
+      if (!table?.rows?.length) continue;
+      // C列(index 2), rows C3:C62 → table.rows[1] to table.rows[60] (headers=1 shifts by 1)
+      const values = [null]; // index 0 = day 0 = null
+      for (let i = 1; i <= 60; i++) {
+        const row = table.rows[i];
+        const v = row?.c?.[2]?.v;
+        values.push(v != null ? parseFloat(v) : null);
+      }
+      // Pad to 66 elements (days 0-65)
+      while (values.length <= 65) values.push(values[values.length - 1]);
+      if (values.some(v => v !== null)) return values;
+    } catch (e) {}
+  }
+  return null;
+}
+
+let weeklyState = null; // { containerData, targetData }
+
 async function loadWeeklySection() {
-  console.log('[weekly] loadWeeklySection v11 start');
   const section = document.getElementById('weekly-section');
   if (!section) return;
 
@@ -490,94 +538,35 @@ async function loadWeeklySection() {
     <div class="loading" style="height:60px">全拠点データを読み込み中...</div>`;
 
   try {
-    // Load summaries from all 3 sites
     const allSummaries = (await Promise.all(SITES.map(site =>
       fetchSummaryRows(site)
         .then(rows => rows.map(r => ({ ...r, siteName: site.name, siteId: site.id })))
         .catch(() => [])
     ))).flat().filter(r => r.startDate);
 
-    console.log('[weekly] allSummaries count:', allSummaries.length);
-    console.log('[weekly] sample startDates:', allSummaries.slice(0,3).map(r => r.startDate));
-
-    // Fetch individual container sheets with concurrency limit
     async function fetchWithLimit(items, fn, limit = 15) {
       const results = [];
       for (let i = 0; i < items.length; i += limit) {
         const batch = items.slice(i, i + limit);
-        const batchResults = await Promise.all(batch.map(fn));
-        results.push(...batchResults);
-        console.log(`[weekly] fetch progress: ${Math.min(i + limit, items.length)}/${items.length}`);
+        results.push(...await Promise.all(batch.map(fn)));
       }
       return results;
     }
-    const containerData = await fetchWithLimit(allSummaries, async c => {
-      try {
-        const table = await fetchSheet(c.siteId, c.name, 1);
-        const { bedCount, rows } = parseContainerRowsV2(table);
-        return { ...c, bedCount, rows };
-      } catch (e) {
-        return { ...c, bedCount: null, rows: [] };
-      }
-    });
-    const dbg = containerData.filter(c => c.rows.length > 0);
-    console.log('[weekly] containers with rows:', dbg.length);
-    console.log('[weekly] sample startDates+weeks:', dbg.slice(0,3).map(c => ({
-      name: c.name, startDate: c.startDate, bedCount: c.bedCount,
-      week: getSunSatWeek(c.startDate)
-    })));
+    const [containerData, targetData] = await Promise.all([
+      fetchWithLimit(allSummaries, async c => {
+        try {
+          const table = await fetchSheet(c.siteId, c.name, 1);
+          const { bedCount, rows } = parseContainerRowsV2(table);
+          return { ...c, bedCount, rows };
+        } catch (e) {
+          return { ...c, bedCount: null, rows: [] };
+        }
+      }),
+      fetchTargetLine(),
+    ]);
 
-    // Group by Sun-Sat week of startDate
-    // Use rowDate of first data row as fallback for startDate
-    const weekGroups = {};
-    containerData.forEach(c => {
-      if (!c.rows.length || !c.bedCount || c.bedCount <= 0) return;
-      // Try startDate first, then fallback to first row's date
-      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
-      if (!week && c.rows[0]?.rowDate) {
-        const rd = c.rows[0].rowDate;
-        const ds = `${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`;
-        week = getSunSatWeek(ds);
-      }
-      if (!week) return;
-      if (!weekGroups[week.key]) weekGroups[week.key] = { label: week.label, containers: [] };
-      weekGroups[week.key].containers.push(c);
-    });
-    console.log('[weekly] weekKeys:', Object.keys(weekGroups).length, Object.keys(weekGroups).slice(0,3));
-
-    const weekKeys = Object.keys(weekGroups).sort();
-    if (!weekKeys.length) {
-      section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
-        <div class="error-msg" style="padding:16px 0">表示できるデータがありません（シートが公開されているか確認してください）</div>`;
-      return;
-    }
-
-    const cardsHtml = weekKeys.map(k => `
-      <div class="weekly-chart-card">
-        <div class="weekly-chart-title">${weekGroups[k].label}</div>
-        <div class="chart-wrap" style="height:260px"><canvas id="weekly-${k}"></canvas></div>
-      </div>`).join('');
-
-    const legendHtml = Object.entries(SITE_WEEKLY_COLORS).map(([name, color]) =>
-      `<div class="weekly-legend-item"><span class="weekly-legend-dot" style="background:${color}"></span>${name}</div>`
-    ).join('');
-
-    section.innerHTML = `
-      <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
-      <div class="weekly-legend">${legendHtml}</div>
-      <div class="weekly-grid">${cardsHtml}</div>`;
-
-    console.log('[weekly] waiting for Chart.js...');
-    await waitForChart();
-    console.log('[weekly] Chart.js ready, building charts');
-    weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
-    weeklyCharts = [];
-    weekKeys.forEach(k => {
-      const canvasId = `weekly-${k}`;
-      const canvas = document.getElementById(canvasId);
-      console.log('[weekly] building', canvasId, 'canvas?', !!canvas);
-      if (canvas) buildWeeklyLineChart(canvasId, weekGroups[k].containers);
-    });
+    weeklyState = { containerData, targetData };
+    renderWeeklySection(section, weeklyState, 'week', 'desc');
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
@@ -586,25 +575,126 @@ async function loadWeeklySection() {
   }
 }
 
-// Target line: (0,0) → (30,660) → (60,800)
-const WEEKLY_TARGET = Array.from({ length: 61 }, (_, day) => ({
-  x: day,
-  y: day <= 30 ? Math.round(day * 660 / 30) : Math.round(660 + (day - 30) * 140 / 30),
-}));
+function renderWeeklySection(section, state, groupMode, sortOrder) {
+  const { containerData, targetData } = state;
+  const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
+  if (!valid.length) {
+    section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+      <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
+    return;
+  }
 
-function buildWeeklyLineChart(canvasId, containers) {
+  // Build groups
+  const groups = {};
+  let groupKeys = [];
+  if (groupMode === 'site') {
+    valid.forEach(c => {
+      if (!groups[c.siteName]) groups[c.siteName] = { label: c.siteName, containers: [] };
+      groups[c.siteName].containers.push(c);
+    });
+    groupKeys = Object.keys(groups);
+  } else if (groupMode === 'month') {
+    valid.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) {
+        const rd = c.rows[0].rowDate;
+        week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`);
+      }
+      if (!week) return;
+      const monthKey = week.key.slice(0, 7); // "2026-01"
+      const monthLabel = `${parseInt(week.key.slice(5,7))}月`;
+      if (!groups[monthKey]) groups[monthKey] = { label: monthLabel, containers: [] };
+      groups[monthKey].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrder === 'desc') groupKeys.reverse();
+  } else {
+    // week (default)
+    valid.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) {
+        const rd = c.rows[0].rowDate;
+        week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`);
+      }
+      if (!week) return;
+      if (!groups[week.key]) groups[week.key] = { label: week.label, containers: [] };
+      groups[week.key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrder === 'desc') groupKeys.reverse();
+  }
+
+  const legendHtml = Object.entries(SITE_WEEKLY_COLORS).map(([name, color]) =>
+    `<div class="weekly-legend-item"><span class="weekly-legend-dot" style="background:${color}"></span>${name}</div>`
+  ).join('');
+
+  const sortBar = `
+    <div class="weekly-sort-bar">
+      <span class="sort-label">並び順:</span>
+      <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
+      <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
+      <span class="sort-label" style="margin-left:12px">グループ:</span>
+      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
+      <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
+      <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
+    </div>`;
+
+  const cardsHtml = groupKeys.map(k => `
+    <div class="weekly-chart-card">
+      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div class="chart-wrap" style="height:260px"><canvas id="weekly-${k}"></canvas></div>
+    </div>`).join('');
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <div class="weekly-legend">${legendHtml}</div>
+      ${sortBar}
+    </div>
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  // Persist current mode for button callbacks
+  section.dataset.groupMode = groupMode;
+  section.dataset.sortOrder = sortOrder;
+
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  groupKeys.forEach(k => {
+    const canvasId = `weekly-${k}`;
+    const canvas = document.getElementById(canvasId);
+    if (canvas) buildWeeklyLineChart(canvasId, groups[k].containers, targetData);
+  });
+}
+
+function weeklySetSort(order) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  const groupMode = section.dataset.groupMode || 'week';
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  renderWeeklySection(section, weeklyState, groupMode, order);
+}
+
+function weeklySetGroup(mode) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  const sortOrder = section.dataset.sortOrder || 'desc';
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  renderWeeklySection(section, weeklyState, mode, sortOrder);
+}
+
+function buildWeeklyLineChart(canvasId, containers, targetData) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) { console.warn('[buildChart] canvas not found:', canvasId); return; }
   const ctx = canvas.getContext('2d');
-  console.log('[buildChart]', canvasId, 'containers:', containers.length, 'Chart?', typeof Chart !== 'undefined');
 
-  // X axis labels: day 0..65
   const MAX_DAY = 65;
   const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
+  const today = new Date(); today.setHours(0,0,0,0);
 
   const datasets = containers.map(c => {
     const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
-    // Build cumulative array indexed by dayNum
     const cumArr = new Array(MAX_DAY + 1).fill(null);
     let cumKg = 0;
     c.rows.forEach(r => {
@@ -614,13 +704,29 @@ function buildWeeklyLineChart(canvasId, containers) {
         cumArr[d] = c.bedCount > 0 ? Math.round((cumKg * 1000) / c.bedCount) : null;
       }
     });
-    // Forward-fill nulls between existing data points so line connects
+
+    // Calculate cutoff day (stop forward-fill here)
+    let cutoffDay = c.rows.length > 0 ? Math.max(...c.rows.map(r => r.dayNum)) : 0;
+    const startD = parseDateStr(c.startDate);
+    if (c.endDate) {
+      // Terminated container: cut at endDate
+      const endD = parseDateStr(c.endDate);
+      if (endD && startD) {
+        cutoffDay = Math.min(Math.round((endD - startD) / 86400000), MAX_DAY);
+      }
+    } else if (startD) {
+      // Active container: extend to today if today > last data day
+      const todayDay = Math.round((today - startD) / 86400000);
+      cutoffDay = Math.min(Math.max(cutoffDay, todayDay), MAX_DAY);
+    }
+
+    // Forward-fill only up to cutoffDay
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
       if (cumArr[i] !== null) { last = cumArr[i]; }
-      else if (last !== null) { cumArr[i] = last; }
+      else if (last !== null && i <= cutoffDay) { cumArr[i] = last; }
     }
-    console.log(`[chart:${canvasId}] ${c.siteName} ${c.name}: bedCount=${c.bedCount} rows=${c.rows.length} nonNullPts=${cumArr.filter(v=>v!==null).length} lastVal=${cumArr[MAX_DAY]}`);
+
     return {
       label: `${c.siteName} ${c.name}`,
       data: cumArr,
@@ -634,10 +740,11 @@ function buildWeeklyLineChart(canvasId, containers) {
     };
   });
 
-  // Target line
-  const targetArr = xLabels.map(d =>
-    d <= 30 ? Math.round(d * 660 / 30) : Math.round(660 + (d - 30) * 140 / 30)
-  );
+  // Target line: use fetched data or fallback formula
+  const targetArr = xLabels.map((d, i) => {
+    if (targetData && targetData[i] != null) return targetData[i];
+    return d <= 30 ? Math.round(d * 660 / 30) : Math.round(660 + (d - 30) * 140 / 30);
+  });
   datasets.push({
     label: '目標',
     data: targetArr,
@@ -837,32 +944,35 @@ function renderSetupNotice() {
 function renderCards(summary) {
   if (!summary.length) return renderSetupNotice();
 
-  const html = summary.map((row, idx) => {
-    const color   = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
+  const html = summary.map(row => {
+    const info = parseContainerName(row.name);
     const hasData = row.harvest != null;
 
     if (!hasData) {
-      // データなし: コンテナ名のみ
       return `<div class="container-card" style="opacity:0.5">
-        <div class="card-name" style="color:${color}">${row.name}</div>
-        <div class="card-breakdown"><span class="size-chip" style="background:#ffffff0a;color:var(--muted)">データなし</span></div>
+        <div class="card-cn">${row.name}</div>
+        <div class="card-sd">—</div>
+        <div class="card-harvest">—</div>
+        <div class="card-meta"><span class="card-chip">データなし</span></div>
       </div>`;
     }
 
-    const harvest  = row.harvest.toLocaleString('ja-JP');
-    const days     = row.days     != null ? `${row.days}日` : '—';
-    const sd       = row.startDate || '—';
-    const packChip = row.packRate  != null
-      ? `<span class="size-chip" style="background:#fbbf2422;color:#fbbf24">パック品率 ${row.packRate}%</span>`
-      : '';
+    const harvestVal = Math.round(row.harvest);
+    const harvestOk  = harvestVal >= 660;
+    const packOk     = row.packRate == null || row.packRate >= 80;
+    const sd   = row.startDate || '—';
+    const days = row.days != null ? `${row.days}日` : '—';
+    const packStr = row.packRate != null ? `${row.packRate}%` : '—';
+
+    const displayName = info.no ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '') : row.name;
 
     return `<div class="container-card">
-      <div class="card-no">栽培開始: ${sd}</div>
-      <div class="card-name" style="color:${color}">${row.name}</div>
-      <div class="card-total" style="color:${color}">${harvest}<span class="card-unit"> g/菌床</span></div>
-      <div class="card-breakdown">
-        <span class="size-chip" style="background:#ffffff11;color:var(--muted)">栽培 ${days}</span>
-        ${packChip}
+      <div class="card-cn" title="${row.name}">${displayName}</div>
+      <div class="card-sd">開始: ${sd}</div>
+      <div class="card-harvest${harvestOk ? '' : ' card-red'}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
+      <div class="card-meta">
+        <span class="card-chip">${days}</span>
+        <span class="card-chip${packOk ? '' : ' card-chip-red'}">${packStr}</span>
       </div>
     </div>`;
   }).join('');
