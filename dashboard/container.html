@@ -383,11 +383,11 @@ function parseContainerRowsV2(table) {
     if (v > 0 && v < 10000) bedCount = v;
   }
 
-  // Find O列: prefer col labeled "合計" or "O" near index 14, else use index 14
+  // Find O列: label "合計（kg）" など "合計" を含む列、なければ index 14
   let oIdx = 14;
   (table.cols || []).forEach((c, i) => {
     const lbl = (c.label || '').replace(/\s/g, '');
-    if (lbl === '合計' || lbl === 'O' || lbl === '計') oIdx = i;
+    if (lbl.includes('合計') || lbl === 'O' || lbl === '計') oIdx = i;
   });
 
   // Find date column (A=0 usually)
