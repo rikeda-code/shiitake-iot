@@ -530,13 +530,13 @@ async function loadWeeklySection() {
       <div class="weekly-legend">${legendHtml}</div>
       <div class="weekly-grid">${cardsHtml}</div>`;
 
-    weeklyCharts.forEach(c => c.destroy());
+    console.log('[weekly] about to destroy old charts, count:', weeklyCharts.length);
+    weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) { console.warn('destroy err', e); } });
     weeklyCharts = [];
-
     console.log('[weekly] calling buildWeeklyLineChart for keys:', weekKeys);
     setTimeout(() => {
       weekKeys.forEach(k => buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers));
-    }, 100);
+    }, 200);
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
