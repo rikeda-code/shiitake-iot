@@ -453,6 +453,7 @@ function cellToDate(v, f) {
 }
 
 async function loadWeeklySection() {
+  console.log('[weekly] loadWeeklySection v11 start');
   const section = document.getElementById('weekly-section');
   if (!section) return;
 
@@ -538,6 +539,7 @@ async function loadWeeklySection() {
     }, 100);
 
   } catch (e) {
+    console.error('[weekly] CATCH ERROR:', e.message, e.stack);
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移</div>
       <div class="error-msg" style="padding:16px 0">エラー: ${e.message}</div>`;
   }
