@@ -523,9 +523,9 @@ async function loadWeeklySection() {
     weeklyCharts.forEach(c => c.destroy());
     weeklyCharts = [];
 
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       weekKeys.forEach(k => buildWeeklyLineChart(`weekly-${k}`, weekGroups[k].containers));
-    });
+    }, 100);
 
   } catch (e) {
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移</div>
@@ -540,8 +540,12 @@ const WEEKLY_TARGET = Array.from({ length: 61 }, (_, day) => ({
 }));
 
 function buildWeeklyLineChart(canvasId, containers) {
+  if (typeof Chart === 'undefined') {
+    setTimeout(() => buildWeeklyLineChart(canvasId, containers), 300);
+    return;
+  }
   const ctx = document.getElementById(canvasId)?.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) { setTimeout(() => buildWeeklyLineChart(canvasId, containers), 100); return; }
 
   const datasets = containers.map(c => {
     const color   = SITE_WEEKLY_COLORS[c.siteName] || '#888';
