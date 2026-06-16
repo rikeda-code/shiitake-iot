@@ -226,22 +226,82 @@ function gvizDateStr(v, f) {
   return s;
 }
 
+// コンテナ名から番号部分を抽出: "2-4(6/19)L3" → "2-4", "5(6/17)L3" → "5"
+function extractContainerNo(name) {
+  const m = String(name).match(/^(.+?)\(/);
+  return m ? m[1].trim() : String(name).trim();
+}
+
+// サイト別ソートキー: [group, subNo]
+function containerSortKey(siteName, no) {
+  const simple   = /^\d+$/.test(no);
+  const compound = no.match(/^(\d+)-(\d+)$/);
+
+  if (siteName === 'いなべ') {
+    return [0, simple ? parseInt(no) : 999];
+  }
+  if (siteName === '群馬') {
+    if (simple)    return [0, parseInt(no)];
+    if (compound) {
+      const [, p, s] = compound;
+      if (p === '3') return [1, parseInt(s)];
+      if (p === '2') return [2, parseInt(s)];
+    }
+    return [99, 0];
+  }
+  if (siteName === '南丹') {
+    if (simple)    return [0, simple ? parseInt(no) : 999];
+    if (compound) {
+      const [, p, s] = compound;
+      if (p === '1') return [1, parseInt(s)];
+      if (p === '2') return [2, parseInt(s)];
+      if (p === '3') return [3, parseInt(s)];
+    }
+    return [99, 0];
+  }
+  return [0, simple ? parseInt(no) : 999];
+}
+
 async function fetchSummaryRows(site) {
   const table = await fetchSheet(site.id, site.indexSheet);
-  // C(2)=栽培開始日 E(4)=栽培日数 F(5)=コンテナ名 J(9)=1菌床当たり収穫量g
-  const rows = [];
+  // C(2)=栽培開始日 E(4)=栽培日数 F(5)=コンテナ名 J(9)=収穫量g/菌床 M(12)=パック品率
+  const SKIP = new Set(['コンテナ名', '号機', '見本', '']);
+  const raw = [];
   (table.rows || []).forEach(row => {
     const cells = row.c || [];
     const nameCell = cells[5];
-    const name = nameCell?.v != null ? String(nameCell.v).trim() : (nameCell?.f ?? '').trim();
-    if (!name || name === 'コンテナ名' || name === '号機' || name === '見本') return;
+    const name = (nameCell?.v != null ? String(nameCell.v) : (nameCell?.f ?? '')).trim();
+    if (SKIP.has(name)) return;
 
     const startDate = gvizDateStr(cells[2]?.v, cells[2]?.f) ?? '';
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
-    rows.push({ name, startDate, days, harvest });
+    const packRaw   = cells[12]?.v;
+    // パック品率: 0-1の小数か0-100の整数かを自動判定
+    let packRate = null;
+    if (packRaw != null && packRaw !== '') {
+      const n = parseFloat(packRaw);
+      if (!isNaN(n)) packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
+    }
+    raw.push({ name, startDate, days, harvest, packRate, no: extractContainerNo(name) });
   });
-  return rows;
+
+  // 同一コンテナNo.の重複処理: 栽培日数が短い（null=0扱い）方を残す
+  const best = {};
+  raw.forEach(r => {
+    const key = r.no;
+    const d = r.days ?? 0;
+    if (!best[key] || d < (best[key].days ?? 0)) best[key] = r;
+  });
+
+  // ソート
+  const sorted = Object.values(best).sort((a, b) => {
+    const ka = containerSortKey(site.name, a.no);
+    const kb = containerSortKey(site.name, b.no);
+    return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1] - kb[1];
+  });
+
+  return sorted;
 }
 
 function parseContainerRows(table) {
@@ -424,16 +484,30 @@ function renderCards(summary) {
 
   const html = summary.map((row, idx) => {
     const color   = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
-    const harvest = row.harvest != null ? row.harvest.toLocaleString('ja-JP') : '—';
-    const days    = row.days    != null ? row.days : '—';
-    const sd      = row.startDate || '—';
+    const hasData = row.harvest != null;
+
+    if (!hasData) {
+      // データなし: コンテナ名のみ
+      return `<div class="container-card" style="opacity:0.5">
+        <div class="card-name" style="color:${color}">${row.name}</div>
+        <div class="card-breakdown"><span class="size-chip" style="background:#ffffff0a;color:var(--muted)">データなし</span></div>
+      </div>`;
+    }
+
+    const harvest  = row.harvest.toLocaleString('ja-JP');
+    const days     = row.days     != null ? `${row.days}日` : '—';
+    const sd       = row.startDate || '—';
+    const packChip = row.packRate  != null
+      ? `<span class="size-chip" style="background:#fbbf2422;color:#fbbf24">パック品率 ${row.packRate}%</span>`
+      : '';
 
     return `<div class="container-card">
       <div class="card-no">栽培開始: ${sd}</div>
       <div class="card-name" style="color:${color}">${row.name}</div>
       <div class="card-total" style="color:${color}">${harvest}<span class="card-unit"> g/菌床</span></div>
       <div class="card-breakdown">
-        <span class="size-chip" style="background:#ffffff11;color:var(--muted)">栽培日数 ${days}日</span>
+        <span class="size-chip" style="background:#ffffff11;color:var(--muted)">栽培 ${days}</span>
+        ${packChip}
       </div>
     </div>`;
   }).join('');
