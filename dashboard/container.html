@@ -226,13 +226,15 @@ function gvizDateStr(v, f) {
   return s;
 }
 
-async function fetchContainerList(siteId) {
-  const table = await fetchSheet(siteId, 'コンテナ一覧');
+async function fetchContainerList(site) {
+  const table = await fetchSheet(site.id, site.indexSheet);
+  // F列(index 5)=コンテナ名, C列(index 2)=栽培開始日, D列(index 3)=栽培終了日, J列(index 9)=1菌床当たり収穫量g
+  const COL_NAME = 5; // F
   return (table.rows || []).map(row => {
-    const c = row.c?.[0];
+    const c = row.c?.[COL_NAME];
     const v = c?.v != null ? String(c.v).trim() : (c?.f ?? '').trim();
     return v;
-  }).filter(Boolean);
+  }).filter(v => v && v !== 'コンテナ名');
 }
 
 function parseContainerRows(table) {
@@ -401,11 +403,11 @@ function buildStackChart(rows) {
 
 function renderSetupNotice() {
   return `<div class="setup-notice">
-    <strong>⚠ コンテナ一覧シートが見つかりません</strong><br>
-    以下の手順でセットアップしてください：<br>
-    1. このスプレッドシートに <strong>コンテナ一覧</strong> という名前のシートを追加する<br>
-    2. A列にコンテナシート名を1行1件で入力する（例: <code>47(6/14)志摩L3</code>）<br>
-    3. スプレッドシートを「ファイル → 共有 → <strong>ウェブに公開</strong>」で公開する<br>
+    <strong>⚠ データを取得できません</strong><br>
+    スプレッドシートが「ウェブに公開」されていない可能性があります：<br>
+    1. スプレッドシートを開く<br>
+    2. 「ファイル → 共有 → <strong>ウェブに公開</strong>」を選択<br>
+    3. 「ドキュメント全体」→「<strong>公開</strong>」ボタンをクリック<br>
     4. このページを更新する
   </div>`;
 }
@@ -686,7 +688,7 @@ async function loadCurrentSite(forceRefresh = false) {
   let listError  = null;
 
   try {
-    containers = await fetchContainerList(site.id);
+    containers = await fetchContainerList(site);
   } catch (e) {
     listError = e.message || String(e);
   }
