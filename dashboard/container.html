@@ -486,9 +486,10 @@ async function loadWeeklySection() {
         if (allSummaries.indexOf(c) < 3) {
           console.log(`[weekly] ${c.siteName} ${c.name}: bedCount=${bedCount}, rows=${rows.length}, oSample=`, rows[0]);
           const rawRows = table.rows || [];
-          console.log('  total rows:', rawRows.length);
-          for (let ri = 0; ri < Math.min(5, rawRows.length); ri++) {
-            const vals = (rawRows[ri]?.c || []).slice(0, 5).map(cell => ({ v: cell?.v, f: cell?.f }));
+          console.log('  total rows:', rawRows.length, 'cols:', table.cols?.length);
+          // Show rows 0-9 with first 20 cols
+          for (let ri = 0; ri < Math.min(10, rawRows.length); ri++) {
+            const vals = (rawRows[ri]?.c || []).slice(0, 20).map(cell => cell?.v ?? cell?.f ?? '·');
             console.log(`  row${ri}:`, JSON.stringify(vals));
           }
         }
