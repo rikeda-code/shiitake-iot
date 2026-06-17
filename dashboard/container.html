@@ -454,9 +454,40 @@ function parseContainerRowsV2(table, startDateStr) {
     if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
   }
 
-  // Detect Type C (群馬 wide): YYYYMMDD in col2, "号基" in col3 around rows 1-6
-  let isTypeC = false;
+  // Helper: parse integer from cell value
+  const toInt = v => {
+    if (typeof v === 'number' && v >= 0 && Number.isInteger(v)) return v;
+    if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v);
+    return NaN;
+  };
+
+  // If not TypeB, attempt TypeA dayCol detection first
+  // TypeA (いなべ): sheet has integer dayIdx (0,1,2...) in some column
+  let dayCol = -1;
   if (!isTypeB) {
+    const colCandidates = {};
+    for (let ri = 2; ri < Math.min(14, allRows.length); ri++) {
+      const cells = allRows[ri]?.c || [];
+      for (let ci = 0; ci <= 6; ci++) {
+        const n = toInt(cells[ci]?.v);
+        if (!isNaN(n) && n <= 5) {
+          if (!colCandidates[ci]) colCandidates[ci] = new Set();
+          colCandidates[ci].add(n);
+        }
+      }
+    }
+    for (const ci of [0,1,2,3,4,5,6]) {
+      if (colCandidates[ci]?.has(0) && colCandidates[ci]?.has(1)) { dayCol = ci; break; }
+    }
+    if (dayCol === -1) for (const ci of [0,1,2,3,4,5]) {
+      if (colCandidates[ci]?.has(0)) { dayCol = ci; break; }
+    }
+  }
+
+  // Detect Type C (群馬 wide) ONLY if TypeA dayCol not found
+  // TypeC: YYYYMMDD in col2, "号基" in col3 — each row is one day, columns span all beds
+  let isTypeC = false;
+  if (!isTypeB && dayCol === -1) {
     for (let ri = 1; ri < Math.min(8, allRows.length); ri++) {
       const cells = allRows[ri]?.c || [];
       const v2 = cells[2]?.v != null ? String(cells[2].v) : '';
@@ -478,9 +509,7 @@ function parseContainerRowsV2(table, startDateStr) {
     // Type B: bedCount is at H3 (row index 2, col index 7)
     bedCount = nearInt(allRows[2]?.c?.[7]?.v);
   } else if (isTypeC) {
-    // Type C: scan rows 0-2 for a standalone integer that looks like bedCount
-    // Row structure: Date | "N日" | YYYYMMDD | "N号基" | labels | nums...
-    // bedCount is likely in a header row (row 0 or 1) in an early col
+    // Type C: scan rows 0-2 for bedCount
     for (let ri = 0; ri <= 2 && bedCount === null; ri++) {
       const cells = allRows[ri]?.c || [];
       for (let ci = 0; ci < Math.min(cells.length, 60); ci++) {
@@ -502,7 +531,7 @@ function parseContainerRowsV2(table, startDateStr) {
 
   const rows = [];
   if (isTypeB) {
-    // Type B (南丹): date in col5, harvest sum in cols 13+14+15+16
+    // Type B (南丹): date in col5, daily total in col13
     const startD = parseDateStr(startDateStr);
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
@@ -510,7 +539,6 @@ function parseContainerRowsV2(table, startDateStr) {
       if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
       const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
       if (!rowDate) continue;
-      // col13 = daily total kg (sum of per-zone cols 6,7,9); cols 14,15 duplicate col13
       const v13 = parseFloat(cells[13]?.v);
       const daily = (!isNaN(v13) && v13 > 0) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
         const v = parseFloat(cells[ci]?.v);
@@ -521,9 +549,7 @@ function parseContainerRowsV2(table, startDateStr) {
       if (dayNum >= 1 && dayNum <= 200) rows.push({ rowDate, dayNum, daily });
     }
   } else if (isTypeC) {
-    // Type C (群馬 wide): col1="N日", col2=YYYYMMDD, col3+= per-号基 data
-    // Validate that row dates match startDate (rejects fallback/template sheets)
-    const startD = parseDateStr(startDateStr);
+    // Type C (群馬 wide): col1="N日", col2=YYYYMMDD, cols4+ = per-bed harvest values
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const dayLabel = String(cells[1]?.v ?? '');
@@ -531,15 +557,6 @@ function parseContainerRowsV2(table, startDateStr) {
       if (!dm) continue;
       const dayNum = parseInt(dm[1]);
       if (dayNum < 1 || dayNum > 200) continue;
-      // Validate: row YYYYMMDD should match startDate + (dayNum-1) days within 7 days
-      if (startD) {
-        const ds = String(cells[2]?.v ?? '');
-        if (/^\d{8}$/.test(ds)) {
-          const rowDate = new Date(parseInt(ds.slice(0,4)), parseInt(ds.slice(4,6))-1, parseInt(ds.slice(6,8)));
-          const expected = new Date(startD.getTime() + (dayNum - 1) * 86400000);
-          if (Math.abs(rowDate - expected) > 7 * 86400000) continue;
-        }
-      }
       let daily = 0;
       for (let ci = 4; ci < cells.length; ci++) {
         const v = parseFloat(cells[ci]?.v);
@@ -548,30 +565,7 @@ function parseContainerRowsV2(table, startDateStr) {
       rows.push({ dayNum, daily });
     }
   } else {
-    // Type A (いなべ/群馬): auto-detect dayIdx column
-    const toInt = v => {
-      if (typeof v === 'number' && v >= 0 && Number.isInteger(v)) return v;
-      if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v);
-      return NaN;
-    };
-    const colCandidates = {};
-    for (let ri = 2; ri < Math.min(14, allRows.length); ri++) {
-      const cells = allRows[ri]?.c || [];
-      for (let ci = 0; ci <= 6; ci++) {
-        const n = toInt(cells[ci]?.v);
-        if (!isNaN(n) && n <= 5) {
-          if (!colCandidates[ci]) colCandidates[ci] = new Set();
-          colCandidates[ci].add(n);
-        }
-      }
-    }
-    let dayCol = -1;
-    for (const ci of [0,1,2,3,4,5,6]) {
-      if (colCandidates[ci]?.has(0) && colCandidates[ci]?.has(1)) { dayCol = ci; break; }
-    }
-    if (dayCol === -1) for (const ci of [0,1,2,3,4,5]) {
-      if (colCandidates[ci]?.has(0)) { dayCol = ci; break; }
-    }
+    // Type A (いなべ): integer dayIdx in dayCol (already detected above)
     if (dayCol === -1) dayCol = 1;
 
     for (let ri = 0; ri < allRows.length; ri++) {
