@@ -379,12 +379,14 @@ async function fetchSummaryRows(site) {
     raw.push({ name, startDate, endDate, days, harvest, packRate, no: extractContainerNo(name) });
   });
 
-  // 同一コンテナNo.の重複処理: 栽培日数が短い（null=0扱い）方を残す
+  // 同一コンテナNo.の重複処理: 最新の startDate を持つ行を残す
   const best = {};
   raw.forEach(r => {
     const key = r.no;
-    const d = r.days ?? 0;
-    if (!best[key] || d < (best[key].days ?? 0)) best[key] = r;
+    if (!best[key]) { best[key] = r; return; }
+    const curr = parseDateStr(r.startDate);
+    const prev = parseDateStr(best[key].startDate);
+    if (curr && (!prev || curr > prev)) best[key] = r;
   });
 
   // ソート
@@ -444,22 +446,15 @@ function parseContainerRowsV2(table) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // bedCount: search rows 0-4, col 7 (H) for a value in realistic range 10-500
+  // bedCount: at H3 (col7, row3). With headers=0: allRows[2]=row3.
+  // Skip allRows[0] (title) to avoid false matches. Scan rows 1-4, cols 5-9.
   let bedCount = null;
-  for (let ri = 0; ri <= 4 && bedCount === null; ri++) {
-    const v = allRows[ri]?.c?.[7]?.v;
-    if (v != null) {
-      const n = parseFloat(v);
-      if (n >= 10 && n <= 500) bedCount = n;
-    }
-  }
-  // Fallback: also check col 6 (G)
-  if (bedCount === null) {
-    for (let ri = 0; ri <= 4 && bedCount === null; ri++) {
-      const v = allRows[ri]?.c?.[6]?.v;
+  for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
+    for (let ci = 5; ci <= 9 && bedCount === null; ci++) {
+      const v = allRows[ri]?.c?.[ci]?.v;
       if (v != null) {
         const n = parseFloat(v);
-        if (n >= 10 && n <= 500) bedCount = n;
+        if (Number.isInteger(n) && n >= 10 && n <= 500) bedCount = n;
       }
     }
   }
@@ -481,6 +476,8 @@ function parseContainerRowsV2(table) {
   }
 
   rows.sort((a, b) => a.dayNum - b.dayNum);
+  // Debug: uncomment to diagnose missing sites
+  // console.log('[parseV2]', 'bedCount=', bedCount, 'rows=', rows.length, 'allRows=', allRows.length);
   return { bedCount, rows };
 }
 
@@ -585,8 +582,10 @@ async function loadWeeklySection() {
         try {
           const table = await fetchSheet(c.siteId, c.name, 0);
           const { bedCount, rows } = parseContainerRowsV2(table);
+          if (c.siteName === '南丹') console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length);
           return { ...c, bedCount, rows };
         } catch (e) {
+          if (c.siteName === '南丹') console.warn('[南丹 ERR]', c.name, e.message);
           return { ...c, bedCount: null, rows: [] };
         }
       }),
@@ -737,9 +736,16 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
       }
     });
 
-    // Cutoff = last actual data day (no forward-fill beyond real data)
-    const lastDataDay = c.rows.length > 0 ? Math.min(Math.max(...c.rows.map(r => r.dayNum)), MAX_DAY) : 0;
-    const cutoffDay = lastDataDay;
+    // Cutoff = today's day number relative to startDate (sheets have pre-filled zero rows)
+    const startD = parseDateStr(c.startDate);
+    let cutoffDay = 0;
+    if (startD) {
+      cutoffDay = Math.min(Math.round((today - startD) / 86400000), MAX_DAY);
+    } else if (c.rows.length > 0) {
+      // Fallback: last day with actual harvest
+      const harvestDays = c.rows.filter(r => r.daily > 0).map(r => r.dayNum);
+      cutoffDay = harvestDays.length > 0 ? Math.min(Math.max(...harvestDays), MAX_DAY) : 0;
+    }
 
     // Forward-fill only up to cutoffDay (fills zero-harvest days between real data)
     let last = null;
@@ -968,6 +974,12 @@ function renderCards(summary) {
     const displayName = info.no
       ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
       : row.name;
+
+    // 栽培終了コンテナ: startDate + days + 7日 < 今日 → 非表示
+    if (row.days != null && row.startDate) {
+      const sd = parseDateStr(row.startDate);
+      if (sd && (sd.getTime() + (row.days + 7) * 86400000) < Date.now()) return '';
+    }
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
     if (row.harvest == null) {
