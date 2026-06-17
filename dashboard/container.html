@@ -439,75 +439,97 @@ function parseDateMD(v, f) {
   return null;
 }
 
-// Parse individual container sheet (headers=0 — no column dropping):
-// Layout: row1(allRows[0])=title, row2(allRows[1])=blank, row3(allRows[2])=bedCount at H(col7),
-//         data rows: col B(1)=dayIdx(0-based int), col F(5)=Date, col N(13)=dailyKg
-function parseContainerRowsV2(table) {
+// Parse individual container sheet (headers=0).
+// Supports two layouts:
+//   Type A (いなべ/群馬): dayIdx in some col (0-based int), date ~5 cols later, dailyKg ~12 cols later
+//   Type B (南丹): YYYYMMDD string in col3, actual date in col5, dailyKg in cols 13-16
+function parseContainerRowsV2(table, startDateStr) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // bedCount: skip title row (allRows[0]). Scan rows 1-4, cols 4-12 for integer 10-600.
+  // bedCount: skip title row. Scan rows 1-4, cols 4-12 for a near-integer in 10-2000.
   let bedCount = null;
   for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
     for (let ci = 4; ci <= 12 && bedCount === null; ci++) {
       const v = allRows[ri]?.c?.[ci]?.v;
       if (v != null) {
         const n = parseFloat(v);
-        if (Number.isInteger(n) && n >= 10 && n <= 600) bedCount = n;
+        const r = Math.round(n);
+        if (r >= 10 && r <= 2000 && Math.abs(n - r) < 0.5) bedCount = r;
       }
     }
   }
 
-  // Data rows: auto-detect dayIdx column (try cols 0-5, accept number or numeric string)
   const rows = [];
-  let dayColDetected = -1;
-  const toInt = v => {
-    if (typeof v === 'number' && v >= 0 && Number.isInteger(v)) return v;
-    if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v);
-    return NaN;
-  };
-  // Scan rows 2-12, cols 0-6 to find the dayIdx column (first col with values 0 and 1)
-  const colCandidates = {};
-  for (let ri = 2; ri < Math.min(14, allRows.length); ri++) {
-    const cells = allRows[ri]?.c || [];
-    for (let ci = 0; ci <= 6; ci++) {
-      const n = toInt(cells[ci]?.v);
-      if (!isNaN(n) && n <= 5) {
-        if (!colCandidates[ci]) colCandidates[ci] = new Set();
-        colCandidates[ci].add(n);
+
+  // Detect Type B: YYYYMMDD string in col3 around rows 8-16
+  let isTypeB = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
+  }
+
+  if (isTypeB) {
+    // Type B (南丹): date in col5, harvest sum in cols 13+14+15+16
+    const startD = parseDateStr(startDateStr);
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      if (!rowDate) continue;
+      const daily = [13, 14, 15, 16].reduce((s, ci) => {
+        const v = parseFloat(cells[ci]?.v);
+        return s + (isNaN(v) || v < 0 ? 0 : v);
+      }, 0);
+      if (!startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum >= 1 && dayNum <= 200) rows.push({ rowDate, dayNum, daily });
+    }
+  } else {
+    // Type A (いなべ/群馬): auto-detect dayIdx column
+    const toInt = v => {
+      if (typeof v === 'number' && v >= 0 && Number.isInteger(v)) return v;
+      if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v);
+      return NaN;
+    };
+    const colCandidates = {};
+    for (let ri = 2; ri < Math.min(14, allRows.length); ri++) {
+      const cells = allRows[ri]?.c || [];
+      for (let ci = 0; ci <= 6; ci++) {
+        const n = toInt(cells[ci]?.v);
+        if (!isNaN(n) && n <= 5) {
+          if (!colCandidates[ci]) colCandidates[ci] = new Set();
+          colCandidates[ci].add(n);
+        }
       }
     }
-  }
-  // Pick the col that has both 0 and 1 (sequential start)
-  for (const ci of [0, 1, 2, 3, 4, 5, 6]) {
-    if (colCandidates[ci]?.has(0) && colCandidates[ci]?.has(1)) { dayColDetected = ci; break; }
-  }
-  if (dayColDetected === -1) {
-    // Fallback: pick col with 0
-    for (const ci of [0, 1, 2, 3, 4, 5]) {
-      if (colCandidates[ci]?.has(0)) { dayColDetected = ci; break; }
+    let dayCol = -1;
+    for (const ci of [0,1,2,3,4,5,6]) {
+      if (colCandidates[ci]?.has(0) && colCandidates[ci]?.has(1)) { dayCol = ci; break; }
     }
-  }
-  if (dayColDetected === -1) dayColDetected = 1; // last resort default
+    if (dayCol === -1) for (const ci of [0,1,2,3,4,5]) {
+      if (colCandidates[ci]?.has(0)) { dayCol = ci; break; }
+    }
+    if (dayCol === -1) dayCol = 1;
 
-  for (let ri = 0; ri < allRows.length; ri++) {
-    const cells = allRows[ri]?.c || [];
-    const dayIdx = toInt(cells[dayColDetected]?.v);
-    if (isNaN(dayIdx)) continue;
-    // Find date cell: try cols dayColDetected+2 through dayColDetected+9
-    let rowDate = null;
-    for (let dc = dayColDetected + 2; dc <= dayColDetected + 10; dc++) {
-      rowDate = cellToDate(cells[dc]?.v, cells[dc]?.f);
-      if (rowDate) break;
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayIdx = toInt(cells[dayCol]?.v);
+      if (isNaN(dayIdx)) continue;
+      let rowDate = null;
+      for (let dc = dayCol + 2; dc <= dayCol + 10; dc++) {
+        rowDate = cellToDate(cells[dc]?.v, cells[dc]?.f);
+        if (rowDate) break;
+      }
+      if (!rowDate) continue;
+      let daily = 0;
+      for (const offset of [12, 11, 13, 10]) {
+        const v = parseFloat(cells[dayCol + offset]?.v);
+        if (!isNaN(v) && v >= 0) { daily = v; break; }
+      }
+      rows.push({ rowDate, dayNum: dayIdx + 1, daily });
     }
-    if (!rowDate) continue;
-    // daily kg: try col dayColDetected+12, then +11, +13
-    let daily = 0;
-    for (const offset of [12, 11, 13, 10]) {
-      const v = parseFloat(cells[dayColDetected + offset]?.v);
-      if (!isNaN(v) && v >= 0) { daily = v; break; }
-    }
-    rows.push({ rowDate, dayNum: dayIdx + 1, daily });
   }
 
   rows.sort((a, b) => a.dayNum - b.dayNum);
@@ -617,17 +639,8 @@ async function loadWeeklySection() {
       fetchWithLimit(allSummaries, async c => {
         try {
           const table = await fetchSheet(c.siteId, c.name, 0);
-          const { bedCount, rows } = parseContainerRowsV2(table);
-          if (c.siteName === '南丹') {
-            console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length, 'totalRows=', table.rows?.length);
-            if (rows.length === 0 && (table.rows?.length ?? 0) > 2) {
-              // Dump rows 5-12 to diagnose daily data layout
-              for (let _i = 4; _i < Math.min(13, table.rows.length); _i++) {
-                const _cells = (table.rows[_i]?.c || []).slice(0, 18);
-                console.log(`  row${_i}:`, _cells.map((cc, j) => `[${j}]${JSON.stringify(cc?.v ?? cc?.f)}`).join(' '));
-              }
-            }
-          }
+          const { bedCount, rows } = parseContainerRowsV2(table, c.startDate);
+          if (c.siteName === '南丹') console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length);
           return { ...c, bedCount, rows };
         } catch (e) {
           if (c.siteName === '南丹') console.warn('[南丹 ERR]', c.name, e.message);
