@@ -1418,7 +1418,7 @@ let weeklyTabActive = false;
 
 function updateTabVisibility() {
   document.getElementById('main').style.display = weeklyTabActive ? 'none' : '';
-  document.getElementById('weekly-section').style.marginTop = weeklyTabActive ? '0' : '';
+  document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
 }
 
 function initTabs() {
@@ -1474,6 +1474,7 @@ function initTabs() {
 }
 
 initTabs();
+updateTabVisibility();
 loadCurrentSite();
 loadWeeklySection();
 </script>
