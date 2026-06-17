@@ -852,8 +852,8 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
     let cutoffDay = 0;
 
     c.rows.forEach(r => {
-      // Use rowDate (from sheet F column) to skip future rows
-      if (r.rowDate && r.rowDate >= tomorrow) return;
+      // Use rowDate (from sheet F column) to skip today and future rows
+      if (r.rowDate && r.rowDate >= today) return;
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
