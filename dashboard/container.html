@@ -1414,8 +1414,17 @@ async function loadCurrentSite(forceRefresh = false) {
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 
+let weeklyTabActive = false;
+
+function updateTabVisibility() {
+  document.getElementById('main').style.display = weeklyTabActive ? 'none' : '';
+  document.getElementById('weekly-section').style.marginTop = weeklyTabActive ? '0' : '';
+}
+
 function initTabs() {
   const tabsEl = document.getElementById('tabs');
+
+  // Site tabs
   SITES.forEach((site, i) => {
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
@@ -1425,7 +1434,8 @@ function initTabs() {
       btn.style.borderBottomColor = site.color;
     }
     btn.addEventListener('click', () => {
-      if (currentSiteIdx === i) return;
+      if (!weeklyTabActive && currentSiteIdx === i) return;
+      weeklyTabActive = false;
       currentSiteIdx = i;
       tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
         const s = SITES[j];
@@ -1433,10 +1443,34 @@ function initTabs() {
         if (j === i) { b.style.color = s.color; b.style.borderBottomColor = s.color; }
         else          { b.style.color = ''; b.style.borderBottomColor = ''; }
       });
+      weeklyBtn.classList.remove('active');
+      weeklyBtn.style.color = '';
+      weeklyBtn.style.borderBottomColor = '';
+      updateTabVisibility();
       loadCurrentSite();
     });
     tabsEl.appendChild(btn);
   });
+
+  // Standalone weekly tab
+  const weeklyBtn = document.createElement('button');
+  weeklyBtn.className = 'tab-btn';
+  weeklyBtn.textContent = '週別累計';
+  weeklyBtn.addEventListener('click', () => {
+    if (weeklyTabActive) return;
+    weeklyTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = '';
+      b.style.borderBottomColor = '';
+    });
+    weeklyBtn.classList.add('active');
+    weeklyBtn.style.color = '#94a3b8';
+    weeklyBtn.style.borderBottomColor = '#94a3b8';
+    updateTabVisibility();
+    document.getElementById('weekly-section').scrollIntoView({ behavior: 'smooth' });
+  });
+  tabsEl.appendChild(weeklyBtn);
 }
 
 initTabs();
