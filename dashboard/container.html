@@ -1438,14 +1438,15 @@ function initTabs() {
       weeklyTabActive = false;
       currentSiteIdx = i;
       tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
-        const s = SITES[j];
         b.classList.toggle('active', j === i);
-        if (j === i) { b.style.color = s.color; b.style.borderBottomColor = s.color; }
-        else          { b.style.color = ''; b.style.borderBottomColor = ''; }
+        if (j < SITES.length) {
+          const s = SITES[j];
+          if (j === i) { b.style.color = s.color; b.style.borderBottomColor = s.color; }
+          else          { b.style.color = ''; b.style.borderBottomColor = ''; }
+        } else {
+          b.style.color = ''; b.style.borderBottomColor = '';
+        }
       });
-      weeklyBtn.classList.remove('active');
-      weeklyBtn.style.color = '';
-      weeklyBtn.style.borderBottomColor = '';
       updateTabVisibility();
       loadCurrentSite();
     });
