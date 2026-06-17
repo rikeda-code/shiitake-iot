@@ -437,29 +437,47 @@ function parseDateMD(v, f) {
   return null;
 }
 
-// Parse individual container sheet (headers=1):
-// Layout: row1=title, row2=blank, row3=bedCount at H(col7),
-//         data rows: col1=dayIdx(0-based), col5=Date, col13=dailyKg, col17=cumulGPerBed
+// Parse individual container sheet (headers=0 — no column dropping):
+// Layout: row1(allRows[0])=title, row2(allRows[1])=blank, row3(allRows[2])=bedCount at H(col7),
+//         data rows: col B(1)=dayIdx(0-based int), col F(5)=Date, col N(13)=dailyKg
 function parseContainerRowsV2(table) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // bedCount: table.rows[1].c[7] = sheet H3
+  // bedCount: search rows 0-4, col 7 (H) for a value in realistic range 10-500
   let bedCount = null;
-  const h3v = allRows[1]?.c?.[7]?.v;
-  if (h3v != null && parseFloat(h3v) > 0) bedCount = parseFloat(h3v);
+  for (let ri = 0; ri <= 4 && bedCount === null; ri++) {
+    const v = allRows[ri]?.c?.[7]?.v;
+    if (v != null) {
+      const n = parseFloat(v);
+      if (n >= 10 && n <= 500) bedCount = n;
+    }
+  }
+  // Fallback: also check col 6 (G)
+  if (bedCount === null) {
+    for (let ri = 0; ri <= 4 && bedCount === null; ri++) {
+      const v = allRows[ri]?.c?.[6]?.v;
+      if (v != null) {
+        const n = parseFloat(v);
+        if (n >= 10 && n <= 500) bedCount = n;
+      }
+    }
+  }
 
-  // Data rows: those where col1 is a number (day index 0,1,2...)
+  // Data rows: col 1 (B) has an integer dayIdx (0, 1, 2 ...)
   const rows = [];
   for (let ri = 0; ri < allRows.length; ri++) {
     const cells = allRows[ri]?.c || [];
-    const dayIdx = cells[1]?.v;
-    if (typeof dayIdx !== 'number') continue;
+    const raw = cells[1]?.v;
+    // Accept both number and numeric string
+    if (raw == null) continue;
+    const dayIdx = typeof raw === 'number' ? raw : (typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? parseInt(raw) : NaN);
+    if (isNaN(dayIdx) || dayIdx < 0) continue;
     const dateCell = cells[5];
     const rowDate = cellToDate(dateCell?.v, dateCell?.f);
     if (!rowDate) continue;
-    const daily = parseFloat(cells[13]?.v) || 0; // col13 = daily total kg
-    rows.push({ rowDate, dayNum: Math.round(dayIdx) + 1, daily });
+    const daily = parseFloat(cells[13]?.v) || 0;
+    rows.push({ rowDate, dayNum: dayIdx + 1, daily });
   }
 
   rows.sort((a, b) => a.dayNum - b.dayNum);
@@ -565,7 +583,7 @@ async function loadWeeklySection() {
     const [containerData, targetData] = await Promise.all([
       fetchWithLimit(allSummaries, async c => {
         try {
-          const table = await fetchSheet(c.siteId, c.name, 1);
+          const table = await fetchSheet(c.siteId, c.name, 0);
           const { bedCount, rows } = parseContainerRowsV2(table);
           return { ...c, bedCount, rows };
         } catch (e) {
@@ -588,7 +606,7 @@ async function loadWeeklySection() {
 
 function renderWeeklySection(section, state, groupMode, sortOrder) {
   const { containerData, targetData } = state;
-  const valid = containerData.filter(c => c.rows.length > 0 && (c.bedCount > 0 || c.rows.some(r => r.daily > 0)));
+  const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
   if (!valid.length) {
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
       <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
@@ -950,12 +968,6 @@ function renderCards(summary) {
     const displayName = info.no
       ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
       : row.name;
-
-    // 栽培終了コンテナ（endDateが過去日）は表示しない
-    if (row.endDate) {
-      const ed = parseDateStr(row.endDate);
-      if (ed && ed < new Date()) return '';
-    }
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
     if (row.harvest == null) {
