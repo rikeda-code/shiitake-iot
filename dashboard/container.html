@@ -1101,10 +1101,11 @@ function renderCards(summary) {
       ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
       : row.name;
 
-    // 栽培終了コンテナ: D列endDate が過去日 → 非表示
+    // 栽培終了コンテナ: D列endDate が昨日以前 → 非表示
     if (row.endDate) {
       const ed = parseDateStr(row.endDate);
-      if (ed && ed < new Date()) return '';
+      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+      if (ed && ed < todayMidnight) return '';
     }
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
