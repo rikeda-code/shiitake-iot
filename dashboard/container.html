@@ -1419,6 +1419,17 @@ let weeklyTabActive = false;
 
 function updateTabVisibility() {
   document.getElementById('main').style.display = weeklyTabActive ? 'none' : '';
+  const ws = document.getElementById('weekly-section');
+  ws.style.display = weeklyTabActive ? '' : 'none';
+  // Re-render charts when section becomes visible (avoids Chart.js 0-size issue)
+  if (weeklyTabActive) {
+    const section = document.getElementById('weekly-section');
+    if (weeklyState) {
+      const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
+      const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
+      renderWeeklySection(section, weeklyState, groupMode, sortOrder);
+    }
+  }
 }
 
 function initTabs() {
@@ -1469,7 +1480,7 @@ function initTabs() {
     weeklyBtn.style.color = '#94a3b8';
     weeklyBtn.style.borderBottomColor = '#94a3b8';
     updateTabVisibility();
-    document.getElementById('weekly-section').scrollIntoView({ behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(weeklyBtn);
 }
