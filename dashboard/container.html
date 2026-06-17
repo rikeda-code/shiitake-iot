@@ -512,19 +512,24 @@ async function fetchTargetLine() {
     try {
       const table = await fetchSheet(site.id, '目標ライン(800g)', 1);
       if (!table?.rows?.length) continue;
-      // C列(index 2), rows C3:C62 → table.rows[1] to table.rows[60] (headers=1 shifts by 1)
+      // Find column by header containing "標準工程" or "800g"
+      const cols = table.cols || [];
+      let colIdx = cols.findIndex(c => (c.label || '').includes('標準工程') || (c.label || '').includes('800g'));
+      if (colIdx === -1) colIdx = 2; // fallback to C column index
       const values = [null]; // index 0 = day 0 = null
       for (let i = 1; i <= 60; i++) {
         const row = table.rows[i];
-        const v = row?.c?.[2]?.v;
-        values.push(v != null ? parseFloat(v) : null);
+        const v = row?.c?.[colIdx]?.v;
+        const n = v != null ? parseFloat(v) : null;
+        // Validate: target should be in g/菌床 range (0-2000), not raw kg
+        values.push(n != null && n >= 0 && n <= 2000 ? n : null);
       }
       // Pad to 66 elements (days 0-65)
       while (values.length <= 65) values.push(values[values.length - 1]);
-      if (values.some(v => v !== null)) return values;
+      if (values.filter(v => v !== null).length >= 10) return values; // need at least 10 valid points
     } catch (e) {}
   }
-  return null;
+  return null; // use hardcoded formula fallback
 }
 
 let weeklyState = null; // { containerData, targetData }
@@ -949,14 +954,18 @@ function renderCards(summary) {
 
   const html = summary.map(row => {
     const info = parseContainerName(row.name);
-    const hasData = row.harvest != null;
+    const displayName = info.no
+      ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
+      : row.name;
 
-    if (!hasData) {
-      return `<div class="container-card" style="opacity:0.5">
-        <div class="card-cn">${row.name}</div>
-        <div class="card-sd">—</div>
-        <div class="card-harvest">—</div>
-        <div class="card-meta"><span class="card-chip">データなし</span></div>
+    // 栽培終了コンテナ（endDateあり）は表示しない
+    if (row.endDate) return '';
+
+    // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
+    if (row.harvest == null) {
+      return `<div class="container-card" style="opacity:0.45">
+        <div class="card-cn" title="${row.name}">${displayName}</div>
+        <div class="card-sd" style="font-size:0.68rem">未稼働</div>
       </div>`;
     }
 
@@ -966,8 +975,6 @@ function renderCards(summary) {
     const sd   = row.startDate || '—';
     const days = row.days != null ? `${row.days}日` : '—';
     const packStr = row.packRate != null ? `${row.packRate}%` : '—';
-
-    const displayName = info.no ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '') : row.name;
 
     return `<div class="container-card">
       <div class="card-cn" title="${row.name}">${displayName}</div>
