@@ -163,6 +163,7 @@
     .card-sd { font-size: 0.72rem; color: var(--muted); margin-bottom: 6px; }
     .card-harvest { font-size: 1.1rem; font-weight: 700; color: #60a5fa; margin-bottom: 6px; }
     .card-harvest.card-red { color: #f87171; }
+    .card-harvest.card-green { color: #86efac; }
     .card-unit { font-size: 0.7rem; font-weight: 400; color: var(--muted); }
     .card-meta { display: flex; gap: 6px; flex-wrap: wrap; }
     .card-chip {
@@ -170,6 +171,8 @@
       background: #ffffff11; color: var(--muted);
     }
     .card-chip-red { background: #ef444422 !important; color: #f87171 !important; }
+    .card-chip-blue { background: #3b82f622 !important; color: #93c5fd !important; }
+    .card-chip-green { background: #86efac22 !important; color: #86efac !important; }
 
     /* ── Weekly charts ── */
     #weekly-section .section-title { margin-bottom: 0; }
@@ -1108,8 +1111,9 @@ function renderCards(summary) {
     }
 
     const harvestVal = Math.round(row.harvest);
-    const harvestOk  = harvestVal >= 660;
+    const harvestCls = harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
     const packOk     = row.packRate == null || row.packRate >= 80;
+    const packCls    = row.packRate == null ? '' : row.packRate >= 90 ? ' card-chip-green' : row.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
     const sd   = row.startDate || '—';
     const days = row.days != null ? `${row.days}日` : '—';
     const packStr = row.packRate != null ? `${row.packRate}%` : '—';
@@ -1117,10 +1121,10 @@ function renderCards(summary) {
     return `<div class="container-card">
       <div class="card-cn" title="${row.name}">${displayName}</div>
       <div class="card-sd">開始: ${sd}</div>
-      <div class="card-harvest${harvestOk ? '' : ' card-red'}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
+      <div class="card-harvest${harvestCls}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
       <div class="card-meta">
         <span class="card-chip">${days}</span>
-        <span class="card-chip${packOk ? '' : ' card-chip-red'}">${packStr}</span>
+        <span class="card-chip${packCls}">${packStr}</span>
       </div>
     </div>`;
   }).join('');
