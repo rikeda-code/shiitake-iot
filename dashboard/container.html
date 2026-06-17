@@ -447,28 +447,34 @@ function parseContainerRowsV2(table, startDateStr) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // bedCount: skip title row. Scan rows 1-4, cols 4-12 for a near-integer in 10-2000.
-  let bedCount = null;
-  for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
-    for (let ci = 4; ci <= 12 && bedCount === null; ci++) {
-      const v = allRows[ri]?.c?.[ci]?.v;
-      if (v != null) {
-        const n = parseFloat(v);
-        const r = Math.round(n);
-        if (r >= 10 && r <= 2000 && Math.abs(n - r) < 0.5) bedCount = r;
-      }
-    }
-  }
-
-  const rows = [];
-
-  // Detect Type B: YYYYMMDD string in col3 around rows 8-16
+  // Detect Type B FIRST (needed for correct bedCount location)
+  // Type B (南丹): YYYYMMDD string in col3 around rows 6-18
   let isTypeB = false;
   for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
     const v = allRows[ri]?.c?.[3]?.v;
     if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
   }
 
+  // bedCount location differs by type
+  let bedCount = null;
+  const nearInt = v => {
+    const n = parseFloat(v);
+    const r = Math.round(n);
+    return (r >= 10 && r <= 2000 && Math.abs(n - r) < 0.5) ? r : null;
+  };
+  if (isTypeB) {
+    // Type B: bedCount is at H3 (row index 2, col index 7)
+    bedCount = nearInt(allRows[2]?.c?.[7]?.v);
+  } else {
+    // Type A: scan rows 1-4, cols 4-12
+    for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
+      for (let ci = 4; ci <= 12 && bedCount === null; ci++) {
+        bedCount = nearInt(allRows[ri]?.c?.[ci]?.v);
+      }
+    }
+  }
+
+  const rows = [];
   if (isTypeB) {
     // Type B (南丹): date in col5, harvest sum in cols 13+14+15+16
     const startD = parseDateStr(startDateStr);
@@ -482,6 +488,7 @@ function parseContainerRowsV2(table, startDateStr) {
         const v = parseFloat(cells[ci]?.v);
         return s + (isNaN(v) || v < 0 ? 0 : v);
       }, 0);
+      if (rows.length === 0) console.log('[南丹 row0]', 'ds=', cells[3]?.v, 'cols13-16=', [13,14,15,16].map(ci=>cells[ci]?.v), 'daily=', daily, 'allCols=', cells.map(c=>c?.v).join('|'));
       if (!startD) continue;
       const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
       if (dayNum >= 1 && dayNum <= 200) rows.push({ rowDate, dayNum, daily });
