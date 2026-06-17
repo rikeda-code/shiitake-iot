@@ -640,11 +640,11 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
     </div>`;
 
-  const safeKey = k => k.replace(/[^a-zA-Z0-9\-]/g, '_');
-  const cardsHtml = groupKeys.map(k => `
+  // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
+  const cardsHtml = groupKeys.map((k, idx) => `
     <div class="weekly-chart-card">
       <div class="weekly-chart-title">${groups[k].label}</div>
-      <div class="chart-wrap" style="height:260px"><canvas id="weekly-${safeKey(k)}"></canvas></div>
+      <div class="chart-wrap" style="height:260px"><canvas id="wc-${idx}"></canvas></div>
     </div>`).join('');
 
   section.innerHTML = `
@@ -661,8 +661,8 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
 
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
-  groupKeys.forEach(k => {
-    const canvasId = `weekly-${safeKey(k)}`;
+  groupKeys.forEach((k, idx) => {
+    const canvasId = `wc-${idx}`;
     const canvas = document.getElementById(canvasId);
     if (canvas) buildWeeklyLineChart(canvasId, groups[k].containers, targetData);
   });
