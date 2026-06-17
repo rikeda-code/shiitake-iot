@@ -446,38 +446,50 @@ function parseContainerRowsV2(table) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // bedCount: at H3 (col7, row3). With headers=0: allRows[2]=row3.
-  // Skip allRows[0] (title) to avoid false matches. Scan rows 1-4, cols 5-9.
+  // bedCount: skip title row (allRows[0]). Scan rows 1-4, cols 4-12 for integer 10-600.
   let bedCount = null;
   for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
-    for (let ci = 5; ci <= 9 && bedCount === null; ci++) {
+    for (let ci = 4; ci <= 12 && bedCount === null; ci++) {
       const v = allRows[ri]?.c?.[ci]?.v;
       if (v != null) {
         const n = parseFloat(v);
-        if (Number.isInteger(n) && n >= 10 && n <= 500) bedCount = n;
+        if (Number.isInteger(n) && n >= 10 && n <= 600) bedCount = n;
       }
     }
   }
 
-  // Data rows: col 1 (B) has an integer dayIdx (0, 1, 2 ...)
+  // Data rows: find column with sequential 0,1,2... integers (dayIdx). Try cols 0,1,2.
+  // Also find date column adjacent to dayIdx (cols 3-7).
   const rows = [];
+  let dayColDetected = -1;
+  // Detect dayIdx column by finding col 0/1/2 with value 0 in an early data row
+  outer: for (let ri = 2; ri < Math.min(10, allRows.length); ri++) {
+    const cells = allRows[ri]?.c || [];
+    for (const ci of [0, 1, 2]) {
+      const v = cells[ci]?.v;
+      if (v === 0 || v === 1) { dayColDetected = ci; break outer; }
+    }
+  }
+  if (dayColDetected === -1) dayColDetected = 1; // default to col B
+
   for (let ri = 0; ri < allRows.length; ri++) {
     const cells = allRows[ri]?.c || [];
-    const raw = cells[1]?.v;
-    // Accept both number and numeric string
+    const raw = cells[dayColDetected]?.v;
     if (raw == null) continue;
-    const dayIdx = typeof raw === 'number' ? raw : (typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? parseInt(raw) : NaN);
-    if (isNaN(dayIdx) || dayIdx < 0) continue;
-    const dateCell = cells[5];
-    const rowDate = cellToDate(dateCell?.v, dateCell?.f);
+    const dayIdx = typeof raw === 'number' && raw >= 0 && Number.isInteger(raw) ? raw : NaN;
+    if (isNaN(dayIdx)) continue;
+    // Find date cell: check cols dayColDetected+3 to dayColDetected+7
+    let rowDate = null;
+    for (let dc = dayColDetected + 3; dc <= dayColDetected + 8; dc++) {
+      rowDate = cellToDate(cells[dc]?.v, cells[dc]?.f);
+      if (rowDate) break;
+    }
     if (!rowDate) continue;
-    const daily = parseFloat(cells[13]?.v) || 0;
+    const daily = parseFloat(cells[dayColDetected + 12]?.v) || 0;
     rows.push({ rowDate, dayNum: dayIdx + 1, daily });
   }
 
   rows.sort((a, b) => a.dayNum - b.dayNum);
-  // Debug: uncomment to diagnose missing sites
-  // console.log('[parseV2]', 'bedCount=', bedCount, 'rows=', rows.length, 'allRows=', allRows.length);
   return { bedCount, rows };
 }
 
@@ -506,6 +518,9 @@ function parseDateStr(s) {
   // "2025年6月14日"
   m = String(s).match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
   if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  // "6/17/2026" M/D/YYYY (gviz formatted string in some locales)
+  m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]));
   // Fallback: let browser parse
   const d = new Date(s);
   return isNaN(d) ? null : d;
@@ -975,10 +990,10 @@ function renderCards(summary) {
       ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
       : row.name;
 
-    // 栽培終了コンテナ: startDate + days + 7日 < 今日 → 非表示
-    if (row.days != null && row.startDate) {
-      const sd = parseDateStr(row.startDate);
-      if (sd && (sd.getTime() + (row.days + 7) * 86400000) < Date.now()) return '';
+    // 栽培終了コンテナ: D列endDate が過去日 → 非表示
+    if (row.endDate) {
+      const ed = parseDateStr(row.endDate);
+      if (ed && ed < new Date()) return '';
     }
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
@@ -1163,10 +1178,12 @@ async function loadMgmt(siteName, forceRefresh = false) {
   if (!forceRefresh && mgmtCache[siteName]) return mgmtCache[siteName];
 
   const results = { sansui: [], chusui: [], mekaki: [] };
+  const silentFetch = (id, sheet, fn) =>
+    fetchSheet(id, sheet).then(t => fn(t)).catch(_e => {});
   await Promise.all([
-    fetchSheet(MGMT_ID, siteName).then(t => { results.sansui = parseMgmtRows(t); }).catch(() => {}),
-    fetchSheet(MGMT_ID, `${siteName}注水`).then(t => { results.chusui = parseMgmtRows(t); }).catch(() => {}),
-    fetchSheet(MGMT_ID, '1回目収穫芽かき').then(t => { results.mekaki = parseMekakiRows(t); }).catch(() => {}),
+    silentFetch(MGMT_ID, siteName,           t => { results.sansui = parseMgmtRows(t); }),
+    silentFetch(MGMT_ID, `${siteName}注水`,  t => { results.chusui = parseMgmtRows(t); }),
+    silentFetch(MGMT_ID, '1回目収穫芽かき', t => { results.mekaki = parseMekakiRows(t); }),
   ]);
   mgmtCache[siteName] = results;
   return results;
