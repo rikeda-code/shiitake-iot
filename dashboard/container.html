@@ -621,9 +621,9 @@ async function loadWeeklySection() {
           if (c.siteName === '南丹') {
             console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length, 'totalRows=', table.rows?.length);
             if (rows.length === 0 && (table.rows?.length ?? 0) > 2) {
-              // Dump first 5 rows to diagnose column layout
-              for (let _i = 0; _i < Math.min(5, table.rows.length); _i++) {
-                const _cells = (table.rows[_i]?.c || []).slice(0, 16);
+              // Dump rows 5-12 to diagnose daily data layout
+              for (let _i = 4; _i < Math.min(13, table.rows.length); _i++) {
+                const _cells = (table.rows[_i]?.c || []).slice(0, 18);
                 console.log(`  row${_i}:`, _cells.map((cc, j) => `[${j}]${JSON.stringify(cc?.v ?? cc?.f)}`).join(' '));
               }
             }
