@@ -566,6 +566,7 @@ async function loadWeeklySection() {
     ]);
 
     weeklyState = { containerData, targetData };
+    await waitForChart();
     renderWeeklySection(section, weeklyState, 'week', 'desc');
 
   } catch (e) {
@@ -639,10 +640,11 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
     </div>`;
 
+  const safeKey = k => k.replace(/[^a-zA-Z0-9\-]/g, '_');
   const cardsHtml = groupKeys.map(k => `
     <div class="weekly-chart-card">
       <div class="weekly-chart-title">${groups[k].label}</div>
-      <div class="chart-wrap" style="height:260px"><canvas id="weekly-${k}"></canvas></div>
+      <div class="chart-wrap" style="height:260px"><canvas id="weekly-${safeKey(k)}"></canvas></div>
     </div>`).join('');
 
   section.innerHTML = `
@@ -660,7 +662,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
   groupKeys.forEach(k => {
-    const canvasId = `weekly-${k}`;
+    const canvasId = `weekly-${safeKey(k)}`;
     const canvas = document.getElementById(canvasId);
     if (canvas) buildWeeklyLineChart(canvasId, groups[k].containers, targetData);
   });
@@ -685,6 +687,7 @@ function weeklySetGroup(mode) {
 }
 
 function buildWeeklyLineChart(canvasId, containers, targetData) {
+  if (typeof Chart === 'undefined') { console.warn('[buildChart] Chart.js not loaded'); return; }
   const canvas = document.getElementById(canvasId);
   if (!canvas) { console.warn('[buildChart] canvas not found:', canvasId); return; }
   const ctx = canvas.getContext('2d');
@@ -712,7 +715,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
       // Terminated container: cut at endDate
       const endD = parseDateStr(c.endDate);
       if (endD && startD) {
-        cutoffDay = Math.min(Math.round((endD - startD) / 86400000), MAX_DAY);
+        cutoffDay = Math.min(Math.round((endD - startD) / 86400000) + 1, MAX_DAY);
       }
     } else if (startD) {
       // Active container: extend to today if today > last data day
