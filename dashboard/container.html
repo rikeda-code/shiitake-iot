@@ -562,7 +562,13 @@ function parseContainerRowsV2(table, startDateStr) {
         const v = parseFloat(cells[ci]?.v);
         if (!isNaN(v) && v > 0 && v < 10000) daily += v;
       }
-      rows.push({ dayNum, daily });
+      // Parse rowDate from col2 YYYYMMDD for future-row cutoff
+      const ds2 = String(cells[2]?.v ?? '');
+      let rowDate = null;
+      if (/^\d{8}$/.test(ds2)) {
+        rowDate = new Date(parseInt(ds2.slice(0,4)), parseInt(ds2.slice(4,6))-1, parseInt(ds2.slice(6,8)));
+      }
+      rows.push({ dayNum, daily, rowDate });
     }
   } else {
     // Type A (いなべ): integer dayIdx in dayCol (already detected above)
@@ -836,28 +842,35 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
   const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
   const today = new Date(); today.setHours(0,0,0,0);
 
+  const tomorrow = new Date(today.getTime() + 86400000);
+
   const datasets = containers.map(c => {
     const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
     const cumArr = new Array(MAX_DAY + 1).fill(null);
     const bedCount = c.bedCount > 0 ? c.bedCount : null;
     let cumKg = 0;
+    let cutoffDay = 0;
+
     c.rows.forEach(r => {
+      // Use rowDate (from sheet F column) to skip future rows
+      if (r.rowDate && r.rowDate >= tomorrow) return;
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
         cumArr[d] = bedCount ? Math.round((cumKg * 1000) / bedCount) : null;
+        cutoffDay = Math.max(cutoffDay, d);
       }
     });
 
-    // Cutoff = today's day number relative to startDate (sheets have pre-filled zero rows)
-    const startD = parseDateStr(c.startDate);
-    let cutoffDay = 0;
-    if (startD) {
-      cutoffDay = Math.min(Math.round((today - startD) / 86400000), MAX_DAY);
-    } else if (c.rows.length > 0) {
-      // Fallback: last day with actual harvest
-      const harvestDays = c.rows.filter(r => r.daily > 0).map(r => r.dayNum);
-      cutoffDay = harvestDays.length > 0 ? Math.min(Math.max(...harvestDays), MAX_DAY) : 0;
+    // Fallback for Type C rows without rowDate: use startDate calculation
+    if (cutoffDay === 0) {
+      const startD = parseDateStr(c.startDate);
+      if (startD) {
+        cutoffDay = Math.min(Math.round((today - startD) / 86400000), MAX_DAY);
+      } else {
+        const harvestDays = c.rows.filter(r => r.daily > 0).map(r => r.dayNum);
+        cutoffDay = harvestDays.length > 0 ? Math.min(Math.max(...harvestDays), MAX_DAY) : 0;
+      }
     }
 
     // Forward-fill only up to cutoffDay (fills zero-harvest days between real data)
