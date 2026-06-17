@@ -1097,9 +1097,7 @@ function renderCards(summary) {
 
   const html = summary.map(row => {
     const info = parseContainerName(row.name);
-    const displayName = info.no
-      ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
-      : row.name;
+    const displayName = info.no || row.name;
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
     if (row.harvest == null) {
