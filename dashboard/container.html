@@ -484,11 +484,12 @@ function parseContainerRowsV2(table, startDateStr) {
       if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
       const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
       if (!rowDate) continue;
-      const daily = [13, 14, 15, 16].reduce((s, ci) => {
+      // col13 = daily total kg (sum of per-zone cols 6,7,9); cols 14,15 duplicate col13
+      const v13 = parseFloat(cells[13]?.v);
+      const daily = (!isNaN(v13) && v13 > 0) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
         const v = parseFloat(cells[ci]?.v);
         return s + (isNaN(v) || v < 0 ? 0 : v);
       }, 0);
-      if (rows.length === 0) console.log('[南丹 row0]', 'ds=', cells[3]?.v, 'cols13-16=', [13,14,15,16].map(ci=>cells[ci]?.v), 'daily=', daily, 'allCols=', cells.map(c=>c?.v).join('|'));
       if (!startD) continue;
       const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
       if (dayNum >= 1 && dayNum <= 200) rows.push({ rowDate, dayNum, daily });
