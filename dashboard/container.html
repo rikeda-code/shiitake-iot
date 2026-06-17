@@ -1095,14 +1095,23 @@ function renderSetupNotice() {
 function renderCards(summary) {
   if (!summary.length) return renderSetupNotice();
 
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+
   const html = summary.map(row => {
     const info = parseContainerName(row.name);
     const displayName = info.no
       ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
       : row.name;
 
-    // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
-    if (row.harvest == null) {
+    // endDate strictly before today → 未稼働
+    let isInactive = false;
+    if (row.endDate) {
+      const ed = parseDateStr(row.endDate);
+      if (ed && ed < todayMidnight) isInactive = true;
+    }
+
+    if (isInactive || row.harvest == null) {
       return `<div class="container-card" style="opacity:0.45">
         <div class="card-cn" title="${row.name}">${displayName}</div>
         <div class="card-sd" style="font-size:0.68rem">未稼働</div>
