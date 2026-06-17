@@ -520,6 +520,7 @@ function parseContainerRowsV2(table, startDateStr) {
       if (colCandidates[ci]?.has(0)) { dayCol = ci; break; }
     }
     if (dayCol === -1) dayCol = 1;
+    console.log('[TypeA debug]', startDateStr, 'dayCol=', dayCol, 'candidates=', JSON.stringify(Object.fromEntries(Object.entries(colCandidates).map(([k,v])=>[k,[...v]]))), 'row2=', (allRows[2]?.c||[]).map(c=>c?.v).join('|'));
 
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
