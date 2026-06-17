@@ -447,24 +447,50 @@ function parseContainerRowsV2(table, startDateStr) {
   const allRows = table.rows || [];
   if (!allRows.length) return { bedCount: null, rows: [] };
 
-  // Detect Type B FIRST (needed for correct bedCount location)
-  // Type B (南丹): YYYYMMDD string in col3 around rows 6-18
+  // Detect Type B (南丹): YYYYMMDD in col3 around rows 6-18
   let isTypeB = false;
   for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
     const v = allRows[ri]?.c?.[3]?.v;
     if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
   }
 
+  // Detect Type C (群馬 wide): YYYYMMDD in col2, "号基" in col3 around rows 1-6
+  let isTypeC = false;
+  if (!isTypeB) {
+    for (let ri = 1; ri < Math.min(8, allRows.length); ri++) {
+      const cells = allRows[ri]?.c || [];
+      const v2 = cells[2]?.v;
+      const v3 = String(cells[3]?.v ?? '');
+      if (typeof v2 === 'string' && /^\d{8}$/.test(v2) && v3.includes('号基')) {
+        isTypeC = true; break;
+      }
+    }
+  }
+
   // bedCount location differs by type
   let bedCount = null;
-  const nearInt = v => {
+  const nearInt = (v, lo = 10, hi = 9999) => {
     const n = parseFloat(v);
     const r = Math.round(n);
-    return (r >= 10 && r <= 2000 && Math.abs(n - r) < 0.5) ? r : null;
+    return (r >= lo && r <= hi && Math.abs(n - r) < 0.5) ? r : null;
   };
   if (isTypeB) {
     // Type B: bedCount is at H3 (row index 2, col index 7)
     bedCount = nearInt(allRows[2]?.c?.[7]?.v);
+  } else if (isTypeC) {
+    // Type C: scan rows 0-2 for a standalone integer that looks like bedCount
+    // Row structure: Date | "N日" | YYYYMMDD | "N号基" | labels | nums...
+    // bedCount is likely in a header row (row 0 or 1) in an early col
+    for (let ri = 0; ri <= 2 && bedCount === null; ri++) {
+      const cells = allRows[ri]?.c || [];
+      for (let ci = 0; ci < Math.min(cells.length, 60); ci++) {
+        bedCount = nearInt(cells[ci]?.v, 10, 9999);
+        if (bedCount !== null) break;
+      }
+    }
+    console.log('[TypeC bedCount]', startDateStr, 'bedCount=', bedCount,
+      'row0=', (allRows[0]?.c||[]).slice(0,15).map(c=>c?.v).join('|'),
+      'row1=', (allRows[1]?.c||[]).slice(0,15).map(c=>c?.v).join('|'));
   } else {
     // Type A: scan rows 1-4, cols 4-12
     for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
@@ -494,6 +520,23 @@ function parseContainerRowsV2(table, startDateStr) {
       const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
       if (dayNum >= 1 && dayNum <= 200) rows.push({ rowDate, dayNum, daily });
     }
+  } else if (isTypeC) {
+    // Type C (群馬 wide): col1="N日", col2=YYYYMMDD, col3+= per-号基 data
+    // daily = sum of all positive numeric values from col 4 onwards
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayLabel = String(cells[1]?.v ?? '');
+      const dm = dayLabel.match(/^(\d+)日$/);
+      if (!dm) continue;
+      const dayNum = parseInt(dm[1]);
+      if (dayNum < 1 || dayNum > 200) continue;
+      let daily = 0;
+      for (let ci = 4; ci < cells.length; ci++) {
+        const v = parseFloat(cells[ci]?.v);
+        if (!isNaN(v) && v > 0 && v < 10000) daily += v;
+      }
+      rows.push({ dayNum, daily });
+    }
   } else {
     // Type A (いなべ/群馬): auto-detect dayIdx column
     const toInt = v => {
@@ -520,7 +563,6 @@ function parseContainerRowsV2(table, startDateStr) {
       if (colCandidates[ci]?.has(0)) { dayCol = ci; break; }
     }
     if (dayCol === -1) dayCol = 1;
-    console.log('[TypeA debug]', startDateStr, 'dayCol=', dayCol, 'candidates=', JSON.stringify(Object.fromEntries(Object.entries(colCandidates).map(([k,v])=>[k,[...v]]))), 'row2=', (allRows[2]?.c||[]).map(c=>c?.v).join('|'));
 
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
