@@ -459,9 +459,9 @@ function parseContainerRowsV2(table, startDateStr) {
   if (!isTypeB) {
     for (let ri = 1; ri < Math.min(8, allRows.length); ri++) {
       const cells = allRows[ri]?.c || [];
-      const v2 = cells[2]?.v;
+      const v2 = cells[2]?.v != null ? String(cells[2].v) : '';
       const v3 = String(cells[3]?.v ?? '');
-      if (typeof v2 === 'string' && /^\d{8}$/.test(v2) && v3.includes('号基')) {
+      if (/^\d{8}$/.test(v2) && v3.includes('号基')) {
         isTypeC = true; break;
       }
     }
@@ -522,7 +522,8 @@ function parseContainerRowsV2(table, startDateStr) {
     }
   } else if (isTypeC) {
     // Type C (群馬 wide): col1="N日", col2=YYYYMMDD, col3+= per-号基 data
-    // daily = sum of all positive numeric values from col 4 onwards
+    // Validate that row dates match startDate (rejects fallback/template sheets)
+    const startD = parseDateStr(startDateStr);
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const dayLabel = String(cells[1]?.v ?? '');
@@ -530,6 +531,15 @@ function parseContainerRowsV2(table, startDateStr) {
       if (!dm) continue;
       const dayNum = parseInt(dm[1]);
       if (dayNum < 1 || dayNum > 200) continue;
+      // Validate: row YYYYMMDD should match startDate + (dayNum-1) days within 7 days
+      if (startD) {
+        const ds = String(cells[2]?.v ?? '');
+        if (/^\d{8}$/.test(ds)) {
+          const rowDate = new Date(parseInt(ds.slice(0,4)), parseInt(ds.slice(4,6))-1, parseInt(ds.slice(6,8)));
+          const expected = new Date(startD.getTime() + (dayNum - 1) * 86400000);
+          if (Math.abs(rowDate - expected) > 7 * 86400000) continue;
+        }
+      }
       let daily = 0;
       for (let ci = 4; ci < cells.length; ci++) {
         const v = parseFloat(cells[ci]?.v);
