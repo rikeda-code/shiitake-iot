@@ -960,8 +960,15 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
 // "47(6/14)志摩L3" → { no:"47", startDate:"6/14", location:"志摩", type:"L3" }
 function parseContainerName(raw) {
   const s = String(raw);
-  const m = s.match(/^(\d+)\(([^)]+)\)(.*?)([A-Za-z]\d*)$/);
-  if (m) return { no: m[1], startDate: m[2], location: m[3], type: m[4], raw: s };
+  // Extract everything before first "(" as the container number/name
+  const parenIdx = s.indexOf('(');
+  if (parenIdx > 0) {
+    const no = s.slice(0, parenIdx).trim();
+    const rest = s.slice(parenIdx + 1);
+    const closeIdx = rest.indexOf(')');
+    const startDate = closeIdx >= 0 ? rest.slice(0, closeIdx) : '';
+    return { no, startDate, location: '', type: '', raw: s };
+  }
   return { no: s, startDate: '', location: '', type: '', raw: s };
 }
 
