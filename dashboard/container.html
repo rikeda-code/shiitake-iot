@@ -506,30 +506,35 @@ function cellToDate(v, f) {
   return parseDateStr(f);
 }
 
-// Try to fetch target line data from any of the harvest spreadsheets
+// Hardcoded target line (g/菌床) — index = day number (1-60), index 0 = null
+const HARDCODED_TARGET = [
+  null,
+  0,0,0,0,0,0,
+  15.9,75.4,134.9,194.4,254.0,313.5,373.0,
+  393.0,400.0,400.0,420.0,440.0,460.0,480.0,
+  500.0,520.0,540.0,570.0,600.0,630.0,645.0,650.0,655.0,660.0,
+  660.0,660.0,660.0,660.0,660.0,660.0,660.0,660.0,660.0,660.0,
+  660.0,660.0,660.0,660.0,660.0,660.0,
+  665,675,685,695,710,725,740,765,775,780,785,790,795,800,
+];
+
 async function fetchTargetLine() {
-  for (const site of SITES) {
-    try {
-      const table = await fetchSheet(site.id, '目標ライン(800g)', 1);
-      if (!table?.rows?.length) continue;
-      // Find column by header containing "標準工程" or "800g"
-      const cols = table.cols || [];
-      let colIdx = cols.findIndex(c => (c.label || '').includes('標準工程') || (c.label || '').includes('800g'));
-      if (colIdx === -1) colIdx = 2; // fallback to C column index
-      const values = [null]; // index 0 = day 0 = null
-      for (let i = 1; i <= 60; i++) {
-        const row = table.rows[i];
-        const v = row?.c?.[colIdx]?.v;
-        const n = v != null ? parseFloat(v) : null;
-        // Validate: target should be in g/菌床 range (0-2000), not raw kg
-        values.push(n != null && n >= 0 && n <= 2000 ? n : null);
-      }
-      // Pad to 66 elements (days 0-65)
-      while (values.length <= 65) values.push(values[values.length - 1]);
-      if (values.filter(v => v !== null).length >= 10) return values; // need at least 10 valid points
-    } catch (e) {}
-  }
-  return null; // use hardcoded formula fallback
+  try {
+    const TARGET_SHEET_ID = '1dpQb5V29H5LUcuMr1gDscLSKRic8k8zMbP97d-xMCFI';
+    const table = await fetchSheet(TARGET_SHEET_ID, 'シート1', 1);
+    if (!table?.rows?.length) return HARDCODED_TARGET;
+    const cols = table.cols || [];
+    let colIdx = cols.findIndex(c => (c.label || '').includes('標準') || (c.label || '').includes('800'));
+    if (colIdx === -1) colIdx = 1;
+    const values = [null];
+    for (let i = 0; i < 60; i++) {
+      const v = table.rows[i]?.c?.[colIdx]?.v;
+      const n = v != null ? parseFloat(v) : null;
+      values.push(n != null && n >= 0 && n <= 2000 ? n : null);
+    }
+    if (values.filter(v => v !== null).length >= 10) return values;
+  } catch (e) {}
+  return HARDCODED_TARGET;
 }
 
 let weeklyState = null; // { containerData, targetData }
@@ -583,7 +588,7 @@ async function loadWeeklySection() {
 
 function renderWeeklySection(section, state, groupMode, sortOrder) {
   const { containerData, targetData } = state;
-  const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
+  const valid = containerData.filter(c => c.rows.length > 0 && (c.bedCount > 0 || c.rows.some(r => r.daily > 0)));
   if (!valid.length) {
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
       <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
@@ -704,31 +709,21 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
   const datasets = containers.map(c => {
     const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
     const cumArr = new Array(MAX_DAY + 1).fill(null);
+    const bedCount = c.bedCount > 0 ? c.bedCount : null;
     let cumKg = 0;
     c.rows.forEach(r => {
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
-        cumArr[d] = c.bedCount > 0 ? Math.round((cumKg * 1000) / c.bedCount) : null;
+        cumArr[d] = bedCount ? Math.round((cumKg * 1000) / bedCount) : null;
       }
     });
 
-    // Calculate cutoff day (stop forward-fill here)
-    let cutoffDay = c.rows.length > 0 ? Math.max(...c.rows.map(r => r.dayNum)) : 0;
-    const startD = parseDateStr(c.startDate);
-    if (c.endDate) {
-      // Terminated container: cut at endDate
-      const endD = parseDateStr(c.endDate);
-      if (endD && startD) {
-        cutoffDay = Math.min(Math.round((endD - startD) / 86400000) + 1, MAX_DAY);
-      }
-    } else if (startD) {
-      // Active container: extend to today if today > last data day
-      const todayDay = Math.round((today - startD) / 86400000);
-      cutoffDay = Math.min(Math.max(cutoffDay, todayDay), MAX_DAY);
-    }
+    // Cutoff = last actual data day (no forward-fill beyond real data)
+    const lastDataDay = c.rows.length > 0 ? Math.min(Math.max(...c.rows.map(r => r.dayNum)), MAX_DAY) : 0;
+    const cutoffDay = lastDataDay;
 
-    // Forward-fill only up to cutoffDay
+    // Forward-fill only up to cutoffDay (fills zero-harvest days between real data)
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
       if (cumArr[i] !== null) { last = cumArr[i]; }
@@ -748,11 +743,9 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
     };
   });
 
-  // Target line: use fetched data or fallback formula
-  const targetArr = xLabels.map((d, i) => {
-    if (targetData && targetData[i] != null) return targetData[i];
-    return d <= 30 ? Math.round(d * 660 / 30) : Math.round(660 + (d - 30) * 140 / 30);
-  });
+  // Target line: index i = day i
+  const tData = targetData || HARDCODED_TARGET;
+  const targetArr = xLabels.map((d, i) => tData[i] != null ? tData[i] : null);
   datasets.push({
     label: '目標',
     data: targetArr,
@@ -958,8 +951,11 @@ function renderCards(summary) {
       ? `${info.no}` + (info.location ? ` ${info.location}${info.type}` : '')
       : row.name;
 
-    // 栽培終了コンテナ（endDateあり）は表示しない
-    if (row.endDate) return '';
+    // 栽培終了コンテナ（endDateが過去日）は表示しない
+    if (row.endDate) {
+      const ed = parseDateStr(row.endDate);
+      if (ed && ed < new Date()) return '';
+    }
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
     if (row.harvest == null) {
