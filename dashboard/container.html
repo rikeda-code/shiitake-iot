@@ -379,7 +379,6 @@ async function fetchSummaryRows(site) {
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
     const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
-    if (raw.length < 3) console.log('[person debug]', name, 'col0=', cells[0]?.v, 'col1=', cells[1]?.v, 'col2=', cells[2]?.v);
     const packRaw   = cells[12]?.v;
     // パック品率: 0-1の小数か0-100の整数かを自動判定
     let packRate = null;
@@ -745,7 +744,14 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   // Build groups
   const groups = {};
   let groupKeys = [];
-  if (groupMode === 'site') {
+  if (groupMode === 'person') {
+    valid.forEach(c => {
+      const key = c.person || '未設定';
+      if (!groups[key]) groups[key] = { label: key, containers: [] };
+      groups[key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+  } else if (groupMode === 'site') {
     valid.forEach(c => {
       if (!groups[c.siteName]) groups[c.siteName] = { label: c.siteName, containers: [] };
       groups[c.siteName].containers.push(c);
@@ -795,6 +801,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
+      <button class="sort-btn${groupMode==='person'?' active':''}" onclick="weeklySetGroup('person')">担当者別</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
