@@ -757,7 +757,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   const groups = {};
   let groupKeys = [];
   if (groupMode === 'lot') {
-    const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '']);
+    const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '']);
     valid.forEach(c => {
       const key = c.lot || '未設定';
       if (LOT_EXCLUDE.has(key)) return;
