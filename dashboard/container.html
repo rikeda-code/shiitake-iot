@@ -1841,13 +1841,28 @@ async function showDetail(containerName) {
     </div>
     ${dailyRows.length > 0 ? `
     <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
-    <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>` : ''}`;
+    <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>
+    <div style="margin-top:20px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別累計収穫量 (kg)</div>
+    <div style="position:relative;height:220px"><canvas id="detail-cumul-canvas"></canvas></div>` : ''}`;
 
   if (dailyRows.length > 0) {
+    const chartOpts = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
+        tooltip: { ...tooltipDefaults },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+      },
+    };
+    const labels = dailyRows.map(r => `day${r.day}`);
+
     new Chart(document.getElementById('detail-bar-canvas'), {
       type: 'bar',
       data: {
-        labels: dailyRows.map(r => `day${r.day}`),
+        labels,
         datasets: [
           { label: 'M',   data: dailyRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
           { label: 'L',   data: dailyRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
@@ -1855,17 +1870,29 @@ async function showDetail(containerName) {
           { label: '袋品', data: dailyRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
         ],
       },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
-          tooltip: { ...tooltipDefaults },
-        },
-        scales: {
-          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
-          y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
-        },
+      options: chartOpts,
+    });
+
+    // Cumulative sums
+    let cm = 0, cl = 0, cxl = 0, cbg = 0;
+    const cumM = [], cumL = [], cumXL = [], cumBG = [];
+    for (const r of dailyRows) {
+      cm += r.m; cl += r.l; cxl += r.xl; cbg += r.bg;
+      cumM.push(+cm.toFixed(2)); cumL.push(+cl.toFixed(2));
+      cumXL.push(+cxl.toFixed(2)); cumBG.push(+cbg.toFixed(2));
+    }
+    new Chart(document.getElementById('detail-cumul-canvas'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'M',   data: cumM,  backgroundColor: '#3b82f6cc', stack: 's' },
+          { label: 'L',   data: cumL,  backgroundColor: '#10b981cc', stack: 's' },
+          { label: '2L',  data: cumXL, backgroundColor: '#f59e0bcc', stack: 's' },
+          { label: '袋品', data: cumBG, backgroundColor: '#8b5cf6cc', stack: 's' },
+        ],
       },
+      options: chartOpts,
     });
   }
 }
