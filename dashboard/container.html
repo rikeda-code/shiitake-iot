@@ -810,8 +810,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
-      <button class="sort-btn${groupMode==='person'?' active':''}" onclick="weeklySetGroup('person')">担当者別</button>
-      <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">拠点→担当者</button>
+      <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -887,8 +886,7 @@ function renderDrillSection(section, valid, targetData) {
       <button class="sort-btn" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn" onclick="weeklySetGroup('site')">拠点別</button>
-      <button class="sort-btn" onclick="weeklySetGroup('person')">担当者別</button>
-      <button class="sort-btn active" onclick="weeklySetGroup('drill')">拠点→担当者</button>
+      <button class="sort-btn active" onclick="weeklySetGroup('drill')">担当者別</button>
     </div>`;
 
   if (!drillState.site) {
