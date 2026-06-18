@@ -1,11 +1,14 @@
-const CACHE = 'shiitake-v1';
+const CACHE = 'shiitake-v2';
 const STATIC = [
   '/shiitake-iot/dashboard/container.html',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
+  e.waitUntil(
+    caches.open(CACHE).then(c =>
+      Promise.allSettled(STATIC.map(url => c.add(url)))
+    )
+  );
   self.skipWaiting();
 });
 
