@@ -1739,17 +1739,19 @@ async function showDetail(containerName) {
     }
   }
 
-  // 菌床重量: D列=号機, E列=上下段, F列=散水前重量, G列=0-10h増加量
-  // 同じ上下段が複数ある場合は最後に現れた行を採用（最新ロット優先）
+  // 菌床重量: D列=号機(結合セルあり), E列=上下段, F列=散水前重量, G列=重量増加
+  // D列は結合セルのため先頭行のみ値あり → lastDNo で引き継ぐ
   const kinshoMap = {};
+  let lastDNo = '';
   if (kinshoBedTable?.rows) {
     for (const row of kinshoBedTable.rows) {
       const cells = row?.c || [];
-      const dNo  = cells[3]?.v != null ? String(cells[3].v).trim() : '';
+      if (cells[3]?.v != null) lastDNo = String(cells[3].v).trim();
+      const curDNo = lastDNo;
       const eStr = cells[4]?.v != null ? String(cells[4].v).trim() : '';
       const fVal = parseFloat(cells[5]?.v);
       const gVal = parseFloat(cells[6]?.v);
-      if (dNo !== containerNo) continue;
+      if (curDNo !== containerNo) continue;
       if (isNaN(fVal)) continue;
       const seg = parseInt(eStr);
       const key = isNaN(seg) ? `_${Object.keys(kinshoMap).length}` : String(seg);
