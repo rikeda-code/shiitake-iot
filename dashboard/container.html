@@ -927,10 +927,8 @@ function renderDrillSection(section, valid, targetData) {
   let groupKeys = [];
 
   if (subMode === 'all') {
-    personContainers.forEach(c => {
-      groups[c.name] = { label: c.no || c.name, containers: [c] };
-    });
-    groupKeys = Object.keys(groups);
+    groups['all'] = { label: `${drillState.person} 全コンテナ`, containers: personContainers };
+    groupKeys = ['all'];
   } else if (subMode === 'month') {
     personContainers.forEach(c => {
       let week = c.startDate ? getSunSatWeek(c.startDate) : null;
