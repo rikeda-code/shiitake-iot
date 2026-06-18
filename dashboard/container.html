@@ -1752,9 +1752,17 @@ async function showDetail(containerName) {
     const v = allRows[ri]?.c?.[3]?.v;
     if (typeof v === 'string' && /^\d{8}$/.test(v)) { detailIsTypeB = true; break; }
   }
+  // Detect TypeC (群馬): col1 contains "N日" string
+  let detailIsTypeC = false;
+  if (!detailIsTypeB) {
+    for (let ri = 13; ri < Math.min(25, allRows.length); ri++) {
+      const v = allRows[ri]?.c?.[1]?.v;
+      if (typeof v === 'string' && /^\d+日$/.test(v)) { detailIsTypeC = true; break; }
+    }
+  }
 
-  // Parse daily size breakdown: cols6=M, cols7=L, cols8=2L, cols9=袋品
-  // いなべ・群馬は day50以降のみ表示、南丹は全日表示
+  // Parse daily size breakdown: G=col6(M), H=col7(L), I=col8(2L), J=col9(袋品)
+  // いなべ・群馬は day50(row80)以降のみ表示、南丹は全日表示
   const dailyMinDay = (site.name === 'いなべ' || site.name === '群馬') ? 50 : 0;
   const dailyRows = [];
   if (detailIsTypeB) {
@@ -1776,9 +1784,24 @@ async function showDetail(containerName) {
       const bg = parseFloat(cells[9]?.v) || 0;
       if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
     }
+  } else if (detailIsTypeC) {
+    // TypeC (群馬): col1="N日", cols6-9=size breakdown, day50～=row80(ri=79)
+    for (let ri = 79; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayLabel = String(cells[1]?.v ?? '');
+      const dm = dayLabel.match(/^(\d+)日$/);
+      if (!dm) continue;
+      const dayNum = parseInt(dm[1]);
+      if (dayNum < dailyMinDay || dayNum > 200) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
   } else {
-    // TypeA (いなべ) / TypeC (群馬): col1=dayNum integer
-    for (let ri = 13; ri < allRows.length; ri++) {
+    // TypeA (いなべ): col1=dayNum integer, day50～=row80(ri=79)
+    for (let ri = 79; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const dayNum = cells[1]?.v;
       if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
