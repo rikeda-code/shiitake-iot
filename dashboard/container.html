@@ -1749,6 +1749,11 @@ async function showDetail(containerName) {
   // Parse daily size breakdown: G=col6(M), H=col7(L), I=col8(2L), J=col9(袋品), dayIdx=col1
   // いなべ・群馬: data starts at row 80 (allRows[79]); 南丹: row 14 (allRows[13])
   const dailyStartRi = (site.name === 'いなべ' || site.name === '群馬') ? 79 : 13;
+  // Debug: log rows around start
+  for (let ri = dailyStartRi; ri < Math.min(dailyStartRi + 5, allRows.length); ri++) {
+    const vals = (allRows[ri]?.c || []).slice(0, 20).map(c => c?.v ?? null);
+    console.log(`[daily debug] row${ri}:`, JSON.stringify(vals));
+  }
   const dailyRows = [];
   for (let ri = dailyStartRi; ri < allRows.length; ri++) {
     const cells = allRows[ri]?.c || [];
