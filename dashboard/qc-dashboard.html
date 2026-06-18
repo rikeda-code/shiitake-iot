@@ -137,13 +137,67 @@ function createState() {
   };
 }
 
+/* ─── PERSISTENCE ────────────────────────────────────────────── */
+const STORAGE_KEY = 'qc-dashboard-v1';
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return createState();
+    const parsed = JSON.parse(saved);
+    // Merge saved member data into fresh state to pick up any new members/steps
+    const fresh = createState();
+    fresh.members = fresh.members.map(fm => {
+      const sm = parsed.members?.find(m => m.id === fm.id);
+      if (!sm) return fm;
+      return {
+        ...fm,
+        steps: fm.steps.map((fs, i) => {
+          const ss = sm.steps?.[i];
+          return ss ? { ...fs, ...ss } : fs;
+        }),
+        reviews: fm.reviews.map((fr, i) => {
+          const sr = sm.reviews?.[i];
+          return sr ? { ...fr, ...sr } : fr;
+        }),
+        nextActionDate:    sm.nextActionDate    ?? fm.nextActionDate,
+        nextActionContent: sm.nextActionContent ?? fm.nextActionContent,
+      };
+    });
+    fresh.selMemberId  = parsed.selMemberId  ?? fresh.selMemberId;
+    fresh.selStepIndex = parsed.selStepIndex ?? fresh.selStepIndex;
+    return fresh;
+  } catch (e) {
+    return createState();
+  }
+}
+
+function saveState(st) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      members:      st.members.map(m => ({
+        id: m.id,
+        steps:   m.steps.map(s => ({ progress:s.progress, startWeek:s.startWeek, endWeek:s.endWeek, risk:s.risk, memo:s.memo })),
+        reviews: m.reviews.map(r => ({ weekIndex:r.weekIndex, completed:r.completed, completedDate:r.completedDate })),
+        nextActionDate:    m.nextActionDate,
+        nextActionContent: m.nextActionContent,
+      })),
+      selMemberId:  st.selMemberId,
+      selStepIndex: st.selStepIndex,
+    }));
+  } catch (e) { /* storage full etc. */ }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    APP
 ═══════════════════════════════════════════════════════════════ */
 function App() {
-  const [st, setSt] = useState(createState);
+  const [st, setSt] = useState(loadState);
   const [modal, setModal] = useState(null);
   const [tmpPct, setTmpPct] = useState(0);
+
+  // Persist whenever state changes
+  useEffect(() => { saveState(st); }, [st]);
 
   const updateStep = useCallback((mid, si, updates) => {
     setSt(prev => ({
@@ -188,6 +242,13 @@ function App() {
 
   const todayStr = TODAY.toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric', weekday:'short' });
 
+  const handleReset = () => {
+    if (confirm('全データをリセットしますか？この操作は元に戻せません。')) {
+      localStorage.removeItem(STORAGE_KEY);
+      setSt(createState());
+    }
+  };
+
   return html`
     <div style=${{ minHeight:'100vh', background:'#0f172a', color:'#e2e8f0' }}>
 
@@ -206,13 +267,20 @@ function App() {
             2025年6〜9月 ／ QCストーリー8ステップ進捗管理
           </p>
         </div>
-        <div style=${{ textAlign:'right', fontSize:'0.7rem', color:'#475569' }}>
-          <div>${todayStr}</div>
-          ${currentWeekIdx >= 0 && currentWeekIdx <= 12 && html`
-            <div style=${{ color:'#38bdf8', fontWeight:700, marginTop:2 }}>
-              現在: ${WEEKS[currentWeekIdx].label}（Week ${currentWeekIdx+1}）
-            </div>
-          `}
+        <div style=${{ display:'flex', alignItems:'center', gap:16 }}>
+          <div style=${{ textAlign:'right', fontSize:'0.7rem', color:'#475569' }}>
+            <div>${todayStr}</div>
+            ${currentWeekIdx >= 0 && currentWeekIdx <= 12 && html`
+              <div style=${{ color:'#38bdf8', fontWeight:700, marginTop:2 }}>
+                現在: ${WEEKS[currentWeekIdx].label}（Week ${currentWeekIdx+1}）
+              </div>
+            `}
+          </div>
+          <button onClick=${handleReset} title="全データをリセット" style=${{
+            padding:'6px 12px', borderRadius:7, fontSize:'0.68rem',
+            border:'1px solid #334155', background:'transparent',
+            color:'#475569', cursor:'pointer',
+          }}>🗑 リセット</button>
         </div>
       </header>
 
