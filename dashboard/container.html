@@ -898,7 +898,12 @@ function renderDrillSection(section, valid, targetData) {
     section.innerHTML = `
       <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">拠点 → 担当者</span></div>
       ${navBar}
-      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>`;
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>
+      <div class="weekly-chart-card" style="margin-top:16px">
+        <div class="weekly-chart-title">全担当者 全コンテナ</div>
+        <div class="chart-wrap" style="height:260px"><canvas id="drill-all-canvas"></canvas></div>
+      </div>`;
+    buildWeeklyLineChart('drill-all-canvas', valid, targetData);
     return;
   }
 
