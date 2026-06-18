@@ -1704,53 +1704,35 @@ async function showDetail(containerName) {
   }
 
   const allRows = table.rows || [];
-  for (let ri = 0; ri < Math.min(15, allRows.length); ri++) {
-    const vals = (allRows[ri]?.c || []).map(c => c?.v ?? c?.f ?? null);
-    console.log(`[detail] row${ri}:`, JSON.stringify(vals));
-  }
-  // Scan top 25 rows for size header row (M収穫量, L収穫量, 2L収穫量, 袋品)
-  let mCol=-1, lCol=-1, xlCol=-1, bagCol=-1, valRow=-1;
-  for (let ri = 0; ri < Math.min(25, allRows.length); ri++) {
+  // Fixed column layout (confirmed from sheet structure):
+  // header row: col0="パック品合計", col12="袋品収穫量"  (M/L/2L are in merged cells)
+  // values row: col6=M, col8=L, col10=2L, col12=袋品, col0=パック品合計
+  // pack row:   col1=合計率, col6=M率, col8=L率, col10=2L率
+  let mVal=null, lVal=null, xlVal=null, bagVal=null, packRate=null;
+  for (let ri = 0; ri < Math.min(20, allRows.length); ri++) {
     const cells = allRows[ri]?.c || [];
-    let found = false;
-    cells.forEach((cell, ci) => {
-      const v = String(cell?.v ?? cell?.f ?? '').replace(/\s/g,'');
-      if (/^M収穫/.test(v) || v === 'M') { mCol = ci; found = true; }
-      if (/^L収穫/.test(v) && !/2L/.test(v) && !/M/.test(v)) { lCol = ci; found = true; }
-      if (/2L収穫/.test(v) || v === '2L') { xlCol = ci; found = true; }
-      if (/袋品/.test(v)) { bagCol = ci; found = true; }
-    });
-    if (found && mCol >= 0 && lCol >= 0) { valRow = ri + 1; break; }
-  }
-
-  let mVal=null, lVal=null, xlVal=null, bagVal=null;
-  if (valRow >= 0 && valRow < allRows.length) {
-    const vc = allRows[valRow]?.c || [];
-    mVal   = mCol  >= 0 ? parseFloat(vc[mCol]?.v)   : null;
-    lVal   = lCol  >= 0 ? parseFloat(vc[lCol]?.v)   : null;
-    xlVal  = xlCol >= 0 ? parseFloat(vc[xlCol]?.v)  : null;
-    bagVal = bagCol>= 0 ? parseFloat(vc[bagCol]?.v) : null;
-  }
-
-  // Find pack rate
-  let packRate = null;
-  for (let ri = 0; ri < Math.min(25, allRows.length); ri++) {
-    const cells = allRows[ri]?.c || [];
-    const hasLabel = cells.some(c => String(c?.v ?? '').includes('パック品率'));
-    if (hasLabel) {
-      // look for a % value in same row
+    const c0 = String(cells[0]?.v ?? '');
+    if (c0.includes('パック品合計')) {
+      const vc = allRows[ri + 1]?.c || [];
+      mVal   = parseFloat(vc[6]?.v);
+      lVal   = parseFloat(vc[8]?.v);
+      xlVal  = parseFloat(vc[10]?.v);
+      bagVal = parseFloat(vc[12]?.v);
+      const pr = allRows[ri + 2]?.c || [];
+      const prv = pr[1]?.v;
+      if (prv != null) {
+        const n = parseFloat(prv);
+        packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
+      }
+      break;
+    }
+    // fallback: パック品率 row with % string
+    if (c0.includes('パック品率') && packRate == null) {
       for (const c of cells) {
         const v = c?.v;
         if (v == null) continue;
         const n = parseFloat(v);
-        if (!isNaN(n) && n > 0 && n <= 1) { packRate = Math.round(n * 100); break; }
-        if (!isNaN(n) && n > 1 && n <= 100) { packRate = Math.round(n); break; }
-        if (typeof v === 'string' && v.includes('%')) {
-          const m = v.match(/([\d.]+)/);
-          if (m) { packRate = Math.round(parseFloat(m[1])); break; }
-        }
       }
-      if (packRate) break;
     }
   }
 
