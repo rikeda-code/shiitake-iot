@@ -1704,6 +1704,10 @@ async function showDetail(containerName) {
   }
 
   const allRows = table.rows || [];
+  for (let ri = 0; ri < Math.min(15, allRows.length); ri++) {
+    const vals = (allRows[ri]?.c || []).map(c => c?.v ?? c?.f ?? null);
+    console.log(`[detail] row${ri}:`, JSON.stringify(vals));
+  }
   // Scan top 25 rows for size header row (M収穫量, L収穫量, 2L収穫量, 袋品)
   let mCol=-1, lCol=-1, xlCol=-1, bagCol=-1, valRow=-1;
   for (let ri = 0; ri < Math.min(25, allRows.length); ri++) {
