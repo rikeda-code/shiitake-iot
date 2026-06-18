@@ -899,11 +899,16 @@ function renderDrillSection(section, valid, targetData) {
       <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">拠点 → 担当者</span></div>
       ${navBar}
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>
-      <div class="weekly-chart-card" style="margin-top:16px">
-        <div class="weekly-chart-title">全担当者 全コンテナ</div>
-        <div class="chart-wrap" style="height:260px"><canvas id="drill-all-canvas"></canvas></div>
-      </div>`;
-    buildWeeklyLineChart('drill-all-canvas', valid, targetData);
+      <div class="weekly-grid" style="margin-top:16px" id="drill-person-charts"></div>`;
+    const allPersons = [...new Set(valid.map(c => c.person || '未設定'))].sort();
+    allPersons.forEach((p, idx) => {
+      const pContainers = valid.filter(c => (c.person || '未設定') === p);
+      const card = document.createElement('div');
+      card.className = 'weekly-chart-card';
+      card.innerHTML = `<div class="weekly-chart-title">${p}</div><div class="chart-wrap" style="height:260px"><canvas id="drillp-${idx}"></canvas></div>`;
+      document.getElementById('drill-person-charts').appendChild(card);
+      buildWeeklyLineChart(`drillp-${idx}`, pContainers, targetData);
+    });
     return;
   }
 
