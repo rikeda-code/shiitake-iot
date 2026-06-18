@@ -1747,8 +1747,10 @@ async function showDetail(containerName) {
   const packCls = packRate == null ? '' : packRate >= 90 ? 'color:#86efac' : packRate >= 80 ? 'color:#93c5fd' : 'color:#f87171';
 
   // Parse daily size breakdown: G=col6(M), H=col7(L), I=col8(2L), J=col9(袋品), dayIdx=col1
+  // いなべ・群馬: data starts at row 80 (allRows[79]); 南丹: row 14 (allRows[13])
+  const dailyStartRi = (site.name === 'いなべ' || site.name === '群馬') ? 79 : 13;
   const dailyRows = [];
-  for (let ri = 13; ri < allRows.length; ri++) {
+  for (let ri = dailyStartRi; ri < allRows.length; ri++) {
     const cells = allRows[ri]?.c || [];
     const dayNum = cells[1]?.v;
     if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
