@@ -1695,12 +1695,40 @@ async function showDetail(containerName) {
   content.innerHTML = '<div class="loading">読み込み中...</div>';
 
   const site = SITES[currentSiteIdx];
-  let table;
+  const MEKAKI_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
+
+  let table, mekakiTable;
   try {
-    table = await fetchSheet(site.id, containerName, 0);
+    [table, mekakiTable] = await Promise.all([
+      fetchSheet(site.id, containerName, 0),
+      fetchSheet(MEKAKI_ID, '1回目芽かき', 0).catch(() => null),
+    ]);
   } catch(e) {
     content.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
     return;
+  }
+
+  // 芽かき量: C列=栽培開始日, E列=コンテナ番号, K列=芽かき量
+  let mekakiVal = null;
+  const summaryRow = cache[site.id]?.summary?.find(r => r.name === containerName);
+  const containerNo = summaryRow?.no || (parseContainerName(containerName)).no;
+  const startDateStr = summaryRow?.startDate || '';
+  if (mekakiTable?.rows) {
+    for (const row of mekakiTable.rows) {
+      const cells = row?.c || [];
+      const cDate = cells[2]?.v != null ? String(cells[2].f || cells[2].v).trim() : '';
+      const eNo   = cells[4]?.v != null ? String(cells[4].v).trim() : '';
+      const kVal  = cells[10]?.v;
+      // コンテナ番号とスタート日の両方が一致する行を採用
+      if (eNo === containerNo && cDate && startDateStr && cDate.replace(/\//g,'-') === startDateStr.replace(/\//g,'-')) {
+        mekakiVal = kVal != null ? parseFloat(kVal) : null;
+        break;
+      }
+      // 番号のみでも一致すれば候補として記録（日付が取れない場合のフォールバック）
+      if (mekakiVal == null && eNo === containerNo && kVal != null) {
+        mekakiVal = parseFloat(kVal);
+      }
+    }
   }
 
   const allRows = table.rows || [];
@@ -1766,8 +1794,7 @@ async function showDetail(containerName) {
   const dailyRows = [];
   if (detailIsTypeB) {
     // TypeB (南丹): col3=YYYYMMDD, col5=date, cols6-9=size breakdown
-    const summaryRow = cache[site.id]?.summary?.find(r => r.name === containerName);
-    const startD = parseDateStr(summaryRow?.startDate || '');
+    const startD = parseDateStr(startDateStr);
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const ds = cells[3]?.v;
@@ -1839,6 +1866,11 @@ async function showDetail(containerName) {
       <div class="detail-pack-label">パック品率</div>
       <div class="detail-pack-value" style="${packCls}">${packRate != null ? packRate + '%' : '—'}</div>
     </div>
+    ${mekakiVal != null && !isNaN(mekakiVal) ? `
+    <div class="detail-pack" style="margin-top:8px">
+      <div class="detail-pack-label">芽かき量 (1回目)</div>
+      <div class="detail-pack-value">${mekakiVal.toFixed(1)} kg</div>
+    </div>` : ''}
     ${dailyRows.length > 0 ? `
     <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
     <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>
