@@ -1724,10 +1724,6 @@ async function showDetail(containerName) {
   const summaryRow = cache[site.id]?.summary?.find(r => r.name === containerName);
   const containerNo = summaryRow?.no || (parseContainerName(containerName)).no;
   const startDateStr = summaryRow?.startDate || '';
-  console.log('[mekaki] site=', site.name, 'containerNo=', containerNo, 'rows=', mekakiTable?.rows?.length ?? 'null');
-  if (mekakiTable?.rows?.length) {
-    console.log('[mekaki] row1 cells:', mekakiTable.rows[1]?.c?.map(c => c?.v));
-  }
   if (mekakiTable?.rows) {
     for (const row of mekakiTable.rows) {
       const cells = row?.c || [];
@@ -1735,16 +1731,28 @@ async function showDetail(containerName) {
       const eNo   = cells[4]?.v != null ? String(cells[4].v).trim() : '';
       const kVal  = cells[10]?.v;
       if (aSite === '拠点') continue;
-      console.log('[mekaki] check aSite=', aSite, 'eNo=', eNo, 'kVal=', kVal);
       if (aSite === site.name && eNo === containerNo && kVal != null) {
         mekakiVal = parseFloat(kVal);
         break;
       }
     }
   }
-  console.log('[mekaki] result=', mekakiVal);
 
   const allRows = table.rows || [];
+
+  // H4 = row3 col7: 菌床数。2520以外なら2520換算に変換
+  const sheetBedCount = parseFloat(allRows[3]?.c?.[7]?.v);
+  const mekakiDisplay = (() => {
+    if (mekakiVal == null || isNaN(mekakiVal)) return null;
+    if (!isNaN(sheetBedCount) && sheetBedCount > 0 && sheetBedCount !== 2520) {
+      return +(mekakiVal * 2520 / sheetBedCount).toFixed(1);
+    }
+    return +mekakiVal.toFixed(1);
+  })();
+  const mekakiLabel = (!isNaN(sheetBedCount) && sheetBedCount > 0 && sheetBedCount !== 2520)
+    ? `芽かき量 (1回目・2520換算) ※実測${mekakiVal?.toFixed(1)}kg / ${sheetBedCount}菌床`
+    : '芽かき量 (1回目)';
+
   // Fixed column layout (confirmed from sheet structure):
   // header row: col0="パック品合計", col12="袋品収穫量"  (M/L/2L are in merged cells)
   // values row: col6=M, col8=L, col10=2L, col12=袋品, col0=パック品合計
@@ -1879,10 +1887,10 @@ async function showDetail(containerName) {
       <div class="detail-pack-label">パック品率</div>
       <div class="detail-pack-value" style="${packCls}">${packRate != null ? packRate + '%' : '—'}</div>
     </div>
-    ${mekakiVal != null && !isNaN(mekakiVal) ? `
+    ${mekakiDisplay != null ? `
     <div class="detail-pack" style="margin-top:8px">
-      <div class="detail-pack-label">芽かき量 (1回目)</div>
-      <div class="detail-pack-value">${mekakiVal.toFixed(1)} kg</div>
+      <div class="detail-pack-label">${mekakiLabel}</div>
+      <div class="detail-pack-value">${mekakiDisplay} kg</div>
     </div>` : ''}
     ${dailyRows.length > 0 ? `
     <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
