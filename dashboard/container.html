@@ -1739,37 +1739,24 @@ async function showDetail(containerName) {
     }
   }
 
-  // 菌床重量: C列=栽培開始日, D列=号機, E列=上下段, F列=散水前重量, G列=0-10h増加量
-  // startDateStr と C列日付を正規化して照合し、同号機の別ロット混入を防ぐ
-  const normDate = s => {
-    if (!s) return '';
-    const d = parseDateStr(String(s));
-    if (d) return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
-    // "YYYY/M/D" or "M/D" そのままの文字列を簡易正規化
-    return String(s).replace(/\s/g,'').replace(/年|月/g,'/').replace(/日/,'');
-  };
-  const targetDateNorm = normDate(startDateStr);
-  const kinshoRows = [];
+  // 菌床重量: D列=号機, E列=上下段, F列=散水前重量, G列=0-10h増加量
+  // 同じ上下段が複数ある場合は最後に現れた行を採用（最新ロット優先）
+  const kinshoMap = {};
   if (kinshoBedTable?.rows) {
     for (const row of kinshoBedTable.rows) {
       const cells = row?.c || [];
-      const cRaw = cells[2]?.f ?? cells[2]?.v;  // C列: 栽培開始日
       const dNo  = cells[3]?.v != null ? String(cells[3].v).trim() : '';
       const eStr = cells[4]?.v != null ? String(cells[4].v).trim() : '';
       const fVal = parseFloat(cells[5]?.v);
       const gVal = parseFloat(cells[6]?.v);
-      if (cells[0]?.v != null && kinshoRows.length === 0 && !kinshoBedTable._logged) { kinshoBedTable._logged=true; console.log('[kinsho cols]', cells.map((c,i)=>c?.v!=null?`[${i}]${c?.f??c?.v}`:null).filter(Boolean)); }
       if (dNo !== containerNo) continue;
       if (isNaN(fVal)) continue;
-      // 栽培開始日が判明しているときは一致するロットのみ採用
-      if (targetDateNorm && cRaw != null) {
-        if (normDate(cRaw) !== targetDateNorm) continue;
-      }
       const seg = parseInt(eStr);
-      kinshoRows.push({ seg: isNaN(seg) ? kinshoRows.length + 1 : seg, base: fVal, inc: isNaN(gVal) ? 0 : gVal });
+      const key = isNaN(seg) ? `_${Object.keys(kinshoMap).length}` : String(seg);
+      kinshoMap[key] = { seg: isNaN(seg) ? Object.keys(kinshoMap).length + 1 : seg, base: fVal, inc: isNaN(gVal) ? 0 : gVal };
     }
-    kinshoRows.sort((a, b) => a.seg - b.seg);
   }
+  const kinshoRows = Object.values(kinshoMap).sort((a, b) => a.seg - b.seg).slice(0, 6);
 
   const allRows = table.rows || [];
 
