@@ -1708,11 +1708,12 @@ async function showDetail(containerName) {
     return json.table;
   };
 
-  let table, mekakiTable;
+  let table, mekakiTable, kinshoBedTable;
   try {
-    [table, mekakiTable] = await Promise.all([
+    [table, mekakiTable, kinshoBedTable] = await Promise.all([
       fetchSheet(site.id, containerName, 0),
       fetchByGid(MEKAKI_ID, MEKAKI_GID).catch(() => null),
+      fetchSheet(MEKAKI_ID, site.name, 0).catch(() => null),
     ]);
   } catch(e) {
     content.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
@@ -1736,6 +1737,23 @@ async function showDetail(containerName) {
         break;
       }
     }
+  }
+
+  // 菌床重量: D列=号機, E列=上下段, F列=散水前重量, G列=0-10h増加量
+  const kinshoRows = [];
+  if (kinshoBedTable?.rows) {
+    for (const row of kinshoBedTable.rows) {
+      const cells = row?.c || [];
+      const dNo  = cells[3]?.v != null ? String(cells[3].v).trim() : '';
+      const eStr = cells[4]?.v != null ? String(cells[4].v).trim() : '';
+      const fVal = parseFloat(cells[5]?.v);
+      const gVal = parseFloat(cells[6]?.v);
+      if (dNo !== containerNo) continue;
+      if (isNaN(fVal)) continue;
+      const seg = parseInt(eStr);
+      kinshoRows.push({ seg: isNaN(seg) ? kinshoRows.length + 1 : seg, base: fVal, inc: isNaN(gVal) ? 0 : gVal });
+    }
+    kinshoRows.sort((a, b) => a.seg - b.seg);
   }
 
   const allRows = table.rows || [];
@@ -1892,11 +1910,38 @@ async function showDetail(containerName) {
       <div class="detail-pack-label">${mekakiLabel}</div>
       <div class="detail-pack-value" style="${mekakiDisplay >= 200 ? 'color:#f87171' : ''}">${mekakiDisplay >= 200 ? '⚠️ ' : ''}${mekakiDisplay} kg</div>
     </div>` : ''}
+    ${kinshoRows.length > 0 ? `
+    <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">菌床重量 (g)</div>
+    <div style="position:relative;height:220px"><canvas id="detail-kinsho-canvas"></canvas></div>` : ''}
     ${dailyRows.length > 0 ? `
     <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
     <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>
     <div style="margin-top:20px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別累計収穫量 (kg)</div>
     <div style="position:relative;height:220px"><canvas id="detail-cumul-canvas"></canvas></div>` : ''}`;
+
+  if (kinshoRows.length > 0) {
+    new Chart(document.getElementById('detail-kinsho-canvas'), {
+      type: 'bar',
+      data: {
+        labels: kinshoRows.map(r => `${r.seg}段`),
+        datasets: [
+          { label: '初期重量', data: kinshoRows.map(r => r.base), backgroundColor: '#38bdf8cc', stack: 's' },
+          { label: '散水増加量', data: kinshoRows.map(r => r.inc), backgroundColor: '#34d399cc', stack: 's' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
+          tooltip: { ...tooltipDefaults },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}g` }, grid: { color: '#1e2235' } },
+        },
+      },
+    });
+  }
 
   if (dailyRows.length > 0) {
     const chartOpts = {
