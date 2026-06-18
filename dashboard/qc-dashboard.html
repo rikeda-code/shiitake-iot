@@ -242,6 +242,21 @@ function App() {
 
   const todayStr = TODAY.toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric', weekday:'short' });
 
+  // activeTab: 'all' | member id
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem('qc-active-tab') || 'all'; } catch(e) { return 'all'; }
+  });
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    try { localStorage.setItem('qc-active-tab', tab); } catch(e) {}
+    // sync admin panel member selector
+    if (tab !== 'all') setSt(p => ({ ...p, selMemberId: tab, selStepIndex: 0 }));
+  };
+
+  const visibleMembers = activeTab === 'all'
+    ? st.members
+    : st.members.filter(m => m.id === activeTab);
+
   const handleReset = () => {
     if (confirm('全データをリセットしますか？この操作は元に戻せません。')) {
       localStorage.removeItem(STORAGE_KEY);
@@ -284,15 +299,45 @@ function App() {
         </div>
       </header>
 
+      <!-- TABS -->
+      <div style=${{
+        display:'flex', gap:0, borderBottom:'1px solid #1e293b',
+        background:'rgba(15,23,42,0.97)', padding:'0 24px',
+        position:'sticky', top:57, zIndex:40,
+      }}>
+        ${[{ id:'all', name:'全員', color:'#94a3b8' }, ...MEMBERS.map(m => ({ id:m.id, name:m.name, color:m.color }))].map(tab => {
+          const active = activeTab === tab.id;
+          return html`
+            <button key=${tab.id} onClick=${() => handleTabChange(tab.id)} style=${{
+              padding:'10px 18px', fontSize:'0.82rem', fontWeight: active ? 800 : 500,
+              border:'none', borderBottom: active ? `2px solid ${tab.color}` : '2px solid transparent',
+              background:'transparent',
+              color: active ? tab.color : '#475569',
+              cursor:'pointer', transition:'all .15s', whiteSpace:'nowrap',
+            }}>
+              ${tab.name}
+              ${tab.id !== 'all' && html`
+                <span style=${{
+                  marginLeft:6, fontSize:'0.65rem', fontWeight:700,
+                  color: statusInfo(st.members.find(m=>m.id===tab.id)).color,
+                }}>
+                  ${overallPct(st.members.find(m=>m.id===tab.id))}%
+                </span>
+              `}
+            </button>
+          `;
+        })}
+      </div>
+
       <!-- MAIN -->
       <main style=${{ padding:'18px 24px', display:'flex', flexDirection:'column', gap:18 }}>
-        <${StatusCards} members=${st.members} />
-        <${GanttSection} members=${st.members} onBarClick=${openModal} onReviewComplete=${completeReview} />
+        <${StatusCards} members=${visibleMembers} />
+        <${GanttSection} members=${visibleMembers} onBarClick=${openModal} onReviewComplete=${completeReview} />
         <${AdminPanel}
           members=${st.members}
-          selMemberId=${st.selMemberId}
+          selMemberId=${activeTab !== 'all' ? activeTab : st.selMemberId}
           selStepIndex=${st.selStepIndex}
-          onSelectMember=${id => setSt(p => ({ ...p, selMemberId:id, selStepIndex:0 }))}
+          onSelectMember=${id => { setSt(p => ({ ...p, selMemberId:id, selStepIndex:0 })); }}
           onSelectStep=${i  => setSt(p => ({ ...p, selStepIndex:i }))}
           onUpdateStep=${updateStep}
           onUpdateMember=${updateMember}
