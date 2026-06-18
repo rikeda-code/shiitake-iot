@@ -1746,20 +1746,49 @@ async function showDetail(containerName) {
 
   const packCls = packRate == null ? '' : packRate >= 90 ? 'color:#86efac' : packRate >= 80 ? 'color:#93c5fd' : 'color:#f87171';
 
-  // Parse daily size breakdown: G=col6(M), H=col7(L), I=col8(2L), J=col9(袋品), dayIdx=col1
-  // いなべ・群馬は day50(row80)以降のみ表示、南丹は全日表示
+  // Detect TypeB (南丹): YYYYMMDD string in col3
+  let detailIsTypeB = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { detailIsTypeB = true; break; }
+  }
+
+  // Parse daily size breakdown: cols6=M, cols7=L, cols8=2L, cols9=袋品
+  // いなべ・群馬は day50以降のみ表示、南丹は全日表示
   const dailyMinDay = (site.name === 'いなべ' || site.name === '群馬') ? 50 : 0;
   const dailyRows = [];
-  for (let ri = 13; ri < allRows.length; ri++) {
-    const cells = allRows[ri]?.c || [];
-    const dayNum = cells[1]?.v;
-    if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
-    if (dayNum < dailyMinDay) continue;
-    const m  = parseFloat(cells[6]?.v) || 0;
-    const l  = parseFloat(cells[7]?.v) || 0;
-    const xl = parseFloat(cells[8]?.v) || 0;
-    const bg = parseFloat(cells[9]?.v) || 0;
-    if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+  if (detailIsTypeB) {
+    // TypeB (南丹): col3=YYYYMMDD, col5=date, cols6-9=size breakdown
+    const summaryRow = cache[site.id]?.summary?.find(r => r.name === containerName);
+    const startD = parseDateStr(summaryRow?.startDate || '');
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      if (!rowDate || !startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum < 1 || dayNum > 200) continue;
+      if (dayNum < dailyMinDay) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else {
+    // TypeA (いなべ) / TypeC (群馬): col1=dayNum integer
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayNum = cells[1]?.v;
+      if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
+      if (dayNum < dailyMinDay) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
   }
 
   content.innerHTML = `
