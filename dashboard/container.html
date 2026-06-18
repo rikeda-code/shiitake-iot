@@ -1741,12 +1741,17 @@ async function showDetail(containerName) {
 
   // 菌床重量: D列=号機(結合セルあり), E列=上下段, F列=散水前重量, G列=重量増加
   // D列は結合セルのため先頭行のみ値あり → lastDNo で引き継ぐ
-  const kinshoMap = {};
+  let kinshoMap = {};
   let lastDNo = '';
   if (kinshoBedTable?.rows) {
     for (const row of kinshoBedTable.rows) {
       const cells = row?.c || [];
-      if (cells[3]?.v != null) lastDNo = String(cells[3].v).trim();
+      if (cells[3]?.v != null) {
+        const newDNo = String(cells[3].v).trim();
+        // 同じ号機の新しいロットが始まったらリセット（最新ロットのみ保持）
+        if (newDNo === containerNo) kinshoMap = {};
+        lastDNo = newDNo;
+      }
       const curDNo = lastDNo;
       const eStr = cells[4]?.v != null ? String(cells[4].v).trim() : '';
       const fVal = parseFloat(cells[5]?.v);
