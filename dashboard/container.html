@@ -379,6 +379,7 @@ async function fetchSummaryRows(site) {
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
     const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
+    const lot       = cells[7]?.v != null ? String(cells[7].v).trim() : '';
     const packRaw   = cells[12]?.v;
     // パック品率: 0-1の小数か0-100の整数かを自動判定
     let packRate = null;
@@ -386,7 +387,7 @@ async function fetchSummaryRows(site) {
       const n = parseFloat(packRaw);
       if (!isNaN(n)) packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
     }
-    raw.push({ name, startDate, endDate, days, harvest, packRate, person, no: extractContainerNo(name) });
+    raw.push({ name, startDate, endDate, days, harvest, packRate, person, lot, no: extractContainerNo(name) });
   });
 
   // 同一コンテナNo.の重複処理: 最新の startDate を持つ行を残す
@@ -604,7 +605,9 @@ function parseContainerRowsV2(table, startDateStr) {
   }
 
   rows.sort((a, b) => a.dayNum - b.dayNum);
-  return { bedCount, rows };
+  // A3 = allRows[2].c[0] → lot label
+  const lotFromSheet = allRows[2]?.c?.[0]?.v != null ? String(allRows[2].c[0].v).trim() : null;
+  return { bedCount, rows, lot: lotFromSheet };
 }
 
 // Return Sun-Sat week info for a date string (e.g. "2025/6/14")
@@ -710,9 +713,9 @@ async function loadWeeklySection() {
       fetchWithLimit(allSummaries, async c => {
         try {
           const table = await fetchSheet(c.siteId, c.name, 0);
-          const { bedCount, rows } = parseContainerRowsV2(table, c.startDate);
+          const { bedCount, rows, lot: sheetLot } = parseContainerRowsV2(table, c.startDate);
           if (c.siteName === '南丹') console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length);
-          return { ...c, bedCount, rows };
+          return { ...c, bedCount, rows, lot: sheetLot || c.lot || '' };
         } catch (e) {
           if (c.siteName === '南丹') console.warn('[南丹 ERR]', c.name, e.message);
           return { ...c, bedCount: null, rows: [] };
@@ -753,7 +756,14 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   // Build groups
   const groups = {};
   let groupKeys = [];
-  if (groupMode === 'person') {
+  if (groupMode === 'lot') {
+    valid.forEach(c => {
+      const key = c.lot || '未設定';
+      if (!groups[key]) groups[key] = { label: key, containers: [] };
+      groups[key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+  } else if (groupMode === 'person') {
     valid.forEach(c => {
       const key = c.person || '未設定';
       if (!groups[key]) groups[key] = { label: key, containers: [] };
@@ -811,6 +821,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
