@@ -4,17 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>新入社員QC発表会 管理ダッシュボード</title>
-  <!-- React 18 UMD (no build step needed) -->
   <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
-  <!-- htm: JSX-like tagged template, no Babel needed -->
   <script src="https://cdn.jsdelivr.net/npm/htm@3/dist/htm.umd.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { font-size: 14px; }
     body {
-      background: #0f172a;
-      color: #e2e8f0;
+      background: #0f172a; color: #e2e8f0;
       font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', 'Segoe UI', sans-serif;
       min-height: 100vh;
     }
@@ -27,19 +24,25 @@
     button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
       outline: 2px solid #38bdf8; outline-offset: 2px;
     }
+    .sub-name-input {
+      background: transparent; border: none; color: #64748b;
+      font-size: 0.62rem; flex: 1; outline: none; cursor: text;
+      min-width: 0;
+    }
+    .sub-name-input:focus { color: #94a3b8; }
+    .sub-name-input::placeholder { color: #334155; }
   </style>
 </head>
 <body>
 <div id="root" style="min-height:100vh"></div>
 
 <script>
-/* ═══════════════════════════════════════════════════════════════
-   SETUP
-═══════════════════════════════════════════════════════════════ */
 const html = htm.bind(React.createElement);
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 
-/* ─── CONSTANTS ─────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   CONSTANTS
+═══════════════════════════════════════════════════════════════ */
 const MEMBERS = [
   { id:'nishida',  name:'西田智也',   factory:'志摩培養F', theme:'菌床の色が褐色化しない要因分析＋対策検討',  color:'#38bdf8' },
   { id:'sugiyama', name:'杉山颯',     factory:'いなべF',   theme:'椎茸栽培における水分調整方法',            color:'#a78bfa' },
@@ -48,17 +51,16 @@ const MEMBERS = [
 ];
 
 const STEPS = [
-  { id:1, name:'テーマ選定',     color:'#818cf8' },
-  { id:2, name:'現状把握',      color:'#22d3ee' },
-  { id:3, name:'目標設定',      color:'#2dd4bf' },
-  { id:4, name:'活動計画作成',  color:'#4ade80' },
-  { id:5, name:'要因解析',      color:'#facc15' },
-  { id:6, name:'対策立案・実施',color:'#fb923c' },
-  { id:7, name:'効果確認',      color:'#f87171' },
-  { id:8, name:'歯止め',        color:'#c084fc' },
+  { id:1, name:'テーマ選定',      color:'#818cf8' },
+  { id:2, name:'現状把握',        color:'#22d3ee' },
+  { id:3, name:'目標設定',        color:'#2dd4bf' },
+  { id:4, name:'活動計画作成',    color:'#4ade80' },
+  { id:5, name:'要因解析',        color:'#facc15' },
+  { id:6, name:'対策立案・実施',  color:'#fb923c' },
+  { id:7, name:'効果確認',        color:'#f87171' },
+  { id:8, name:'歯止め',          color:'#c084fc' },
 ];
 
-// 13 weeks: Jun 23 – Sep 21, 2025
 const GANTT_START = new Date(2025, 5, 23);
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 const WEEKS = Array.from({ length: 13 }, (_, i) => {
@@ -85,17 +87,19 @@ const currentWeekIdx = Math.min(12, Math.max(-1,
   Math.floor((TODAY.getTime() - GANTT_START.getTime()) / MS_PER_WEEK)
 ));
 
-/* ─── HELPERS ────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════════════ */
 function hexRgb(h) {
   return `${parseInt(h.slice(1,3),16)},${parseInt(h.slice(3,5),16)},${parseInt(h.slice(5,7),16)}`;
 }
 function barColor(progress, stepColor, delayed) {
   if (progress === 0) return 'rgba(15,23,42,0.8)';
-  if (delayed) return `rgba(239,68,68,${0.25 + progress / 100 * 0.55})`;
-  return `rgba(${hexRgb(stepColor)},${0.18 + progress / 100 * 0.78})`;
+  if (delayed) return `rgba(239,68,68,${0.25 + progress/100*0.55})`;
+  return `rgba(${hexRgb(stepColor)},${0.18 + progress/100*0.78})`;
 }
 function overallPct(member) {
-  return Math.round(member.steps.reduce((s, t) => s + t.progress, 0) / member.steps.length);
+  return Math.round(member.steps.reduce((s,t) => s + t.progress, 0) / member.steps.length);
 }
 function currentStepIdx(member) {
   const i = member.steps.findIndex(s => s.progress < 100);
@@ -103,7 +107,7 @@ function currentStepIdx(member) {
 }
 function statusInfo(member) {
   const pct  = overallPct(member);
-  const time = currentWeekIdx < 0 ? 0 : currentWeekIdx >= 12 ? 100 : Math.round(currentWeekIdx / 12 * 100);
+  const time = currentWeekIdx < 0 ? 0 : currentWeekIdx >= 12 ? 100 : Math.round(currentWeekIdx/12*100);
   const diff = pct - time;
   if (diff >= 0)   return { label:'順調', color:'#4ade80', bg:'rgba(74,222,128,0.1)',  border:'rgba(74,222,128,0.35)'  };
   if (diff >= -20) return { label:'注意', color:'#fbbf24', bg:'rgba(251,191,36,0.1)',  border:'rgba(251,191,36,0.35)'  };
@@ -113,10 +117,15 @@ function stepDelayed(sd) {
   if (currentWeekIdx < 0 || currentWeekIdx < sd.startWeek) return false;
   const dur  = sd.endWeek - sd.startWeek + 1;
   const into = Math.min(currentWeekIdx - sd.startWeek + 1, dur);
-  return sd.progress < Math.round(into / dur * 100) - 20;
+  return sd.progress < Math.round(into/dur*100) - 20;
+}
+function genId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
 }
 
-/* ─── INITIAL STATE ──────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   INITIAL STATE
+═══════════════════════════════════════════════════════════════ */
 function createState() {
   return {
     members: MEMBERS.map(m => ({
@@ -127,6 +136,7 @@ function createState() {
         endWeek:   DEFAULT_SCHEDULE[i].endWeek,
         risk:      null,
         memo:      '',
+        subItems:  [],
       })),
       reviews: DEFAULT_REVIEW_WEEKS.map(w => ({ weekIndex:w, completed:false, completedDate:null })),
       nextActionDate:    '',
@@ -137,15 +147,16 @@ function createState() {
   };
 }
 
-/* ─── PERSISTENCE ────────────────────────────────────────────── */
-const STORAGE_KEY = 'qc-dashboard-v1';
+/* ═══════════════════════════════════════════════════════════════
+   PERSISTENCE
+═══════════════════════════════════════════════════════════════ */
+const STORAGE_KEY = 'qc-dashboard-v2';
 
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return createState();
     const parsed = JSON.parse(saved);
-    // Merge saved member data into fresh state to pick up any new members/steps
     const fresh = createState();
     fresh.members = fresh.members.map(fm => {
       const sm = parsed.members?.find(m => m.id === fm.id);
@@ -154,7 +165,22 @@ function loadState() {
         ...fm,
         steps: fm.steps.map((fs, i) => {
           const ss = sm.steps?.[i];
-          return ss ? { ...fs, ...ss } : fs;
+          if (!ss) return fs;
+          return {
+            ...fs,
+            progress:  ss.progress  ?? fs.progress,
+            startWeek: ss.startWeek ?? fs.startWeek,
+            endWeek:   ss.endWeek   ?? fs.endWeek,
+            risk:      ss.risk      ?? fs.risk,
+            memo:      ss.memo      ?? fs.memo,
+            subItems:  (ss.subItems || []).map(si => ({
+              id:        si.id        || genId(),
+              name:      si.name      || '',
+              progress:  si.progress  ?? 0,
+              startWeek: si.startWeek ?? fs.startWeek,
+              endWeek:   si.endWeek   ?? fs.endWeek,
+            })),
+          };
         }),
         reviews: fm.reviews.map((fr, i) => {
           const sr = sm.reviews?.[i];
@@ -167,44 +193,57 @@ function loadState() {
     fresh.selMemberId  = parsed.selMemberId  ?? fresh.selMemberId;
     fresh.selStepIndex = parsed.selStepIndex ?? fresh.selStepIndex;
     return fresh;
-  } catch (e) {
-    return createState();
-  }
+  } catch(e) { return createState(); }
 }
 
 function saveState(st) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      members:      st.members.map(m => ({
+      members: st.members.map(m => ({
         id: m.id,
-        steps:   m.steps.map(s => ({ progress:s.progress, startWeek:s.startWeek, endWeek:s.endWeek, risk:s.risk, memo:s.memo })),
-        reviews: m.reviews.map(r => ({ weekIndex:r.weekIndex, completed:r.completed, completedDate:r.completedDate })),
+        steps: m.steps.map(s => ({
+          progress:  s.progress,
+          startWeek: s.startWeek,
+          endWeek:   s.endWeek,
+          risk:      s.risk,
+          memo:      s.memo,
+          subItems:  (s.subItems || []).map(si => ({
+            id:        si.id,
+            name:      si.name,
+            progress:  si.progress,
+            startWeek: si.startWeek,
+            endWeek:   si.endWeek,
+          })),
+        })),
+        reviews: m.reviews.map(r => ({
+          weekIndex: r.weekIndex, completed: r.completed, completedDate: r.completedDate,
+        })),
         nextActionDate:    m.nextActionDate,
         nextActionContent: m.nextActionContent,
       })),
       selMemberId:  st.selMemberId,
       selStepIndex: st.selStepIndex,
     }));
-  } catch (e) { /* storage full etc. */ }
+  } catch(e) {}
 }
 
 /* ═══════════════════════════════════════════════════════════════
    APP
 ═══════════════════════════════════════════════════════════════ */
 function App() {
-  const [st, setSt] = useState(loadState);
-  const [modal, setModal] = useState(null);
+  const [st, setSt]       = useState(loadState);
+  const [modal, setModal] = useState(null);   // { memberId, stepIndex, subItemId }
   const [tmpPct, setTmpPct] = useState(0);
 
-  // Persist whenever state changes
   useEffect(() => { saveState(st); }, [st]);
 
+  /* ── step callbacks ── */
   const updateStep = useCallback((mid, si, updates) => {
     setSt(prev => ({
       ...prev,
       members: prev.members.map(m =>
         m.id === mid
-          ? { ...m, steps: m.steps.map((s, i) => i === si ? { ...s, ...updates } : s) }
+          ? { ...m, steps: m.steps.map((s,i) => i===si ? { ...s, ...updates } : s) }
           : m
       ),
     }));
@@ -213,43 +252,103 @@ function App() {
   const updateMember = useCallback((mid, updates) => {
     setSt(prev => ({
       ...prev,
-      members: prev.members.map(m => m.id === mid ? { ...m, ...updates } : m),
+      members: prev.members.map(m => m.id===mid ? { ...m, ...updates } : m),
     }));
   }, []);
 
-  const openModal = useCallback((mid, si) => {
+  /* ── sub-item callbacks ── */
+  const addSubItem = useCallback((mid, si) => {
+    setSt(prev => {
+      const member = prev.members.find(m => m.id === mid);
+      const step   = member?.steps[si];
+      const count  = step?.subItems?.length ?? 0;
+      const newItem = {
+        id:        genId(),
+        name:      `小項目${count + 1}`,
+        progress:  0,
+        startWeek: step?.startWeek ?? DEFAULT_SCHEDULE[si].startWeek,
+        endWeek:   step?.endWeek   ?? DEFAULT_SCHEDULE[si].endWeek,
+      };
+      return {
+        ...prev,
+        members: prev.members.map(m =>
+          m.id === mid
+            ? { ...m, steps: m.steps.map((s,i) => i===si
+                ? { ...s, subItems: [...(s.subItems||[]), newItem] }
+                : s) }
+            : m
+        ),
+      };
+    });
+  }, []);
+
+  const updateSubItem = useCallback((mid, si, subId, updates) => {
+    setSt(prev => ({
+      ...prev,
+      members: prev.members.map(m =>
+        m.id === mid
+          ? { ...m, steps: m.steps.map((s,i) => i===si
+              ? { ...s, subItems: (s.subItems||[]).map(sub => sub.id===subId ? { ...sub, ...updates } : sub) }
+              : s) }
+          : m
+      ),
+    }));
+  }, []);
+
+  const deleteSubItem = useCallback((mid, si, subId) => {
+    if (!confirm('この小項目を削除しますか？')) return;
+    setSt(prev => ({
+      ...prev,
+      members: prev.members.map(m =>
+        m.id === mid
+          ? { ...m, steps: m.steps.map((s,i) => i===si
+              ? { ...s, subItems: (s.subItems||[]).filter(sub => sub.id !== subId) }
+              : s) }
+          : m
+      ),
+    }));
+  }, []);
+
+  /* ── modal ── */
+  const openModal = useCallback((mid, si, subId = null) => {
     const member = st.members.find(m => m.id === mid);
-    setTmpPct(member.steps[si].progress);
-    setModal({ memberId: mid, stepIndex: si });
+    const pct = subId
+      ? (member?.steps[si]?.subItems || []).find(s => s.id === subId)?.progress ?? 0
+      : member?.steps[si]?.progress ?? 0;
+    setTmpPct(pct);
+    setModal({ memberId: mid, stepIndex: si, subItemId: subId });
   }, [st.members]);
 
   const applyModal = useCallback(() => {
-    if (modal) updateStep(modal.memberId, modal.stepIndex, { progress: tmpPct });
+    if (!modal) return;
+    if (modal.subItemId) {
+      updateSubItem(modal.memberId, modal.stepIndex, modal.subItemId, { progress: tmpPct });
+    } else {
+      updateStep(modal.memberId, modal.stepIndex, { progress: tmpPct });
+    }
     setModal(null);
-  }, [modal, tmpPct, updateStep]);
+  }, [modal, tmpPct, updateStep, updateSubItem]);
 
+  /* ── review ── */
   const completeReview = useCallback((mid, ri) => {
     const date = TODAY.toLocaleDateString('ja-JP');
     setSt(prev => ({
       ...prev,
       members: prev.members.map(m =>
         m.id === mid
-          ? { ...m, reviews: m.reviews.map((r, i) => i === ri ? { ...r, completed:true, completedDate:date } : r) }
+          ? { ...m, reviews: m.reviews.map((r,i) => i===ri ? { ...r, completed:true, completedDate:date } : r) }
           : m
       ),
     }));
   }, []);
 
-  const todayStr = TODAY.toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric', weekday:'short' });
-
-  // activeTab: 'all' | member id
+  /* ── tabs ── */
   const [activeTab, setActiveTab] = useState(() => {
     try { return localStorage.getItem('qc-active-tab') || 'all'; } catch(e) { return 'all'; }
   });
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     try { localStorage.setItem('qc-active-tab', tab); } catch(e) {}
-    // sync admin panel member selector
     if (tab !== 'all') setSt(p => ({ ...p, selMemberId: tab, selStepIndex: 0 }));
   };
 
@@ -257,12 +356,15 @@ function App() {
     ? st.members
     : st.members.filter(m => m.id === activeTab);
 
+  /* ── reset ── */
   const handleReset = () => {
     if (confirm('全データをリセットしますか？この操作は元に戻せません。')) {
       localStorage.removeItem(STORAGE_KEY);
       setSt(createState());
     }
   };
+
+  const todayStr = TODAY.toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric', weekday:'short' });
 
   return html`
     <div style=${{ minHeight:'100vh', background:'#0f172a', color:'#e2e8f0' }}>
@@ -301,27 +403,24 @@ function App() {
 
       <!-- TABS -->
       <div style=${{
-        display:'flex', gap:0, borderBottom:'1px solid #1e293b',
+        display:'flex', borderBottom:'1px solid #1e293b',
         background:'rgba(15,23,42,0.97)', padding:'0 24px',
         position:'sticky', top:57, zIndex:40,
       }}>
         ${[{ id:'all', name:'全員', color:'#94a3b8' }, ...MEMBERS.map(m => ({ id:m.id, name:m.name, color:m.color }))].map(tab => {
           const active = activeTab === tab.id;
+          const tabMember = tab.id !== 'all' ? st.members.find(m => m.id === tab.id) : null;
           return html`
             <button key=${tab.id} onClick=${() => handleTabChange(tab.id)} style=${{
               padding:'10px 18px', fontSize:'0.82rem', fontWeight: active ? 800 : 500,
               border:'none', borderBottom: active ? `2px solid ${tab.color}` : '2px solid transparent',
-              background:'transparent',
-              color: active ? tab.color : '#475569',
+              background:'transparent', color: active ? tab.color : '#475569',
               cursor:'pointer', transition:'all .15s', whiteSpace:'nowrap',
             }}>
               ${tab.name}
-              ${tab.id !== 'all' && html`
-                <span style=${{
-                  marginLeft:6, fontSize:'0.65rem', fontWeight:700,
-                  color: statusInfo(st.members.find(m=>m.id===tab.id)).color,
-                }}>
-                  ${overallPct(st.members.find(m=>m.id===tab.id))}%
+              ${tabMember && html`
+                <span style=${{ marginLeft:6, fontSize:'0.65rem', fontWeight:700, color:statusInfo(tabMember).color }}>
+                  ${overallPct(tabMember)}%
                 </span>
               `}
             </button>
@@ -332,16 +431,26 @@ function App() {
       <!-- MAIN -->
       <main style=${{ padding:'18px 24px', display:'flex', flexDirection:'column', gap:18 }}>
         <${StatusCards} members=${visibleMembers} />
-        <${GanttSection} members=${visibleMembers} onBarClick=${openModal} onReviewComplete=${completeReview} />
+        <${GanttSection}
+          members=${visibleMembers}
+          onBarClick=${openModal}
+          onReviewComplete=${completeReview}
+          onSubItemAdd=${addSubItem}
+          onSubItemUpdate=${updateSubItem}
+          onSubItemDelete=${deleteSubItem}
+        />
         <${AdminPanel}
           members=${st.members}
           selMemberId=${activeTab !== 'all' ? activeTab : st.selMemberId}
           selStepIndex=${st.selStepIndex}
-          onSelectMember=${id => { setSt(p => ({ ...p, selMemberId:id, selStepIndex:0 })); }}
+          onSelectMember=${id => setSt(p => ({ ...p, selMemberId:id, selStepIndex:0 }))}
           onSelectStep=${i  => setSt(p => ({ ...p, selStepIndex:i }))}
           onUpdateStep=${updateStep}
           onUpdateMember=${updateMember}
           onReviewComplete=${completeReview}
+          onSubItemAdd=${addSubItem}
+          onSubItemUpdate=${updateSubItem}
+          onSubItemDelete=${deleteSubItem}
         />
       </main>
 
@@ -360,8 +469,9 @@ function App() {
    STATUS CARDS
 ═══════════════════════════════════════════════════════════════ */
 function StatusCards({ members }) {
+  const cols = members.length === 1 ? '1fr' : members.length === 2 ? 'repeat(2,1fr)' : members.length === 3 ? 'repeat(3,1fr)' : 'repeat(4,1fr)';
   return html`
-    <div style=${{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
+    <div style=${{ display:'grid', gridTemplateColumns:cols, gap:14 }}>
       ${members.map(m => html`<${MemberCard} key=${m.id} member=${m} />`)}
     </div>
   `;
@@ -372,7 +482,6 @@ function MemberCard({ member }) {
   const csi  = currentStepIdx(member);
   const stat = statusInfo(member);
   const step = STEPS[csi];
-
   return html`
     <div style=${{
       background:'#1e293b', border:'1px solid #334155',
@@ -389,9 +498,7 @@ function MemberCard({ member }) {
           borderRadius:999, padding:'2px 9px', fontSize:'0.68rem', fontWeight:800, whiteSpace:'nowrap',
         }}>${stat.label}</span>
       </div>
-
       <div style=${{ fontSize:'0.67rem', color:'#64748b', lineHeight:1.55 }}>${member.theme}</div>
-
       <div>
         <div style=${{ display:'flex', justifyContent:'space-between', fontSize:'0.7rem', marginBottom:4 }}>
           <span style=${{ color:'#64748b' }}>全体進捗</span>
@@ -401,28 +508,19 @@ function MemberCard({ member }) {
           <div style=${{ background:member.color, width:`${pct}%`, height:'100%', borderRadius:4, transition:'width .4s ease' }} />
         </div>
       </div>
-
-      <div style=${{
-        background:'#0f172a', borderRadius:8, padding:'9px 12px',
-        borderLeft:`3px solid ${step.color}`,
-      }}>
+      <div style=${{ background:'#0f172a', borderRadius:8, padding:'9px 12px', borderLeft:`3px solid ${step.color}` }}>
         <div style=${{ fontSize:'0.62rem', color:'#475569', marginBottom:2 }}>現在のステップ</div>
-        <div style=${{ fontWeight:700, fontSize:'0.8rem', color:step.color }}>
-          Step ${csi+1}：${step.name}
-        </div>
+        <div style=${{ fontWeight:700, fontSize:'0.8rem', color:step.color }}>Step ${csi+1}：${step.name}</div>
         <div style=${{ fontSize:'0.68rem', color:'#64748b', marginTop:2 }}>
           ${member.steps[csi].progress}% 完了
-          ${member.steps[csi].risk ? html`<span style=${{ marginLeft:6 }}>
-            ${member.steps[csi].risk==='red'?'🔴':member.steps[csi].risk==='yellow'?'🟡':'🟢'}
-          </span>` : ''}
+          ${member.steps[csi].risk ? html`<span style=${{ marginLeft:6 }}>${member.steps[csi].risk==='red'?'🔴':member.steps[csi].risk==='yellow'?'🟡':'🟢'}</span>` : ''}
         </div>
       </div>
-
       ${(member.nextActionDate || member.nextActionContent) && html`
         <div style=${{ fontSize:'0.66rem', color:'#64748b', borderTop:'1px solid #1e293b', paddingTop:8 }}>
           次回アクション：
           ${member.nextActionDate && html`<span style=${{ color:'#fbbf24', fontWeight:700 }}>
-            ${new Date(member.nextActionDate + 'T00:00').toLocaleDateString('ja-JP',{ month:'short', day:'numeric' })}
+            ${new Date(member.nextActionDate+'T00:00').toLocaleDateString('ja-JP',{month:'short',day:'numeric'})}
           </span>`}
           ${member.nextActionDate && member.nextActionContent ? ' ' : ''}
           <span style=${{ color:'#94a3b8' }}>${member.nextActionContent}</span>
@@ -436,18 +534,15 @@ function MemberCard({ member }) {
    GANTT
 ═══════════════════════════════════════════════════════════════ */
 function Diamond({ completed, size=12 }) {
-  return html`
-    <span style=${{
-      display:'inline-block', width:size, height:size,
-      transform:'rotate(45deg)',
-      background: completed ? '#4ade80' : 'transparent',
-      border:`2px solid ${completed ? '#4ade80' : '#64748b'}`,
-      borderRadius:2, flexShrink:0,
-    }} />
-  `;
+  return html`<span style=${{
+    display:'inline-block', width:size, height:size, transform:'rotate(45deg)',
+    background: completed?'#4ade80':'transparent',
+    border:`2px solid ${completed?'#4ade80':'#64748b'}`,
+    borderRadius:2, flexShrink:0,
+  }} />`;
 }
 
-function GanttSection({ members, onBarClick, onReviewComplete }) {
+function GanttSection({ members, onBarClick, onReviewComplete, onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
   return html`
     <div style=${{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, overflow:'hidden' }}>
       <div style=${{
@@ -455,7 +550,7 @@ function GanttSection({ members, onBarClick, onReviewComplete }) {
         display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', rowGap:6,
       }}>
         <h2 style=${{ fontWeight:700, fontSize:'0.9rem' }}>📊 ガントチャート</h2>
-        <div style=${{ display:'flex', gap:16, marginLeft:'auto', fontSize:'0.65rem', color:'#475569', alignItems:'center', flexWrap:'wrap' }}>
+        <div style=${{ display:'flex', gap:14, marginLeft:'auto', fontSize:'0.65rem', color:'#475569', alignItems:'center', flexWrap:'wrap' }}>
           <span style=${{ display:'inline-flex', alignItems:'center', gap:4 }}>
             <span style=${{ width:12, height:9, borderRadius:2, border:'1px solid #475569', display:'inline-block', background:'rgba(15,23,42,0.8)' }} /> 未着手
           </span>
@@ -471,14 +566,14 @@ function GanttSection({ members, onBarClick, onReviewComplete }) {
           <span style=${{ display:'inline-flex', alignItems:'center', gap:4 }}>
             <${Diamond} completed=${true} /> 実施済
           </span>
+          <span style=${{ color:'#64748b' }}>　ステップ行末「＋」で小項目追加</span>
         </div>
       </div>
-
       <div style=${{ overflowX:'auto' }}>
         <div style=${{ minWidth:1000 }}>
           <!-- Week header -->
           <div style=${{
-            display:'grid', gridTemplateColumns:'185px repeat(13,1fr)',
+            display:'grid', gridTemplateColumns:'195px repeat(13,1fr)',
             background:'#0a1526', borderBottom:'1px solid #334155',
           }}>
             <div style=${{ padding:'6px 10px', fontSize:'0.62rem', color:'#475569', borderRight:'1px solid #334155' }}>
@@ -487,18 +582,18 @@ function GanttSection({ members, onBarClick, onReviewComplete }) {
             ${WEEKS.map((w,i) => html`
               <div key=${i} style=${{
                 padding:'5px 3px', textAlign:'center', fontSize:'0.62rem',
-                color: i===currentWeekIdx ? '#38bdf8' : '#475569',
-                fontWeight: i===currentWeekIdx ? 800 : 400,
-                borderRight: i<12 ? '1px solid #1e293b' : 'none',
-                borderBottom: i===currentWeekIdx ? '2px solid #38bdf8' : '2px solid transparent',
+                color: i===currentWeekIdx?'#38bdf8':'#475569',
+                fontWeight: i===currentWeekIdx?800:400,
+                borderRight: i<12?'1px solid #1e293b':'none',
+                borderBottom: i===currentWeekIdx?'2px solid #38bdf8':'2px solid transparent',
               }}>${w.label}</div>
             `)}
           </div>
-
           ${members.map((m,mi) => html`
             <${MemberRows}
               key=${m.id} member=${m} isLast=${mi===members.length-1}
               onBarClick=${onBarClick} onReviewComplete=${onReviewComplete}
+              onSubItemAdd=${onSubItemAdd} onSubItemUpdate=${onSubItemUpdate} onSubItemDelete=${onSubItemDelete}
             />
           `)}
         </div>
@@ -507,49 +602,41 @@ function GanttSection({ members, onBarClick, onReviewComplete }) {
   `;
 }
 
-function MemberRows({ member, isLast, onBarClick, onReviewComplete }) {
+function MemberRows({ member, isLast, onBarClick, onReviewComplete, onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
   const [collapsed, setCollapsed] = useState(false);
   const pct  = overallPct(member);
   const stat = statusInfo(member);
 
+  const GRID = '195px repeat(13,1fr)';
+
   return html`
-    <div style=${{ borderBottom: isLast ? 'none' : '2px solid #334155' }}>
-      <!-- member header row -->
+    <div style=${{ borderBottom: isLast?'none':'2px solid #334155' }}>
+      <!-- member header -->
       <div
-        style=${{
-          display:'grid', gridTemplateColumns:'185px repeat(13,1fr)',
-          background:'#131f33', cursor:'pointer', userSelect:'none',
-        }}
+        style=${{ display:'grid', gridTemplateColumns:GRID, background:'#131f33', cursor:'pointer', userSelect:'none' }}
         onClick=${() => setCollapsed(c => !c)}
       >
-        <div style=${{
-          padding:'7px 10px', borderRight:'1px solid #334155',
-          display:'flex', alignItems:'center', gap:6,
-        }}>
+        <div style=${{ padding:'7px 10px', borderRight:'1px solid #334155', display:'flex', alignItems:'center', gap:6 }}>
           <span style=${{ color:'#475569', fontSize:'0.6rem', width:8, flexShrink:0 }}>${collapsed?'▶':'▼'}</span>
           <div style=${{ flex:1, minWidth:0 }}>
-            <div style=${{ fontWeight:700, fontSize:'0.8rem', color:member.color, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-              ${member.name}
-            </div>
+            <div style=${{ fontWeight:700, fontSize:'0.8rem', color:member.color, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>${member.name}</div>
             <div style=${{ fontSize:'0.6rem', color:'#475569' }}>${member.factory}</div>
           </div>
           <span style=${{ fontSize:'0.7rem', fontWeight:800, color:stat.color, flexShrink:0 }}>${pct}%</span>
         </div>
-
-        <!-- diamond markers -->
         ${WEEKS.map((_,wi) => {
-          const rev = member.reviews.find(r => r.weekIndex === wi);
+          const rev = member.reviews.find(r => r.weekIndex===wi);
           return html`
             <div key=${wi} style=${{
               display:'flex', alignItems:'center', justifyContent:'center', minHeight:34,
-              borderRight: wi<12 ? '1px solid #1e293b' : 'none',
-              background: wi===currentWeekIdx ? 'rgba(56,189,248,0.05)' : 'transparent',
+              borderRight: wi<12?'1px solid #1e293b':'none',
+              background: wi===currentWeekIdx?'rgba(56,189,248,0.05)':'transparent',
             }}>
               ${rev && html`
                 <button
                   onClick=${e => { e.stopPropagation(); if(!rev.completed) onReviewComplete(member.id, member.reviews.indexOf(rev)); }}
-                  title=${rev.completed ? `レビュー済：${rev.completedDate}` : 'クリックでレビュー完了'}
-                  style=${{ background:'none', border:'none', padding:3, cursor: rev.completed?'default':'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                  title=${rev.completed?`レビュー済：${rev.completedDate}`:'クリックでレビュー完了'}
+                  style=${{ background:'none', border:'none', padding:3, cursor:rev.completed?'default':'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
                 >
                   <${Diamond} completed=${rev.completed} />
                 </button>
@@ -559,57 +646,62 @@ function MemberRows({ member, isLast, onBarClick, onReviewComplete }) {
         })}
       </div>
 
-      <!-- step rows -->
+      <!-- steps + sub-items -->
       ${!collapsed && STEPS.map((step, si) => {
-        const sd = member.steps[si];
+        const sd      = member.steps[si];
         const delayed = stepDelayed(sd);
+        const subs    = sd.subItems || [];
+
         return html`
-          <div key=${step.id} style=${{
-            display:'grid', gridTemplateColumns:'185px repeat(13,1fr)',
-            borderTop:'1px solid #0f1e30', minHeight:28,
-          }}>
+          <!-- step row -->
+          <div key=${step.id} style=${{ display:'grid', gridTemplateColumns:GRID, borderTop:'1px solid #0f1e30', minHeight:28 }}>
             <div style=${{
-              padding:'3px 8px 3px 24px', borderRight:'1px solid #334155',
-              display:'flex', alignItems:'center', gap:5, fontSize:'0.68rem',
+              padding:'3px 6px 3px 22px', borderRight:'1px solid #334155',
+              display:'flex', alignItems:'center', gap:4, fontSize:'0.68rem',
             }}>
               <span style=${{
                 background:step.color, color:'#0f172a',
                 borderRadius:3, padding:'1px 5px', fontSize:'0.58rem', fontWeight:800, flexShrink:0,
               }}>S${si+1}</span>
-              <span style=${{ color:'#94a3b8', fontSize:'0.66rem', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+              <span style=${{ color:'#94a3b8', fontSize:'0.66rem', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                 ${step.name}
               </span>
-              ${sd.risk && html`
-                <span style=${{ marginLeft:'auto', fontSize:10, flexShrink:0 }}>
-                  ${sd.risk==='red'?'🔴':sd.risk==='yellow'?'🟡':'🟢'}
-                </span>
-              `}
+              ${sd.risk && html`<span style=${{ fontSize:10, flexShrink:0 }}>${sd.risk==='red'?'🔴':sd.risk==='yellow'?'🟡':'🟢'}</span>`}
+              <!-- add sub-item button -->
+              <button
+                onClick=${e => { e.stopPropagation(); onSubItemAdd(member.id, si); }}
+                title="小項目を追加"
+                style=${{
+                  background:'rgba(74,222,128,0.1)', border:'1px solid rgba(74,222,128,0.3)',
+                  color:'#4ade80', borderRadius:4, padding:'1px 5px', cursor:'pointer',
+                  fontSize:'0.65rem', fontWeight:800, flexShrink:0, lineHeight:1.4,
+                }}
+              >＋</button>
             </div>
-
             ${WEEKS.map((_,wi) => {
-              const inRange = wi >= sd.startWeek && wi <= sd.endWeek;
-              const isFirst = wi === sd.startWeek;
-              const isLast2 = wi === sd.endWeek;
+              const inRange = wi>=sd.startWeek && wi<=sd.endWeek;
+              const isFst   = wi===sd.startWeek;
+              const isLst   = wi===sd.endWeek;
               return html`
                 <div key=${wi}
-                  onClick=${inRange ? () => onBarClick(member.id, si) : undefined}
+                  onClick=${inRange ? () => onBarClick(member.id, si, null) : undefined}
                   style=${{
-                    borderRight: wi<12 ? '1px solid #0f1e30' : 'none',
-                    background: wi===currentWeekIdx ? 'rgba(56,189,248,0.03)' : 'transparent',
-                    cursor: inRange ? 'pointer' : 'default',
+                    borderRight: wi<12?'1px solid #0f1e30':'none',
+                    background: wi===currentWeekIdx?'rgba(56,189,248,0.03)':'transparent',
+                    cursor: inRange?'pointer':'default',
                     position:'relative', display:'flex', alignItems:'center', padding:'2px 1px',
                   }}
                 >
                   ${inRange && html`
                     <div style=${{
-                      position:'absolute', inset:`2px ${isLast2?'1px':'0px'} 2px ${isFirst?'1px':'0px'}`,
+                      position:'absolute', inset:`2px ${isLst?'1px':'0px'} 2px ${isFst?'1px':'0px'}`,
                       background: barColor(sd.progress, step.color, delayed),
-                      borderRadius:`${isFirst?4:0}px ${isLast2?4:0}px ${isLast2?4:0}px ${isFirst?4:0}px`,
+                      borderRadius:`${isFst?4:0}px ${isLst?4:0}px ${isLst?4:0}px ${isFst?4:0}px`,
                       border:`1px solid ${delayed?'rgba(248,113,113,0.2)':step.color+'22'}`,
                       transition:'background .25s',
                       display:'flex', alignItems:'center', justifyContent:'center',
                     }}>
-                      ${isFirst && sd.progress > 0 && html`
+                      ${isFst && sd.progress>0 && html`
                         <span style=${{ fontSize:'0.55rem', color:'#fff', fontWeight:800, textShadow:'0 1px 3px rgba(0,0,0,0.8)' }}>
                           ${sd.progress}%
                         </span>
@@ -620,6 +712,65 @@ function MemberRows({ member, isLast, onBarClick, onReviewComplete }) {
               `;
             })}
           </div>
+
+          <!-- sub-item rows -->
+          ${subs.map(sub => html`
+            <div key=${sub.id} style=${{ display:'grid', gridTemplateColumns:GRID, borderTop:'1px solid #080d18', minHeight:24 }}>
+              <div style=${{
+                padding:'2px 6px 2px 36px', borderRight:'1px solid #334155',
+                display:'flex', alignItems:'center', gap:4,
+              }}>
+                <span style=${{ color:step.color, fontSize:'0.55rem', flexShrink:0, opacity:0.7 }}>└</span>
+                <input
+                  class="sub-name-input"
+                  value=${sub.name}
+                  placeholder="小項目名を入力"
+                  onInput=${e => onSubItemUpdate(member.id, si, sub.id, { name: e.target.value })}
+                  onClick=${e => e.stopPropagation()}
+                />
+                <button
+                  onClick=${e => { e.stopPropagation(); onSubItemDelete(member.id, si, sub.id); }}
+                  title="削除"
+                  style=${{
+                    background:'none', border:'none', color:'#475569', cursor:'pointer',
+                    padding:'0 2px', fontSize:'0.75rem', flexShrink:0, lineHeight:1,
+                  }}
+                >✕</button>
+              </div>
+              ${WEEKS.map((_,wi) => {
+                const inR  = wi>=sub.startWeek && wi<=sub.endWeek;
+                const isFst = wi===sub.startWeek;
+                const isLst = wi===sub.endWeek;
+                return html`
+                  <div key=${wi}
+                    onClick=${inR ? () => onBarClick(member.id, si, sub.id) : undefined}
+                    style=${{
+                      borderRight: wi<12?'1px solid #080d18':'none',
+                      background: wi===currentWeekIdx?'rgba(56,189,248,0.02)':'transparent',
+                      cursor: inR?'pointer':'default',
+                      position:'relative', padding:'3px 1px',
+                    }}
+                  >
+                    ${inR && html`
+                      <div style=${{
+                        position:'absolute', inset:`3px ${isLst?'1px':'0px'} 3px ${isFst?'1px':'0px'}`,
+                        background: barColor(sub.progress, step.color, false),
+                        borderRadius:`${isFst?3:0}px ${isLst?3:0}px ${isLst?3:0}px ${isFst?3:0}px`,
+                        border:`1px solid ${step.color}18`, opacity:0.85,
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                      }}>
+                        ${isFst && sub.progress>0 && html`
+                          <span style=${{ fontSize:'0.5rem', color:'#fff', fontWeight:800, textShadow:'0 1px 2px rgba(0,0,0,0.9)' }}>
+                            ${sub.progress}%
+                          </span>
+                        `}
+                      </div>
+                    `}
+                  </div>
+                `;
+              })}
+            </div>
+          `)}
         `;
       })}
     </div>
@@ -630,61 +781,52 @@ function MemberRows({ member, isLast, onBarClick, onReviewComplete }) {
    PROGRESS MODAL
 ═══════════════════════════════════════════════════════════════ */
 function ProgressModal({ modal, members, tmpPct, onPctChange, onApply, onClose }) {
-  const member = members.find(m => m.id === modal.memberId);
-  const step   = STEPS[modal.stepIndex];
+  const member  = members.find(m => m.id === modal.memberId);
+  const step    = STEPS[modal.stepIndex];
+  const subItem = modal.subItemId
+    ? (member?.steps[modal.stepIndex]?.subItems || []).find(s => s.id === modal.subItemId)
+    : null;
 
   return html`
     <div
-      style=${{
-        position:'fixed', inset:0, background:'rgba(0,0,0,0.75)',
-        display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999,
-      }}
+      style=${{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999 }}
       onClick=${onClose}
     >
       <div
-        style=${{
-          background:'#1e293b', border:'1px solid #334155', borderRadius:16,
-          padding:28, width:360,
-          boxShadow:'0 30px 60px rgba(0,0,0,0.7)',
-        }}
+        style=${{ background:'#1e293b', border:'1px solid #334155', borderRadius:16, padding:28, width:380, boxShadow:'0 30px 60px rgba(0,0,0,0.7)' }}
         onClick=${e => e.stopPropagation()}
       >
         <div style=${{ fontWeight:800, fontSize:'0.95rem', marginBottom:4 }}>進捗を更新</div>
-        <div style=${{ fontSize:'0.75rem', color:'#64748b', marginBottom:22 }}>
+        <div style=${{ fontSize:'0.75rem', color:'#64748b', marginBottom:6 }}>
           ${member?.name}　／　Step ${modal.stepIndex+1}：${step.name}
         </div>
+        ${subItem && html`
+          <div style=${{
+            fontSize:'0.72rem', color:step.color, marginBottom:18,
+            background:step.color+'15', borderRadius:6, padding:'5px 10px', borderLeft:`3px solid ${step.color}`,
+          }}>
+            小項目：${subItem.name || '（名称未設定）'}
+          </div>
+        `}
+        ${!subItem && html`<div style=${{ marginBottom:18 }} />`}
 
         <div style=${{ display:'flex', gap:8, marginBottom:16 }}>
           ${[0,25,50,75,100].map(pct => html`
             <button key=${pct} onClick=${() => onPctChange(pct)} style=${{
               flex:1, padding:'10px 2px', borderRadius:8,
-              border:`2px solid ${tmpPct===pct ? step.color : '#334155'}`,
-              background: tmpPct===pct ? step.color+'28' : '#0f172a',
-              color: tmpPct===pct ? step.color : '#64748b',
-              cursor:'pointer', fontWeight: tmpPct===pct ? 800 : 400,
-              fontSize:'0.85rem', transition:'all .15s',
+              border:`2px solid ${tmpPct===pct?step.color:'#334155'}`,
+              background: tmpPct===pct?step.color+'28':'#0f172a',
+              color: tmpPct===pct?step.color:'#64748b',
+              cursor:'pointer', fontWeight:tmpPct===pct?800:400, fontSize:'0.85rem', transition:'all .15s',
             }}>${pct}%</button>
           `)}
         </div>
-
         <div style=${{ background:'#334155', borderRadius:5, height:10, marginBottom:24, overflow:'hidden' }}>
-          <div style=${{
-            background:step.color, width:`${tmpPct}%`, height:'100%',
-            borderRadius:5, transition:'width .3s ease',
-          }} />
+          <div style=${{ background:step.color, width:`${tmpPct}%`, height:'100%', borderRadius:5, transition:'width .3s ease' }} />
         </div>
-
         <div style=${{ display:'flex', gap:10 }}>
-          <button onClick=${onClose} style=${{
-            flex:1, padding:10, borderRadius:8,
-            border:'1px solid #334155', background:'transparent',
-            color:'#64748b', cursor:'pointer',
-          }}>キャンセル</button>
-          <button onClick=${onApply} style=${{
-            flex:2, padding:10, borderRadius:8, border:'none',
-            background:step.color, color:'#0f172a', cursor:'pointer',
-            fontWeight:800, fontSize:'0.9rem',
-          }}>更新する</button>
+          <button onClick=${onClose} style=${{ flex:1, padding:10, borderRadius:8, border:'1px solid #334155', background:'transparent', color:'#64748b', cursor:'pointer' }}>キャンセル</button>
+          <button onClick=${onApply} style=${{ flex:2, padding:10, borderRadius:8, border:'none', background:step.color, color:'#0f172a', cursor:'pointer', fontWeight:800, fontSize:'0.9rem' }}>更新する</button>
         </div>
       </div>
     </div>
@@ -694,10 +836,13 @@ function ProgressModal({ modal, members, tmpPct, onPctChange, onApply, onClose }
 /* ═══════════════════════════════════════════════════════════════
    ADMIN PANEL
 ═══════════════════════════════════════════════════════════════ */
-function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSelectStep, onUpdateStep, onUpdateMember, onReviewComplete }) {
-  const selMember = members.find(m => m.id === selMemberId);
-  const selStep   = selMember?.steps[selStepIndex];
-  const stepColor = STEPS[selStepIndex].color;
+function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSelectStep,
+                      onUpdateStep, onUpdateMember, onReviewComplete,
+                      onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
+  const selMember  = members.find(m => m.id === selMemberId);
+  const selStep    = selMember?.steps[selStepIndex];
+  const stepColor  = STEPS[selStepIndex].color;
+  const subItems   = selStep?.subItems || [];
 
   const [memo,       setMemo]       = useState('');
   const [actDate,    setActDate]    = useState('');
@@ -716,16 +861,11 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
     onUpdateMember(selMemberId, { nextActionDate: actDate, nextActionContent: actContent });
     setSavedAct(true); setTimeout(() => setSavedAct(false), 2000);
   };
-  const setRisk = r => onUpdateStep(selMemberId, selStepIndex, { risk: selStep?.risk === r ? null : r });
+  const setRisk = r => onUpdateStep(selMemberId, selStepIndex, { risk: selStep?.risk===r ? null : r });
 
-  const IS = {  // input style
-    width:'100%', background:'#0a1526', color:'#e2e8f0',
-    border:'1px solid #334155', borderRadius:8, padding:'7px 11px', outline:'none',
-  };
-  const LS = { // label style
-    fontSize:'0.65rem', color:'#475569', display:'block', marginBottom:6,
-    fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em',
-  };
+  const IS = { width:'100%', background:'#0a1526', color:'#e2e8f0', border:'1px solid #334155', borderRadius:8, padding:'7px 11px', outline:'none' };
+  const LS = { fontSize:'0.65rem', color:'#475569', display:'block', marginBottom:6, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em' };
+  const SS = { ...IS, padding:'5px 8px', fontSize:'0.72rem' }; // small input style
 
   return html`
     <div style=${{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, overflow:'hidden' }}>
@@ -733,6 +873,7 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
         <h2 style=${{ fontWeight:700, fontSize:'0.9rem' }}>⚙️ 管理者アクション＆メモ</h2>
       </div>
 
+      <!-- 3-column grid -->
       <div style=${{ display:'grid', gridTemplateColumns:'230px 1fr 235px' }}>
 
         <!-- LEFT: selector + risk -->
@@ -743,42 +884,31 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
               ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.name}（${m.factory}）</option>`)}
             </select>
           </div>
-
           <div>
             <label style=${LS}>ステップ選択</label>
             <select value=${selStepIndex} onChange=${e => onSelectStep(+e.target.value)} style=${IS}>
               ${STEPS.map((s,i) => html`<option key=${s.id} value=${i}>Step${i+1}：${s.name}</option>`)}
             </select>
           </div>
-
           <div>
-            <label style=${LS}>リスクフラグ（ステップ単位）</label>
+            <label style=${LS}>リスクフラグ</label>
             <div style=${{ display:'flex', gap:8 }}>
               ${[['red','🔴','要注意'],['yellow','🟡','注意'],['green','🟢','良好']].map(([v,e,t]) => html`
                 <button key=${v} onClick=${() => setRisk(v)} title=${t} style=${{
                   flex:1, padding:'8px 4px', borderRadius:8, fontSize:'1.05rem',
-                  border:`2px solid ${selStep?.risk===v ? '#94a3b8' : '#1e293b'}`,
-                  background: selStep?.risk===v ? '#334155' : '#0a1526',
+                  border:`2px solid ${selStep?.risk===v?'#94a3b8':'#1e293b'}`,
+                  background: selStep?.risk===v?'#334155':'#0a1526',
                   cursor:'pointer', transition:'all .15s',
                 }}>${e}</button>
               `)}
             </div>
           </div>
-
-          <!-- summary -->
-          <div style=${{
-            background:'#0a1526', borderRadius:8, padding:'10px 12px',
-            flex:1, borderLeft:`3px solid ${stepColor}`,
-          }}>
-            <div style=${{ fontSize:'0.62rem', color:'#475569', marginBottom:4 }}>選択中のステップ状態</div>
-            <div style=${{ fontWeight:700, fontSize:'0.78rem', color:stepColor, marginBottom:3 }}>
-              ${STEPS[selStepIndex].name}
-            </div>
+          <div style=${{ background:'#0a1526', borderRadius:8, padding:'10px 12px', flex:1, borderLeft:`3px solid ${stepColor}` }}>
+            <div style=${{ fontSize:'0.62rem', color:'#475569', marginBottom:4 }}>選択中ステップ</div>
+            <div style=${{ fontWeight:700, fontSize:'0.78rem', color:stepColor, marginBottom:3 }}>${STEPS[selStepIndex].name}</div>
             <div style=${{ fontSize:'0.7rem', color:'#64748b' }}>
               進捗：<span style=${{ color:'#e2e8f0', fontWeight:700 }}>${selStep?.progress ?? 0}%</span>
-              ${selStep?.risk ? html`<span style=${{ marginLeft:6 }}>
-                ${selStep.risk==='red'?'🔴':selStep.risk==='yellow'?'🟡':'🟢'}
-              </span>` : ''}
+              ${selStep?.risk ? html`<span style=${{ marginLeft:6 }}>${selStep.risk==='red'?'🔴':selStep.risk==='yellow'?'🟡':'🟢'}</span>` : ''}
             </div>
             ${selStep?.memo && html`
               <div style=${{ fontSize:'0.64rem', color:'#475569', marginTop:6, borderTop:'1px solid #1e293b', paddingTop:5, lineHeight:1.5 }}>
@@ -790,26 +920,18 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
 
         <!-- CENTER: memo -->
         <div style=${{ padding:18, borderRight:'1px solid #334155', display:'flex', flexDirection:'column', gap:10 }}>
-          <label style=${LS}>
-            メモ　Step${selStepIndex+1}：${STEPS[selStepIndex].name}　／　${selMember?.name}
-          </label>
+          <label style=${LS}>メモ　Step${selStepIndex+1}：${STEPS[selStepIndex].name}　／　${selMember?.name}</label>
           <textarea
-            value=${memo}
-            onInput=${e => setMemo(e.target.value)}
+            value=${memo} onInput=${e => setMemo(e.target.value)}
             placeholder="気づき、懸念事項、指導内容などを記録…"
             rows=9
             style=${{ ...IS, lineHeight:1.7, fontFamily:'inherit', flex:1 }}
           />
           <div style=${{ display:'flex', alignItems:'center', gap:10 }}>
-            <button onClick=${saveMemo} style=${{
-              flex:1, padding:'9px', borderRadius:8, border:'none',
-              background:stepColor, color:'#0f172a', cursor:'pointer', fontWeight:800,
-            }}>メモを保存</button>
+            <button onClick=${saveMemo} style=${{ flex:1, padding:'9px', borderRadius:8, border:'none', background:stepColor, color:'#0f172a', cursor:'pointer', fontWeight:800 }}>メモを保存</button>
             ${savedMemo && html`<span style=${{ fontSize:'0.72rem', color:'#4ade80', fontWeight:700 }}>✓ 保存しました</span>`}
           </div>
-          ${selStep?.memo && selStep.memo !== memo && html`
-            <div style=${{ fontSize:'0.67rem', color:'#fb923c' }}>※ 未保存の変更があります</div>
-          `}
+          ${selStep?.memo && selStep.memo!==memo && html`<div style=${{ fontSize:'0.67rem', color:'#fb923c' }}>※ 未保存の変更があります</div>`}
         </div>
 
         <!-- RIGHT: reviews + next action -->
@@ -842,33 +964,121 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
               `)}
             </div>
           </div>
-
           <div>
             <label style=${LS}>次回アクション</label>
-            <input type="date" value=${actDate} onInput=${e => setActDate(e.target.value)}
-              style=${{ ...IS, marginBottom:7 }} />
-            <input type="text" value=${actContent} onInput=${e => setActContent(e.target.value)}
-              placeholder="例：Step3確認・フィードバック"
-              style=${{ ...IS, marginBottom:9 }} />
+            <input type="date" value=${actDate} onInput=${e => setActDate(e.target.value)} style=${{ ...IS, marginBottom:7 }} />
+            <input type="text" value=${actContent} onInput=${e => setActContent(e.target.value)} placeholder="例：Step3確認・フィードバック" style=${{ ...IS, marginBottom:9 }} />
             <div style=${{ display:'flex', alignItems:'center', gap:10 }}>
-              <button onClick=${saveAction} style=${{
-                flex:1, padding:'9px', borderRadius:8,
-                border:'1px solid #334155', background:'#0a1526',
-                color:'#94a3b8', cursor:'pointer', fontWeight:700,
-              }}>アクションを保存</button>
+              <button onClick=${saveAction} style=${{ flex:1, padding:'9px', borderRadius:8, border:'1px solid #334155', background:'#0a1526', color:'#94a3b8', cursor:'pointer', fontWeight:700 }}>アクションを保存</button>
               ${savedAct && html`<span style=${{ fontSize:'0.72rem', color:'#4ade80', fontWeight:700 }}>✓</span>`}
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- SUB-ITEMS SECTION -->
+      <div style=${{ borderTop:'1px solid #334155', padding:18 }}>
+        <div style=${{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+          <h3 style=${{ fontSize:'0.82rem', fontWeight:700 }}>
+            📋 小項目管理
+            <span style=${{ color:stepColor, marginLeft:6 }}>Step${selStepIndex+1}：${STEPS[selStepIndex].name}</span>
+            <span style=${{ color:'#475569', marginLeft:6, fontWeight:400, fontSize:'0.72rem' }}>／ ${selMember?.name}</span>
+          </h3>
+          <button
+            onClick=${() => onSubItemAdd(selMemberId, selStepIndex)}
+            style=${{
+              marginLeft:'auto', padding:'6px 14px', borderRadius:7, cursor:'pointer',
+              border:`1px solid ${stepColor}55`, background:stepColor+'18',
+              color:stepColor, fontWeight:700, fontSize:'0.75rem',
+            }}
+          >＋ 小項目を追加</button>
+        </div>
+
+        ${subItems.length === 0 && html`
+          <div style=${{ textAlign:'center', color:'#334155', fontSize:'0.78rem', padding:'16px 0' }}>
+            小項目はまだありません。「＋ 小項目を追加」か、ガントチャートのステップ行末「＋」から追加できます。
+          </div>
+        `}
+
+        ${subItems.length > 0 && html`
+          <!-- header -->
+          <div style=${{
+            display:'grid', gridTemplateColumns:'1fr 110px 110px 130px 36px',
+            gap:8, padding:'4px 10px', marginBottom:4,
+            fontSize:'0.62rem', color:'#475569', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em',
+          }}>
+            <span>小項目名</span>
+            <span style=${{ textAlign:'center' }}>開始週</span>
+            <span style=${{ textAlign:'center' }}>終了週</span>
+            <span style=${{ textAlign:'center' }}>進捗</span>
+            <span></span>
+          </div>
+          ${subItems.map((sub, idx) => html`
+            <div key=${sub.id} style=${{
+              display:'grid', gridTemplateColumns:'1fr 110px 110px 130px 36px',
+              gap:8, padding:'8px 10px', marginBottom:6,
+              background:'#0a1526', borderRadius:8,
+              border:`1px solid ${stepColor}22`,
+              alignItems:'center',
+            }}>
+              <!-- name -->
+              <input
+                type="text"
+                value=${sub.name}
+                placeholder="小項目名を入力"
+                onInput=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { name: e.target.value })}
+                style=${{ ...SS, width:'100%' }}
+              />
+              <!-- start week -->
+              <select
+                value=${sub.startWeek}
+                onChange=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { startWeek: +e.target.value })}
+                style=${SS}
+              >
+                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
+              </select>
+              <!-- end week -->
+              <select
+                value=${sub.endWeek}
+                onChange=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { endWeek: +e.target.value })}
+                style=${SS}
+              >
+                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
+              </select>
+              <!-- progress -->
+              <div style=${{ display:'flex', gap:4 }}>
+                ${[0,25,50,75,100].map(pct => html`
+                  <button key=${pct}
+                    onClick=${() => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { progress: pct })}
+                    style=${{
+                      flex:1, padding:'4px 2px', borderRadius:5, fontSize:'0.6rem', cursor:'pointer',
+                      border:`1px solid ${sub.progress===pct?stepColor:'#1e293b'}`,
+                      background: sub.progress===pct?stepColor+'30':'transparent',
+                      color: sub.progress===pct?stepColor:'#475569',
+                      fontWeight: sub.progress===pct?800:400,
+                    }}
+                  >${pct}%</button>
+                `)}
+              </div>
+              <!-- delete -->
+              <button
+                onClick=${() => onSubItemDelete(selMemberId, selStepIndex, sub.id)}
+                title="削除"
+                style=${{
+                  background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.3)',
+                  color:'#f87171', borderRadius:6, padding:'5px 8px', cursor:'pointer', fontSize:'0.7rem',
+                }}
+              >✕</button>
+            </div>
+          `)}
+        `}
       </div>
     </div>
   `;
 }
 
 /* ─── MOUNT ──────────────────────────────────────────────────── */
-ReactDOM.createRoot(document.getElementById('root')).render(
-  React.createElement(App)
-);
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
 </script>
 </body>
 </html>
