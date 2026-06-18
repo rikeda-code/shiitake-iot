@@ -379,6 +379,7 @@ async function fetchSummaryRows(site) {
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
     const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
+    if (raw.length < 3) console.log('[person debug]', name, 'col0=', cells[0]?.v, 'col1=', cells[1]?.v, 'col2=', cells[2]?.v);
     const packRaw   = cells[12]?.v;
     // パック品率: 0-1の小数か0-100の整数かを自動判定
     let packRate = null;
