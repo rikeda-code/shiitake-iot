@@ -207,6 +207,16 @@
     .weekly-legend-item { display: flex; align-items: center; gap: 4px; }
     .weekly-legend-dot { width: 10px; height: 3px; border-radius: 2px; }
 
+    .detail-title { font-size:1.1rem; font-weight:700; margin-bottom:16px; }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
+    .detail-cell { background:#0f1117; border-radius:8px; padding:12px 14px; }
+    .detail-cell-label { font-size:0.7rem; color:#8892a4; margin-bottom:4px; }
+    .detail-cell-value { font-size:1.2rem; font-weight:700; color:#e2e8f0; }
+    .detail-cell-pct { font-size:0.75rem; color:#8892a4; margin-top:2px; }
+    .detail-pack { background:#0f1117; border-radius:8px; padding:12px 14px; text-align:center; }
+    .detail-pack-label { font-size:0.75rem; color:#8892a4; margin-bottom:4px; }
+    .detail-pack-value { font-size:1.5rem; font-weight:700; }
+
     @media (max-width: 640px) {
       header, main { padding: 16px; }
       .tabs { padding: 0 16px; }
@@ -233,6 +243,13 @@
 <div class="tabs" id="tabs"></div>
 <main id="main"></main>
 <section id="weekly-section" style="margin:0 32px 40px;"></section>
+
+<div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
+    <button onclick="closeDetail()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.2rem;cursor:pointer">✕</button>
+    <div id="detail-content"></div>
+  </div>
+</div>
 
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────────
@@ -1289,7 +1306,7 @@ function renderCards(summary) {
 
     // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
     if (row.harvest == null) {
-      return `<div class="container-card" style="opacity:0.45">
+      return `<div class="container-card" style="opacity:0.45;cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
         <div class="card-cn" title="${row.name}">${displayName}</div>
         <div class="card-sd" style="font-size:0.68rem">未稼働</div>
       </div>`;
@@ -1304,7 +1321,7 @@ function renderCards(summary) {
     const packStr = row.packRate != null ? `${row.packRate}%` : '—';
 
     const personStr = row.person ? `<span style="color:var(--muted);font-size:0.72rem">${row.person}</span>` : '';
-    return `<div class="container-card">
+    return `<div class="container-card" style="cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
       <div class="card-cn" title="${row.name}" style="display:flex;justify-content:space-between;align-items:baseline">${displayName}${personStr}</div>
       <div class="card-sd">開始: ${sd}</div>
       <div class="card-harvest${harvestCls}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
@@ -1665,6 +1682,112 @@ function initTabs() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(weeklyBtn);
+}
+
+function closeDetail() {
+  document.getElementById('detail-modal').style.display = 'none';
+}
+
+async function showDetail(containerName) {
+  const modal = document.getElementById('detail-modal');
+  const content = document.getElementById('detail-content');
+  modal.style.display = '';
+  content.innerHTML = '<div class="loading">読み込み中...</div>';
+
+  const site = SITES[currentSiteIdx];
+  let table;
+  try {
+    table = await fetchSheet(site.id, containerName, 0);
+  } catch(e) {
+    content.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
+    return;
+  }
+
+  const allRows = table.rows || [];
+  // Scan top 25 rows for size header row (M収穫量, L収穫量, 2L収穫量, 袋品)
+  let mCol=-1, lCol=-1, xlCol=-1, bagCol=-1, valRow=-1;
+  for (let ri = 0; ri < Math.min(25, allRows.length); ri++) {
+    const cells = allRows[ri]?.c || [];
+    let found = false;
+    cells.forEach((cell, ci) => {
+      const v = String(cell?.v ?? cell?.f ?? '').replace(/\s/g,'');
+      if (/^M収穫/.test(v) || v === 'M') { mCol = ci; found = true; }
+      if (/^L収穫/.test(v) && !/2L/.test(v) && !/M/.test(v)) { lCol = ci; found = true; }
+      if (/2L収穫/.test(v) || v === '2L') { xlCol = ci; found = true; }
+      if (/袋品/.test(v)) { bagCol = ci; found = true; }
+    });
+    if (found && mCol >= 0 && lCol >= 0) { valRow = ri + 1; break; }
+  }
+
+  let mVal=null, lVal=null, xlVal=null, bagVal=null;
+  if (valRow >= 0 && valRow < allRows.length) {
+    const vc = allRows[valRow]?.c || [];
+    mVal   = mCol  >= 0 ? parseFloat(vc[mCol]?.v)   : null;
+    lVal   = lCol  >= 0 ? parseFloat(vc[lCol]?.v)   : null;
+    xlVal  = xlCol >= 0 ? parseFloat(vc[xlCol]?.v)  : null;
+    bagVal = bagCol>= 0 ? parseFloat(vc[bagCol]?.v) : null;
+  }
+
+  // Find pack rate
+  let packRate = null;
+  for (let ri = 0; ri < Math.min(25, allRows.length); ri++) {
+    const cells = allRows[ri]?.c || [];
+    const hasLabel = cells.some(c => String(c?.v ?? '').includes('パック品率'));
+    if (hasLabel) {
+      // look for a % value in same row
+      for (const c of cells) {
+        const v = c?.v;
+        if (v == null) continue;
+        const n = parseFloat(v);
+        if (!isNaN(n) && n > 0 && n <= 1) { packRate = Math.round(n * 100); break; }
+        if (!isNaN(n) && n > 1 && n <= 100) { packRate = Math.round(n); break; }
+        if (typeof v === 'string' && v.includes('%')) {
+          const m = v.match(/([\d.]+)/);
+          if (m) { packRate = Math.round(parseFloat(m[1])); break; }
+        }
+      }
+      if (packRate) break;
+    }
+  }
+
+  const info = parseContainerName(containerName);
+  const displayName = info.no || containerName;
+
+  // Calculate totals and percentages
+  const packTotal = [mVal, lVal, xlVal, bagVal].reduce((s, v) => s + (isNaN(v) ? 0 : v), 0);
+  const pct = v => (packTotal > 0 && !isNaN(v)) ? `${((v / packTotal) * 100).toFixed(1)}%` : '—';
+  const fmt = v => (!isNaN(v) && v != null) ? `${v.toFixed(2)} kg` : '—';
+
+  const packCls = packRate == null ? '' : packRate >= 90 ? 'color:#86efac' : packRate >= 80 ? 'color:#93c5fd' : 'color:#f87171';
+
+  content.innerHTML = `
+    <div class="detail-title">コンテナ ${displayName} 詳細</div>
+    <div class="detail-grid">
+      <div class="detail-cell">
+        <div class="detail-cell-label">M収穫量</div>
+        <div class="detail-cell-value">${fmt(mVal)}</div>
+        <div class="detail-cell-pct">${pct(mVal)}</div>
+      </div>
+      <div class="detail-cell">
+        <div class="detail-cell-label">L収穫量</div>
+        <div class="detail-cell-value">${fmt(lVal)}</div>
+        <div class="detail-cell-pct">${pct(lVal)}</div>
+      </div>
+      <div class="detail-cell">
+        <div class="detail-cell-label">2L収穫量</div>
+        <div class="detail-cell-value">${fmt(xlVal)}</div>
+        <div class="detail-cell-pct">${pct(xlVal)}</div>
+      </div>
+      <div class="detail-cell">
+        <div class="detail-cell-label">袋品収穫量</div>
+        <div class="detail-cell-value">${fmt(bagVal)}</div>
+        <div class="detail-cell-pct">${pct(bagVal)}</div>
+      </div>
+    </div>
+    <div class="detail-pack">
+      <div class="detail-pack-label">パック品率</div>
+      <div class="detail-pack-value" style="${packCls}">${packRate != null ? packRate + '%' : '—'}</div>
+    </div>`;
 }
 
 if ('serviceWorker' in navigator) {
