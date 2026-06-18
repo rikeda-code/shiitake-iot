@@ -1716,17 +1716,13 @@ async function showDetail(containerName) {
   if (mekakiTable?.rows) {
     for (const row of mekakiTable.rows) {
       const cells = row?.c || [];
-      const cDate = cells[2]?.v != null ? String(cells[2].f || cells[2].v).trim() : '';
-      const eNo   = cells[4]?.v != null ? String(cells[4].v).trim() : '';
-      const kVal  = cells[10]?.v;
-      // コンテナ番号とスタート日の両方が一致する行を採用
-      if (eNo === containerNo && cDate && startDateStr && cDate.replace(/\//g,'-') === startDateStr.replace(/\//g,'-')) {
-        mekakiVal = kVal != null ? parseFloat(kVal) : null;
-        break;
-      }
-      // 番号のみでも一致すれば候補として記録（日付が取れない場合のフォールバック）
-      if (mekakiVal == null && eNo === containerNo && kVal != null) {
+      const aSite = String(cells[0]?.v ?? '').trim(); // A列: 拠点
+      const eNo   = cells[4]?.v != null ? String(cells[4].v).trim() : ''; // E列: 号基
+      const kVal  = cells[10]?.v; // K列: 合計重量(kg)
+      if (aSite === '拠点') continue; // ヘッダー行スキップ
+      if (aSite === site.name && eNo === containerNo && kVal != null) {
         mekakiVal = parseFloat(kVal);
+        break;
       }
     }
   }
