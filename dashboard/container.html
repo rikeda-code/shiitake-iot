@@ -1762,8 +1762,7 @@ async function showDetail(containerName) {
   }
 
   // Parse daily size breakdown: G=col6(M), H=col7(L), I=col8(2L), J=col9(袋品)
-  // いなべ・群馬は day50(row80)以降のみ表示、南丹は全日表示
-  const dailyMinDay = (site.name === 'いなべ' || site.name === '群馬') ? 50 : 0;
+  // 全拠点 day1～全日表示。day0=14行目(ri=13)、day50=80行目(ri=79)はシート構造の説明
   const dailyRows = [];
   if (detailIsTypeB) {
     // TypeB (南丹): col3=YYYYMMDD, col5=date, cols6-9=size breakdown
@@ -1777,7 +1776,6 @@ async function showDetail(containerName) {
       if (!rowDate || !startD) continue;
       const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
       if (dayNum < 1 || dayNum > 200) continue;
-      if (dayNum < dailyMinDay) continue;
       const m  = parseFloat(cells[6]?.v) || 0;
       const l  = parseFloat(cells[7]?.v) || 0;
       const xl = parseFloat(cells[8]?.v) || 0;
@@ -1785,14 +1783,14 @@ async function showDetail(containerName) {
       if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
     }
   } else if (detailIsTypeC) {
-    // TypeC (群馬): col1="N日", cols6-9=size breakdown, day50～=row80(ri=79)
-    for (let ri = 79; ri < allRows.length; ri++) {
+    // TypeC (群馬): col1="N日", cols6-9=size breakdown, day0=ri=13(row14)
+    for (let ri = 13; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const dayLabel = String(cells[1]?.v ?? '');
       const dm = dayLabel.match(/^(\d+)日$/);
       if (!dm) continue;
       const dayNum = parseInt(dm[1]);
-      if (dayNum < dailyMinDay || dayNum > 200) continue;
+      if (dayNum < 1 || dayNum > 200) continue;
       const m  = parseFloat(cells[6]?.v) || 0;
       const l  = parseFloat(cells[7]?.v) || 0;
       const xl = parseFloat(cells[8]?.v) || 0;
@@ -1800,12 +1798,11 @@ async function showDetail(containerName) {
       if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
     }
   } else {
-    // TypeA (いなべ): col1=dayNum integer, day50～=row80(ri=79)
-    for (let ri = 79; ri < allRows.length; ri++) {
+    // TypeA (いなべ): col1=dayNum integer, day0=ri=13(row14)
+    for (let ri = 13; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const dayNum = cells[1]?.v;
       if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
-      if (dayNum < dailyMinDay) continue;
       const m  = parseFloat(cells[6]?.v) || 0;
       const l  = parseFloat(cells[7]?.v) || 0;
       const xl = parseFloat(cells[8]?.v) || 0;
