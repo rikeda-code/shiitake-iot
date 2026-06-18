@@ -378,6 +378,7 @@ async function fetchSummaryRows(site) {
     const endDate   = edCell?.v ? (gvizDateStr(edCell.v, null) ?? gvizDateStr(null, edCell?.f) ?? '') : (gvizDateStr(null, edCell?.f) ?? '');
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+    const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
     const packRaw   = cells[12]?.v;
     // パック品率: 0-1の小数か0-100の整数かを自動判定
     let packRate = null;
@@ -385,7 +386,7 @@ async function fetchSummaryRows(site) {
       const n = parseFloat(packRaw);
       if (!isNaN(n)) packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
     }
-    raw.push({ name, startDate, endDate, days, harvest, packRate, no: extractContainerNo(name) });
+    raw.push({ name, startDate, endDate, days, harvest, packRate, person, no: extractContainerNo(name) });
   });
 
   // 同一コンテナNo.の重複処理: 最新の startDate を持つ行を残す
@@ -1131,8 +1132,9 @@ function renderCards(summary) {
     const days = row.days != null ? `${row.days}日` : '—';
     const packStr = row.packRate != null ? `${row.packRate}%` : '—';
 
+    const personStr = row.person ? `<span style="color:var(--muted);font-size:0.72rem">${row.person}</span>` : '';
     return `<div class="container-card">
-      <div class="card-cn" title="${row.name}">${displayName}</div>
+      <div class="card-cn" title="${row.name}" style="display:flex;justify-content:space-between;align-items:baseline">${displayName}${personStr}</div>
       <div class="card-sd">開始: ${sd}</div>
       <div class="card-harvest${harvestCls}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
       <div class="card-meta">
