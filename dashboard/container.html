@@ -732,12 +732,21 @@ async function loadWeeklySection() {
   }
 }
 
+let drillState = { site: null, person: null, subMode: 'week', sortOrder: 'desc' };
+
 function renderWeeklySection(section, state, groupMode, sortOrder) {
   const { containerData, targetData } = state;
   const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
   if (!valid.length) {
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
       <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
+    return;
+  }
+
+  if (groupMode === 'drill') {
+    renderDrillSection(section, valid, targetData);
+    section.dataset.groupMode = groupMode;
+    section.dataset.sortOrder = sortOrder;
     return;
   }
 
@@ -802,6 +811,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='person'?' active':''}" onclick="weeklySetGroup('person')">担当者別</button>
+      <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">拠点→担当者</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -848,6 +858,140 @@ function weeklySetGroup(mode) {
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
   renderWeeklySection(section, weeklyState, mode, sortOrder);
+}
+
+function renderDrillSection(section, valid, targetData) {
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+
+  const SITES_ORDER = ['いなべ', '群馬', '南丹'];
+  const SITE_COLORS = { 'いなべ': '#3b82f6', '群馬': '#f59e0b', '南丹': '#10b981' };
+
+  const backBtn = (label, onclick) =>
+    `<button class="sort-btn active" style="margin-bottom:12px" onclick="${onclick}">← ${label}</button>`;
+
+  const modeBar = (subMode) => `
+    <div class="weekly-sort-bar" style="margin-bottom:12px">
+      <span class="sort-label">表示:</span>
+      <button class="sort-btn${drillState.subMode==='week'?' active':''}" onclick="weeklyDrillSub('week')">週別</button>
+      <button class="sort-btn${drillState.subMode==='month'?' active':''}" onclick="weeklyDrillSub('month')">月別</button>
+      <button class="sort-btn${drillState.subMode==='all'?' active':''}" onclick="weeklyDrillSub('all')">全コンテナ</button>
+      <span class="sort-label" style="margin-left:12px">並び順:</span>
+      <button class="sort-btn${drillState.sortOrder==='desc'?' active':''}" onclick="weeklyDrillSort('desc')">新しい順</button>
+      <button class="sort-btn${drillState.sortOrder==='asc'?' active':''}" onclick="weeklyDrillSort('asc')">古い順</button>
+    </div>`;
+
+  const navBar = `
+    <div class="weekly-sort-bar" style="margin-bottom:12px">
+      <span class="sort-label">グループ:</span>
+      <button class="sort-btn" onclick="weeklySetGroup('week')">週別</button>
+      <button class="sort-btn" onclick="weeklySetGroup('month')">月別</button>
+      <button class="sort-btn" onclick="weeklySetGroup('site')">拠点別</button>
+      <button class="sort-btn" onclick="weeklySetGroup('person')">担当者別</button>
+      <button class="sort-btn active" onclick="weeklySetGroup('drill')">拠点→担当者</button>
+    </div>`;
+
+  if (!drillState.site) {
+    const siteCards = SITES_ORDER.filter(s => valid.some(c => c.siteName === s)).map(s => {
+      const cnt = valid.filter(c => c.siteName === s).length;
+      const color = SITE_COLORS[s] || '#8892a4';
+      return `<button onclick="weeklyDrillSite('${s}')" style="background:var(--surface);border:2px solid ${color};border-radius:10px;padding:20px 32px;cursor:pointer;color:var(--text);font-size:1rem;font-weight:700;text-align:center;min-width:120px"><div style="color:${color};font-size:1.4rem;margin-bottom:4px">${s}</div><div style="font-size:0.75rem;color:var(--muted)">${cnt} コンテナ</div></button>`;
+    }).join('');
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">拠点 → 担当者</span></div>
+      ${navBar}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>`;
+    return;
+  }
+
+  const siteContainers = valid.filter(c => c.siteName === drillState.site);
+
+  if (!drillState.person) {
+    const persons = [...new Set(siteContainers.map(c => c.person || '未設定'))].sort();
+    const personCards = persons.map(p => {
+      const cnt = siteContainers.filter(c => (c.person || '未設定') === p).length;
+      const safeP = p.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `<button onclick="weeklyDrillPerson('${safeP}')" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 24px;cursor:pointer;color:var(--text);font-size:0.9rem;font-weight:600;text-align:center;min-width:120px"><div style="font-size:1rem;margin-bottom:4px">${p}</div><div style="font-size:0.72rem;color:var(--muted)">${cnt} コンテナ</div></button>`;
+    }).join('');
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">${drillState.site} › 担当者</span></div>
+      ${backBtn(drillState.site, "weeklyDrillSite(null)")}
+      <div style="display:flex;gap:12px;flex-wrap:wrap">${personCards}</div>`;
+    return;
+  }
+
+  const personContainers = siteContainers.filter(c => (c.person || '未設定') === drillState.person);
+  const subMode = drillState.subMode;
+  const sortOrd = drillState.sortOrder;
+  const groups = {};
+  let groupKeys = [];
+
+  if (subMode === 'all') {
+    personContainers.forEach(c => {
+      groups[c.name] = { label: c.no || c.name, containers: [c] };
+    });
+    groupKeys = Object.keys(groups);
+  } else if (subMode === 'month') {
+    personContainers.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) { const rd = c.rows[0].rowDate; week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`); }
+      if (!week) return;
+      const mk = week.key.slice(0,7); const ml = `${parseInt(week.key.slice(5,7))}月`;
+      if (!groups[mk]) groups[mk] = { label: ml, containers: [] };
+      groups[mk].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrd === 'desc') groupKeys.reverse();
+  } else {
+    personContainers.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) { const rd = c.rows[0].rowDate; week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`); }
+      if (!week) return;
+      if (!groups[week.key]) groups[week.key] = { label: week.label, containers: [] };
+      groups[week.key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrd === 'desc') groupKeys.reverse();
+  }
+
+  const cardsHtml = groupKeys.map((k, idx) => `
+    <div class="weekly-chart-card">
+      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div class="chart-wrap" style="height:260px"><canvas id="wd-${idx}"></canvas></div>
+    </div>`).join('');
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">${drillState.site} › ${drillState.person}</span></div>
+    ${backBtn(`${drillState.site} › 担当者`, "weeklyDrillPerson(null)")}
+    ${modeBar(subMode)}
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  weeklyCharts = [];
+  groupKeys.forEach((k, idx) => {
+    if (document.getElementById(`wd-${idx}`))
+      buildWeeklyLineChart(`wd-${idx}`, groups[k].containers, targetData);
+  });
+}
+
+function weeklyDrillSite(site) {
+  drillState.site = site; drillState.person = null;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+function weeklyDrillPerson(person) {
+  drillState.person = person;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+function weeklyDrillSub(sub) {
+  drillState.subMode = sub;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+function weeklyDrillSort(order) {
+  drillState.sortOrder = order;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
 }
 
 function buildWeeklyLineChart(canvasId, containers, targetData) {
