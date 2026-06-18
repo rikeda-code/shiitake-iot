@@ -1888,9 +1888,9 @@ async function showDetail(containerName) {
       <div class="detail-pack-value" style="${packCls}">${packRate != null ? packRate + '%' : '—'}</div>
     </div>
     ${mekakiDisplay != null ? `
-    <div class="detail-pack" style="margin-top:8px">
+    <div class="detail-pack" style="margin-top:8px${mekakiDisplay >= 200 ? ';border:1px solid #f87171;border-radius:8px;padding:8px 12px' : ''}">
       <div class="detail-pack-label">${mekakiLabel}</div>
-      <div class="detail-pack-value">${mekakiDisplay} kg</div>
+      <div class="detail-pack-value" style="${mekakiDisplay >= 200 ? 'color:#f87171' : ''}">${mekakiDisplay >= 200 ? '⚠️ ' : ''}${mekakiDisplay} kg</div>
     </div>` : ''}
     ${dailyRows.length > 0 ? `
     <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
