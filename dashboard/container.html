@@ -1758,8 +1758,7 @@ async function showDetail(containerName) {
       const eStr = cells[4]?.v != null ? String(cells[4].v).trim() : '';
       const fVal = parseFloat(cells[5]?.v);
       const gVal = parseFloat(cells[6]?.v);
-      if (kinshoRows.length === 0 && dNo === containerNo) console.log('[kinsho first match] cells:', cells.map(c=>c?.v));
-      if (kinshoRows.length === 0 && cells[0]?.v != null) console.log('[kinsho row sample] c0-7:', cells.slice(0,8).map(c=>c?.v));
+      if (cells[0]?.v != null && kinshoRows.length === 0 && !kinshoBedTable._logged) { kinshoBedTable._logged=true; console.log('[kinsho cols]', cells.map((c,i)=>c?.v!=null?`[${i}]${c?.f??c?.v}`:null).filter(Boolean)); }
       if (dNo !== containerNo) continue;
       if (isNaN(fVal)) continue;
       // 栽培開始日が判明しているときは一致するロットのみ採用
