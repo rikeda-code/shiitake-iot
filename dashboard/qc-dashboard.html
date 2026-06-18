@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>新入社員QC発表会 管理ダッシュボード</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Hiragino Sans', 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+    select, input, textarea, button { font-family: inherit; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    /* ─── DATA CONSTANTS ─────────────────────────────────────────── */
+    const MEMBERS = [
+      { id: 'nishida',  name: '西田智也',   factory: '志摩培養F', theme: '菌床の色が褐色化しない要因分析＋対策検討',  color: '#38bdf8' },
+      { id: 'sugiyama', name: '杉山颯',     factory: 'いなべF',   theme: '椎茸栽培における水分調整方法',            color: '#a78bfa' },
+      { id: 'aoki',     name: '青木暉',     factory: '南丹F',     theme: '椎茸栽培における水分調整方法',            color: '#34d399' },
+      { id: 'yamamoto', name: '山本真之介', factory: '南丹F',     theme: '出荷効率について（パックスピード）',       color: '#fbbf24' },
+    ];
+
+    const STEPS = [
+      { id: 1, name: 'テーマ選定',    color: '#6366f1' },
+      { id: 2, name: '現状把握',     color: '#06b6d4' },
+      { id: 3, name: '目標設定',     color: '#14b8a6' },
+      { id: 4, name: '活動計画作成', color: '#22c55e' },
+      { id: 5, name: '要因解析',     color: '#eab308' },
+      { id: 6, name: '対策立案・実施', color: '#f97316' },
+      { id: 7, name: '効果確認',     color: '#ef4444' },
+      { id: 8, name: '歯止め',       color: '#8b5cf6' },
+    ];
+
+    // Week 0 = Jun 23, 2025; 13 weeks total
+    const GANTT_START = new Date(2025, 5, 23);
+    const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
+    const WEEKS = Array.from({ length: 13 }, (_, i) => {
+      const d = new Date(GANTT_START.getTime() + i * MS_PER_WEEK);
+      const m = d.getMonth() + 1;
+      const weekOfMonth = Math.ceil(d.getDate() / 7);
+      return { index: i, date: d, label: `${m}月W${weekOfMonth}`, shortLabel: `${m}/${d.getDate()}` };
+    });
+
+    const DEFAULT_SCHEDULE = [
+      { startWeek: 0,  endWeek: 1  },
+      { startWeek: 1,  endWeek: 3  },
+      { startWeek: 3,  endWeek: 4  },
+      { startWeek: 4,  endWeek: 5  },
+      { startWeek: 5,  endWeek: 8  },
+      { startWeek: 8,  endWeek: 11 },
+      { startWeek: 11, endWeek: 12 },
+      { startWeek: 12, endWeek: 12 },
+    ];
+    const DEFAULT_REVIEW_WEEKS = [4, 8, 12];
+
+    // Current week relative to gantt
+    const TODAY = new Date();
+    const currentWeekIdx = Math.min(12, Math.max(-1,
+      Math.floor((TODAY.getTime() - GANTT_START.getTime()) / MS_PER_WEEK)
+    ));
+
+    /* ─── HELPERS ────────────────────────────────────────────────── */
+    function hexToRgb(hex) {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `${r},${g},${b}`;
+    }
+
+    function progressBarColor(progress, stepColor, delayed) {
+      if (progress === 0) return 'rgba(30,41,59,0.6)';
+      if (delayed) return `rgba(239,68,68,${0.25 + (progress / 100) * 0.55})`;
+      const rgb = hexToRgb(stepColor);
+      return `rgba(${rgb},${0.2 + (progress / 100) * 0.78})`;
+    }
+
+    function overallProgress(member) {
+      return Math.round(member.steps.reduce((s, st) => s + st.progress, 0) / member.steps.length);
+    }
+
+    function currentStepIdx(member) {
+      const i = member.steps.findIndex(s => s.progress < 100);
+      return i === -1 ? 7 : i;
+    }
+
+    function statusInfo(member) {
+      const pct = overallProgress(member);
+      const timeElapsed = currentWeekIdx < 0 ? 0 : currentWeekIdx >= 12 ? 100 :
+        Math.round((currentWeekIdx / 12) * 100);
+      const diff = pct - timeElapsed;
+      if (diff >= 0)   return { label: '順調', color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.4)'  };
+      if (diff >= -20) return { label: '注意', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', border: 'rgba(251,191,36,0.4)' };
+      return              { label: '遅延', color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.4)'  };
+    }
+
+    function isStepDelayed(stepData) {
+      if (currentWeekIdx < 0 || currentWeekIdx < stepData.startWeek) return false;
+      const dur = stepData.endWeek - stepData.startWeek + 1;
+      const into = Math.min(currentWeekIdx - stepData.startWeek + 1, dur);
+      const expected = Math.round((into / dur) * 100);
+      return stepData.progress < expected - 20;
+    }
+
+    /* ─── INITIAL STATE ──────────────────────────────────────────── */
+    function createState() {
+      return {
+        members: MEMBERS.map(m => ({
+          ...m,
+          steps: STEPS.map((_, i) => ({
+            progress:   0,
+            startWeek:  DEFAULT_SCHEDULE[i].startWeek,
+            endWeek:    DEFAULT_SCHEDULE[i].endWeek,
+            risk:       null,
+            memo:       '',
+          })),
+          reviews: DEFAULT_REVIEW_WEEKS.map(w => ({
+            weekIndex: w, completed: false, completedDate: null,
+          })),
+          nextActionDate:    '',
+          nextActionContent: '',
+        })),
+        selMemberId:  MEMBERS[0].id,
+        selStepIndex: 0,
+      };
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       APP
+    ═══════════════════════════════════════════════════════════════ */
+    function App() {
+      const [st, setSt] = useState(createState);
+      const [modal, setModal] = useState(null);  // { memberId, stepIndex }
+      const [tmpPct, setTmpPct] = useState(0);
+
+      const updateStep = useCallback((mid, si, updates) => {
+        setSt(prev => ({
+          ...prev,
+          members: prev.members.map(m =>
+            m.id === mid
+              ? { ...m, steps: m.steps.map((s, i) => i === si ? { ...s, ...updates } : s) }
+              : m
+          ),
+        }));
+      }, []);
+
+      const updateMember = useCallback((mid, updates) => {
+        setSt(prev => ({
+          ...prev,
+          members: prev.members.map(m => m.id === mid ? { ...m, ...updates } : m),
+        }));
+      }, []);
+
+      const openModal = useCallback((mid, si) => {
+        const member = st.members.find(m => m.id === mid);
+        setTmpPct(member.steps[si].progress);
+        setModal({ memberId: mid, stepIndex: si });
+      }, [st.members]);
+
+      const applyModal = useCallback(() => {
+        if (modal) updateStep(modal.memberId, modal.stepIndex, { progress: tmpPct });
+        setModal(null);
+      }, [modal, tmpPct, updateStep]);
+
+      const completeReview = useCallback((mid, ri) => {
+        const date = TODAY.toLocaleDateString('ja-JP');
+        setSt(prev => ({
+          ...prev,
+          members: prev.members.map(m =>
+            m.id === mid
+              ? { ...m, reviews: m.reviews.map((r, i) => i === ri ? { ...r, completed: true, completedDate: date } : r) }
+              : m
+          ),
+        }));
+      }, []);
+
+      const selMember = st.members.find(m => m.id === st.selMemberId);
+
+      return (
+        <div style={{ minHeight: '100vh', background: '#0f172a' }}>
+          {/* ── HEADER ── */}
+          <header style={{
+            borderBottom: '1px solid #1e293b',
+            padding: '14px 32px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: 'rgba(15,23,42,0.95)',
+            position: 'sticky', top: 0, zIndex: 50,
+          }}>
+            <div>
+              <h1 style={{ fontSize: '1.2rem', fontWeight: 800, letterSpacing: '-0.01em' }}>
+                🍄 新入社員QC発表会 管理ダッシュボード
+              </h1>
+              <p style={{ fontSize: '0.72rem', color: '#475569', marginTop: 2 }}>
+                2025年6〜9月 ／ QCストーリー8ステップ進捗管理
+              </p>
+            </div>
+            <div style={{ textAlign: 'right', fontSize: '0.72rem', color: '#475569' }}>
+              <div>{TODAY.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</div>
+              {currentWeekIdx >= 0 && currentWeekIdx <= 12 &&
+                <div style={{ color: '#38bdf8', fontWeight: 700, marginTop: 2 }}>
+                  現在: Week {currentWeekIdx + 1}（{WEEKS[currentWeekIdx].label}）
+                </div>
+              }
+            </div>
+          </header>
+
+          <main style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* ── STATUS CARDS ── */}
+            <StatusCards members={st.members} />
+
+            {/* ── GANTT ── */}
+            <GanttSection
+              members={st.members}
+              onBarClick={openModal}
+              onReviewComplete={completeReview}
+            />
+
+            {/* ── ADMIN PANEL ── */}
+            <AdminPanel
+              members={st.members}
+              selMemberId={st.selMemberId}
+              selStepIndex={st.selStepIndex}
+              onSelectMember={id => setSt(p => ({ ...p, selMemberId: id, selStepIndex: 0 }))}
+              onSelectStep={i  => setSt(p => ({ ...p, selStepIndex: i }))}
+              onUpdateStep={updateStep}
+              onUpdateMember={updateMember}
+              onReviewComplete={completeReview}
+            />
+          </main>
+
+          {/* ── PROGRESS MODAL ── */}
+          {modal && (
+            <ProgressModal
+              modal={modal}
+              members={st.members}
+              tmpPct={tmpPct}
+              onPctChange={setTmpPct}
+              onApply={applyModal}
+              onClose={() => setModal(null)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       STATUS CARDS
+    ═══════════════════════════════════════════════════════════════ */
+    function StatusCards({ members }) {
+      return (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          {members.map(m => <MemberCard key={m.id} member={m} />)}
+        </div>
+      );
+    }
+
+    function MemberCard({ member }) {
+      const pct   = overallProgress(member);
+      const csi   = currentStepIdx(member);
+      const stat  = statusInfo(member);
+      const step  = STEPS[csi];
+
+      return (
+        <div style={{
+          background: '#1e293b',
+          border: '1px solid #334155',
+          borderRadius: 12,
+          borderTop: `3px solid ${member.color}`,
+          padding: 18,
+          display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '1rem' }}>{member.name}</div>
+              <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 1 }}>{member.factory}</div>
+            </div>
+            <span style={{
+              background: stat.bg,
+              color: stat.color,
+              border: `1px solid ${stat.border}`,
+              borderRadius: 999,
+              padding: '2px 9px',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+            }}>
+              {stat.label}
+            </span>
+          </div>
+
+          {/* Theme */}
+          <div style={{ fontSize: '0.68rem', color: '#64748b', lineHeight: 1.5 }}>
+            {member.theme}
+          </div>
+
+          {/* Progress bar */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginBottom: 5 }}>
+              <span style={{ color: '#64748b' }}>全体進捗</span>
+              <span style={{ fontWeight: 800, color: member.color }}>{pct}%</span>
+            </div>
+            <div style={{ background: '#334155', borderRadius: 4, height: 7, overflow: 'hidden' }}>
+              <div style={{
+                background: member.color,
+                width: `${pct}%`, height: '100%',
+                borderRadius: 4, transition: 'width 0.4s ease',
+              }} />
+            </div>
+          </div>
+
+          {/* Current step */}
+          <div style={{
+            background: '#0f172a', borderRadius: 8,
+            padding: '9px 12px',
+            borderLeft: `3px solid ${step.color}`,
+          }}>
+            <div style={{ fontSize: '0.65rem', color: '#475569', marginBottom: 2 }}>現在のステップ</div>
+            <div style={{ fontWeight: 700, fontSize: '0.82rem', color: step.color }}>
+              Step {csi + 1}：{step.name}
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>
+              {member.steps[csi].progress}% 完了
+              {member.steps[csi].risk && (
+                <span style={{ marginLeft: 6 }}>
+                  {member.steps[csi].risk === 'red' ? '🔴' : member.steps[csi].risk === 'yellow' ? '🟡' : '🟢'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Next action */}
+          {(member.nextActionDate || member.nextActionContent) && (
+            <div style={{ fontSize: '0.68rem', color: '#64748b', borderTop: '1px solid #1e293b', paddingTop: 8 }}>
+              <span>次回アクション：</span>
+              {member.nextActionDate && (
+                <span style={{ color: '#fbbf24', fontWeight: 700 }}>
+                  {new Date(member.nextActionDate).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                </span>
+              )}
+              {member.nextActionDate && member.nextActionContent && ' '}
+              <span style={{ color: '#94a3b8' }}>{member.nextActionContent}</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       GANTT CHART
+    ═══════════════════════════════════════════════════════════════ */
+    function GanttSection({ members, onBarClick, onReviewComplete }) {
+      return (
+        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, overflow: 'hidden' }}>
+          {/* Title bar */}
+          <div style={{
+            padding: '14px 22px', borderBottom: '1px solid #334155',
+            display: 'flex', alignItems: 'center', gap: 10,
+            flexWrap: 'wrap', rowGap: 6,
+          }}>
+            <h2 style={{ fontWeight: 700, fontSize: '0.95rem' }}>📊 ガントチャート</h2>
+            <div style={{ display: 'flex', gap: 14, marginLeft: 'auto', fontSize: '0.68rem', color: '#475569', flexWrap: 'wrap' }}>
+              <LegendItem color="#1e293b" label="未着手" border />
+              <LegendItem color="#22c55e" opacity={0.6} label="進行中" />
+              <LegendItem color="#22c55e" label="完了" />
+              <LegendItem color="#ef4444" opacity={0.6} label="遅延" />
+              <span>
+                <Diamond completed={false} /> 予定レビュー
+                <Diamond completed={true}  /> 実施済レビュー
+              </span>
+            </div>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: 1060 }}>
+              {/* Week header */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '190px repeat(13, 1fr)',
+                background: '#0f172a',
+                borderBottom: '1px solid #334155',
+              }}>
+                <div style={{ padding: '7px 12px', fontSize: '0.68rem', color: '#475569', borderRight: '1px solid #334155' }}>
+                  メンバー / ステップ
+                </div>
+                {WEEKS.map((w, i) => (
+                  <div key={i} style={{
+                    padding: '7px 3px',
+                    textAlign: 'center',
+                    fontSize: '0.65rem',
+                    color: i === currentWeekIdx ? '#38bdf8' : '#475569',
+                    fontWeight: i === currentWeekIdx ? 800 : 400,
+                    borderRight: i < 12 ? '1px solid #1e293b' : 'none',
+                    borderBottom: i === currentWeekIdx ? '2px solid #38bdf8' : '2px solid transparent',
+                  }}>
+                    {w.label}
+                  </div>
+                ))}
+              </div>
+
+              {/* Member rows */}
+              {members.map((m, mi) => (
+                <MemberRows
+                  key={m.id}
+                  member={m}
+                  isLast={mi === members.length - 1}
+                  onBarClick={onBarClick}
+                  onReviewComplete={onReviewComplete}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function LegendItem({ color, opacity = 1, label, border }) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{
+            width: 12, height: 10, borderRadius: 2, display: 'inline-block',
+            background: `rgba(${color === '#1e293b' ? '30,41,59' : hexToRgb(color)},${opacity})`,
+            border: border ? '1px solid #475569' : 'none',
+          }} />
+          {label}
+        </span>
+      );
+    }
+
+    function Diamond({ completed, size = 14 }) {
+      return (
+        <span style={{
+          display: 'inline-block',
+          width: size, height: size,
+          transform: 'rotate(45deg)',
+          background: completed ? '#22c55e' : 'transparent',
+          border: `2px solid ${completed ? '#22c55e' : '#64748b'}`,
+          borderRadius: 2,
+          verticalAlign: 'middle',
+          marginBottom: 1,
+        }} />
+      );
+    }
+
+    function MemberRows({ member, isLast, onBarClick, onReviewComplete }) {
+      const [collapsed, setCollapsed] = useState(false);
+      const pct  = overallProgress(member);
+      const stat = statusInfo(member);
+
+      return (
+        <div style={{ borderBottom: isLast ? 'none' : '2px solid #334155' }}>
+          {/* Member header row */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '190px repeat(13, 1fr)',
+              background: '#162032',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+            onClick={() => setCollapsed(c => !c)}
+          >
+            <div style={{
+              padding: '8px 12px', borderRight: '1px solid #334155',
+              display: 'flex', alignItems: 'center', gap: 7,
+            }}>
+              <span style={{ color: '#475569', fontSize: '0.65rem', width: 10 }}>{collapsed ? '▶' : '▼'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: member.color }}>{member.name}</div>
+                <div style={{ fontSize: '0.62rem', color: '#475569' }}>{member.factory}</div>
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: stat.color, flexShrink: 0 }}>{pct}%</span>
+            </div>
+            {/* Diamond review markers on member row */}
+            {WEEKS.map((_, wi) => {
+              const rev = member.reviews.find(r => r.weekIndex === wi);
+              return (
+                <div key={wi} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRight: wi < 12 ? '1px solid #1e293b' : 'none',
+                  background: wi === currentWeekIdx ? 'rgba(56,189,248,0.06)' : 'transparent',
+                  minHeight: 36,
+                }}>
+                  {rev && (
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (!rev.completed) onReviewComplete(member.id, member.reviews.indexOf(rev));
+                      }}
+                      title={rev.completed ? `レビュー済：${rev.completedDate}` : 'クリックでレビュー完了'}
+                      style={{
+                        background: 'none', border: 'none', padding: 2, cursor: rev.completed ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      <Diamond completed={rev.completed} size={12} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Step rows */}
+          {!collapsed && STEPS.map((step, si) => {
+            const sd       = member.steps[si];
+            const delayed  = isStepDelayed(sd);
+
+            return (
+              <div
+                key={step.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '190px repeat(13, 1fr)',
+                  borderTop: '1px solid #1a2840',
+                  minHeight: 30,
+                }}
+              >
+                {/* Step label */}
+                <div style={{
+                  padding: '4px 10px 4px 26px',
+                  borderRight: '1px solid #334155',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: '0.72rem',
+                }}>
+                  <span style={{
+                    background: step.color, color: '#fff',
+                    borderRadius: 3, padding: '1px 5px',
+                    fontSize: '0.6rem', fontWeight: 800, flexShrink: 0,
+                  }}>
+                    S{si + 1}
+                  </span>
+                  <span style={{ color: '#94a3b8', fontSize: '0.68rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {step.name}
+                  </span>
+                  {sd.risk && (
+                    <span style={{ marginLeft: 'auto', fontSize: 10, flexShrink: 0 }}>
+                      {sd.risk === 'red' ? '🔴' : sd.risk === 'yellow' ? '🟡' : '🟢'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Week cells */}
+                {WEEKS.map((_, wi) => {
+                  const inRange = wi >= sd.startWeek && wi <= sd.endWeek;
+                  const isFirst = wi === sd.startWeek;
+                  const isLast  = wi === sd.endWeek;
+                  return (
+                    <div
+                      key={wi}
+                      onClick={inRange ? () => onBarClick(member.id, si) : undefined}
+                      style={{
+                        borderRight: wi < 12 ? '1px solid #1a2840' : 'none',
+                        background: wi === currentWeekIdx ? 'rgba(56,189,248,0.03)' : 'transparent',
+                        cursor: inRange ? 'pointer' : 'default',
+                        position: 'relative',
+                        display: 'flex', alignItems: 'center',
+                        padding: '3px 1px',
+                      }}
+                    >
+                      {inRange && (
+                        <div style={{
+                          position: 'absolute', inset: '3px 1px',
+                          background: progressBarColor(sd.progress, step.color, delayed),
+                          borderRadius: `${isFirst ? 4 : 0}px ${isLast ? 4 : 0}px ${isLast ? 4 : 0}px ${isFirst ? 4 : 0}px`,
+                          border: `1px solid ${delayed ? 'rgba(239,68,68,0.25)' : step.color + '28'}`,
+                          transition: 'background 0.25s',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {isFirst && sd.progress > 0 && (
+                            <span style={{
+                              fontSize: '0.55rem', color: '#fff', fontWeight: 800,
+                              textShadow: '0 1px 3px rgba(0,0,0,0.7)',
+                            }}>
+                              {sd.progress}%
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       PROGRESS MODAL
+    ═══════════════════════════════════════════════════════════════ */
+    function ProgressModal({ modal, members, tmpPct, onPctChange, onApply, onClose }) {
+      const member = members.find(m => m.id === modal.memberId);
+      const step   = STEPS[modal.stepIndex];
+      const sd     = member?.steps[modal.stepIndex];
+
+      return (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.72)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999,
+          }}
+          onClick={onClose}
+        >
+          <div
+            style={{
+              background: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: 16,
+              padding: 28,
+              width: 380,
+              boxShadow: '0 30px 60px rgba(0,0,0,0.6)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ marginBottom: 4, fontWeight: 800, fontSize: '1rem' }}>進捗を更新</div>
+            <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 22 }}>
+              {member?.name}　／　Step {modal.stepIndex + 1}：{step.name}
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+              {[0, 25, 50, 75, 100].map(pct => (
+                <button
+                  key={pct}
+                  onClick={() => onPctChange(pct)}
+                  style={{
+                    flex: 1, padding: '10px 2px',
+                    borderRadius: 8,
+                    border: `2px solid ${tmpPct === pct ? step.color : '#334155'}`,
+                    background: tmpPct === pct ? step.color + '28' : '#0f172a',
+                    color: tmpPct === pct ? step.color : '#64748b',
+                    cursor: 'pointer',
+                    fontWeight: tmpPct === pct ? 800 : 400,
+                    fontSize: '0.85rem',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
+
+            {/* Progress preview */}
+            <div style={{ background: '#334155', borderRadius: 5, height: 10, marginBottom: 24, overflow: 'hidden' }}>
+              <div style={{
+                background: step.color,
+                width: `${tmpPct}%`, height: '100%',
+                borderRadius: 5, transition: 'width 0.3s ease',
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={onClose}
+                style={{
+                  flex: 1, padding: 10, borderRadius: 8,
+                  border: '1px solid #334155', background: 'transparent',
+                  color: '#64748b', cursor: 'pointer', fontSize: '0.85rem',
+                }}
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={onApply}
+                style={{
+                  flex: 2, padding: 10, borderRadius: 8,
+                  border: 'none', background: step.color,
+                  color: '#fff', cursor: 'pointer',
+                  fontSize: '0.9rem', fontWeight: 800,
+                }}
+              >
+                更新する
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       ADMIN PANEL
+    ═══════════════════════════════════════════════════════════════ */
+    function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSelectStep, onUpdateStep, onUpdateMember, onReviewComplete }) {
+      const selMember = members.find(m => m.id === selMemberId);
+      const selStep   = selMember?.steps[selStepIndex];
+
+      const [memo,       setMemo]       = useState(selStep?.memo || '');
+      const [actDate,    setActDate]    = useState(selMember?.nextActionDate    || '');
+      const [actContent, setActContent] = useState(selMember?.nextActionContent || '');
+      const [saved,      setSaved]      = useState(false);
+
+      useEffect(() => { setMemo(selStep?.memo || ''); },    [selMemberId, selStepIndex]);
+      useEffect(() => {
+        setActDate(selMember?.nextActionDate    || '');
+        setActContent(selMember?.nextActionContent || '');
+      }, [selMemberId]);
+
+      const saveMemo = () => {
+        onUpdateStep(selMemberId, selStepIndex, { memo });
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      };
+
+      const saveAction = () => {
+        onUpdateMember(selMemberId, { nextActionDate: actDate, nextActionContent: actContent });
+      };
+
+      const setRisk = (risk) => {
+        onUpdateStep(selMemberId, selStepIndex, { risk: selStep?.risk === risk ? null : risk });
+      };
+
+      const panelStyle = (extra = {}) => ({
+        background: '#1e293b',
+        border: '1px solid #334155',
+        borderRadius: 10,
+        padding: 18,
+        ...extra,
+      });
+
+      const labelStyle = {
+        fontSize: '0.7rem', color: '#475569',
+        display: 'block', marginBottom: 7, fontWeight: 600,
+        textTransform: 'uppercase', letterSpacing: '0.06em',
+      };
+
+      const inputStyle = {
+        width: '100%', background: '#0f172a', color: '#e2e8f0',
+        border: '1px solid #334155', borderRadius: 8,
+        padding: '8px 12px', fontSize: '0.82rem',
+        outline: 'none', transition: 'border-color 0.15s',
+      };
+
+      return (
+        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 22px', borderBottom: '1px solid #334155' }}>
+            <h2 style={{ fontWeight: 700, fontSize: '0.95rem' }}>⚙️ 管理者アクション＆メモ</h2>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr 240px', gap: 0 }}>
+            {/* ── LEFT: Selector + Risk ── */}
+            <div style={{ padding: 20, borderRight: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={labelStyle}>メンバー選択</label>
+                <select
+                  value={selMemberId}
+                  onChange={e => onSelectMember(e.target.value)}
+                  style={inputStyle}
+                >
+                  {members.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}（{m.factory}）</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>ステップ選択</label>
+                <select
+                  value={selStepIndex}
+                  onChange={e => onSelectStep(parseInt(e.target.value))}
+                  style={inputStyle}
+                >
+                  {STEPS.map((s, i) => (
+                    <option key={s.id} value={i}>Step{i + 1}：{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Risk flag */}
+              <div>
+                <label style={labelStyle}>リスクフラグ（ステップ単位）</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[
+                    { v: 'red',    e: '🔴', t: '要注意' },
+                    { v: 'yellow', e: '🟡', t: '注意'   },
+                    { v: 'green',  e: '🟢', t: '良好'   },
+                  ].map(({ v, e, t }) => (
+                    <button
+                      key={v}
+                      onClick={() => setRisk(v)}
+                      title={t}
+                      style={{
+                        flex: 1, padding: '9px 4px',
+                        borderRadius: 8,
+                        border: `2px solid ${selStep?.risk === v ? '#94a3b8' : '#1e293b'}`,
+                        background: selStep?.risk === v ? '#334155' : '#0f172a',
+                        cursor: 'pointer', fontSize: '1.1rem',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Current state summary */}
+              <div style={panelStyle({ background: '#0f172a', flex: 1 })}>
+                <div style={{ fontSize: '0.7rem', color: '#475569', marginBottom: 6 }}>現在の状態</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: STEPS[selStepIndex].color, marginBottom: 3 }}>
+                  {STEPS[selStepIndex].name}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                  進捗：<span style={{ color: '#e2e8f0', fontWeight: 700 }}>{selStep?.progress ?? 0}%</span>
+                  {selStep?.risk && <span style={{ marginLeft: 8 }}>
+                    {selStep.risk === 'red' ? '🔴' : selStep.risk === 'yellow' ? '🟡' : '🟢'}
+                  </span>}
+                </div>
+                {selStep?.memo && (
+                  <div style={{ fontSize: '0.68rem', color: '#475569', marginTop: 6, borderTop: '1px solid #1e293b', paddingTop: 6, lineHeight: 1.5 }}>
+                    {selStep.memo.slice(0, 60)}{selStep.memo.length > 60 ? '…' : ''}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── CENTER: Memo ── */}
+            <div style={{ padding: 20, borderRight: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={labelStyle}>
+                  メモ　Step{selStepIndex + 1}：{STEPS[selStepIndex].name}　／　{selMember?.name}
+                </label>
+                <textarea
+                  value={memo}
+                  onChange={e => setMemo(e.target.value)}
+                  placeholder={`気づき、懸念事項、指導内容などを記録…`}
+                  rows={8}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical',
+                    lineHeight: 1.7,
+                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  onClick={saveMemo}
+                  style={{
+                    flex: 1, padding: '10px',
+                    borderRadius: 8, border: 'none',
+                    background: STEPS[selStepIndex].color,
+                    color: '#fff', cursor: 'pointer',
+                    fontSize: '0.85rem', fontWeight: 800,
+                  }}
+                >
+                  メモを保存
+                </button>
+                {saved && (
+                  <span style={{ fontSize: '0.75rem', color: '#22c55e', fontWeight: 700 }}>✓ 保存しました</span>
+                )}
+              </div>
+              {selStep?.memo && selStep.memo !== memo && (
+                <div style={{ fontSize: '0.7rem', color: '#f97316' }}>※ 未保存の変更があります</div>
+              )}
+            </div>
+
+            {/* ── RIGHT: Reviews + Next Action ── */}
+            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Reviews */}
+              <div>
+                <label style={labelStyle}>管理者レビュー状況</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {selMember?.reviews.map((rev, ri) => (
+                    <div key={ri} style={{
+                      background: '#0f172a', borderRadius: 8,
+                      padding: '9px 12px',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      border: `1px solid ${rev.completed ? 'rgba(34,197,94,0.25)' : '#1e293b'}`,
+                    }}>
+                      <Diamond completed={rev.completed} size={11} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                          {WEEKS[rev.weekIndex]?.label}
+                          {rev.completed && (
+                            <span style={{ color: '#22c55e', marginLeft: 6 }}>✓ 実施済</span>
+                          )}
+                        </div>
+                        {rev.completed && (
+                          <div style={{ fontSize: '0.65rem', color: '#475569' }}>{rev.completedDate}</div>
+                        )}
+                      </div>
+                      {!rev.completed && (
+                        <button
+                          onClick={() => onReviewComplete(selMemberId, ri)}
+                          style={{
+                            padding: '4px 9px', borderRadius: 6,
+                            border: '1px solid #334155', background: 'transparent',
+                            color: '#64748b', cursor: 'pointer', fontSize: '0.65rem',
+                            whiteSpace: 'nowrap', flexShrink: 0,
+                          }}
+                        >
+                          実施済にする
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Next action */}
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>次回アクション</label>
+                <input
+                  type="date"
+                  value={actDate}
+                  onChange={e => setActDate(e.target.value)}
+                  style={{ ...inputStyle, marginBottom: 8 }}
+                />
+                <input
+                  type="text"
+                  value={actContent}
+                  onChange={e => setActContent(e.target.value)}
+                  placeholder="例：Step3確認・フィードバック"
+                  style={{ ...inputStyle, marginBottom: 10 }}
+                />
+                <button
+                  onClick={saveAction}
+                  style={{
+                    width: '100%', padding: '9px',
+                    borderRadius: 8, border: '1px solid #334155',
+                    background: '#0f172a', color: '#94a3b8',
+                    cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  アクションを保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── Mount ── */
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
