@@ -783,6 +783,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       groups[key].containers.push(c);
     });
     groupKeys = Object.keys(groups).sort();
+    if (sortOrder === 'desc') groupKeys.reverse();
   } else if (groupMode === 'person') {
     valid.forEach(c => {
       const key = c.person || '未設定';
