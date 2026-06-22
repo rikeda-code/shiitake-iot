@@ -244,6 +244,7 @@
 <div class="tabs" id="tabs"></div>
 <main id="main"></main>
 <section id="weekly-section" style="margin:0 32px 40px;"></section>
+<section id="lot-section" style="display:none;margin:0 32px 40px;"></section>
 
 <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
@@ -1617,20 +1618,85 @@ async function loadCurrentSite(forceRefresh = false) {
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 
 let weeklyTabActive = false;
+let lotTabActive = false;
 
 function updateTabVisibility() {
-  document.getElementById('main').style.display = weeklyTabActive ? 'none' : '';
+  document.getElementById('main').style.display = (weeklyTabActive || lotTabActive) ? 'none' : '';
   const ws = document.getElementById('weekly-section');
   ws.style.display = weeklyTabActive ? '' : 'none';
-  // Re-render charts when section becomes visible (avoids Chart.js 0-size issue)
-  if (weeklyTabActive) {
+  const ls = document.getElementById('lot-section');
+  ls.style.display = lotTabActive ? '' : 'none';
+  if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
-    if (weeklyState) {
-      const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
-      const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
-      renderWeeklySection(section, weeklyState, groupMode, sortOrder);
-    }
+    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
+    const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
+    renderWeeklySection(section, weeklyState, groupMode, sortOrder);
   }
+  if (lotTabActive) renderLotTab();
+}
+
+function renderLotTab() {
+  const section = document.getElementById('lot-section');
+  if (!weeklyState) {
+    section.innerHTML = '<div class="loading">データ読み込み中...</div>';
+    return;
+  }
+  const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '']);
+  const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#a78bfa', '南丹': '#34d399' };
+
+  // Group by lot
+  const groups = {};
+  weeklyState.containerData.forEach(c => {
+    const lot = c.lot || '未設定';
+    if (LOT_EXCLUDE.has(lot)) return;
+    if (!groups[lot]) groups[lot] = [];
+    groups[lot].push(c);
+  });
+  const lotKeys = Object.keys(groups).sort().reverse(); // 新しい順
+
+  if (!lotKeys.length) {
+    section.innerHTML = '<div style="padding:16px;color:#94a3b8">自社菌床データがありません</div>';
+    return;
+  }
+
+  const html = lotKeys.map(lot => {
+    // Strip "自社" prefix for display
+    const lotLabel = lot.replace(/^自社/, '');
+    const cards = groups[lot].map(c => {
+      const siteColor = SITE_COLORS_LOT[c.siteName] || '#8892a4';
+      const displayNo = `${c.siteName}${c.no || c.name}`;
+      const harvestVal = c.harvest != null ? Math.round(c.harvest) : null;
+      const harvestCls = harvestVal == null ? '' : harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
+      const packCls = c.packRate == null ? '' : c.packRate >= 90 ? ' card-chip-green' : c.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
+      const packStr = c.packRate != null ? `${c.packRate}%` : '—';
+      const days = c.days != null ? `${c.days}日` : '—';
+      const safeName = c.name.replace(/'/g,"\\'");
+      if (harvestVal == null) {
+        return `<div class="container-card" style="opacity:0.45;cursor:pointer" onclick="showDetail('${safeName}','${c.siteId}')">
+          <div style="font-size:0.65rem;color:${siteColor};font-weight:700;margin-bottom:2px">${lotLabel}</div>
+          <div class="card-cn">${displayNo}</div>
+          <div class="card-sd" style="font-size:0.68rem">未稼働</div>
+        </div>`;
+      }
+      return `<div class="container-card" style="cursor:pointer" onclick="showDetail('${safeName}','${c.siteId}')">
+        <div style="font-size:0.65rem;color:${siteColor};font-weight:700;margin-bottom:2px">${lotLabel}</div>
+        <div class="card-cn">${displayNo}</div>
+        <div class="card-harvest${harvestCls}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
+        <div class="card-meta">
+          <span class="card-chip">${days}</span>
+          <span class="card-chip${packCls}">${packStr}</span>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:28px">
+      <div style="font-size:0.9rem;font-weight:700;color:#e2e8f0;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #2e3148">ロット ${lotLabel}</div>
+      <div class="cards-grid">${cards}</div>
+    </div>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title">自社菌床 収穫状況<span class="sub">ロット別</span></div>
+    ${html}`;
 }
 
 function initTabs() {
@@ -1646,8 +1712,9 @@ function initTabs() {
       btn.style.borderBottomColor = site.color;
     }
     btn.addEventListener('click', () => {
-      if (!weeklyTabActive && currentSiteIdx === i) return;
+      if (!weeklyTabActive && !lotTabActive && currentSiteIdx === i) return;
       weeklyTabActive = false;
+      lotTabActive = false;
       currentSiteIdx = i;
       tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
         b.classList.toggle('active', j === i);
@@ -1665,6 +1732,26 @@ function initTabs() {
     tabsEl.appendChild(btn);
   });
 
+  // 自社菌床 tab
+  const lotBtn = document.createElement('button');
+  lotBtn.className = 'tab-btn';
+  lotBtn.textContent = '自社菌床';
+  lotBtn.addEventListener('click', () => {
+    if (lotTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = ''; b.style.borderBottomColor = '';
+    });
+    lotBtn.classList.add('active');
+    lotBtn.style.color = '#f59e0b';
+    lotBtn.style.borderBottomColor = '#f59e0b';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(lotBtn);
+
   // Standalone weekly tab
   const weeklyBtn = document.createElement('button');
   weeklyBtn.className = 'tab-btn';
@@ -1672,6 +1759,7 @@ function initTabs() {
   weeklyBtn.addEventListener('click', () => {
     if (weeklyTabActive) return;
     weeklyTabActive = true;
+    lotTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -1690,13 +1778,15 @@ function closeDetail() {
   document.getElementById('detail-modal').style.display = 'none';
 }
 
-async function showDetail(containerName) {
+async function showDetail(containerName, overrideSiteId) {
   const modal = document.getElementById('detail-modal');
   const content = document.getElementById('detail-content');
   modal.style.display = '';
   content.innerHTML = '<div class="loading">読み込み中...</div>';
 
-  const site = SITES[currentSiteIdx];
+  const site = overrideSiteId
+    ? (SITES.find(s => s.id === overrideSiteId) || SITES[currentSiteIdx])
+    : SITES[currentSiteIdx];
   const MEKAKI_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
   const MEKAKI_GID = '1439665705';
 
