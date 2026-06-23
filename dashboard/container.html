@@ -398,7 +398,7 @@ async function fetchSummaryRows(site) {
     const sdCell    = cells[2];
     const startDate = sdCell?.v ? (gvizDateStr(sdCell.v, null) ?? gvizDateStr(null, sdCell?.f) ?? '') : (gvizDateStr(null, sdCell?.f) ?? '');
     const edCell    = cells[3];
-    const endDate   = edCell?.v ? (gvizDateStr(edCell.v, null) ?? gvizDateStr(null, edCell?.f) ?? '') : (gvizDateStr(null, edCell?.f) ?? '');
+    const endDate   = edCell?.v ? (gvizDateStr(edCell.v, null) ?? '') : '';
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
     const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
