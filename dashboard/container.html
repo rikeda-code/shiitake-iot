@@ -388,9 +388,20 @@ async function fetchSummaryRows(site) {
     raw.push({ name, startDate, endDate, days, harvest, packRate, person, lot, no: extractContainerNo(name) });
   });
 
-  // 同一コンテナNo.の重複処理: 最新の startDate を持つ行を残す
-  const best = {};
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // 同一コンテナNo.の重複処理
+  // - endDate が過去 → 過去実績 (ended)
+  // - 最新 startDate のもの → アクティブ候補
+  const best = {};      // No → 最新行（アクティブ or 空き）
+  const ended = [];     // 終了済み行（endDate 過去日）
+
   raw.forEach(r => {
+    const ed = parseDateStr(r.endDate);
+    if (ed && ed < today) {
+      ended.push(r);
+      return;
+    }
     const key = r.no;
     if (!best[key]) { best[key] = r; return; }
     const curr = parseDateStr(r.startDate);
@@ -398,14 +409,22 @@ async function fetchSummaryRows(site) {
     if (curr && (!prev || curr > prev)) best[key] = r;
   });
 
-  // ソート
-  const sorted = Object.values(best).sort((a, b) => {
+  const sortByNo = (a, b) => {
     const ka = containerSortKey(site.name, a.no);
     const kb = containerSortKey(site.name, b.no);
     return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1] - kb[1];
+  };
+
+  const active = Object.values(best).sort(sortByNo);
+
+  // 終了済みは endDate 新しい順
+  ended.sort((a, b) => {
+    const ea = parseDateStr(a.endDate), eb = parseDateStr(b.endDate);
+    if (ea && eb) return eb - ea;
+    return 0;
   });
 
-  return sorted;
+  return { active, ended };
 }
 
 function parseContainerRows(table) {
@@ -695,7 +714,7 @@ async function loadWeeklySection() {
   try {
     const allSummaries = (await Promise.all(SITES.map(site =>
       fetchSummaryRows(site)
-        .then(rows => rows.map(r => ({ ...r, siteName: site.name, siteId: site.id })))
+        .then(({ active }) => active.map(r => ({ ...r, siteName: site.name, siteId: site.id })))
         .catch(() => [])
     ))).flat().filter(r => r.startDate);
 
@@ -1235,11 +1254,11 @@ function renderCards(summary) {
     const info = parseContainerName(row.name);
     const displayName = info.no || row.name;
 
-    // 未稼働コンテナ（収穫データなし）はコンテナ名のみ
+    // 空きコンテナ（収穫データなし）
     if (row.harvest == null) {
-      return `<div class="container-card" style="opacity:0.45;cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
+      return `<div class="container-card" style="opacity:0.35;cursor:default">
         <div class="card-cn" title="${row.name}">${displayName}</div>
-        <div class="card-sd" style="font-size:0.68rem">未稼働</div>
+        <div class="card-sd" style="font-size:0.72rem;color:var(--muted)">空き</div>
       </div>`;
     }
 
@@ -1267,23 +1286,55 @@ function renderCards(summary) {
   return `<div class="cards-grid">${html}</div>`;
 }
 
+function renderEndedCards(ended) {
+  if (!ended.length) return '';
+  const html = ended.map(row => {
+    const info = parseContainerName(row.name);
+    const displayName = info.no || row.name;
+    const ed = row.endDate || '—';
+    const sd = row.startDate || '—';
+    const harvestVal = row.harvest != null ? Math.round(row.harvest) : null;
+    const harvestCls = harvestVal == null ? '' : harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
+    const harvestStr = harvestVal != null ? `${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span>` : '<span style="color:var(--muted)">—</span>';
+    const packCls = row.packRate == null ? '' : row.packRate >= 90 ? ' card-chip-green' : row.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
+    const packStr = row.packRate != null ? `${row.packRate}%` : '—';
+    const days = row.days != null ? `${row.days}日` : '—';
+    return `<div class="container-card" style="opacity:0.6;cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
+      <div class="card-cn" title="${row.name}">${displayName}</div>
+      <div class="card-sd">開始: ${sd}</div>
+      <div class="card-sd" style="color:#f87171">終了: ${ed}</div>
+      <div class="card-harvest${harvestCls}">${harvestStr}</div>
+      <div class="card-meta">
+        <span class="card-chip">${days}</span>
+        <span class="card-chip${packCls}">${packStr}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="cards-grid">${html}</div>`;
+}
+
 // ── Mgmt data ─────────────────────────────────────────────────────────────────
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-function renderMain(site, summary, containers, data) {
+function renderMain(site, active, ended, containers, data) {
   destroyCharts();
   const main = document.getElementById('main');
   main.innerHTML = '';
 
-  // Section 1 – KPI cards (from 収穫実績集計表: C=栽培開始日 E=栽培日数 F=コンテナ名 J=収穫量g/菌床)
   const s1 = document.createElement('section');
   s1.innerHTML = `<div class="section-title">現時点収穫量<span class="sub">1菌床当たり (g)</span></div>
-    ${renderCards(summary)}`;
+    ${renderCards(active)}`;
   main.appendChild(s1);
 
-  if (!containers.length) return;
+  if (ended.length) {
+    const s2 = document.createElement('section');
+    s2.innerHTML = `<div class="section-title" style="margin-top:32px">過去の実績<span class="sub">栽培終了済み</span></div>
+      ${renderEndedCards(ended)}`;
+    main.appendChild(s2);
+  }
 
+  if (!containers.length) return;
 }
 
 // ── Load ───────────────────────────────────────────────────────────────────────
@@ -1292,21 +1343,22 @@ async function loadCurrentSite(forceRefresh = false) {
   const site = SITES[currentSiteIdx];
 
   if (!forceRefresh && cache[site.id]) {
-    const { summary, containers, data } = cache[site.id];
-    renderMain(site, summary, containers, data);
+    const { active, ended, containers, data } = cache[site.id];
+    renderMain(site, active, ended, containers, data);
     return;
   }
 
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('last-updated').textContent = '';
 
-  let summary    = [];
+  let active     = [];
+  let ended      = [];
   let containers = [];
   let listError  = null;
 
   try {
-    summary    = await fetchSummaryRows(site);
-    containers = summary.map(r => r.name);
+    ({ active, ended } = await fetchSummaryRows(site));
+    containers = active.map(r => r.name);
   } catch (e) {
     listError = e.message || String(e);
   }
@@ -1323,8 +1375,8 @@ async function loadCurrentSite(forceRefresh = false) {
     }));
   }
 
-  cache[site.id] = { summary, containers, data };
-  renderMain(site, summary, containers, data);
+  cache[site.id] = { active, ended, containers, data };
+  renderMain(site, active, ended, containers, data);
 
   if (listError) {
     const msg = document.createElement('div');
@@ -1535,7 +1587,10 @@ async function showDetail(containerName, overrideSiteId) {
 
   // 芽かき量: A列=拠点, E列=号基, K列=合計重量
   let mekakiVal = null;
-  const summaryRow = cache[site.id]?.summary?.find(r => r.name === containerName);
+  const cached = cache[site.id];
+  const summaryRow = cached
+    ? ([...(cached.active || []), ...(cached.ended || [])].find(r => r.name === containerName))
+    : null;
   const containerNo = summaryRow?.no || (parseContainerName(containerName)).no;
   const startDateStr = summaryRow?.startDate || '';
   if (mekakiTable?.rows) {
