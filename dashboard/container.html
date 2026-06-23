@@ -412,6 +412,7 @@ async function fetchSummaryRows(site) {
     }
     raw.push({ name, startDate, endDate, days, harvest, packRate, person, lot, no: extractContainerNo(name) });
   });
+  console.log(`[${site.name}] raw sample (first 3):`, raw.slice(0,3).map(r => ({no:r.no, startDate:r.startDate, endDate:r.endDate, harvest:r.harvest})));
 
   const today = new Date(); today.setHours(0,0,0,0);
 
