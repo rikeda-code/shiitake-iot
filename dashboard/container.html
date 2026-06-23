@@ -137,23 +137,6 @@
       padding: 1px 6px; border-radius: 3px; font-size: 0.82rem;
     }
 
-    /* ── Mgmt table ── */
-    .mgmt-table-wrap { overflow-x: auto; margin-top: 4px; }
-    .mgmt-table { width: 100%; border-collapse: collapse; font-size: 0.79rem; }
-    .mgmt-table th, .mgmt-table td {
-      padding: 8px 12px; border-bottom: 1px solid var(--border);
-      text-align: right; white-space: nowrap;
-    }
-    .mgmt-table th { color: var(--muted); font-weight: 500; background: rgba(0,0,0,0.25); position: sticky; top: 0; }
-    .mgmt-table td:first-child, .mgmt-table th:first-child,
-    .mgmt-table td:nth-child(2), .mgmt-table th:nth-child(2),
-    .mgmt-table td:nth-child(3), .mgmt-table th:nth-child(3),
-    .mgmt-table td:nth-child(4), .mgmt-table th:nth-child(4) { text-align: left; }
-    .mgmt-table tr:hover td { background: rgba(255,255,255,0.03); }
-    .mgmt-table .col-increase { color: #34d399; }
-    .mgmt-table .col-decrease { color: #f87171; }
-    .mgmt-sub-header { font-size: 0.72rem; color: var(--muted); margin: 20px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
-
     /* ── Sort bar ── */
     .weekly-sort-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .sort-label { font-size: 0.78rem; color: var(--muted); }
@@ -269,8 +252,6 @@ const SIZES = [
   { key: 'premium', label: '優',   color: '#f97316' },
 ];
 
-const MGMT_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
-
 const CONTAINER_PALETTE = [
   '#38bdf8','#34d399','#a78bfa','#f97316','#fb7185','#facc15',
   '#4ade80','#c084fc','#f472b6','#60a5fa','#fb923c','#2dd4bf',
@@ -281,9 +262,7 @@ const CONTAINER_PALETTE = [
 
 let currentSiteIdx = 0;
 const cache     = {}; // { [siteId]: { summary: [], containers: [], data: {} } }
-const mgmtCache = {}; // { [siteName]: { sansui: [], chusui: [], mekaki: [] } }
 let chartCumul = null;
-let chartStack = null;
 let weeklyCharts = [];
 
 const SITE_WEEKLY_COLORS = {
@@ -1175,7 +1154,6 @@ const tooltipDefaults = {
 };
 
 function destroyCharts() {
-  if (chartStack) { chartStack.destroy(); chartStack = null; }
 }
 
 function buildCumulChart(containers, data) {
@@ -1229,56 +1207,6 @@ function buildCumulChart(containers, data) {
           grid: { color: '#1e2235' },
         },
         y: {
-          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} kg` },
-          grid: { color: '#1e2235' },
-        },
-      },
-    },
-  });
-}
-
-function buildStackChart(rows) {
-  if (!rows || !rows.length) return;
-  const labels = rows.map(r => r.date);
-  const datasets = SIZES.map(s => ({
-    label: s.label,
-    data: rows.map(r => r[s.key]),
-    backgroundColor: s.color + 'cc',
-    borderColor: s.color,
-    borderWidth: 1,
-    borderRadius: 3,
-  }));
-
-  const ctx = document.getElementById('stack-chart').getContext('2d');
-  chartStack = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 14, padding: 16 },
-        },
-        tooltip: {
-          ...tooltipDefaults,
-          callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kg`,
-            footer: items => {
-              const total = items.reduce((s, i) => s + i.parsed.y, 0);
-              return `合計: ${total.toFixed(2)} kg`;
-            },
-          },
-        },
-      },
-      scales: {
-        x: {
-          stacked: true,
-          ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45, maxTicksLimit: 20 },
-          grid: { color: '#1e2235' },
-        },
-        y: {
-          stacked: true,
           ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} kg` },
           grid: { color: '#1e2235' },
         },
@@ -1341,168 +1269,6 @@ function renderCards(summary) {
 
 // ── Mgmt data ─────────────────────────────────────────────────────────────────
 
-function parseMgmtRows(table) {
-  const colMap = {};
-  (table.cols || []).forEach((c, i) => {
-    const lbl = (c.label || '').replace(/\s/g, '');
-    if (lbl.includes('菌床種類'))                    colMap.type     = i;
-    if (lbl.includes('散水開始時間'))                 colMap.time     = i;
-    if (lbl.includes('栽培開始日'))                   colMap.startD   = i;
-    if (lbl.includes('号機'))                         colMap.no       = i;
-    if (lbl.includes('上下段'))                       colMap.ud       = i;
-    // Avoid matching "(ave.)" columns
-    if (lbl.includes('散水前重量') && !lbl.includes('ave')) colMap.before  = i;
-    if (lbl.includes('散水20h')   && !lbl.includes('ave')) colMap.after20 = i;
-    if (/^0-20h増加量/.test(lbl)  && !lbl.includes('ave')) colMap.inc20   = i;
-    // 注水 sheets may use same col names; also accept 注水前 / 注水後
-    if (lbl.includes('注水前重量') && !lbl.includes('ave')) colMap.before  = i;
-    if (lbl.includes('注水20h')   && !lbl.includes('ave')) colMap.after20 = i;
-  });
-
-  const rows = [];
-  (table.rows || []).forEach(row => {
-    const cells = row.c || [];
-    const get = (idx) => {
-      if (idx == null) return null;
-      const c = cells[idx];
-      if (!c) return null;
-      return c.v ?? c.f ?? null;
-    };
-    const no = get(colMap.no);
-    if (no == null || String(no).trim() === '') return;
-
-    const startD  = get(colMap.startD);
-    const ud      = get(colMap.ud);
-    const type    = get(colMap.type);
-    const time    = get(colMap.time);
-    const before  = parseFloat(get(colMap.before))  || null;
-    const after20 = parseFloat(get(colMap.after20)) || null;
-    const inc20   = parseFloat(get(colMap.inc20))   || null;
-
-    rows.push({
-      no: String(no).trim(),
-      startD: startD != null ? String(startD).trim() : '',
-      ud:     ud     != null ? String(ud).trim()     : '',
-      type:   type   != null ? String(type).trim()   : '',
-      time:   time   != null ? String(time).trim()   : '',
-      before, after20, inc20,
-    });
-  });
-  return rows;
-}
-
-function parseMekakiRows(table) {
-  // 1回目収穫芽かき: flexible — find 号機/上下段/栽培開始日/芽かき量
-  const colMap = {};
-  (table.cols || []).forEach((c, i) => {
-    const lbl = (c.label || '').replace(/\s/g, '');
-    if (lbl.includes('号機'))      colMap.no    = i;
-    if (lbl.includes('上下段'))    colMap.ud    = i;
-    if (lbl.includes('栽培開始日')) colMap.startD = i;
-    if (lbl.includes('菌床種類'))  colMap.type  = i;
-    if (lbl.includes('芽かき'))    colMap.mekaki = i;
-  });
-
-  const rows = [];
-  (table.rows || []).forEach(row => {
-    const cells = row.c || [];
-    const get = (idx) => {
-      if (idx == null) return null;
-      const c = cells[idx];
-      return c ? (c.v ?? c.f ?? null) : null;
-    };
-    const no = get(colMap.no);
-    if (no == null || String(no).trim() === '') return;
-    rows.push({
-      no:     String(no).trim(),
-      startD: get(colMap.startD) != null ? String(get(colMap.startD)).trim() : '',
-      ud:     get(colMap.ud)     != null ? String(get(colMap.ud)).trim()     : '',
-      type:   get(colMap.type)   != null ? String(get(colMap.type)).trim()   : '',
-      mekaki: parseFloat(get(colMap.mekaki)) || null,
-    });
-  });
-  return rows;
-}
-
-function fmt(v) {
-  if (v == null) return '<span style="color:var(--muted)">—</span>';
-  return v.toLocaleString('ja-JP');
-}
-
-function fmtInc(v) {
-  if (v == null) return '<span style="color:var(--muted)">—</span>';
-  const cls = v >= 0 ? 'col-increase' : 'col-decrease';
-  return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toLocaleString('ja-JP')}</span>`;
-}
-
-function renderMgmtTable(rows, cols) {
-  if (!rows.length) return '<div class="loading" style="height:60px">データなし</div>';
-  const head = cols.map(c => `<th>${c.label}</th>`).join('');
-  const body = rows.map(row =>
-    `<tr>${cols.map(c => `<td>${c.render(row)}</td>`).join('')}</tr>`
-  ).join('');
-  return `<div class="mgmt-table-wrap">
-    <table class="mgmt-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
-  </div>`;
-}
-
-function renderMgmtSection(siteName, mgmt) {
-  const sansuiCols = [
-    { label: '号機',     render: r => r.no },
-    { label: '上下段',   render: r => r.ud },
-    { label: '栽培開始日', render: r => r.startD },
-    { label: '菌床種類', render: r => r.type },
-    { label: '散水前重量(g)', render: r => fmt(r.before) },
-    { label: '散水20h(g)',    render: r => fmt(r.after20) },
-    { label: '0-20h増加量(g)', render: r => fmtInc(r.inc20) },
-  ];
-  const chusuiCols = [
-    { label: '号機',     render: r => r.no },
-    { label: '上下段',   render: r => r.ud },
-    { label: '栽培開始日', render: r => r.startD },
-    { label: '菌床種類', render: r => r.type },
-    { label: '注水前重量(g)', render: r => fmt(r.before) },
-    { label: '注水20h(g)',    render: r => fmt(r.after20) },
-    { label: '増加量(g)',     render: r => fmtInc(r.inc20) },
-  ];
-  const mekakiCols = [
-    { label: '号機',     render: r => r.no },
-    { label: '上下段',   render: r => r.ud },
-    { label: '栽培開始日', render: r => r.startD },
-    { label: '菌床種類', render: r => r.type },
-    { label: '芽かき量(g)', render: r => fmt(r.mekaki) },
-  ];
-
-  let html = '';
-  if (mgmt.sansui.length) {
-    html += `<div class="mgmt-sub-header">散水データ</div>${renderMgmtTable(mgmt.sansui, sansuiCols)}`;
-  }
-  if (mgmt.chusui.length) {
-    html += `<div class="mgmt-sub-header">注水データ</div>${renderMgmtTable(mgmt.chusui, chusuiCols)}`;
-  }
-  if (mgmt.mekaki.length) {
-    html += `<div class="mgmt-sub-header">芽かきデータ</div>${renderMgmtTable(mgmt.mekaki, mekakiCols)}`;
-  }
-  if (!html) html = renderSetupNotice().replace('コンテナ一覧シート', '菌床管理シート');
-
-  return html;
-}
-
-async function loadMgmt(siteName, forceRefresh = false) {
-  if (!forceRefresh && mgmtCache[siteName]) return mgmtCache[siteName];
-
-  const results = { sansui: [], chusui: [], mekaki: [] };
-  const silentFetch = (id, sheet, fn) =>
-    fetchSheet(id, sheet).then(t => fn(t)).catch(_e => {});
-  await Promise.all([
-    silentFetch(MGMT_ID, siteName,           t => { results.sansui = parseMgmtRows(t); }),
-    silentFetch(MGMT_ID, `${siteName}注水`,  t => { results.chusui = parseMgmtRows(t); }),
-    silentFetch(MGMT_ID, '1回目収穫芽かき', t => { results.mekaki = parseMekakiRows(t); }),
-  ]);
-  mgmtCache[siteName] = results;
-  return results;
-}
-
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
 function renderMain(site, summary, containers, data) {
@@ -1518,48 +1284,6 @@ function renderMain(site, summary, containers, data) {
 
   if (!containers.length) return;
 
-  // Section 3 – Stacked bar
-  const options = containers.map(name =>
-    `<option value="${name}">${name}</option>`
-  ).join('');
-
-  const s3 = document.createElement('section');
-  s3.className = 'chart-section';
-  s3.innerHTML = `<div class="section-title">日次サイズ別収穫量<span class="sub">積み上げ棒グラフ</span></div>
-    <div class="selector-row">
-      <label>コンテナ：</label>
-      <select id="container-select" onchange="onContainerChange()">${options}</select>
-    </div>
-    <div class="chart-wrap"><canvas id="stack-chart"></canvas></div>`;
-  main.appendChild(s3);
-
-  requestAnimationFrame(() => {
-    buildStackChart(data[containers[0]] || []);
-  });
-
-  // Section 4 – Mgmt data (async, fills in after load)
-  const s4 = document.createElement('section');
-  s4.className = 'chart-section';
-  s4.id = 'mgmt-section';
-  s4.innerHTML = `<div class="section-title">菌床管理データ<span class="sub">散水・注水・芽かき</span></div>
-    <div class="loading" style="height:60px">読み込み中...</div>`;
-  main.appendChild(s4);
-
-  loadMgmt(site.name).then(mgmt => {
-    const sec = document.getElementById('mgmt-section');
-    if (!sec) return;
-    sec.innerHTML = `<div class="section-title">菌床管理データ<span class="sub">散水・注水・芽かき</span></div>
-      ${renderMgmtSection(site.name, mgmt)}`;
-  }).catch(() => {});
-}
-
-function onContainerChange() {
-  const sel = document.getElementById('container-select');
-  if (!sel) return;
-  const site = SITES[currentSiteIdx];
-  const rows = (cache[site.id]?.data || {})[sel.value] || [];
-  if (chartStack) { chartStack.destroy(); chartStack = null; }
-  buildStackChart(rows);
 }
 
 // ── Load ───────────────────────────────────────────────────────────────────────
@@ -1572,8 +1296,6 @@ async function loadCurrentSite(forceRefresh = false) {
     renderMain(site, summary, containers, data);
     return;
   }
-
-  if (forceRefresh) delete mgmtCache[site.name];
 
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('last-updated').textContent = '';
@@ -1800,12 +1522,11 @@ async function showDetail(containerName, overrideSiteId) {
     return json.table;
   };
 
-  let table, mekakiTable, kinshoBedTable;
+  let table, mekakiTable;
   try {
-    [table, mekakiTable, kinshoBedTable] = await Promise.all([
+    [table, mekakiTable] = await Promise.all([
       fetchSheet(site.id, containerName, 0),
       fetchByGid(MEKAKI_ID, MEKAKI_GID).catch(() => null),
-      fetchSheet(MEKAKI_ID, site.name, 0).catch(() => null),
     ]);
   } catch(e) {
     content.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
@@ -1830,32 +1551,6 @@ async function showDetail(containerName, overrideSiteId) {
       }
     }
   }
-
-  // 菌床重量: D列=号機(結合セルあり), E列=上下段, F列=散水前重量, G列=重量増加
-  // D列は結合セルのため先頭行のみ値あり → lastDNo で引き継ぐ
-  let kinshoMap = {};
-  let lastDNo = '';
-  if (kinshoBedTable?.rows) {
-    for (const row of kinshoBedTable.rows) {
-      const cells = row?.c || [];
-      if (cells[3]?.v != null) {
-        const newDNo = String(cells[3].v).trim();
-        // 同じ号機の新しいロットが始まったらリセット（最新ロットのみ保持）
-        if (newDNo === containerNo) kinshoMap = {};
-        lastDNo = newDNo;
-      }
-      const curDNo = lastDNo;
-      const eStr = cells[4]?.v != null ? String(cells[4].v).trim() : '';
-      const fVal = parseFloat(cells[5]?.v);
-      const gVal = parseFloat(cells[6]?.v);
-      if (curDNo !== containerNo) continue;
-      if (isNaN(fVal)) continue;
-      const seg = parseInt(eStr);
-      const key = isNaN(seg) ? `_${Object.keys(kinshoMap).length}` : String(seg);
-      kinshoMap[key] = { seg: isNaN(seg) ? Object.keys(kinshoMap).length + 1 : seg, base: fVal, inc: isNaN(gVal) ? 0 : gVal };
-    }
-  }
-  const kinshoRows = Object.values(kinshoMap).sort((a, b) => a.seg - b.seg).slice(0, 6);
 
   const allRows = table.rows || [];
 
@@ -1914,70 +1609,6 @@ async function showDetail(containerName, overrideSiteId) {
 
   const packCls = packRate == null ? '' : packRate >= 90 ? 'color:#86efac' : packRate >= 80 ? 'color:#93c5fd' : 'color:#f87171';
 
-  // Detect TypeB (南丹): YYYYMMDD string in col3
-  let detailIsTypeB = false;
-  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
-    const v = allRows[ri]?.c?.[3]?.v;
-    if (typeof v === 'string' && /^\d{8}$/.test(v)) { detailIsTypeB = true; break; }
-  }
-  // Detect TypeC (群馬): col1 contains "N日" string
-  let detailIsTypeC = false;
-  if (!detailIsTypeB) {
-    for (let ri = 13; ri < Math.min(25, allRows.length); ri++) {
-      const v = allRows[ri]?.c?.[1]?.v;
-      if (typeof v === 'string' && /^\d+日$/.test(v)) { detailIsTypeC = true; break; }
-    }
-  }
-
-  // Parse daily size breakdown: G=col6(M), H=col7(L), I=col8(2L), J=col9(袋品)
-  // 全拠点 day1～全日表示。day0=14行目(ri=13)、day50=80行目(ri=79)はシート構造の説明
-  const dailyRows = [];
-  if (detailIsTypeB) {
-    // TypeB (南丹): col3=YYYYMMDD, col5=date, cols6-9=size breakdown
-    const startD = parseDateStr(startDateStr);
-    for (let ri = 0; ri < allRows.length; ri++) {
-      const cells = allRows[ri]?.c || [];
-      const ds = cells[3]?.v;
-      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
-      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
-      if (!rowDate || !startD) continue;
-      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
-      if (dayNum < 1 || dayNum > 200) continue;
-      const m  = parseFloat(cells[6]?.v) || 0;
-      const l  = parseFloat(cells[7]?.v) || 0;
-      const xl = parseFloat(cells[8]?.v) || 0;
-      const bg = parseFloat(cells[9]?.v) || 0;
-      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
-    }
-  } else if (detailIsTypeC) {
-    // TypeC (群馬): col1="N日", cols6-9=size breakdown, day0=ri=13(row14)
-    for (let ri = 13; ri < allRows.length; ri++) {
-      const cells = allRows[ri]?.c || [];
-      const dayLabel = String(cells[1]?.v ?? '');
-      const dm = dayLabel.match(/^(\d+)日$/);
-      if (!dm) continue;
-      const dayNum = parseInt(dm[1]);
-      if (dayNum < 1 || dayNum > 200) continue;
-      const m  = parseFloat(cells[6]?.v) || 0;
-      const l  = parseFloat(cells[7]?.v) || 0;
-      const xl = parseFloat(cells[8]?.v) || 0;
-      const bg = parseFloat(cells[9]?.v) || 0;
-      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
-    }
-  } else {
-    // TypeA (いなべ): col1=dayNum integer, day0=ri=13(row14)
-    for (let ri = 13; ri < allRows.length; ri++) {
-      const cells = allRows[ri]?.c || [];
-      const dayNum = cells[1]?.v;
-      if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
-      const m  = parseFloat(cells[6]?.v) || 0;
-      const l  = parseFloat(cells[7]?.v) || 0;
-      const xl = parseFloat(cells[8]?.v) || 0;
-      const bg = parseFloat(cells[9]?.v) || 0;
-      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
-    }
-  }
-
   content.innerHTML = `
     <div class="detail-title">コンテナ ${displayName} 詳細</div>
     <div class="detail-grid">
@@ -2011,89 +1642,7 @@ async function showDetail(containerName, overrideSiteId) {
       <div class="detail-pack-label">${mekakiLabel}</div>
       <div class="detail-pack-value" style="${mekakiDisplay >= 200 ? 'color:#f87171' : ''}">${mekakiDisplay >= 200 ? '⚠️ ' : ''}${mekakiDisplay} kg</div>
     </div>` : ''}
-    ${kinshoRows.length > 0 ? `
-    <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">菌床重量 (g)</div>
-    <div style="position:relative;height:220px"><canvas id="detail-kinsho-canvas"></canvas></div>` : ''}
-    ${dailyRows.length > 0 ? `
-    <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
-    <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>
-    <div style="margin-top:20px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別累計収穫量 (kg)</div>
-    <div style="position:relative;height:220px"><canvas id="detail-cumul-canvas"></canvas></div>` : ''}`;
-
-  if (kinshoRows.length > 0) {
-    new Chart(document.getElementById('detail-kinsho-canvas'), {
-      type: 'bar',
-      data: {
-        labels: kinshoRows.map(r => `${r.seg}段`),
-        datasets: [
-          { label: '初期重量', data: kinshoRows.map(r => r.base), backgroundColor: '#38bdf8cc', stack: 's' },
-          { label: '散水増加量', data: kinshoRows.map(r => r.inc), backgroundColor: '#34d399cc', stack: 's' },
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
-          tooltip: { ...tooltipDefaults },
-        },
-        scales: {
-          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}g` }, grid: { color: '#1e2235' } },
-        },
-      },
-    });
-  }
-
-  if (dailyRows.length > 0) {
-    const chartOpts = {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
-        tooltip: { ...tooltipDefaults },
-      },
-      scales: {
-        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
-        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
-      },
-    };
-    const labels = dailyRows.map(r => `day${r.day}`);
-
-    new Chart(document.getElementById('detail-bar-canvas'), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label: 'M',   data: dailyRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
-          { label: 'L',   data: dailyRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
-          { label: '2L',  data: dailyRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
-          { label: '袋品', data: dailyRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
-        ],
-      },
-      options: chartOpts,
-    });
-
-    // Cumulative sums
-    let cm = 0, cl = 0, cxl = 0, cbg = 0;
-    const cumM = [], cumL = [], cumXL = [], cumBG = [];
-    for (const r of dailyRows) {
-      cm += r.m; cl += r.l; cxl += r.xl; cbg += r.bg;
-      cumM.push(+cm.toFixed(2)); cumL.push(+cl.toFixed(2));
-      cumXL.push(+cxl.toFixed(2)); cumBG.push(+cbg.toFixed(2));
-    }
-    new Chart(document.getElementById('detail-cumul-canvas'), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label: 'M',   data: cumM,  backgroundColor: '#3b82f6cc', stack: 's' },
-          { label: 'L',   data: cumL,  backgroundColor: '#10b981cc', stack: 's' },
-          { label: '2L',  data: cumXL, backgroundColor: '#f59e0bcc', stack: 's' },
-          { label: '袋品', data: cumBG, backgroundColor: '#8b5cf6cc', stack: 's' },
-        ],
-      },
-      options: chartOpts,
-    });
-  }
+    `;
 }
 
 if ('serviceWorker' in navigator) {
