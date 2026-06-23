@@ -440,12 +440,12 @@ async function fetchSummaryRows(site) {
     return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1] - kb[1];
   };
 
-  // 定義済みNoのうちデータにないものを「空き」スケルトンとして追加
+  // 定義済みNoのうちアクティブデータがないものを「空き」スケルトンとして追加
+  // (endedにあっても現時点スロットとして空きカードを表示)
   const definedNos = DEFINED_NOS[site.name] || [];
   const activeNos = new Set(Object.keys(best));
-  const endedNos  = new Set(ended.map(r => r.no));
   for (const no of definedNos) {
-    if (!activeNos.has(no) && !endedNos.has(no)) {
+    if (!activeNos.has(no)) {
       best[no] = { name: no, startDate: '', endDate: '', days: null, harvest: null, packRate: null, person: '', lot: '', no };
     }
   }
