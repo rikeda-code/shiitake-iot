@@ -1609,6 +1609,65 @@ async function showDetail(containerName, overrideSiteId) {
 
   const packCls = packRate == null ? '' : packRate >= 90 ? 'color:#86efac' : packRate >= 80 ? 'color:#93c5fd' : 'color:#f87171';
 
+  // Detect TypeB (南丹): YYYYMMDD string in col3
+  let detailIsTypeB = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { detailIsTypeB = true; break; }
+  }
+  // Detect TypeC (群馬): col1 contains "N日" string
+  let detailIsTypeC = false;
+  if (!detailIsTypeB) {
+    for (let ri = 13; ri < Math.min(25, allRows.length); ri++) {
+      const v = allRows[ri]?.c?.[1]?.v;
+      if (typeof v === 'string' && /^\d+日$/.test(v)) { detailIsTypeC = true; break; }
+    }
+  }
+
+  const dailyRows = [];
+  if (detailIsTypeB) {
+    const startD = parseDateStr(startDateStr);
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      if (!rowDate || !startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else if (detailIsTypeC) {
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayLabel = String(cells[1]?.v ?? '');
+      const dm = dayLabel.match(/^(\d+)日$/);
+      if (!dm) continue;
+      const dayNum = parseInt(dm[1]);
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else {
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayNum = cells[1]?.v;
+      if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  }
+
   content.innerHTML = `
     <div class="detail-title">コンテナ ${displayName} 詳細</div>
     <div class="detail-grid">
@@ -1642,7 +1701,59 @@ async function showDetail(containerName, overrideSiteId) {
       <div class="detail-pack-label">${mekakiLabel}</div>
       <div class="detail-pack-value" style="${mekakiDisplay >= 200 ? 'color:#f87171' : ''}">${mekakiDisplay >= 200 ? '⚠️ ' : ''}${mekakiDisplay} kg</div>
     </div>` : ''}
-    `;
+    ${dailyRows.length > 0 ? `
+    <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
+    <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>
+    <div style="margin-top:20px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別累計収穫量 (kg)</div>
+    <div style="position:relative;height:220px"><canvas id="detail-cumul-canvas"></canvas></div>` : ''}`;
+
+  if (dailyRows.length > 0) {
+    const chartOpts = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
+        tooltip: { ...tooltipDefaults },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+      },
+    };
+    const labels = dailyRows.map(r => `day${r.day}`);
+    new Chart(document.getElementById('detail-bar-canvas'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'M',   data: dailyRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+          { label: 'L',   data: dailyRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+          { label: '2L',  data: dailyRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+          { label: '袋品', data: dailyRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+        ],
+      },
+      options: chartOpts,
+    });
+    let cm = 0, cl = 0, cxl = 0, cbg = 0;
+    const cumM = [], cumL = [], cumXL = [], cumBG = [];
+    for (const r of dailyRows) {
+      cm += r.m; cl += r.l; cxl += r.xl; cbg += r.bg;
+      cumM.push(+cm.toFixed(2)); cumL.push(+cl.toFixed(2));
+      cumXL.push(+cxl.toFixed(2)); cumBG.push(+cbg.toFixed(2));
+    }
+    new Chart(document.getElementById('detail-cumul-canvas'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'M',   data: cumM,  backgroundColor: '#3b82f6cc', stack: 's' },
+          { label: 'L',   data: cumL,  backgroundColor: '#10b981cc', stack: 's' },
+          { label: '2L',  data: cumXL, backgroundColor: '#f59e0bcc', stack: 's' },
+          { label: '袋品', data: cumBG, backgroundColor: '#8b5cf6cc', stack: 's' },
+        ],
+      },
+      options: chartOpts,
+    });
+  }
 }
 
 if ('serviceWorker' in navigator) {
