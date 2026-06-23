@@ -358,6 +358,30 @@ function containerSortKey(siteName, no) {
   return [0, simple ? parseInt(no) : 999];
 }
 
+// 拠点ごとの「常に表示するコンテナNo」定義
+const DEFINED_NOS = {
+  'いなべ': (() => {
+    const nos = [];
+    for (let i = 1; i <= 51; i++) nos.push(String(i));
+    return nos;
+  })(),
+  '群馬': (() => {
+    const nos = [];
+    for (let i = 1; i <= 17; i++) { if (i !== 4 && i !== 12) nos.push(String(i)); }
+    for (let i = 1; i <= 18; i++) nos.push(`3-${i}`);
+    for (let i = 1; i <= 19; i++) nos.push(`2-${i}`);
+    return nos;
+  })(),
+  '南丹': (() => {
+    const nos = [];
+    for (let i = 1; i <= 10; i++) nos.push(String(i));
+    for (let i = 1; i <= 10; i++) nos.push(`1-${i}`);
+    for (let i = 1; i <= 8;  i++) nos.push(`2-${i}`);
+    for (let i = 1; i <= 16; i++) nos.push(`3-${i}`);
+    return nos;
+  })(),
+};
+
 async function fetchSummaryRows(site) {
   const table = await fetchSheet(site.id, site.indexSheet);
   // C(2)=栽培開始日 E(4)=栽培日数 F(5)=コンテナ名 J(9)=収穫量g/菌床 M(12)=パック品率
@@ -414,6 +438,16 @@ async function fetchSummaryRows(site) {
     const kb = containerSortKey(site.name, b.no);
     return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1] - kb[1];
   };
+
+  // 定義済みNoのうちデータにないものを「空き」スケルトンとして追加
+  const definedNos = DEFINED_NOS[site.name] || [];
+  const activeNos = new Set(Object.keys(best));
+  const endedNos  = new Set(ended.map(r => r.no));
+  for (const no of definedNos) {
+    if (!activeNos.has(no) && !endedNos.has(no)) {
+      best[no] = { name: no, startDate: '', endDate: '', days: null, harvest: null, packRate: null, person: '', lot: '', no };
+    }
+  }
 
   const active = Object.values(best).sort(sortByNo);
 
