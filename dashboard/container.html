@@ -750,7 +750,10 @@ async function loadWeeklySection() {
   try {
     const allSummaries = (await Promise.all(SITES.map(site =>
       fetchSummaryRows(site)
-        .then(({ active }) => active.map(r => ({ ...r, siteName: site.name, siteId: site.id })))
+        .then(({ active, ended }) => [
+          ...active.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: false })),
+          ...ended.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: true })),
+        ])
         .catch(() => [])
     ))).flat().filter(r => r.startDate);
 
@@ -1086,9 +1089,12 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
     let cumKg = 0;
     let cutoffDay = 0;
 
+    // ended containers: use endDate as cutoff; active: use today
+    const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
+    const cutoffDate = endD || today;
+
     c.rows.forEach(r => {
-      // Use rowDate (from sheet F column) to skip today and future rows
-      if (r.rowDate && r.rowDate >= today) return;
+      if (r.rowDate && r.rowDate >= cutoffDate) return;
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
@@ -1101,14 +1107,14 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
     if (cutoffDay === 0) {
       const startD = parseDateStr(c.startDate);
       if (startD) {
-        cutoffDay = Math.min(Math.round((today - startD) / 86400000), MAX_DAY);
+        cutoffDay = Math.min(Math.round((cutoffDate - startD) / 86400000), MAX_DAY);
       } else {
         const harvestDays = c.rows.filter(r => r.daily > 0).map(r => r.dayNum);
         cutoffDay = harvestDays.length > 0 ? Math.min(Math.max(...harvestDays), MAX_DAY) : 0;
       }
     }
 
-    // Forward-fill only up to cutoffDay (fills zero-harvest days between real data)
+    // Forward-fill only up to cutoffDay
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
       if (cumArr[i] !== null) { last = cumArr[i]; }
@@ -1120,7 +1126,8 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
       data: cumArr,
       borderColor: color,
       backgroundColor: 'transparent',
-      borderWidth: 1.5,
+      borderWidth: c.isEnded ? 1 : 1.5,
+      borderDash: c.isEnded ? [4, 3] : [],
       pointRadius: 0,
       pointHoverRadius: 4,
       tension: 0.2,
