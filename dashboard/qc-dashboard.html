@@ -139,8 +139,7 @@ function createState() {
         subItems:  [],
       })),
       reviews: DEFAULT_REVIEW_WEEKS.map(w => ({ weekIndex:w, completed:false, completedDate:null })),
-      nextActionDate:    '',
-      nextActionContent: '',
+      mtg: { date:'', minutesUrl:'', purpose:'', content:'', nextAction:'' },
     })),
     selMemberId:  MEMBERS[0].id,
     selStepIndex: 0,
@@ -187,8 +186,19 @@ function loadState() {
           const sr = sm.reviews?.[i];
           return sr ? { ...fr, ...sr } : fr;
         }),
-        nextActionDate:    sm.nextActionDate    ?? fm.nextActionDate,
-        nextActionContent: sm.nextActionContent ?? fm.nextActionContent,
+        mtg: sm.mtg ? {
+          date:       sm.mtg.date       || sm.nextActionDate    || '',
+          minutesUrl: sm.mtg.minutesUrl || '',
+          purpose:    sm.mtg.purpose    || '',
+          content:    sm.mtg.content    || '',
+          nextAction: sm.mtg.nextAction || sm.nextActionContent || '',
+        } : {
+          date:       sm.nextActionDate    || '',
+          minutesUrl: '',
+          purpose:    '',
+          content:    '',
+          nextAction: sm.nextActionContent || '',
+        },
       };
     });
     fresh.selMemberId  = parsed.selMemberId  ?? fresh.selMemberId;
@@ -220,8 +230,7 @@ function saveState(st) {
         reviews: m.reviews.map(r => ({
           weekIndex: r.weekIndex, completed: r.completed, completedDate: r.completedDate,
         })),
-        nextActionDate:    m.nextActionDate,
-        nextActionContent: m.nextActionContent,
+        mtg: m.mtg,
       })),
       selMemberId:  st.selMemberId,
       selStepIndex: st.selStepIndex,
@@ -247,6 +256,15 @@ function App() {
         m.id === mid
           ? { ...m, steps: m.steps.map((s,i) => i===si ? { ...s, ...updates } : s) }
           : m
+      ),
+    }));
+  }, []);
+
+  const updateMtg = useCallback((mid, updates) => {
+    setSt(prev => ({
+      ...prev,
+      members: prev.members.map(m =>
+        m.id===mid ? { ...m, mtg: { ...m.mtg, ...updates } } : m
       ),
     }));
   }, []);
@@ -465,8 +483,7 @@ function App() {
           onSelectMember=${id => setSt(p => ({ ...p, selMemberId:id, selStepIndex:0 }))}
           onSelectStep=${i  => setSt(p => ({ ...p, selStepIndex:i }))}
           onUpdateStep=${updateStep}
-          onUpdateMember=${updateMember}
-          onReviewComplete=${completeReview}
+          onUpdateMtg=${updateMtg}
           onSubItemAdd=${addSubItem}
           onSubItemUpdate=${updateSubItem}
           onSubItemDelete=${deleteSubItem}
@@ -984,165 +1001,110 @@ function PeriodModal({ periodModal, members, onApply, onClose }) {
    ADMIN PANEL
 ═══════════════════════════════════════════════════════════════ */
 function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSelectStep,
-                      onUpdateStep, onUpdateMember, onReviewComplete,
+                      onUpdateStep, onUpdateMtg,
                       onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
-  const selMember  = members.find(m => m.id === selMemberId);
-  const selStep    = selMember?.steps[selStepIndex];
-  const stepColor  = STEPS[selStepIndex].color;
-  const subItems   = selStep?.subItems || [];
-
-  const [memo,       setMemo]       = useState('');
-  const [actDate,    setActDate]    = useState('');
-  const [actContent, setActContent] = useState('');
-  const [savedMemo,  setSavedMemo]  = useState(false);
-  const [savedAct,   setSavedAct]   = useState(false);
-
-  useEffect(() => { setMemo(selStep?.memo || ''); },                          [selMemberId, selStepIndex]);
-  useEffect(() => { setActDate(selMember?.nextActionDate || ''); setActContent(selMember?.nextActionContent || ''); }, [selMemberId]);
-
-  const saveMemo = () => {
-    onUpdateStep(selMemberId, selStepIndex, { memo });
-    setSavedMemo(true); setTimeout(() => setSavedMemo(false), 2000);
-  };
-  const saveAction = () => {
-    onUpdateMember(selMemberId, { nextActionDate: actDate, nextActionContent: actContent });
-    setSavedAct(true); setTimeout(() => setSavedAct(false), 2000);
-  };
-  const setRisk = r => onUpdateStep(selMemberId, selStepIndex, { risk: selStep?.risk===r ? null : r });
+  const selMember = members.find(m => m.id === selMemberId);
+  const selStep   = selMember?.steps[selStepIndex];
+  const stepColor = STEPS[selStepIndex].color;
+  const subItems  = selStep?.subItems || [];
+  const mtg       = selMember?.mtg || {};
 
   const IS = { width:'100%', background:'#0a1526', color:'#e2e8f0', border:'1px solid #334155', borderRadius:8, padding:'7px 11px', outline:'none' };
   const LS = { fontSize:'0.65rem', color:'#475569', display:'block', marginBottom:6, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em' };
-  const SS = { ...IS, padding:'5px 8px', fontSize:'0.72rem' }; // small input style
+  const SS = { ...IS, padding:'5px 8px', fontSize:'0.72rem' };
+
+  const upd = (key, val) => onUpdateMtg(selMemberId, { [key]: val });
 
   return html`
     <div style=${{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, overflow:'hidden' }}>
       <div style=${{ padding:'12px 20px', borderBottom:'1px solid #334155' }}>
-        <h2 style=${{ fontWeight:700, fontSize:'0.9rem' }}>⚙️ 管理者アクション＆メモ</h2>
+        <h2 style=${{ fontWeight:700, fontSize:'0.9rem' }}>📝 MTG内容メモ</h2>
       </div>
 
-      <!-- 3-column grid -->
-      <div style=${{ display:'grid', gridTemplateColumns:'230px 1fr 235px' }}>
-
-        <!-- LEFT: selector + risk -->
-        <div style=${{ padding:18, borderRight:'1px solid #334155', display:'flex', flexDirection:'column', gap:12 }}>
-          <div>
-            <label style=${LS}>メンバー選択</label>
-            <select value=${selMemberId} onChange=${e => onSelectMember(e.target.value)} style=${IS}>
-              ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.name}（${m.factory}）</option>`)}
-            </select>
-          </div>
-          <div>
-            <label style=${LS}>ステップ選択</label>
-            <select value=${selStepIndex} onChange=${e => onSelectStep(+e.target.value)} style=${IS}>
-              ${STEPS.map((s,i) => html`<option key=${s.id} value=${i}>Step${i+1}：${s.name}</option>`)}
-            </select>
-          </div>
-          <div>
-            <label style=${LS}>期間（週）</label>
-            <div style=${{ display:'flex', alignItems:'center', gap:6 }}>
-              <select value=${selStep?.startWeek ?? 0} onChange=${e => onUpdateStep(selMemberId, selStepIndex, { startWeek: +e.target.value })} style=${{ ...IS, flex:1 }}>
-                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
-              </select>
-              <span style=${{ color:'#475569', flexShrink:0 }}>〜</span>
-              <select value=${selStep?.endWeek ?? 0} onChange=${e => onUpdateStep(selMemberId, selStepIndex, { endWeek: +e.target.value })} style=${{ ...IS, flex:1 }}>
-                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style=${LS}>リスクフラグ</label>
-            <div style=${{ display:'flex', gap:8 }}>
-              ${[['red','🔴','要注意'],['yellow','🟡','注意'],['green','🟢','良好']].map(([v,e,t]) => html`
-                <button key=${v} onClick=${() => setRisk(v)} title=${t} style=${{
-                  flex:1, padding:'8px 4px', borderRadius:8, fontSize:'1.05rem',
-                  border:`2px solid ${selStep?.risk===v?'#94a3b8':'#1e293b'}`,
-                  background: selStep?.risk===v?'#334155':'#0a1526',
-                  cursor:'pointer', transition:'all .15s',
-                }}>${e}</button>
-              `)}
-            </div>
-          </div>
-          <div style=${{ background:'#0a1526', borderRadius:8, padding:'10px 12px', flex:1, borderLeft:`3px solid ${stepColor}` }}>
-            <div style=${{ fontSize:'0.62rem', color:'#475569', marginBottom:4 }}>選択中ステップ</div>
-            <div style=${{ fontWeight:700, fontSize:'0.78rem', color:stepColor, marginBottom:3 }}>${STEPS[selStepIndex].name}</div>
-            <div style=${{ fontSize:'0.7rem', color:'#64748b' }}>
-              進捗：<span style=${{ color:'#e2e8f0', fontWeight:700 }}>${selStep?.progress ?? 0}%</span>
-              ${selStep?.risk ? html`<span style=${{ marginLeft:6 }}>${selStep.risk==='red'?'🔴':selStep.risk==='yellow'?'🟡':'🟢'}</span>` : ''}
-            </div>
-            ${selStep?.memo && html`
-              <div style=${{ fontSize:'0.64rem', color:'#475569', marginTop:6, borderTop:'1px solid #1e293b', paddingTop:5, lineHeight:1.5 }}>
-                ${selStep.memo.slice(0,70)}${selStep.memo.length>70?'…':''}
-              </div>
-            `}
-          </div>
+      <!-- header row: member + date -->
+      <div style=${{ display:'flex', gap:16, padding:'14px 20px', borderBottom:'1px solid #334155', flexWrap:'wrap', alignItems:'flex-end' }}>
+        <div style=${{ minWidth:200, flex:'0 0 220px' }}>
+          <label style=${LS}>メンバー選択</label>
+          <select value=${selMemberId} onChange=${e => onSelectMember(e.target.value)} style=${IS}>
+            ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.name}（${m.factory}）</option>`)}
+          </select>
         </div>
+        <div style=${{ flex:'0 0 180px' }}>
+          <label style=${LS}>MTG実施日</label>
+          <input type="date" value=${mtg.date || ''} onInput=${e => upd('date', e.target.value)} style=${IS} />
+        </div>
+        <div style=${{ flex:1, minWidth:120, display:'flex', alignItems:'flex-end', paddingBottom:1 }}>
+          ${mtg.date && html`<span style=${{ fontSize:'0.78rem', color:'#64748b' }}>${selMember?.name} との MTG</span>`}
+        </div>
+      </div>
 
-        <!-- CENTER: memo -->
-        <div style=${{ padding:18, borderRight:'1px solid #334155', display:'flex', flexDirection:'column', gap:10 }}>
-          <label style=${LS}>メモ　Step${selStepIndex+1}：${STEPS[selStepIndex].name}　／　${selMember?.name}</label>
-          <textarea
-            value=${memo} onInput=${e => setMemo(e.target.value)}
-            placeholder="気づき、懸念事項、指導内容などを記録…"
-            rows=9
-            style=${{ ...IS, lineHeight:1.7, fontFamily:'inherit', flex:1 }}
+      <!-- 4-field grid -->
+      <div style=${{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:0 }}>
+
+        <!-- 1. 議事録URL -->
+        <div style=${{ padding:'16px 20px', borderRight:'1px solid #334155', borderBottom:'1px solid #334155' }}>
+          <label style=${LS}>① 議事録URL</label>
+          <input
+            type="url"
+            value=${mtg.minutesUrl || ''}
+            onInput=${e => upd('minutesUrl', e.target.value)}
+            placeholder="https://docs.google.com/..."
+            style=${IS}
           />
-          <div style=${{ display:'flex', alignItems:'center', gap:10 }}>
-            <button onClick=${saveMemo} style=${{ flex:1, padding:'9px', borderRadius:8, border:'none', background:stepColor, color:'#0f172a', cursor:'pointer', fontWeight:800 }}>メモを保存</button>
-            ${savedMemo && html`<span style=${{ fontSize:'0.72rem', color:'#4ade80', fontWeight:700 }}>✓ 保存しました</span>`}
-          </div>
-          ${selStep?.memo && selStep.memo!==memo && html`<div style=${{ fontSize:'0.67rem', color:'#fb923c' }}>※ 未保存の変更があります</div>`}
+          ${mtg.minutesUrl && html`
+            <a href=${mtg.minutesUrl} target="_blank" rel="noopener" style=${{ display:'inline-block', marginTop:6, fontSize:'0.72rem', color:'#38bdf8' }}>
+              🔗 議事録を開く
+            </a>
+          `}
         </div>
 
-        <!-- RIGHT: reviews + next action -->
-        <div style=${{ padding:18, display:'flex', flexDirection:'column', gap:16 }}>
-          <div>
-            <label style=${LS}>管理者レビュー状況</label>
-            <div style=${{ display:'flex', flexDirection:'column', gap:7 }}>
-              ${selMember?.reviews.map((rev,ri) => html`
-                <div key=${ri} style=${{
-                  background:'#0a1526', borderRadius:8, padding:'8px 10px',
-                  display:'flex', alignItems:'center', gap:8,
-                  border:`1px solid ${rev.completed?'rgba(74,222,128,0.2)':'#1e293b'}`,
-                }}>
-                  <${Diamond} completed=${rev.completed} />
-                  <div style=${{ flex:1, minWidth:0 }}>
-                    <div style=${{ fontSize:'0.72rem', color:'#94a3b8' }}>
-                      ${WEEKS[rev.weekIndex]?.label}
-                      ${rev.completed && html`<span style=${{ color:'#4ade80', marginLeft:6 }}>✓ 実施済</span>`}
-                    </div>
-                    ${rev.completed && html`<div style=${{ fontSize:'0.62rem', color:'#475569' }}>${rev.completedDate}</div>`}
-                  </div>
-                  ${!rev.completed && html`
-                    <button onClick=${() => onReviewComplete(selMemberId, ri)} style=${{
-                      padding:'3px 8px', borderRadius:6, whiteSpace:'nowrap', flexShrink:0,
-                      border:'1px solid #334155', background:'transparent',
-                      color:'#64748b', cursor:'pointer', fontSize:'0.62rem',
-                    }}>実施済にする</button>
-                  `}
-                </div>
-              `)}
-            </div>
-          </div>
-          <div>
-            <label style=${LS}>次回アクション</label>
-            <input type="date" value=${actDate} onInput=${e => setActDate(e.target.value)} style=${{ ...IS, marginBottom:7 }} />
-            <input type="text" value=${actContent} onInput=${e => setActContent(e.target.value)} placeholder="例：Step3確認・フィードバック" style=${{ ...IS, marginBottom:9 }} />
-            <div style=${{ display:'flex', alignItems:'center', gap:10 }}>
-              <button onClick=${saveAction} style=${{ flex:1, padding:'9px', borderRadius:8, border:'1px solid #334155', background:'#0a1526', color:'#94a3b8', cursor:'pointer', fontWeight:700 }}>アクションを保存</button>
-              ${savedAct && html`<span style=${{ fontSize:'0.72rem', color:'#4ade80', fontWeight:700 }}>✓</span>`}
-            </div>
-          </div>
+        <!-- 2. 会議目的 -->
+        <div style=${{ padding:'16px 20px', borderBottom:'1px solid #334155' }}>
+          <label style=${LS}>② 会議目的</label>
+          <textarea
+            value=${mtg.purpose || ''}
+            onInput=${e => upd('purpose', e.target.value)}
+            placeholder="例：Step2の現状把握の進捗確認、課題整理"
+            rows=3
+            style=${{ ...IS, lineHeight:1.6, fontFamily:'inherit', resize:'vertical' }}
+          />
+        </div>
+
+        <!-- 3. 内容・メモ -->
+        <div style=${{ padding:'16px 20px', borderRight:'1px solid #334155', borderBottom:'1px solid #334155' }}>
+          <label style=${LS}>③ 内容・メモ</label>
+          <textarea
+            value=${mtg.content || ''}
+            onInput=${e => upd('content', e.target.value)}
+            placeholder="気づき、指導内容、懸念事項、決定事項などを記録…"
+            rows=7
+            style=${{ ...IS, lineHeight:1.7, fontFamily:'inherit', resize:'vertical' }}
+          />
+        </div>
+
+        <!-- 4. 次回アクション -->
+        <div style=${{ padding:'16px 20px', borderBottom:'1px solid #334155', display:'flex', flexDirection:'column', gap:10 }}>
+          <label style=${LS}>④ 次回アクション</label>
+          <textarea
+            value=${mtg.nextAction || ''}
+            onInput=${e => upd('nextAction', e.target.value)}
+            placeholder="例：・Step3の目標値を決める&#10;・データ追加収集&#10;・次回MTGまでに〇〇を実施"
+            rows=7
+            style=${{ ...IS, lineHeight:1.7, fontFamily:'inherit', resize:'vertical' }}
+          />
         </div>
       </div>
 
       <!-- SUB-ITEMS SECTION -->
       <div style=${{ borderTop:'1px solid #334155', padding:18 }}>
-        <div style=${{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+        <div style=${{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
           <h3 style=${{ fontSize:'0.82rem', fontWeight:700 }}>
             📋 小項目管理
-            <span style=${{ color:stepColor, marginLeft:6 }}>Step${selStepIndex+1}：${STEPS[selStepIndex].name}</span>
-            <span style=${{ color:'#475569', marginLeft:6, fontWeight:400, fontSize:'0.72rem' }}>／ ${selMember?.name}</span>
           </h3>
+          <select value=${selStepIndex} onChange=${e => onSelectStep(+e.target.value)} style=${{ ...SS, width:'auto', flex:'0 0 auto' }}>
+            ${STEPS.map((s,i) => html`<option key=${s.id} value=${i}>Step${i+1}：${s.name}</option>`)}
+          </select>
+          <span style=${{ color:'#475569', fontSize:'0.72rem' }}>／ ${selMember?.name}</span>
           <button
             onClick=${() => onSubItemAdd(selMemberId, selStepIndex)}
             style=${{
