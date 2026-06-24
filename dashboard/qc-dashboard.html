@@ -140,6 +140,7 @@ function createState() {
       })),
       reviews: DEFAULT_REVIEW_WEEKS.map(w => ({ weekIndex:w, completed:false, completedDate:null })),
       mtg: { date:'', minutesUrl:'', purpose:'', content:'', nextAction:'' },
+      mtgHistory: [],
     })),
     selMemberId:  MEMBERS[0].id,
     selStepIndex: 0,
@@ -199,6 +200,14 @@ function loadState() {
           content:    '',
           nextAction: sm.nextActionContent || '',
         },
+        mtgHistory: (sm.mtgHistory || []).map(r => ({
+          id:         r.id         || genId(),
+          date:       r.date       || '',
+          minutesUrl: r.minutesUrl || '',
+          purpose:    r.purpose    || '',
+          content:    r.content    || '',
+          nextAction: r.nextAction || '',
+        })),
       };
     });
     fresh.selMemberId  = parsed.selMemberId  ?? fresh.selMemberId;
@@ -231,6 +240,7 @@ function saveState(st) {
           weekIndex: r.weekIndex, completed: r.completed, completedDate: r.completedDate,
         })),
         mtg: m.mtg,
+        mtgHistory: m.mtgHistory || [],
       })),
       selMemberId:  st.selMemberId,
       selStepIndex: st.selStepIndex,
@@ -265,6 +275,33 @@ function App() {
       ...prev,
       members: prev.members.map(m =>
         m.id===mid ? { ...m, mtg: { ...m.mtg, ...updates } } : m
+      ),
+    }));
+  }, []);
+
+  const saveMtgRecord = useCallback((mid) => {
+    setSt(prev => {
+      const member = prev.members.find(m => m.id === mid);
+      if (!member) return prev;
+      const record = { ...member.mtg, id: genId() };
+      return {
+        ...prev,
+        members: prev.members.map(m =>
+          m.id === mid
+            ? { ...m, mtgHistory: [record, ...(m.mtgHistory || [])] }
+            : m
+        ),
+      };
+    });
+  }, []);
+
+  const deleteMtgRecord = useCallback((mid, recordId) => {
+    setSt(prev => ({
+      ...prev,
+      members: prev.members.map(m =>
+        m.id === mid
+          ? { ...m, mtgHistory: (m.mtgHistory || []).filter(r => r.id !== recordId) }
+          : m
       ),
     }));
   }, []);
@@ -484,6 +521,8 @@ function App() {
           onSelectStep=${i  => setSt(p => ({ ...p, selStepIndex:i }))}
           onUpdateStep=${updateStep}
           onUpdateMtg=${updateMtg}
+          onSaveMtg=${saveMtgRecord}
+          onDeleteMtg=${deleteMtgRecord}
           onSubItemAdd=${addSubItem}
           onSubItemUpdate=${updateSubItem}
           onSubItemDelete=${deleteSubItem}
@@ -1001,13 +1040,23 @@ function PeriodModal({ periodModal, members, onApply, onClose }) {
    ADMIN PANEL
 ═══════════════════════════════════════════════════════════════ */
 function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSelectStep,
-                      onUpdateStep, onUpdateMtg,
+                      onUpdateStep, onUpdateMtg, onSaveMtg, onDeleteMtg,
                       onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
-  const selMember = members.find(m => m.id === selMemberId);
-  const selStep   = selMember?.steps[selStepIndex];
-  const stepColor = STEPS[selStepIndex].color;
-  const subItems  = selStep?.subItems || [];
-  const mtg       = selMember?.mtg || {};
+  const selMember  = members.find(m => m.id === selMemberId);
+  const selStep    = selMember?.steps[selStepIndex];
+  const stepColor  = STEPS[selStepIndex].color;
+  const subItems   = selStep?.subItems || [];
+  const mtg        = selMember?.mtg || {};
+  const mtgHistory = selMember?.mtgHistory || [];
+
+  const [expandedId, setExpandedId] = useState(null);
+  const [saved,      setSaved]      = useState(false);
+
+  const handleSave = () => {
+    onSaveMtg(selMemberId);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
 
   const IS = { width:'100%', background:'#0a1526', color:'#e2e8f0', border:'1px solid #334155', borderRadius:8, padding:'7px 11px', outline:'none' };
   const LS = { fontSize:'0.65rem', color:'#475569', display:'block', marginBottom:6, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em' };
@@ -1094,6 +1143,97 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
           />
         </div>
       </div>
+
+      <!-- SAVE BUTTON -->
+      <div style=${{ padding:'12px 20px', borderTop:'1px solid #334155', display:'flex', alignItems:'center', gap:14 }}>
+        <button
+          onClick=${handleSave}
+          disabled=${!mtg.date}
+          style=${{
+            padding:'9px 28px', borderRadius:8, fontWeight:800, fontSize:'0.85rem', cursor: mtg.date ? 'pointer' : 'not-allowed',
+            border:'none', background: mtg.date ? '#38bdf8' : '#334155', color: mtg.date ? '#0f172a' : '#475569',
+            transition:'background .15s',
+          }}
+        >💾 このMTGを保存</button>
+        ${saved && html`<span style=${{ fontSize:'0.78rem', color:'#4ade80', fontWeight:700 }}>✓ 保存しました</span>`}
+        ${!mtg.date && html`<span style=${{ fontSize:'0.72rem', color:'#475569' }}>※ MTG実施日を入力してから保存してください</span>`}
+      </div>
+
+      <!-- MTG HISTORY -->
+      ${mtgHistory.length > 0 && html`
+        <div style=${{ borderTop:'1px solid #334155', padding:'16px 20px' }}>
+          <div style=${{ fontSize:'0.75rem', fontWeight:700, color:'#475569', marginBottom:12, textTransform:'uppercase', letterSpacing:'0.06em' }}>
+            📁 保存済みMTG記録 (${mtgHistory.length}件)
+          </div>
+          <div style=${{ display:'flex', flexDirection:'column', gap:8 }}>
+            ${mtgHistory.map(rec => html`
+              <div key=${rec.id} style=${{ background:'#0a1526', borderRadius:10, border:'1px solid #334155', overflow:'hidden' }}>
+                <!-- card header (always visible, clickable) -->
+                <div
+                  onClick=${() => setExpandedId(expandedId === rec.id ? null : rec.id)}
+                  style=${{
+                    display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
+                    cursor:'pointer', userSelect:'none',
+                    background: expandedId === rec.id ? '#1e293b' : 'transparent',
+                    transition:'background .15s',
+                  }}
+                >
+                  <span style=${{ fontSize:'1rem' }}>${expandedId === rec.id ? '▼' : '▶'}</span>
+                  <span style=${{ fontWeight:700, fontSize:'0.85rem', color:'#e2e8f0', flex:1 }}>
+                    📅 ${rec.date ? new Date(rec.date).toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric' }) : '日付なし'}
+                  </span>
+                  ${rec.purpose && html`
+                    <span style=${{ fontSize:'0.72rem', color:'#64748b', maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      ${rec.purpose}
+                    </span>
+                  `}
+                  <button
+                    onClick=${e => { e.stopPropagation(); onDeleteMtg(selMemberId, rec.id); }}
+                    title="削除"
+                    style=${{
+                      marginLeft:4, padding:'3px 8px', borderRadius:6, fontSize:'0.65rem', cursor:'pointer',
+                      background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.25)', color:'#f87171',
+                      flexShrink:0,
+                    }}
+                  >✕</button>
+                </div>
+
+                <!-- card body (expanded) -->
+                ${expandedId === rec.id && html`
+                  <div style=${{ padding:'14px 16px', borderTop:'1px solid #1e293b', display:'flex', flexDirection:'column', gap:12 }}>
+                    ${rec.minutesUrl && html`
+                      <div>
+                        <div style=${{ fontSize:'0.6rem', color:'#475569', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4 }}>① 議事録URL</div>
+                        <a href=${rec.minutesUrl} target="_blank" rel="noopener" style=${{ fontSize:'0.78rem', color:'#38bdf8', wordBreak:'break-all' }}>
+                          🔗 ${rec.minutesUrl}
+                        </a>
+                      </div>
+                    `}
+                    ${rec.purpose && html`
+                      <div>
+                        <div style=${{ fontSize:'0.6rem', color:'#475569', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4 }}>② 会議目的</div>
+                        <div style=${{ fontSize:'0.8rem', color:'#cbd5e1', lineHeight:1.6, whiteSpace:'pre-wrap' }}>${rec.purpose}</div>
+                      </div>
+                    `}
+                    ${rec.content && html`
+                      <div>
+                        <div style=${{ fontSize:'0.6rem', color:'#475569', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4 }}>③ 内容・メモ</div>
+                        <div style=${{ fontSize:'0.8rem', color:'#cbd5e1', lineHeight:1.6, whiteSpace:'pre-wrap' }}>${rec.content}</div>
+                      </div>
+                    `}
+                    ${rec.nextAction && html`
+                      <div style=${{ background:'#0f172a', borderRadius:8, padding:'10px 12px', borderLeft:'3px solid #38bdf8' }}>
+                        <div style=${{ fontSize:'0.6rem', color:'#475569', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4 }}>④ 次回アクション</div>
+                        <div style=${{ fontSize:'0.8rem', color:'#cbd5e1', lineHeight:1.6, whiteSpace:'pre-wrap' }}>${rec.nextAction}</div>
+                      </div>
+                    `}
+                  </div>
+                `}
+              </div>
+            `)}
+          </div>
+        </div>
+      `}
 
       <!-- SUB-ITEMS SECTION -->
       <div style=${{ borderTop:'1px solid #334155', padding:18 }}>
