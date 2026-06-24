@@ -1468,6 +1468,7 @@ function updateTabVisibility() {
 
 let scatterChart = null;
 let scatterMode = 'all'; // 'all' | 'month-all' | 'month-site'
+let scatterSite = 'all'; // 'all' | 'いなべ' | '群馬' | '南丹'
 
 async function renderScatterTab() {
   const section = document.getElementById('scatter-section');
@@ -1506,16 +1507,24 @@ function renderScatterChart() {
     `<button class="sort-btn${scatterMode===k?' active':''}" onclick="scatterSetMode('${k}')" style="margin-right:6px">${v}</button>`
   ).join('');
 
+  const siteFilterBtns = [['all','全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) => {
+    const col = k === 'all' ? '' : `color:${SITE_COLORS[k]};border-color:${SITE_COLORS[k]}`;
+    const active = scatterSite === k ? 'active' : '';
+    return `<button class="sort-btn ${active}" onclick="scatterSetSite('${k}')" style="margin-right:6px;${active?col:''}">${v}</button>`;
+  }).join('');
+
   section.innerHTML = `
     <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
-    <div style="margin-bottom:16px">${btnBar}</div>
+    <div style="margin-bottom:10px">${btnBar}</div>
+    <div style="margin-bottom:16px">${siteFilterBtns}</div>
     <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
       <canvas id="scatter-canvas"></canvas>
     </div>`;
 
   if (scatterChart) { scatterChart.destroy(); scatterChart = null; }
 
-  const data = scatterEndedData || [];
+  const allData = scatterEndedData || [];
+  const data = scatterSite === 'all' ? allData : allData.filter(r => r.siteName === scatterSite);
   let datasets = [];
 
   if (scatterMode === 'all') {
@@ -1589,6 +1598,11 @@ function renderScatterChart() {
 
 function scatterSetMode(mode) {
   scatterMode = mode;
+  renderScatterChart();
+}
+
+function scatterSetSite(site) {
+  scatterSite = site;
   renderScatterChart();
 }
 
