@@ -1467,6 +1467,7 @@ let weeklyTabActive = false;
 let lotTabActive = false;
 let scatterTabActive = false;
 let scatterEndedData = null; // { siteName, no, name, startDate, endDate, days, harvest }[]
+const scatterMonthCharts = {};
 
 function updateTabVisibility() {
   const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive;
@@ -1543,7 +1544,7 @@ function renderScatterChart() {
     if (!monthBuckets[key]) monthBuckets[key] = [];
     monthBuckets[key].push(r);
   });
-  const sortedMonths = Object.keys(monthBuckets).sort();
+  const sortedMonths = Object.keys(monthBuckets).sort().reverse();
 
   const monthChartsHtml = sortedMonths.map(mk => {
     const [yr, mo] = mk.split('_');
