@@ -1323,29 +1323,47 @@ function renderCards(summary) {
 
 function renderEndedCards(ended) {
   if (!ended.length) return '';
-  const html = ended.map(row => {
-    const info = parseContainerName(row.name);
-    const displayName = info.no || row.name;
-    const ed = row.endDate || '—';
-    const sd = row.startDate || '—';
-    const harvestVal = row.harvest != null ? Math.round(row.harvest) : null;
-    const harvestCls = harvestVal == null ? '' : harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
-    const harvestStr = harvestVal != null ? `${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span>` : '<span style="color:var(--muted)">—</span>';
-    const packCls = row.packRate == null ? '' : row.packRate >= 90 ? ' card-chip-green' : row.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
-    const packStr = row.packRate != null ? `${row.packRate}%` : '—';
-    const days = row.days != null ? `${row.days}日` : '—';
-    return `<div class="container-card" style="opacity:0.6;cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
-      <div class="card-cn" title="${row.name}">${displayName}</div>
-      <div class="card-sd">開始: ${sd}</div>
-      <div class="card-sd" style="color:#f87171">終了: ${ed}</div>
-      <div class="card-harvest${harvestCls}">${harvestStr}</div>
-      <div class="card-meta">
-        <span class="card-chip">${days}</span>
-        <span class="card-chip${packCls}">${packStr}</span>
-      </div>
+
+  // 栽培開始月でグループ化（新しい月順）
+  const groups = {};
+  ended.forEach(row => {
+    const sd = parseDateStr(row.startDate);
+    const key = sd ? `${sd.getFullYear()}年${sd.getMonth() + 1}月` : '不明';
+    const sortKey = sd ? sd.getFullYear() * 100 + sd.getMonth() : 0;
+    if (!groups[key]) groups[key] = { sortKey, rows: [] };
+    groups[key].rows.push(row);
+  });
+
+  const sortedGroups = Object.entries(groups).sort((a, b) => b[1].sortKey - a[1].sortKey);
+
+  return sortedGroups.map(([monthLabel, { rows }]) => {
+    const cards = rows.map(row => {
+      const info = parseContainerName(row.name);
+      const displayName = info.no || row.name;
+      const ed = row.endDate || '—';
+      const sd = row.startDate || '—';
+      const harvestVal = row.harvest != null ? Math.round(row.harvest) : null;
+      const harvestCls = harvestVal == null ? '' : harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
+      const harvestStr = harvestVal != null ? `${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span>` : '<span style="color:var(--muted)">—</span>';
+      const packCls = row.packRate == null ? '' : row.packRate >= 90 ? ' card-chip-green' : row.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
+      const packStr = row.packRate != null ? `${row.packRate}%` : '—';
+      const days = row.days != null ? `${row.days}日` : '—';
+      return `<div class="container-card" style="opacity:0.6;cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
+        <div class="card-cn" title="${row.name}">${displayName}</div>
+        <div class="card-sd">開始: ${sd}</div>
+        <div class="card-sd" style="color:#f87171">終了: ${ed}</div>
+        <div class="card-harvest${harvestCls}">${harvestStr}</div>
+        <div class="card-meta">
+          <span class="card-chip">${days}</span>
+          <span class="card-chip${packCls}">${packStr}</span>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:24px">
+      <div style="font-size:0.8rem;color:#8892a4;margin-bottom:8px;padding-left:2px">${monthLabel}開始</div>
+      <div class="cards-grid">${cards}</div>
     </div>`;
   }).join('');
-  return `<div class="cards-grid">${html}</div>`;
 }
 
 // ── Mgmt data ─────────────────────────────────────────────────────────────────
