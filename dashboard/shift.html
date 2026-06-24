@@ -29,12 +29,12 @@
     table.shift { border-collapse: collapse; font-size: 0.75rem; }
     table.shift th, table.shift td { border: 1px solid #d1d5db; }
     table.shift thead th { background: white; padding: 4px 2px; text-align: center; min-width: 44px; position: sticky; top: 0; z-index: 1; }
-    table.shift thead th.dest-header { position: sticky; left: 0; z-index: 2; background: white; min-width: 72px; font-size: 0.8rem; }
+    table.shift thead th.dest-header { position: sticky; left: 0; z-index: 2; background: white; min-width: 96px; font-size: 0.8rem; }
     table.shift .day-num { font-size: 0.75rem; }
     table.shift .day-name { font-size: 0.7rem; }
     .sat { color: #2563eb; }
     .sun { color: #dc2626; }
-    table.shift td.dest-label { position: sticky; left: 0; background: white; z-index: 1; padding: 4px 8px; font-weight: 600; font-size: 0.8rem; min-width: 72px; }
+    table.shift td.dest-label { position: sticky; left: 0; background: white; z-index: 1; padding: 4px 8px; font-weight: 600; font-size: 0.75rem; min-width: 96px; }
     table.shift td.holiday { background: #f3f4f6; color: #9ca3af; text-align: center; height: 52px; }
     table.shift td.cell { padding: 0; }
     table.shift td.footer-dest { position: sticky; left: 0; background: #f9fafb; z-index: 1; padding: 2px 4px; font-size: 0.7rem; color: #6b7280; text-align: center; }
@@ -46,6 +46,7 @@
     .ota   { background: #FAEEDA; color: #633806; border-color: #EF9F27 !important; }
     thead th.clickable { cursor: pointer; }
     thead th.clickable:hover { background: #f0f0f0; }
+    .group-sep td, .group-sep th { border-top: 2px solid #6b7280 !important; }
   </style>
 </head>
 <body>
@@ -69,7 +70,7 @@
 </div>
 <script>
 const MEMBERS = ['久保', '古田', '太田'];
-const DESTINATIONS = ['いなべ', '南丹'];
+const DESTINATIONS = ['志摩⇔いなべ①', '志摩⇔いなべ②', '志摩⇔南丹①', '志摩⇔南丹②'];
 const START_YEAR = 2026, START_MONTH = 6;
 const DAY_NAMES = ['日','月','火','水','木','金','土'];
 const STORAGE_KEY = 'shift_store';
@@ -120,7 +121,10 @@ function render() {
   document.getElementById('prev-btn').disabled = (y === START_YEAR && m === START_MONTH);
   const days = daysInMonth(y, m); const shiftData = getShiftData(y, m); const summary = getSummary(y, m);
   let shtml = `<table class="summary-table"><thead><tr><th>行き先</th>${MEMBERS.map(mem=>`<th>${mem}</th>`).join('')}<th style="color:#6b7280">未割当</th></tr></thead><tbody>`;
-  DESTINATIONS.forEach(dest => { shtml += `<tr><td>${dest}</td>${MEMBERS.map(mem=>`<td>${summary[dest][mem]}</td>`).join('')}<td style="color:#6b7280">${summary[dest].unassigned}</td></tr>`; });
+  DESTINATIONS.forEach((dest, i) => {
+    const sep = (i === 2) ? ' style="border-top:2px solid #6b7280"' : '';
+    shtml += `<tr><td${sep}>${dest}</td>${MEMBERS.map(mem=>`<td${sep}>${summary[dest][mem]}</td>`).join('')}<td${sep} style="color:#6b7280${i===2?';border-top:2px solid #6b7280':''}">${summary[dest].unassigned}</td></tr>`;
+  });
   shtml += '</tbody></table>';
   document.getElementById('summary-wrap').innerHTML = shtml;
   let html = `<table class="shift"><thead><tr><th class="dest-header">行き先</th>`;
@@ -129,13 +133,14 @@ function render() {
     html += `<th class="clickable" onclick="toggleHoliday(${y},${m},${d})" title="クリックで休日トグル"><div class="day-num">${d}</div><div class="day-name ${cls}">${DAY_NAMES[dow]}</div></th>`;
   }
   html += '</tr></thead><tbody>';
-  DESTINATIONS.forEach(dest => {
-    html += `<tr><td class="dest-label">${dest}</td>`;
+  DESTINATIONS.forEach((dest, i) => {
+    const rowSep = i === 2 ? ' style="border-top:2px solid #6b7280"' : '';
+    html += `<tr><td class="dest-label"${rowSep}>${dest}</td>`;
     for (let d = 1; d <= days; d++) {
-      if (isHoliday(shiftData, d)) { html += `<td class="holiday">－</td>`; }
+      if (isHoliday(shiftData, d)) { html += `<td class="holiday"${rowSep}>－</td>`; }
       else {
         const val = shiftData[d]?.[dest] || ''; const cls = memberClass(val);
-        html += `<td class="cell ${cls}"><select class="member-select" onchange="onSelect(${d},'${dest}',this.value)">`;
+        html += `<td class="cell ${cls}"${rowSep}><select class="member-select" onchange="onSelect(${d},'${dest}',this.value)">`;
         html += `<option value="">－</option>`;
         MEMBERS.forEach(mem => { html += `<option value="${mem}"${val===mem?' selected':''}>${mem}</option>`; });
         html += `</select></td>`;
@@ -147,7 +152,7 @@ function render() {
   for (let d = 1; d <= days; d++) {
     if (isHoliday(shiftData, d)) { html += `<td class="footer-cell" style="color:#9ca3af">休</td>`; }
     else {
-      const members = DESTINATIONS.map(dest => { const val = shiftData[d]?.[dest]; return (val && val !== 'holiday') ? val : ''; }).filter(Boolean);
+      const members = [...new Set(DESTINATIONS.map(dest => { const val = shiftData[d]?.[dest]; return (val && val !== 'holiday') ? val : ''; }).filter(Boolean))];
       const inner = members.map(mem => `<div style="color:${memberClass(mem)==='kubo'?'#0C447C':memberClass(mem)==='furuta'?'#27500A':'#633806'}">${mem}</div>`).join('');
       html += `<td class="footer-cell">${inner}</td>`;
     }
