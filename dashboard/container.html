@@ -1716,7 +1716,7 @@ function renderLotTab() {
     section.innerHTML = '<div class="loading">データ読み込み中...</div>';
     return;
   }
-  const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '']);
+  const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
   const isExcludedLot = lot => LOT_EXCLUDE.has(lot) || /^Date\(/.test(lot);
   const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
 
