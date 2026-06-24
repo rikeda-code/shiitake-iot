@@ -228,6 +228,7 @@
 <main id="main"></main>
 <section id="weekly-section" style="margin:0 32px 40px;"></section>
 <section id="lot-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="scatter-section" style="display:none;margin:0 32px 40px;"></section>
 
 <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
@@ -1446,13 +1447,15 @@ async function loadCurrentSite(forceRefresh = false) {
 
 let weeklyTabActive = false;
 let lotTabActive = false;
+let scatterTabActive = false;
+let scatterEndedData = null; // { siteName, no, name, startDate, endDate, days, harvest }[]
 
 function updateTabVisibility() {
-  document.getElementById('main').style.display = (weeklyTabActive || lotTabActive) ? 'none' : '';
-  const ws = document.getElementById('weekly-section');
-  ws.style.display = weeklyTabActive ? '' : 'none';
-  const ls = document.getElementById('lot-section');
-  ls.style.display = lotTabActive ? '' : 'none';
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive;
+  document.getElementById('main').style.display = anyAlt ? 'none' : '';
+  document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
+  document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
+  document.getElementById('scatter-section').style.display = scatterTabActive ? '' : 'none';
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
@@ -1460,6 +1463,133 @@ function updateTabVisibility() {
     renderWeeklySection(section, weeklyState, groupMode, sortOrder);
   }
   if (lotTabActive) renderLotTab();
+  if (scatterTabActive) renderScatterTab();
+}
+
+let scatterChart = null;
+let scatterMode = 'all'; // 'all' | 'month-all' | 'month-site'
+
+async function renderScatterTab() {
+  const section = document.getElementById('scatter-section');
+  section.innerHTML = `
+    <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
+    <div class="loading">全拠点データを読み込み中...</div>`;
+
+  // 全拠点の ended を収集（キャッシュ優先、なければフェッチ）
+  const allEnded = [];
+  for (const site of SITES) {
+    let ended = cache[site.id]?.ended;
+    if (!ended) {
+      try {
+        const result = await fetchSummaryRows(site);
+        cache[site.id] = { ...(cache[site.id] || {}), ...result };
+        ended = result.ended;
+      } catch { ended = []; }
+    }
+    (ended || []).forEach(r => {
+      if (r.harvest == null || r.days == null) return;
+      allEnded.push({ ...r, siteName: site.name, siteColor: site.color });
+    });
+  }
+  scatterEndedData = allEnded;
+  renderScatterChart();
+}
+
+function renderScatterChart() {
+  const section = document.getElementById('scatter-section');
+  const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#a78bfa', '南丹': '#34d399' };
+  const MONTH_COLORS = ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#38bdf8','#60a5fa','#a78bfa','#e879f9','#f472b6','#94a3b8','#fbbf24'];
+
+  const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'month-site': '月別(拠点別)' };
+
+  const btnBar = Object.entries(modeLabels).map(([k, v]) =>
+    `<button class="sort-btn${scatterMode===k?' active':''}" onclick="scatterSetMode('${k}')" style="margin-right:6px">${v}</button>`
+  ).join('');
+
+  section.innerHTML = `
+    <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
+    <div style="margin-bottom:16px">${btnBar}</div>
+    <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
+      <canvas id="scatter-canvas"></canvas>
+    </div>`;
+
+  if (scatterChart) { scatterChart.destroy(); scatterChart = null; }
+
+  const data = scatterEndedData || [];
+  let datasets = [];
+
+  if (scatterMode === 'all') {
+    // 拠点別に色分け
+    for (const site of SITES) {
+      const pts = data.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
+      if (!pts.length) continue;
+      datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+    }
+  } else if (scatterMode === 'month-all') {
+    // 開始月別に色分け（全拠点まとめて）
+    const monthMap = {};
+    data.forEach(r => {
+      const sd = parseDateStr(r.startDate);
+      const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
+      if (!monthMap[key]) monthMap[key] = [];
+      monthMap[key].push({ x: r.days, y: Math.round(r.harvest), label: r.no });
+    });
+    Object.entries(monthMap).sort().forEach(([month, pts], i) => {
+      datasets.push({ label: `${month}月開始`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+    });
+  } else {
+    // 拠点×月別
+    for (const site of SITES) {
+      const siteData = data.filter(r => r.siteName === site.name);
+      const monthMap = {};
+      siteData.forEach(r => {
+        const sd = parseDateStr(r.startDate);
+        const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
+        if (!monthMap[key]) monthMap[key] = [];
+        monthMap[key].push({ x: r.days, y: Math.round(r.harvest), label: r.no });
+      });
+      Object.entries(monthMap).sort().forEach(([month, pts], i) => {
+        datasets.push({ label: `${site.name} ${month}`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+      });
+    }
+  }
+
+  scatterChart = new Chart(document.getElementById('scatter-canvas'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            label: ctx => {
+              const p = ctx.raw;
+              return `No.${p.label}  ${ctx.dataset.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 11 } },
+          ticks: { color: '#8892a4', font: { size: 10 } },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          title: { display: true, text: '収穫量 (g/菌床)', color: '#8892a4', font: { size: 11 } },
+          ticks: { color: '#8892a4', font: { size: 10 } },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+}
+
+function scatterSetMode(mode) {
+  scatterMode = mode;
+  renderScatterChart();
 }
 
 function renderLotTab() {
@@ -1540,9 +1670,10 @@ function initTabs() {
       btn.style.borderBottomColor = site.color;
     }
     btn.addEventListener('click', () => {
-      if (!weeklyTabActive && !lotTabActive && currentSiteIdx === i) return;
+      if (!weeklyTabActive && !lotTabActive && !scatterTabActive && currentSiteIdx === i) return;
       weeklyTabActive = false;
       lotTabActive = false;
+      scatterTabActive = false;
       currentSiteIdx = i;
       tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
         b.classList.toggle('active', j === i);
@@ -1568,6 +1699,7 @@ function initTabs() {
     if (lotTabActive) return;
     weeklyTabActive = false;
     lotTabActive = true;
+    scatterTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -1580,6 +1712,27 @@ function initTabs() {
   });
   tabsEl.appendChild(lotBtn);
 
+  // 散布図 tab
+  const scatterBtn = document.createElement('button');
+  scatterBtn.className = 'tab-btn';
+  scatterBtn.textContent = '散布図';
+  scatterBtn.addEventListener('click', () => {
+    if (scatterTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = ''; b.style.borderBottomColor = '';
+    });
+    scatterBtn.classList.add('active');
+    scatterBtn.style.color = '#e879f9';
+    scatterBtn.style.borderBottomColor = '#e879f9';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(scatterBtn);
+
   // Standalone weekly tab
   const weeklyBtn = document.createElement('button');
   weeklyBtn.className = 'tab-btn';
@@ -1588,6 +1741,7 @@ function initTabs() {
     if (weeklyTabActive) return;
     weeklyTabActive = true;
     lotTabActive = false;
+    scatterTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
