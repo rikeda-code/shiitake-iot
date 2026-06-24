@@ -329,6 +329,21 @@ function App() {
     setModal(null);
   }, [modal, tmpPct, updateStep, updateSubItem]);
 
+  /* ── period modal ── */
+  const [periodModal, setPeriodModal] = useState(null); // { memberId, stepIndex, subItemId }
+  const openPeriodModal = useCallback((mid, si, subId = null) => {
+    setPeriodModal({ memberId: mid, stepIndex: si, subItemId: subId });
+  }, []);
+  const applyPeriod = useCallback((startWeek, endWeek) => {
+    if (!periodModal) return;
+    if (periodModal.subItemId) {
+      updateSubItem(periodModal.memberId, periodModal.stepIndex, periodModal.subItemId, { startWeek, endWeek });
+    } else {
+      updateStep(periodModal.memberId, periodModal.stepIndex, { startWeek, endWeek });
+    }
+    setPeriodModal(null);
+  }, [periodModal, updateStep, updateSubItem]);
+
   /* ── review ── */
   const completeReview = useCallback((mid, ri) => {
     const date = TODAY.toLocaleDateString('ja-JP');
@@ -438,6 +453,7 @@ function App() {
           onSubItemAdd=${addSubItem}
           onSubItemUpdate=${updateSubItem}
           onSubItemDelete=${deleteSubItem}
+          onPeriodEdit=${openPeriodModal}
         />
         <${AdminPanel}
           members=${st.members}
@@ -459,6 +475,12 @@ function App() {
           modal=${modal} members=${st.members}
           tmpPct=${tmpPct} onPctChange=${setTmpPct}
           onApply=${applyModal} onClose=${() => setModal(null)}
+        />
+      `}
+      ${periodModal && html`
+        <${PeriodModal}
+          periodModal=${periodModal} members=${st.members}
+          onApply=${applyPeriod} onClose=${() => setPeriodModal(null)}
         />
       `}
     </div>
@@ -542,7 +564,7 @@ function Diamond({ completed, size=12 }) {
   }} />`;
 }
 
-function GanttSection({ members, onBarClick, onReviewComplete, onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
+function GanttSection({ members, onBarClick, onReviewComplete, onSubItemAdd, onSubItemUpdate, onSubItemDelete, onPeriodEdit }) {
   return html`
     <div style=${{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, overflow:'hidden' }}>
       <div style=${{
@@ -594,6 +616,7 @@ function GanttSection({ members, onBarClick, onReviewComplete, onSubItemAdd, onS
               key=${m.id} member=${m} isLast=${mi===members.length-1}
               onBarClick=${onBarClick} onReviewComplete=${onReviewComplete}
               onSubItemAdd=${onSubItemAdd} onSubItemUpdate=${onSubItemUpdate} onSubItemDelete=${onSubItemDelete}
+              onPeriodEdit=${onPeriodEdit}
             />
           `)}
         </div>
@@ -602,7 +625,7 @@ function GanttSection({ members, onBarClick, onReviewComplete, onSubItemAdd, onS
   `;
 }
 
-function MemberRows({ member, isLast, onBarClick, onReviewComplete, onSubItemAdd, onSubItemUpdate, onSubItemDelete }) {
+function MemberRows({ member, isLast, onBarClick, onReviewComplete, onSubItemAdd, onSubItemUpdate, onSubItemDelete, onPeriodEdit }) {
   const [collapsed, setCollapsed] = useState(false);
   const pct  = overallPct(member);
   const stat = statusInfo(member);
@@ -667,6 +690,16 @@ function MemberRows({ member, isLast, onBarClick, onReviewComplete, onSubItemAdd
                 ${step.name}
               </span>
               ${sd.risk && html`<span style=${{ fontSize:10, flexShrink:0 }}>${sd.risk==='red'?'🔴':sd.risk==='yellow'?'🟡':'🟢'}</span>`}
+              <!-- period edit button -->
+              <button
+                onClick=${e => { e.stopPropagation(); onPeriodEdit(member.id, si, null); }}
+                title="期間を変更（${WEEKS[sd.startWeek]?.label}〜${WEEKS[sd.endWeek]?.label}）"
+                style=${{
+                  background:'rgba(56,189,248,0.1)', border:'1px solid rgba(56,189,248,0.25)',
+                  color:'#38bdf8', borderRadius:4, padding:'1px 4px', cursor:'pointer',
+                  fontSize:'0.6rem', flexShrink:0, lineHeight:1.4,
+                }}
+              >📅</button>
               <!-- add sub-item button -->
               <button
                 onClick=${e => { e.stopPropagation(); onSubItemAdd(member.id, si); }}
@@ -728,6 +761,15 @@ function MemberRows({ member, isLast, onBarClick, onReviewComplete, onSubItemAdd
                   onInput=${e => onSubItemUpdate(member.id, si, sub.id, { name: e.target.value })}
                   onClick=${e => e.stopPropagation()}
                 />
+                <button
+                  onClick=${e => { e.stopPropagation(); onPeriodEdit(member.id, si, sub.id); }}
+                  title="期間を変更（${WEEKS[sub.startWeek]?.label}〜${WEEKS[sub.endWeek]?.label}）"
+                  style=${{
+                    background:'rgba(56,189,248,0.08)', border:'1px solid rgba(56,189,248,0.2)',
+                    color:'#38bdf8', borderRadius:3, padding:'0 3px', cursor:'pointer',
+                    fontSize:'0.55rem', flexShrink:0, lineHeight:1.6,
+                  }}
+                >📅</button>
                 <button
                   onClick=${e => { e.stopPropagation(); onSubItemDelete(member.id, si, sub.id); }}
                   title="削除"
@@ -834,6 +876,108 @@ function ProgressModal({ modal, members, tmpPct, onPctChange, onApply, onClose }
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   PERIOD MODAL
+═══════════════════════════════════════════════════════════════ */
+function PeriodModal({ periodModal, members, onApply, onClose }) {
+  const member  = members.find(m => m.id === periodModal.memberId);
+  const step    = STEPS[periodModal.stepIndex];
+  const sd      = member?.steps[periodModal.stepIndex];
+  const subItem = periodModal.subItemId
+    ? (sd?.subItems || []).find(s => s.id === periodModal.subItemId)
+    : null;
+
+  const current = subItem || sd;
+  const [startWeek, setStartWeek] = useState(current?.startWeek ?? 0);
+  const [endWeek,   setEndWeek]   = useState(current?.endWeek   ?? 0);
+
+  const handleApply = () => {
+    const s = Math.min(startWeek, endWeek);
+    const e = Math.max(startWeek, endWeek);
+    onApply(s, e);
+  };
+
+  const SS = {
+    background:'#0a1526', color:'#e2e8f0', border:'1px solid #334155',
+    borderRadius:8, padding:'7px 10px', outline:'none', flex:1,
+  };
+
+  return html`
+    <div
+      style=${{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999 }}
+      onClick=${onClose}
+    >
+      <div
+        style=${{ background:'#1e293b', border:'1px solid #334155', borderRadius:16, padding:28, width:420, boxShadow:'0 30px 60px rgba(0,0,0,0.7)' }}
+        onClick=${e => e.stopPropagation()}
+      >
+        <div style=${{ fontWeight:800, fontSize:'0.95rem', marginBottom:4 }}>期間を設定</div>
+        <div style=${{ fontSize:'0.75rem', color:'#64748b', marginBottom: subItem ? 6 : 20 }}>
+          ${member?.name}　／　Step ${periodModal.stepIndex+1}：${step.name}
+        </div>
+        ${subItem && html`
+          <div style=${{
+            fontSize:'0.72rem', color:step.color, marginBottom:20,
+            background:step.color+'15', borderRadius:6, padding:'5px 10px', borderLeft:`3px solid ${step.color}`,
+          }}>
+            小項目：${subItem.name || '（名称未設定）'}
+          </div>
+        `}
+
+        <!-- week selectors -->
+        <div style=${{ display:'flex', alignItems:'center', gap:10, marginBottom:18 }}>
+          <div style=${{ flex:1 }}>
+            <div style=${{ fontSize:'0.65rem', color:'#475569', marginBottom:5, fontWeight:700 }}>開始週</div>
+            <select value=${startWeek} onChange=${e => setStartWeek(+e.target.value)} style=${SS}>
+              ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}（${w.shortLabel}〜）</option>`)}
+            </select>
+          </div>
+          <div style=${{ color:'#475569', fontSize:'1.2rem', marginTop:16 }}>〜</div>
+          <div style=${{ flex:1 }}>
+            <div style=${{ fontSize:'0.65rem', color:'#475569', marginBottom:5, fontWeight:700 }}>終了週</div>
+            <select value=${endWeek} onChange=${e => setEndWeek(+e.target.value)} style=${SS}>
+              ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}（〜${w.shortLabel}）</option>`)}
+            </select>
+          </div>
+        </div>
+
+        <!-- visual preview -->
+        <div style=${{ marginBottom:22 }}>
+          <div style=${{ fontSize:'0.65rem', color:'#475569', marginBottom:6, fontWeight:700 }}>プレビュー</div>
+          <div style=${{ display:'flex', borderRadius:6, overflow:'hidden', border:'1px solid #334155', height:20 }}>
+            ${WEEKS.map((_,i) => {
+              const s = Math.min(startWeek, endWeek);
+              const e = Math.max(startWeek, endWeek);
+              const inRange = i >= s && i <= e;
+              return html`
+                <div key=${i} style=${{
+                  flex:1, height:'100%',
+                  background: inRange ? step.color+'aa' : 'rgba(15,23,42,0.6)',
+                  borderRight: i<12 ? '1px solid #1e293b' : 'none',
+                  transition:'background .15s',
+                }} title=${WEEKS[i].label} />
+              `;
+            })}
+          </div>
+          <div style=${{ display:'flex', justifyContent:'space-between', fontSize:'0.6rem', color:'#475569', marginTop:3 }}>
+            <span>${WEEKS[0].label}</span>
+            <span style=${{ color:step.color, fontWeight:700 }}>
+              ${WEEKS[Math.min(startWeek,endWeek)].label} 〜 ${WEEKS[Math.max(startWeek,endWeek)].label}
+              （${Math.max(startWeek,endWeek) - Math.min(startWeek,endWeek) + 1}週間）
+            </span>
+            <span>${WEEKS[12].label}</span>
+          </div>
+        </div>
+
+        <div style=${{ display:'flex', gap:10 }}>
+          <button onClick=${onClose} style=${{ flex:1, padding:10, borderRadius:8, border:'1px solid #334155', background:'transparent', color:'#64748b', cursor:'pointer' }}>キャンセル</button>
+          <button onClick=${handleApply} style=${{ flex:2, padding:10, borderRadius:8, border:'none', background:step.color, color:'#0f172a', cursor:'pointer', fontWeight:800, fontSize:'0.9rem' }}>期間を確定する</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    ADMIN PANEL
 ═══════════════════════════════════════════════════════════════ */
 function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSelectStep,
@@ -889,6 +1033,18 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
             <select value=${selStepIndex} onChange=${e => onSelectStep(+e.target.value)} style=${IS}>
               ${STEPS.map((s,i) => html`<option key=${s.id} value=${i}>Step${i+1}：${s.name}</option>`)}
             </select>
+          </div>
+          <div>
+            <label style=${LS}>期間（週）</label>
+            <div style=${{ display:'flex', alignItems:'center', gap:6 }}>
+              <select value=${selStep?.startWeek ?? 0} onChange=${e => onUpdateStep(selMemberId, selStepIndex, { startWeek: +e.target.value })} style=${{ ...IS, flex:1 }}>
+                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
+              </select>
+              <span style=${{ color:'#475569', flexShrink:0 }}>〜</span>
+              <select value=${selStep?.endWeek ?? 0} onChange=${e => onUpdateStep(selMemberId, selStepIndex, { endWeek: +e.target.value })} style=${{ ...IS, flex:1 }}>
+                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
+              </select>
+            </div>
           </div>
           <div>
             <label style=${LS}>リスクフラグ</label>
