@@ -1338,6 +1338,24 @@ function renderEndedCards(ended) {
   const sortedGroups = Object.entries(groups).sort((a, b) => b[1].sortKey - a[1].sortKey);
 
   return sortedGroups.map(([monthLabel, { rows }]) => {
+    // 月平均カード
+    const harvestRows = rows.filter(r => r.harvest != null);
+    const avgHarvest = harvestRows.length
+      ? Math.round(harvestRows.reduce((s, r) => s + r.harvest, 0) / harvestRows.length)
+      : null;
+    const avgDays = rows.filter(r => r.days != null).length
+      ? Math.round(rows.filter(r => r.days != null).reduce((s, r) => s + r.days, 0) / rows.filter(r => r.days != null).length)
+      : null;
+    const avgHarvestCls = avgHarvest == null ? '' : avgHarvest >= 800 ? ' card-green' : avgHarvest < 660 ? ' card-red' : '';
+    const avgHarvestStr = avgHarvest != null ? `${avgHarvest.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span>` : '—';
+    const avgCard = `<div class="container-card" style="border:1px solid #3e4460;cursor:default">
+      <div class="card-cn">${monthLabel.replace('年','年').replace('月','月')}平均</div>
+      <div class="card-sd" style="color:#8892a4">${harvestRows.length}コンテナ</div>
+      <div class="card-harvest${avgHarvestCls}">${avgHarvestStr}</div>
+      <div class="card-meta">
+        <span class="card-chip">${avgDays != null ? avgDays + '日' : '—'}</span>
+      </div>
+    </div>`;
     const cards = rows.map(row => {
       const info = parseContainerName(row.name);
       const displayName = info.no || row.name;
@@ -1362,7 +1380,7 @@ function renderEndedCards(ended) {
     }).join('');
     return `<div style="margin-bottom:24px">
       <div style="font-size:0.8rem;color:#8892a4;margin-bottom:8px;padding-left:2px">${monthLabel}開始</div>
-      <div class="cards-grid">${cards}</div>
+      <div class="cards-grid">${avgCard}${cards}</div>
     </div>`;
   }).join('');
 }
