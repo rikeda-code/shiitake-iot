@@ -46,7 +46,6 @@
     .ota   { background: #FAEEDA; color: #633806; border-color: #EF9F27 !important; }
     thead th.clickable { cursor: pointer; }
     thead th.clickable:hover { background: #f0f0f0; }
-    .group-sep td, .group-sep th { border-top: 2px solid #6b7280 !important; }
   </style>
 </head>
 <body>
@@ -71,6 +70,10 @@
 <script>
 const MEMBERS = ['久保', '古田', '太田'];
 const DESTINATIONS = ['志摩⇔いなべ①', '志摩⇔いなべ②', '志摩⇔南丹①', '志摩⇔南丹②'];
+const GROUPS = [
+  { label: '志摩⇔いなべ', keys: ['志摩⇔いなべ①', '志摩⇔いなべ②'] },
+  { label: '志摩⇔南丹',   keys: ['志摩⇔南丹①',   '志摩⇔南丹②']   },
+];
 const START_YEAR = 2026, START_MONTH = 6;
 const DAY_NAMES = ['日','月','火','水','木','金','土'];
 const STORAGE_KEY = 'shift_store';
@@ -120,13 +123,16 @@ function render() {
   document.getElementById('month-label').textContent = `${y}年${m}月`;
   document.getElementById('prev-btn').disabled = (y === START_YEAR && m === START_MONTH);
   const days = daysInMonth(y, m); const shiftData = getShiftData(y, m); const summary = getSummary(y, m);
+  // Summary table (①②を合算して表示)
   let shtml = `<table class="summary-table"><thead><tr><th>行き先</th>${MEMBERS.map(mem=>`<th>${mem}</th>`).join('')}<th style="color:#6b7280">未割当</th></tr></thead><tbody>`;
-  DESTINATIONS.forEach((dest, i) => {
-    const sep = (i === 2) ? ' style="border-top:2px solid #6b7280"' : '';
-    shtml += `<tr><td${sep}>${dest}</td>${MEMBERS.map(mem=>`<td${sep}>${summary[dest][mem]}</td>`).join('')}<td${sep} style="color:#6b7280${i===2?';border-top:2px solid #6b7280':''}">${summary[dest].unassigned}</td></tr>`;
+  GROUPS.forEach(g => {
+    const merged = { '久保':0, '古田':0, '太田':0, unassigned:0 };
+    g.keys.forEach(k => { MEMBERS.forEach(mem => { merged[mem] += summary[k][mem]; }); merged.unassigned += summary[k].unassigned; });
+    shtml += `<tr><td>${g.label}</td>${MEMBERS.map(mem=>`<td>${merged[mem]}</td>`).join('')}<td style="color:#6b7280">${merged.unassigned}</td></tr>`;
   });
   shtml += '</tbody></table>';
   document.getElementById('summary-wrap').innerHTML = shtml;
+  // Shift table
   let html = `<table class="shift"><thead><tr><th class="dest-header">行き先</th>`;
   for (let d = 1; d <= days; d++) {
     const dow = getDow(y, m, d); const cls = dow === 6 ? 'sat' : dow === 0 ? 'sun' : '';
@@ -134,13 +140,13 @@ function render() {
   }
   html += '</tr></thead><tbody>';
   DESTINATIONS.forEach((dest, i) => {
-    const rowSep = i === 2 ? ' style="border-top:2px solid #6b7280"' : '';
-    html += `<tr><td class="dest-label"${rowSep}>${dest}</td>`;
+    const sep = i === 2 ? ' style="border-top:2px solid #9ca3af"' : '';
+    html += `<tr><td class="dest-label"${sep}>${dest}</td>`;
     for (let d = 1; d <= days; d++) {
-      if (isHoliday(shiftData, d)) { html += `<td class="holiday"${rowSep}>－</td>`; }
+      if (isHoliday(shiftData, d)) { html += `<td class="holiday"${sep}>－</td>`; }
       else {
         const val = shiftData[d]?.[dest] || ''; const cls = memberClass(val);
-        html += `<td class="cell ${cls}"${rowSep}><select class="member-select" onchange="onSelect(${d},'${dest}',this.value)">`;
+        html += `<td class="cell ${cls}"${sep}><select class="member-select" onchange="onSelect(${d},'${dest}',this.value)">`;
         html += `<option value="">－</option>`;
         MEMBERS.forEach(mem => { html += `<option value="${mem}"${val===mem?' selected':''}>${mem}</option>`; });
         html += `</select></td>`;
