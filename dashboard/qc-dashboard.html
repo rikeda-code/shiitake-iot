@@ -1114,7 +1114,7 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
             value=${mtg.purpose || ''}
             onInput=${e => upd('purpose', e.target.value)}
             placeholder="例：Step2の現状把握の進捗確認、課題整理"
-            rows=3
+            rows=7
             style=${{ ...IS, lineHeight:1.6, fontFamily:'inherit', resize:'vertical' }}
           />
         </div>
