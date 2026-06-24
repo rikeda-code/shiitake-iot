@@ -37,13 +37,13 @@
     table.shift { border-collapse: collapse; font-size: 0.75rem; }
     table.shift th, table.shift td { border: 1px solid #d1d5db; }
     table.shift thead th { background: white; padding: 4px 2px; text-align: center; min-width: 44px; position: sticky; top: 0; z-index: 1; }
-    table.shift thead th.dest-header { position: sticky; left: 0; z-index: 2; background: white; min-width: 72px; font-size: 0.8rem; }
+    table.shift thead th.dest-header { position: sticky; left: 0; z-index: 2; background: white; min-width: 96px; font-size: 0.8rem; }
     table.shift .day-num { font-size: 0.75rem; }
     table.shift .day-name { font-size: 0.7rem; }
     .sat { color: #2563eb; }
     .sun { color: #dc2626; }
 
-    table.shift td.dest-label { position: sticky; left: 0; background: white; z-index: 1; padding: 4px 8px; font-weight: 600; font-size: 0.8rem; min-width: 72px; }
+    table.shift td.dest-label { position: sticky; left: 0; background: white; z-index: 1; padding: 4px 8px; font-weight: 600; font-size: 0.75rem; min-width: 96px; }
     table.shift td.holiday { background: #f3f4f6; color: #9ca3af; text-align: center; height: 52px; }
     table.shift td.cell { padding: 0; }
     table.shift td.footer-dest { position: sticky; left: 0; background: #f9fafb; z-index: 1; padding: 2px 4px; font-size: 0.7rem; color: #6b7280; text-align: center; }
@@ -84,7 +84,7 @@
 
 <script>
 const MEMBERS = ['久保', '古田', '太田'];
-const DESTINATIONS = ['いなべ', '南丹'];
+const DESTINATIONS = ['志摩⇔いなべ①', '志摩⇔いなべ②', '志摩⇔南丹①', '志摩⇔南丹②'];
 const START_YEAR = 2026, START_MONTH = 6;
 const DAY_NAMES = ['日','月','火','水','木','金','土'];
 const STORAGE_KEY = 'shift_store';
