@@ -179,6 +179,7 @@ function loadState() {
               progress:  si.progress  ?? 0,
               startWeek: si.startWeek ?? fs.startWeek,
               endWeek:   si.endWeek   ?? fs.endWeek,
+              memo:      si.memo      || '',
             })),
           };
         }),
@@ -213,6 +214,7 @@ function saveState(st) {
             progress:  si.progress,
             startWeek: si.startWeek,
             endWeek:   si.endWeek,
+            memo:      si.memo || '',
           })),
         })),
         reviews: m.reviews.map(r => ({
@@ -268,6 +270,7 @@ function App() {
         progress:  0,
         startWeek: step?.startWeek ?? DEFAULT_SCHEDULE[si].startWeek,
         endWeek:   step?.endWeek   ?? DEFAULT_SCHEDULE[si].endWeek,
+        memo:      '',
       };
       return {
         ...prev,
@@ -1171,60 +1174,75 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
           </div>
           ${subItems.map((sub, idx) => html`
             <div key=${sub.id} style=${{
-              display:'grid', gridTemplateColumns:'1fr 110px 110px 130px 36px',
-              gap:8, padding:'8px 10px', marginBottom:6,
+              display:'flex', flexDirection:'column', gap:6,
+              padding:'8px 10px', marginBottom:6,
               background:'#0a1526', borderRadius:8,
               border:`1px solid ${stepColor}22`,
-              alignItems:'center',
             }}>
-              <!-- name -->
-              <input
-                type="text"
-                value=${sub.name}
-                placeholder="小項目名を入力"
-                onInput=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { name: e.target.value })}
-                style=${{ ...SS, width:'100%' }}
-              />
-              <!-- start week -->
-              <select
-                value=${sub.startWeek}
-                onChange=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { startWeek: +e.target.value })}
-                style=${SS}
-              >
-                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
-              </select>
-              <!-- end week -->
-              <select
-                value=${sub.endWeek}
-                onChange=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { endWeek: +e.target.value })}
-                style=${SS}
-              >
-                ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
-              </select>
-              <!-- progress -->
-              <div style=${{ display:'flex', gap:4 }}>
-                ${[0,25,50,75,100].map(pct => html`
-                  <button key=${pct}
-                    onClick=${() => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { progress: pct })}
-                    style=${{
-                      flex:1, padding:'4px 2px', borderRadius:5, fontSize:'0.6rem', cursor:'pointer',
-                      border:`1px solid ${sub.progress===pct?stepColor:'#1e293b'}`,
-                      background: sub.progress===pct?stepColor+'30':'transparent',
-                      color: sub.progress===pct?stepColor:'#475569',
-                      fontWeight: sub.progress===pct?800:400,
-                    }}
-                  >${pct}%</button>
-                `)}
+              <!-- main row -->
+              <div style=${{ display:'grid', gridTemplateColumns:'1fr 110px 110px 130px 36px', gap:8, alignItems:'center' }}>
+                <!-- name -->
+                <input
+                  type="text"
+                  value=${sub.name}
+                  placeholder="小項目名を入力"
+                  onInput=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { name: e.target.value })}
+                  style=${{ ...SS, width:'100%' }}
+                />
+                <!-- start week -->
+                <select
+                  value=${sub.startWeek}
+                  onChange=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { startWeek: +e.target.value })}
+                  style=${SS}
+                >
+                  ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
+                </select>
+                <!-- end week -->
+                <select
+                  value=${sub.endWeek}
+                  onChange=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { endWeek: +e.target.value })}
+                  style=${SS}
+                >
+                  ${WEEKS.map((w,i) => html`<option key=${i} value=${i}>${w.label}</option>`)}
+                </select>
+                <!-- progress -->
+                <div style=${{ display:'flex', gap:4 }}>
+                  ${[0,25,50,75,100].map(pct => html`
+                    <button key=${pct}
+                      onClick=${() => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { progress: pct })}
+                      style=${{
+                        flex:1, padding:'4px 2px', borderRadius:5, fontSize:'0.6rem', cursor:'pointer',
+                        border:`1px solid ${sub.progress===pct?stepColor:'#1e293b'}`,
+                        background: sub.progress===pct?stepColor+'30':'transparent',
+                        color: sub.progress===pct?stepColor:'#475569',
+                        fontWeight: sub.progress===pct?800:400,
+                      }}
+                    >${pct}%</button>
+                  `)}
+                </div>
+                <!-- delete -->
+                <button
+                  onClick=${() => onSubItemDelete(selMemberId, selStepIndex, sub.id)}
+                  title="削除"
+                  style=${{
+                    background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.3)',
+                    color:'#f87171', borderRadius:6, padding:'5px 8px', cursor:'pointer', fontSize:'0.7rem',
+                  }}
+                >✕</button>
               </div>
-              <!-- delete -->
-              <button
-                onClick=${() => onSubItemDelete(selMemberId, selStepIndex, sub.id)}
-                title="削除"
+              <!-- memo row -->
+              <textarea
+                value=${sub.memo || ''}
+                onInput=${e => onSubItemUpdate(selMemberId, selStepIndex, sub.id, { memo: e.target.value })}
+                placeholder="メモ（気づき・懸念・指導内容など）"
+                rows="2"
                 style=${{
-                  background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.3)',
-                  color:'#f87171', borderRadius:6, padding:'5px 8px', cursor:'pointer', fontSize:'0.7rem',
+                  width:'100%', background:'#0f172a', color:'#94a3b8',
+                  border:'1px solid #1e293b', borderRadius:6, padding:'6px 9px',
+                  fontSize:'0.72rem', lineHeight:1.5, outline:'none', resize:'vertical',
+                  fontFamily:'inherit',
                 }}
-              >✕</button>
+              />
             </div>
           `)}
         `}
