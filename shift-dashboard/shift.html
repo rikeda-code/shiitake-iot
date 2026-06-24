@@ -19,9 +19,16 @@
     .nav button:disabled { opacity: 0.3; cursor: default; }
     .nav button:not(:disabled):hover { background: #f0f0f0; }
     .month-label { font-size: 1.3rem; font-weight: bold; min-width: 120px; text-align: center; }
+    .nav-right { display: flex; align-items: center; gap: 8px; }
     .pdf-btn { padding: 8px 18px; background: #2563eb; color: #000; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
     .pdf-btn:disabled { opacity: 0.5; }
     .pdf-btn:not(:disabled):hover { background: #1d4ed8; }
+    .save-btn { padding: 8px 18px; background: #16a34a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .save-btn:hover { background: #15803d; }
+    .save-btn.saved { background: #6b7280; }
+    .back-btn { padding: 8px 16px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .back-btn:hover { background: #e5e7eb; }
+    .view-badge { display: inline-block; background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; border-radius: 4px; padding: 3px 10px; font-size: 0.8rem; font-weight: 600; }
 
     /* Summary */
     .summary-section { margin-bottom: 20px; }
@@ -51,6 +58,7 @@
 
     select.member-select { width: 100%; height: 52px; border: none; background: transparent; text-align: center; cursor: pointer; padding: 6px 2px; font-size: 0.75rem; appearance: none; outline: none; }
     select.member-select:focus { outline: 2px solid #93c5fd; }
+    select.member-select:disabled { cursor: default; opacity: 0.8; }
 
     .kubo  { background: #E6F1FB; color: #0C447C; border-color: #85B7EB !important; }
     .furuta { background: #EAF3DE; color: #27500A; border-color: #97C459 !important; }
@@ -58,6 +66,55 @@
 
     thead th.clickable { cursor: pointer; }
     thead th.clickable:hover { background: #f0f0f0; }
+    thead th.no-click { cursor: default; }
+
+    /* Saved cards section */
+    .saved-section { margin-top: 32px; padding-top: 24px; border-top: 2px solid #e5e7eb; }
+    .saved-section .section-title { font-size: 1rem; color: #374151; margin-bottom: 12px; }
+    .cards-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+    .card {
+      position: relative;
+      background: white;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 16px 20px;
+      min-width: 120px;
+      cursor: pointer;
+      transition: box-shadow 0.15s, border-color 0.15s;
+      text-align: center;
+    }
+    .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); border-color: #2563eb; }
+    .card .card-label { font-size: 1rem; font-weight: 700; color: #1e3a5f; }
+    .card .card-sub { font-size: 0.72rem; color: #6b7280; margin-top: 4px; }
+    .card .delete-btn {
+      position: absolute;
+      top: 6px; right: 8px;
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 1rem;
+      cursor: pointer;
+      line-height: 1;
+      padding: 2px 4px;
+    }
+    .card .delete-btn:hover { color: #dc2626; }
+    .no-saved { color: #9ca3af; font-size: 0.85rem; }
+
+    /* Toast */
+    #toast {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2937;
+      color: white;
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      z-index: 999;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -66,9 +123,11 @@
     <div class="nav-center">
       <button id="prev-btn" onclick="prevMonth()">◀</button>
       <div class="month-label" id="month-label"></div>
-      <button onclick="nextMonth()">▶</button>
+      <button id="next-btn" onclick="nextMonth()">▶</button>
     </div>
-    <button class="pdf-btn" id="pdf-btn" onclick="exportPdf()">PDF出力</button>
+    <div class="nav-right" id="nav-right">
+      <!-- buttons injected by JS -->
+    </div>
   </div>
 
   <div class="summary-section">
@@ -77,10 +136,17 @@
   </div>
 
   <div class="shift-section">
-    <div class="section-title">シフト表（日付ヘッダーをクリックで休日トグル）</div>
+    <div class="section-title" id="shift-section-title">シフト表（日付ヘッダーをクリックで休日トグル）</div>
     <div class="table-wrap" id="table-wrap"></div>
   </div>
+
+  <div class="saved-section" id="saved-section">
+    <div class="section-title">保存済みシフト一覧</div>
+    <div class="cards-grid" id="cards-grid"></div>
+  </div>
 </div>
+
+<div id="toast"></div>
 
 <script>
 const MEMBERS = ['久保', '古田', '太田'];
@@ -88,9 +154,24 @@ const DESTINATIONS = ['志摩⇔いなべ①', '志摩⇔いなべ②', '志摩�
 const START_YEAR = 2026, START_MONTH = 6;
 const DAY_NAMES = ['日','月','火','水','木','金','土'];
 const STORAGE_KEY = 'shift_store';
+const SAVED_KEY = 'saved_months';
 
+// Detect view mode from URL param
+const urlParams = new URLSearchParams(location.search);
+const paramMonth = urlParams.get('month');
+let viewMode = false;
 let currentYear = START_YEAR, currentMonth = START_MONTH;
 
+if (paramMonth) {
+  const parts = paramMonth.split('-').map(Number);
+  if (parts.length === 2 && parts[0] > 2000 && parts[1] >= 1 && parts[1] <= 12) {
+    currentYear = parts[0];
+    currentMonth = parts[1];
+    viewMode = true;
+  }
+}
+
+// --- Storage helpers ---
 function loadStore() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; }
 }
@@ -99,9 +180,7 @@ function monthKey(y, m) { return `${y}-${String(m).padStart(2,'0')}`; }
 function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
 function getDow(y, m, d) { return new Date(y, m-1, d).getDay(); }
 
-function getShiftData(y, m) {
-  return loadStore()[monthKey(y, m)] || {};
-}
+function getShiftData(y, m) { return loadStore()[monthKey(y, m)] || {}; }
 function setCell(y, m, day, dest, val) {
   const store = loadStore();
   const key = monthKey(y, m);
@@ -111,16 +190,14 @@ function setCell(y, m, day, dest, val) {
   saveStore(store);
 }
 function toggleHoliday(y, m, day) {
+  if (viewMode) return;
   const store = loadStore();
   const key = monthKey(y, m);
   if (!store[key]) store[key] = {};
   const dayData = store[key][day] || {};
-  const isHoliday = DESTINATIONS.every(d => dayData[d] === 'holiday');
-  if (isHoliday) {
-    DESTINATIONS.forEach(d => { dayData[d] = ''; });
-  } else {
-    DESTINATIONS.forEach(d => { dayData[d] = 'holiday'; });
-  }
+  const isHol = DESTINATIONS.every(d => dayData[d] === 'holiday');
+  if (isHol) { DESTINATIONS.forEach(d => { dayData[d] = ''; }); }
+  else { DESTINATIONS.forEach(d => { dayData[d] = 'holiday'; }); }
   store[key][day] = dayData;
   saveStore(store);
   render();
@@ -130,6 +207,41 @@ function isHoliday(shiftData, day) {
   return d && DESTINATIONS.every(dest => d[dest] === 'holiday');
 }
 
+// --- Saved months helpers ---
+function getSavedMonths() {
+  try { return JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'); } catch { return []; }
+}
+function isMonthSaved(y, m) {
+  return getSavedMonths().includes(monthKey(y, m));
+}
+function saveCurrentMonth() {
+  const key = monthKey(currentYear, currentMonth);
+  const saved = getSavedMonths();
+  if (!saved.includes(key)) {
+    saved.push(key);
+    saved.sort();
+    localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
+  }
+  renderNav();
+  renderCards();
+  showToast(`${currentYear}年${currentMonth}月 を保存しました`);
+}
+function deleteSavedMonth(key, e) {
+  e.stopPropagation();
+  const saved = getSavedMonths().filter(k => k !== key);
+  localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
+  renderNav();
+  renderCards();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 2200);
+}
+
+// --- Summary ---
 function getSummary(y, m) {
   const data = getShiftData(y, m);
   const days = daysInMonth(y, m);
@@ -153,16 +265,72 @@ function memberClass(m) {
   return '';
 }
 
+// --- Render nav buttons ---
+function renderNav() {
+  const navRight = document.getElementById('nav-right');
+  if (viewMode) {
+    navRight.innerHTML = `
+      <span class="view-badge">閲覧モード</span>
+      <button class="back-btn" onclick="history.back()">← 戻る</button>
+    `;
+  } else {
+    const saved = isMonthSaved(currentYear, currentMonth);
+    navRight.innerHTML = `
+      <button class="save-btn${saved?' saved':''}" id="save-btn" onclick="saveCurrentMonth()">
+        ${saved ? '✓ 保存済み' : '保存'}
+      </button>
+      <button class="pdf-btn" id="pdf-btn" onclick="exportPdf()">PDF出力</button>
+    `;
+  }
+}
+
+// --- Render saved cards ---
+function renderCards() {
+  const grid = document.getElementById('cards-grid');
+  const saved = getSavedMonths();
+  if (saved.length === 0) {
+    grid.innerHTML = '<div class="no-saved">保存済みのシフトはありません</div>';
+    return;
+  }
+  grid.innerHTML = saved.map(mk => {
+    const [y, mo] = mk.split('-').map(Number);
+    return `
+      <div class="card" onclick="openSavedMonth('${mk}')">
+        <button class="delete-btn" onclick="deleteSavedMonth('${mk}', event)" title="削除">✕</button>
+        <div class="card-label">${y}年${mo}月</div>
+        <div class="card-sub">タップして開く</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openSavedMonth(mk) {
+  window.open(`${location.pathname}?month=${mk}`, '_blank');
+}
+
+// --- Main render ---
 function render() {
   const y = currentYear, m = currentMonth;
   document.getElementById('month-label').textContent = `${y}年${m}月`;
-  document.getElementById('prev-btn').disabled = (y === START_YEAR && m === START_MONTH);
+
+  if (viewMode) {
+    document.getElementById('prev-btn').style.display = 'none';
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('shift-section-title').textContent = 'シフト表';
+    document.getElementById('saved-section').style.display = 'none';
+  } else {
+    document.getElementById('prev-btn').disabled = (y === START_YEAR && m === START_MONTH);
+    document.getElementById('shift-section-title').textContent = 'シフト表（日付ヘッダーをクリックで休日トグル）';
+    renderCards();
+  }
+
+  renderNav();
 
   const days = daysInMonth(y, m);
   const shiftData = getShiftData(y, m);
   const summary = getSummary(y, m);
 
-  // Summary table (①②を合算して表示)
+  // Summary table
   const GROUPS = [
     { label: '志摩⇔いなべ', keys: ['志摩⇔いなべ①', '志摩⇔いなべ②'] },
     { label: '志摩⇔南丹',   keys: ['志摩⇔南丹①',   '志摩⇔南丹②']   },
@@ -181,7 +349,11 @@ function render() {
   for (let d = 1; d <= days; d++) {
     const dow = getDow(y, m, d);
     const cls = dow === 6 ? 'sat' : dow === 0 ? 'sun' : '';
-    html += `<th class="clickable" onclick="toggleHoliday(${y},${m},${d})" title="クリックで休日トグル"><div class="day-num">${d}</div><div class="day-name ${cls}">${DAY_NAMES[dow]}</div></th>`;
+    if (viewMode) {
+      html += `<th class="no-click"><div class="day-num">${d}</div><div class="day-name ${cls}">${DAY_NAMES[dow]}</div></th>`;
+    } else {
+      html += `<th class="clickable" onclick="toggleHoliday(${y},${m},${d})" title="クリックで休日トグル"><div class="day-num">${d}</div><div class="day-name ${cls}">${DAY_NAMES[dow]}</div></th>`;
+    }
   }
   html += '</tr></thead><tbody>';
 
@@ -193,7 +365,7 @@ function render() {
       } else {
         const val = shiftData[d]?.[dest] || '';
         const cls = memberClass(val);
-        html += `<td class="cell ${cls}"><select class="member-select" onchange="onSelect(${d},'${dest}',this.value)">`;
+        html += `<td class="cell ${cls}"><select class="member-select" ${viewMode?'disabled':''} onchange="onSelect(${d},'${dest}',this.value)">`;
         html += `<option value="">－</option>`;
         MEMBERS.forEach(mem => { html += `<option value="${mem}"${val===mem?' selected':''}>${mem}</option>`; });
         html += `</select></td>`;
@@ -217,23 +389,26 @@ function render() {
     }
   }
   html += '</tr>';
-
   html += '</tbody></table>';
   document.getElementById('table-wrap').innerHTML = html;
 }
 
 function onSelect(day, dest, val) {
+  if (viewMode) return;
   setCell(currentYear, currentMonth, day, dest, val);
+  renderNav(); // update save button state if needed
   render();
 }
 
 function prevMonth() {
+  if (viewMode) return;
   if (currentYear === START_YEAR && currentMonth === START_MONTH) return;
   if (currentMonth === 1) { currentYear--; currentMonth = 12; }
   else currentMonth--;
   render();
 }
 function nextMonth() {
+  if (viewMode) return;
   if (currentMonth === 12) { currentYear++; currentMonth = 1; }
   else currentMonth++;
   render();
@@ -241,6 +416,7 @@ function nextMonth() {
 
 async function exportPdf() {
   const btn = document.getElementById('pdf-btn');
+  if (!btn) return;
   btn.disabled = true; btn.textContent = '出力中…';
   try {
     const el = document.getElementById('app');
