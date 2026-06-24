@@ -1525,7 +1525,6 @@ function renderScatterChart() {
     `<button class="sort-btn${scatterMode===k?' active':''}" onclick="scatterSetMode('${k}')" style="margin-right:6px">${v}</button>`
   ).join('');
 
-  // 平均モードでは拠点フィルター不要（全拠点を拠点別に表示するため）
   const showSiteFilter = scatterMode !== 'avg';
   const siteFilterBtns = showSiteFilter ? [['all','全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) => {
     const col = k === 'all' ? '' : `color:${SITE_COLORS[k]};border-color:${SITE_COLORS[k]}`;
@@ -1533,29 +1532,54 @@ function renderScatterChart() {
     return `<button class="sort-btn ${active}" onclick="scatterSetSite('${k}')" style="margin-right:6px;${active?col:''}">${v}</button>`;
   }).join('') : '';
 
+  const allData = scatterEndedData || [];
+
+  // 月一覧を事前収集してHTML生成
+  const monthBuckets = {};
+  allData.forEach(r => {
+    const sd = parseDateStr(r.startDate);
+    if (!sd) return;
+    const key = `${sd.getFullYear()}_${String(sd.getMonth()+1).padStart(2,'0')}`;
+    if (!monthBuckets[key]) monthBuckets[key] = [];
+    monthBuckets[key].push(r);
+  });
+  const sortedMonths = Object.keys(monthBuckets).sort();
+
+  const monthChartsHtml = sortedMonths.map(mk => {
+    const [yr, mo] = mk.split('_');
+    return `
+      <div style="margin-bottom:32px">
+        <div style="color:#cbd5e1;font-size:0.9rem;font-weight:600;margin-bottom:8px">${yr}年${parseInt(mo)}月開始</div>
+        <div style="position:relative;height:320px;background:#13151f;border-radius:12px;padding:16px">
+          <canvas id="scatter-month-${mk}"></canvas>
+        </div>
+      </div>`;
+  }).join('');
+
   section.innerHTML = `
     <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
     <div style="margin-bottom:10px">${btnBar}</div>
     ${siteFilterBtns ? `<div style="margin-bottom:16px">${siteFilterBtns}</div>` : '<div style="margin-bottom:16px"></div>'}
     <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
       <canvas id="scatter-canvas"></canvas>
-    </div>`;
+    </div>
+    ${monthChartsHtml ? `<div style="margin-top:40px">${monthChartsHtml}</div>` : ''}`;
 
+  // destroy old charts
   if (scatterChart) { scatterChart.destroy(); scatterChart = null; }
+  Object.values(scatterMonthCharts).forEach(c => c.destroy());
+  Object.keys(scatterMonthCharts).forEach(k => delete scatterMonthCharts[k]);
 
-  const allData = scatterEndedData || [];
   const data = scatterSite === 'all' ? allData : allData.filter(r => r.siteName === scatterSite);
   let datasets = [];
 
   if (scatterMode === 'all') {
-    // 拠点別に色分け
     for (const site of SITES) {
       const pts = data.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
       if (!pts.length) continue;
       datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 });
     }
   } else if (scatterMode === 'month-all') {
-    // 開始月別に色分け（全拠点まとめて）
     const monthMap = {};
     data.forEach(r => {
       const sd = parseDateStr(r.startDate);
@@ -1567,7 +1591,7 @@ function renderScatterChart() {
       datasets.push({ label: `${month}月開始`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
     });
   } else {
-    // 平均モード: 拠点×月の平均値を1点で表示
+    // 平均モード
     for (const site of SITES) {
       const siteData = allData.filter(r => r.siteName === site.name);
       const monthMap = {};
@@ -1586,6 +1610,19 @@ function renderScatterChart() {
       datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 8, pointHoverRadius: 11 });
     }
   }
+
+  const scaleOpts = {
+    x: {
+      title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 11 } },
+      ticks: { color: '#8892a4', font: { size: 10 } },
+      grid: { color: '#1e2235' },
+    },
+    y: {
+      title: { display: true, text: '収穫量 (g/菌床)', color: '#8892a4', font: { size: 11 } },
+      ticks: { color: '#8892a4', font: { size: 10 } },
+      grid: { color: '#1e2235' },
+    },
+  };
 
   scatterChart = new Chart(document.getElementById('scatter-canvas'), {
     type: 'scatter',
@@ -1606,19 +1643,36 @@ function renderScatterChart() {
           },
         },
       },
-      scales: {
-        x: {
-          title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 11 } },
-          ticks: { color: '#8892a4', font: { size: 10 } },
-          grid: { color: '#1e2235' },
-        },
-        y: {
-          title: { display: true, text: '収穫量 (g/菌床)', color: '#8892a4', font: { size: 11 } },
-          ticks: { color: '#8892a4', font: { size: 10 } },
-          grid: { color: '#1e2235' },
-        },
-      },
+      scales: scaleOpts,
     },
+  });
+
+  // 月別サブチャート（拠点色、全モード共通）
+  sortedMonths.forEach(mk => {
+    const canvas = document.getElementById('scatter-month-' + mk);
+    if (!canvas) return;
+    const monthData = monthBuckets[mk] || [];
+    const subDatasets = [];
+    for (const site of SITES) {
+      const pts = monthData.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
+      if (!pts.length) continue;
+      subDatasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+    }
+    scatterMonthCharts[mk] = new Chart(canvas, {
+      type: 'scatter',
+      data: { datasets: subDatasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } },
+          tooltip: {
+            ...tooltipDefaults,
+            callbacks: { label: ctx => `No.${ctx.raw.label}  ${ctx.dataset.label}  ${ctx.raw.x}日 / ${ctx.raw.y.toLocaleString('ja-JP')} g/菌床` },
+          },
+        },
+        scales: scaleOpts,
+      },
+    });
   });
 }
 
