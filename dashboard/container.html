@@ -1519,22 +1519,24 @@ function renderScatterChart() {
   const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
   const MONTH_COLORS = ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#38bdf8','#60a5fa','#a78bfa','#e879f9','#f472b6','#94a3b8','#fbbf24'];
 
-  const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'month-site': '月別(拠点別)' };
+  const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'avg': '平均' };
 
   const btnBar = Object.entries(modeLabels).map(([k, v]) =>
     `<button class="sort-btn${scatterMode===k?' active':''}" onclick="scatterSetMode('${k}')" style="margin-right:6px">${v}</button>`
   ).join('');
 
-  const siteFilterBtns = [['all','全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) => {
+  // 平均モードでは拠点フィルター不要（全拠点を拠点別に表示するため）
+  const showSiteFilter = scatterMode !== 'avg';
+  const siteFilterBtns = showSiteFilter ? [['all','全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) => {
     const col = k === 'all' ? '' : `color:${SITE_COLORS[k]};border-color:${SITE_COLORS[k]}`;
     const active = scatterSite === k ? 'active' : '';
     return `<button class="sort-btn ${active}" onclick="scatterSetSite('${k}')" style="margin-right:6px;${active?col:''}">${v}</button>`;
-  }).join('');
+  }).join('') : '';
 
   section.innerHTML = `
     <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
     <div style="margin-bottom:10px">${btnBar}</div>
-    <div style="margin-bottom:16px">${siteFilterBtns}</div>
+    ${siteFilterBtns ? `<div style="margin-bottom:16px">${siteFilterBtns}</div>` : '<div style="margin-bottom:16px"></div>'}
     <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
       <canvas id="scatter-canvas"></canvas>
     </div>`;
@@ -1565,19 +1567,23 @@ function renderScatterChart() {
       datasets.push({ label: `${month}月開始`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
     });
   } else {
-    // 拠点×月別
+    // 平均モード: 拠点×月の平均値を1点で表示
     for (const site of SITES) {
-      const siteData = data.filter(r => r.siteName === site.name);
+      const siteData = allData.filter(r => r.siteName === site.name);
       const monthMap = {};
       siteData.forEach(r => {
         const sd = parseDateStr(r.startDate);
         const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
         if (!monthMap[key]) monthMap[key] = [];
-        monthMap[key].push({ x: r.days, y: Math.round(r.harvest), label: r.no });
+        monthMap[key].push(r);
       });
-      Object.entries(monthMap).sort().forEach(([month, pts], i) => {
-        datasets.push({ label: `${site.name} ${month}`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+      const pts = Object.entries(monthMap).sort().map(([month, rs]) => {
+        const avgH = Math.round(rs.reduce((s, r) => s + r.harvest, 0) / rs.length);
+        const avgD = Math.round(rs.reduce((s, r) => s + r.days, 0) / rs.length);
+        return { x: avgD, y: avgH, label: `${month}(${rs.length}件)` };
       });
+      if (!pts.length) continue;
+      datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 8, pointHoverRadius: 11 });
     }
   }
 
@@ -1593,6 +1599,8 @@ function renderScatterChart() {
           callbacks: {
             label: ctx => {
               const p = ctx.raw;
+              if (scatterMode === 'avg')
+                return `${ctx.dataset.label} ${p.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
               return `No.${p.label}  ${ctx.dataset.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
             },
           },
