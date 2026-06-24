@@ -1548,12 +1548,17 @@ function renderScatterChart() {
 
   const monthChartsHtml = sortedMonths.map(mk => {
     const [yr, mo] = mk.split('_');
-    return `
-      <div style="margin-bottom:32px">
-        <div style="color:#cbd5e1;font-size:0.9rem;font-weight:600;margin-bottom:8px">${yr}年${parseInt(mo)}月開始</div>
-        <div style="position:relative;height:320px;background:#13151f;border-radius:12px;padding:16px">
-          <canvas id="scatter-month-${mk}"></canvas>
+    const siteCanvases = SITES.map(s => `
+      <div style="flex:1;min-width:0">
+        <div style="color:${s.color};font-size:0.8rem;font-weight:600;margin-bottom:6px">${s.name}</div>
+        <div style="position:relative;height:280px;background:#13151f;border-radius:12px;padding:12px">
+          <canvas id="scatter-month-${mk}-${s.name}"></canvas>
         </div>
+      </div>`).join('');
+    return `
+      <div style="margin-bottom:40px">
+        <div style="color:#cbd5e1;font-size:0.9rem;font-weight:600;margin-bottom:12px">${yr}年${parseInt(mo)}月開始</div>
+        <div style="display:flex;gap:16px">${siteCanvases}</div>
       </div>`;
   }).join('');
 
@@ -1648,31 +1653,29 @@ function renderScatterChart() {
     },
   });
 
-  // 月別サブチャート（拠点色、全モード共通）
+  // 月別サブチャート（拠点ごとに独立したチャート）
   sortedMonths.forEach(mk => {
-    const canvas = document.getElementById('scatter-month-' + mk);
-    if (!canvas) return;
     const monthData = monthBuckets[mk] || [];
-    const subDatasets = [];
-    for (const site of SITES) {
+    SITES.forEach(site => {
+      const canvas = document.getElementById(`scatter-month-${mk}-${site.name}`);
+      if (!canvas) return;
       const pts = monthData.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
-      if (!pts.length) continue;
-      subDatasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 });
-    }
-    scatterMonthCharts[mk] = new Chart(canvas, {
-      type: 'scatter',
-      data: { datasets: subDatasets },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } },
-          tooltip: {
-            ...tooltipDefaults,
-            callbacks: { label: ctx => `No.${ctx.raw.label}  ${ctx.dataset.label}  ${ctx.raw.x}日 / ${ctx.raw.y.toLocaleString('ja-JP')} g/菌床` },
+      const chartKey = `${mk}-${site.name}`;
+      scatterMonthCharts[chartKey] = new Chart(canvas, {
+        type: 'scatter',
+        data: { datasets: pts.length ? [{ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 }] : [] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              ...tooltipDefaults,
+              callbacks: { label: ctx => `No.${ctx.raw.label}  ${ctx.raw.x}日 / ${ctx.raw.y.toLocaleString('ja-JP')} g/菌床` },
+            },
           },
+          scales: scaleOpts,
         },
-        scales: scaleOpts,
-      },
+      });
     });
   });
 }
