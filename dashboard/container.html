@@ -242,7 +242,7 @@
 
 const SITES = [
   { name: 'いなべ', id: '1TWOwAAFlV4ufYwaicbWGZ_Agv3ZF-rbDXZQDxYqHAiQ', color: '#38bdf8', indexSheet: '収穫実績集計表1' },
-  { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#a78bfa', indexSheet: '収穫実績集計表' },
+  { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#f97316', indexSheet: '収穫実績集計表' },
   { name: '南丹',   id: '1bAdmTLPGtwn6JH6C16m2nzr3RJhZpgAuSMaVtIL1aRc', color: '#34d399', indexSheet: '収穫実績集計表' },
 ];
 
@@ -1497,7 +1497,7 @@ async function renderScatterTab() {
 
 function renderScatterChart() {
   const section = document.getElementById('scatter-section');
-  const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#a78bfa', '南丹': '#34d399' };
+  const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
   const MONTH_COLORS = ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#38bdf8','#60a5fa','#a78bfa','#e879f9','#f472b6','#94a3b8','#fbbf24'];
 
   const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'month-site': '月別(拠点別)' };
@@ -1600,7 +1600,7 @@ function renderLotTab() {
   }
   const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '']);
   const isExcludedLot = lot => LOT_EXCLUDE.has(lot) || /^Date\(/.test(lot);
-  const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#a78bfa', '南丹': '#34d399' };
+  const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
 
   // Group by lot
   const groups = {};
