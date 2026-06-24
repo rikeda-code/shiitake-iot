@@ -1485,6 +1485,7 @@ function updateTabVisibility() {
 }
 
 let scatterChart = null;
+const scatterMonthCharts = {};
 let scatterMode = 'all'; // 'all' | 'month-all' | 'month-site'
 let scatterSite = 'all'; // 'all' | 'いなべ' | '群馬' | '南丹'
 
@@ -1533,15 +1534,27 @@ function renderScatterChart() {
     return `<button class="sort-btn ${active}" onclick="scatterSetSite('${k}')" style="margin-right:6px;${active?col:''}">${v}</button>`;
   }).join('') : '';
 
+  const siteMonthCanvases = SITES.map(s =>
+    `<div style="margin-top:32px">
+      <div style="font-size:0.85rem;font-weight:600;color:${SITE_COLORS[s.name]};margin-bottom:8px">${s.name} — 月別</div>
+      <div style="position:relative;height:320px;background:#13151f;border-radius:12px;padding:16px">
+        <canvas id="scatter-month-${s.name}"></canvas>
+      </div>
+    </div>`
+  ).join('');
+
   section.innerHTML = `
     <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
     <div style="margin-bottom:10px">${btnBar}</div>
     ${siteFilterBtns ? `<div style="margin-bottom:16px">${siteFilterBtns}</div>` : '<div style="margin-bottom:16px"></div>'}
     <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
       <canvas id="scatter-canvas"></canvas>
-    </div>`;
+    </div>
+    ${siteMonthCanvases}`;
 
   if (scatterChart) { scatterChart.destroy(); scatterChart = null; }
+  Object.values(scatterMonthCharts).forEach(c => c.destroy());
+  Object.keys(scatterMonthCharts).forEach(k => delete scatterMonthCharts[k]);
 
   const allData = scatterEndedData || [];
   const data = scatterSite === 'all' ? allData : allData.filter(r => r.siteName === scatterSite);
@@ -1620,6 +1633,44 @@ function renderScatterChart() {
       },
     },
   });
+}
+
+  // 各拠点の月別散布図
+  const scatterOpts = (titleY) => ({
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 10 } },
+      tooltip: { ...tooltipDefaults, callbacks: { label: ctx => `No.${ctx.raw.label}  ${ctx.parsed.x}日 / ${ctx.parsed.y.toLocaleString('ja-JP')} g/菌床` } },
+    },
+    scales: {
+      x: { title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 10 } }, ticks: { color: '#8892a4', font: { size: 9 } }, grid: { color: '#1e2235' } },
+      y: { title: { display: true, text: titleY, color: '#8892a4', font: { size: 10 } }, ticks: { color: '#8892a4', font: { size: 9 } }, grid: { color: '#1e2235' } },
+    },
+  });
+
+  for (const site of SITES) {
+    const canvasEl = document.getElementById(`scatter-month-${site.name}`);
+    if (!canvasEl) continue;
+    const siteData = allData.filter(r => r.siteName === site.name);
+    const monthMap = {};
+    siteData.forEach(r => {
+      const sd = parseDateStr(r.startDate);
+      const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
+      if (!monthMap[key]) monthMap[key] = [];
+      monthMap[key].push({ x: r.days, y: Math.round(r.harvest), label: r.no });
+    });
+    const mDatasets = Object.entries(monthMap).sort().map(([month, pts], i) => ({
+      label: `${month}月`,
+      data: pts,
+      backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc',
+      pointRadius: 6, pointHoverRadius: 9,
+    }));
+    scatterMonthCharts[site.name] = new Chart(canvasEl, {
+      type: 'scatter',
+      data: { datasets: mDatasets },
+      options: scatterOpts('収穫量 (g/菌床)'),
+    });
+  }
 }
 
 function scatterSetMode(mode) {
