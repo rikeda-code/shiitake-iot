@@ -1076,11 +1076,23 @@ function buildWeeklyLineChart(canvasId, containers, targetData) {
   if (!canvas) { console.warn('[buildChart] canvas not found:', canvasId); return; }
   const ctx = canvas.getContext('2d');
 
-  const MAX_DAY = 65;
-  const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
   const today = new Date(); today.setHours(0,0,0,0);
-
   const tomorrow = new Date(today.getTime() + 86400000);
+
+  // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
+  const maxDayInData = containers.reduce((max, c) => {
+    const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
+    const cutoffDate = endD || today;
+    const fromRows = c.rows.reduce((m, r) => {
+      if (r.rowDate && r.rowDate >= cutoffDate) return m;
+      return Math.max(m, Math.round(r.dayNum || 0));
+    }, 0);
+    const startD = parseDateStr(c.startDate);
+    const fromStart = startD ? Math.round((cutoffDate - startD) / 86400000) : 0;
+    return Math.max(max, fromRows, fromStart);
+  }, 0);
+  const MAX_DAY = Math.max(65, maxDayInData);
+  const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
 
   const datasets = containers.map(c => {
     const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
