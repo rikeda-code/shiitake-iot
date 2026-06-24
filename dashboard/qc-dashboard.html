@@ -1161,15 +1161,14 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
 
       <!-- MTG HISTORY -->
       ${(() => {
-        const filtered = mtg.date ? mtgHistory.filter(r => r.date === mtg.date) : [];
-        if (!filtered.length) return null;
+        if (!mtgHistory.length) return null;
         return html`
         <div style=${{ borderTop:'1px solid #334155', padding:'16px 20px' }}>
           <div style=${{ fontSize:'0.75rem', fontWeight:700, color:'#475569', marginBottom:12, textTransform:'uppercase', letterSpacing:'0.06em' }}>
-            📁 ${mtg.date ? new Date(mtg.date).toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric' }) : ''} の保存済み記録 (${filtered.length}件)
+            📁 保存済みMTG記録 (${mtgHistory.length}件)
           </div>
           <div style=${{ display:'flex', flexDirection:'column', gap:8 }}>
-            ${filtered.map(rec => html`
+            ${mtgHistory.map(rec => html`
               <div key=${rec.id} style=${{ background:'#0a1526', borderRadius:10, border:'1px solid #334155', overflow:'hidden' }}>
                 <!-- card header (always visible, clickable) -->
                 <div
