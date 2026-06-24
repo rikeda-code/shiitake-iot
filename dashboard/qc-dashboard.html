@@ -1087,11 +1087,11 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
         </div>
       </div>
 
-      <!-- 4-field grid -->
-      <div style=${{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:0 }}>
+      <!-- 4-field stack -->
+      <div style=${{ display:'flex', flexDirection:'column', gap:0 }}>
 
         <!-- 1. 議事録URL -->
-        <div style=${{ padding:'16px 20px', borderRight:'1px solid #334155', borderBottom:'1px solid #334155' }}>
+        <div style=${{ padding:'16px 20px', borderBottom:'1px solid #334155' }}>
           <label style=${LS}>① 議事録URL</label>
           <input
             type="url"
@@ -1120,7 +1120,7 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
         </div>
 
         <!-- 3. 内容・メモ -->
-        <div style=${{ padding:'16px 20px', borderRight:'1px solid #334155', borderBottom:'1px solid #334155' }}>
+        <div style=${{ padding:'16px 20px', borderBottom:'1px solid #334155' }}>
           <label style=${LS}>③ 内容・メモ</label>
           <textarea
             value=${mtg.content || ''}
@@ -1132,13 +1132,13 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
         </div>
 
         <!-- 4. 次回アクション -->
-        <div style=${{ padding:'16px 20px', borderBottom:'1px solid #334155', display:'flex', flexDirection:'column', gap:10 }}>
+        <div style=${{ padding:'16px 20px', borderBottom:'1px solid #334155' }}>
           <label style=${LS}>④ 次回アクション</label>
           <textarea
             value=${mtg.nextAction || ''}
             onInput=${e => upd('nextAction', e.target.value)}
             placeholder="例：・Step3の目標値を決める&#10;・データ追加収集&#10;・次回MTGまでに〇〇を実施"
-            rows=7
+            rows=5
             style=${{ ...IS, lineHeight:1.7, fontFamily:'inherit', resize:'vertical' }}
           />
         </div>
@@ -1160,13 +1160,16 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
       </div>
 
       <!-- MTG HISTORY -->
-      ${mtgHistory.length > 0 && html`
+      ${(() => {
+        const filtered = mtg.date ? mtgHistory.filter(r => r.date === mtg.date) : [];
+        if (!filtered.length) return null;
+        return html`
         <div style=${{ borderTop:'1px solid #334155', padding:'16px 20px' }}>
           <div style=${{ fontSize:'0.75rem', fontWeight:700, color:'#475569', marginBottom:12, textTransform:'uppercase', letterSpacing:'0.06em' }}>
-            📁 保存済みMTG記録 (${mtgHistory.length}件)
+            📁 ${mtg.date ? new Date(mtg.date).toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric' }) : ''} の保存済み記録 (${filtered.length}件)
           </div>
           <div style=${{ display:'flex', flexDirection:'column', gap:8 }}>
-            ${mtgHistory.map(rec => html`
+            ${filtered.map(rec => html`
               <div key=${rec.id} style=${{ background:'#0a1526', borderRadius:10, border:'1px solid #334155', overflow:'hidden' }}>
                 <!-- card header (always visible, clickable) -->
                 <div
@@ -1233,7 +1236,8 @@ function AdminPanel({ members, selMemberId, selStepIndex, onSelectMember, onSele
             `)}
           </div>
         </div>
-      `}
+        `;
+      })()}
 
       <!-- SUB-ITEMS SECTION -->
       <div style=${{ borderTop:'1px solid #334155', padding:18 }}>
