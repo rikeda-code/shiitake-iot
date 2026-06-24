@@ -162,10 +162,16 @@ function render() {
   const shiftData = getShiftData(y, m);
   const summary = getSummary(y, m);
 
-  // Summary table
+  // Summary table (①②を合算して表示)
+  const GROUPS = [
+    { label: '志摩⇔いなべ', keys: ['志摩⇔いなべ①', '志摩⇔いなべ②'] },
+    { label: '志摩⇔南丹',   keys: ['志摩⇔南丹①',   '志摩⇔南丹②']   },
+  ];
   let shtml = `<table class="summary-table"><thead><tr><th>行き先</th>${MEMBERS.map(mem=>`<th>${mem}</th>`).join('')}<th style="color:#6b7280">未割当</th></tr></thead><tbody>`;
-  DESTINATIONS.forEach(dest => {
-    shtml += `<tr><td>${dest}</td>${MEMBERS.map(mem=>`<td>${summary[dest][mem]}</td>`).join('')}<td style="color:#6b7280">${summary[dest].unassigned}</td></tr>`;
+  GROUPS.forEach(g => {
+    const merged = { '久保':0, '古田':0, '太田':0, unassigned:0 };
+    g.keys.forEach(k => { MEMBERS.forEach(mem => { merged[mem] += summary[k][mem]; }); merged.unassigned += summary[k].unassigned; });
+    shtml += `<tr><td>${g.label}</td>${MEMBERS.map(mem=>`<td>${merged[mem]}</td>`).join('')}<td style="color:#6b7280">${merged.unassigned}</td></tr>`;
   });
   shtml += '</tbody></table>';
   document.getElementById('summary-wrap').innerHTML = shtml;
@@ -218,15 +224,6 @@ function render() {
 
 function onSelect(day, dest, val) {
   setCell(currentYear, currentMonth, day, dest, val);
-  // Re-render only summary
-  const summary = getSummary(currentYear, currentMonth);
-  let shtml = `<table class="summary-table"><thead><tr><th>行き先</th>${MEMBERS.map(mem=>`<th>${mem}</th>`).join('')}<th style="color:#6b7280">未割当</th></tr></thead><tbody>`;
-  DESTINATIONS.forEach(d => {
-    shtml += `<tr><td>${d}</td>${MEMBERS.map(mem=>`<td>${summary[d][mem]}</td>`).join('')}<td style="color:#6b7280">${summary[d].unassigned}</td></tr>`;
-  });
-  shtml += '</tbody></table>';
-  document.getElementById('summary-wrap').innerHTML = shtml;
-  // Update cell style
   render();
 }
 
