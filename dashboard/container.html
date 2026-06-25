@@ -911,7 +911,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   const cardsHtml = groupKeys.map((k, idx) => `
     <div class="weekly-chart-card" style="cursor:pointer" onclick="openWeeklyZoom(${idx})">
       <div class="weekly-chart-title">${groups[k].label}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${
+      <div style="display:none">${
         groups[k].containers.map(c => {
           const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
           const sd = parseDateStr(c.startDate);
@@ -959,7 +959,7 @@ function openWeeklyZoom(idx) {
   // コンテナラベル（拠点名なし）をタイトル下に表示
   const zoomLabelsEl = document.getElementById('weekly-zoom-labels');
   if (zoomLabelsEl) {
-    zoomLabelsEl.innerHTML = weeklyZoomGroups[idx].containers.map(c => {
+    zoomLabelsEl.innerHTML = "";
       const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
       const sd = parseDateStr(c.startDate);
       const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
@@ -1454,7 +1454,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     const sd = parseDateStr(c.startDate);
     const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
     const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
-    const containerLabel = `${c.siteName}${c.name}${startStr}${lotStr}`;
+    const containerLabel = '';
 
     return {
       label: `${c.siteName} ${c.name}`,
@@ -2474,7 +2474,7 @@ async function showDetail(containerName, overrideSiteId) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
+  navigator.serviceWorker.register('sw.js?v=7');
 }
 
 initTabs();
