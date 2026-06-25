@@ -1,7 +1,5 @@
-const CACHE = 'shiitake-v4';
-const STATIC = [
-  '/shiitake-iot/dashboard/container.html',
-];
+const CACHE = 'shiitake-v5';
+const STATIC = [];
 
 self.addEventListener('install', e => {
   e.waitUntil(
