@@ -1463,52 +1463,25 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     spanGaps: false,
   });
 
-  // カスタムプラグイン: 各ラインの終点にコンテナラベルを描画
+  // カスタムプラグイン: グラフ左上にコンテナラベルを縦並びで描画
   const containerLabelPlugin = {
     id: 'containerLabels',
     afterDraw(ch) {
       const ctx2 = ch.ctx;
       const area = ch.chartArea;
-      const FONT = isZoom ? '10px sans-serif' : '9px sans-serif';
-      const pts = [];
-      ch.data.datasets.forEach((ds, i) => {
+      const FONT_SIZE = isZoom ? 11 : 9;
+      const lineH = FONT_SIZE + 3;
+      ctx2.save();
+      ctx2.font = `${FONT_SIZE}px sans-serif`;
+      ctx2.textBaseline = 'top';
+      let y = area.top + 4;
+      ch.data.datasets.forEach((ds) => {
         if (!ds.containerLabel) return;
-        const meta = ch.getDatasetMeta(i);
-        if (meta.hidden) return;
-        for (let j = ds.data.length - 1; j >= 0; j--) {
-          if (ds.data[j] !== null && meta.data[j]) {
-            pts.push({ x: meta.data[j].x, y: meta.data[j].y, label: ds.containerLabel, color: ds.borderColor });
-            break;
-          }
-        }
+        ctx2.fillStyle = ds.borderColor;
+        ctx2.fillText(ds.containerLabel, area.left + 4, y);
+        y += lineH;
       });
-      // Y衝突回避: 同じx付近のラベルを上方向にずらす
-      pts.sort((a, b) => a.y - b.y);
-      const placed = [];
-      const lineH = isZoom ? 13 : 11;
-      pts.forEach(p => {
-        let y = Math.max(area.top + lineH, p.y - 4);
-        // 既存ラベルと重なる場合は上にずらす
-        let shifted = true;
-        while (shifted) {
-          shifted = false;
-          for (const q of placed) {
-            if (Math.abs(q.x - p.x) < 5 && Math.abs(q.y - y) < lineH) {
-              y = q.y - lineH;
-              shifted = true;
-            }
-          }
-        }
-        placed.push({ x: p.x, y });
-        ctx2.save();
-        ctx2.font = FONT;
-        ctx2.fillStyle = p.color;
-        ctx2.textAlign = 'left';
-        ctx2.textBaseline = 'bottom';
-        const lx = Math.min(p.x + 3, area.right - 5);
-        ctx2.fillText(p.label, lx, y);
-        ctx2.restore();
-      });
+      ctx2.restore();
     },
   };
 
