@@ -1,4 +1,4 @@
-const CACHE = 'shiitake-v3';
+const CACHE = 'shiitake-v4';
 const STATIC = [
   '/shiitake-iot/dashboard/container.html',
 ];
