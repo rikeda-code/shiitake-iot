@@ -1,4 +1,4 @@
-const CACHE = 'shiitake-v6';
+const CACHE = 'shiitake-v7';
 const STATIC = [];
 
 self.addEventListener('install', e => {
@@ -19,10 +19,10 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-// Network-first: Google Sheets は常に最新を取得、失敗時にキャッシュへフォールバック
 self.addEventListener('fetch', e => {
   const url = e.request.url;
-  if (url.includes('docs.google.com') || url.includes('spreadsheets')) {
+  // HTMLファイルとGoogle Sheetsは常にネットワーク取得
+  if (url.includes('docs.google.com') || url.includes('spreadsheets') || url.endsWith('.html') || url.includes('.html?')) {
     e.respondWith(
       fetch(e.request).catch(() => caches.match(e.request))
     );
