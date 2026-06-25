@@ -234,7 +234,14 @@
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeWeeklyZoom()">
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:900px;padding:24px;position:relative">
     <button onclick="closeWeeklyZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
-    <div id="weekly-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:16px"></div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div id="weekly-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0"></div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="sort-btn" id="zoom-btn-cumul" onclick="weeklyZoomSetMode('cumul')" style="font-size:0.78rem">累計収穫量</button>
+        <button class="sort-btn" id="zoom-btn-daily" onclick="weeklyZoomSetMode('daily')" style="font-size:0.78rem">サイズ別日次</button>
+        <button class="sort-btn" id="zoom-btn-size-cumul" onclick="weeklyZoomSetMode('size-cumul')" style="font-size:0.78rem">サイズ別累計</button>
+      </div>
+    </div>
     <div style="position:relative;height:480px"><canvas id="weekly-zoom-canvas"></canvas></div>
   </div>
 </div>
@@ -895,9 +902,6 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
       <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
-      <span class="sort-label" style="margin-left:12px">サイズ別:</span>
-      <button class="sort-btn${weeklySizeMode==='daily'?' active':''}" onclick="weeklySetSizeMode('daily')">日次収穫量</button>
-      <button class="sort-btn${weeklySizeMode==='cumul'?' active':''}" onclick="weeklySetSizeMode('cumul')">累計収穫量</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -930,22 +934,91 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   });
 }
 
+let weeklyZoomCurrentIdx = null;
+let weeklyZoomMode = 'cumul'; // 'cumul' | 'daily' | 'size-cumul'
+
 function openWeeklyZoom(idx) {
   if (!weeklyZoomGroups || !weeklyZoomGroups[idx]) return;
-  const { label, containers } = weeklyZoomGroups[idx];
+  weeklyZoomCurrentIdx = idx;
+  weeklyZoomMode = 'cumul';
   const modal = document.getElementById('weekly-zoom-modal');
-  document.getElementById('weekly-zoom-title').textContent = label;
+  document.getElementById('weekly-zoom-title').textContent = weeklyZoomGroups[idx].label;
   modal.style.display = 'flex';
+  weeklyZoomUpdateBtns();
   if (weeklyZoomChart) { try { weeklyZoomChart.destroy(); } catch(e) {} weeklyZoomChart = null; }
-  // 少し待ってからチャート描画（モーダル表示後にcanvasサイズが確定するため）
   setTimeout(() => {
-    weeklyZoomChart = buildWeeklyLineChart('weekly-zoom-canvas', containers, weeklyState?.targetData || null, true);
+    weeklyZoomChart = buildWeeklyLineChart('weekly-zoom-canvas', weeklyZoomGroups[idx].containers, weeklyState?.targetData || null, true);
   }, 30);
+}
+
+function weeklyZoomUpdateBtns() {
+  ['cumul','daily','size-cumul'].forEach(m => {
+    const btn = document.getElementById('zoom-btn-' + m);
+    if (btn) btn.classList.toggle('active', weeklyZoomMode === m);
+  });
+}
+
+function weeklyZoomSetMode(mode) {
+  if (weeklyZoomCurrentIdx === null) return;
+  weeklyZoomMode = mode;
+  weeklyZoomUpdateBtns();
+  if (weeklyZoomChart) { try { weeklyZoomChart.destroy(); } catch(e) {} weeklyZoomChart = null; }
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+
+  if (mode === 'cumul') {
+    setTimeout(() => {
+      weeklyZoomChart = buildWeeklyLineChart('weekly-zoom-canvas', containers, weeklyState?.targetData || null, true);
+    }, 10);
+    return;
+  }
+
+  // サイズ別: コンテナのsizeRowsを合算して表示
+  const combined = {};
+  containers.forEach(c => {
+    (c.sizeRows || []).forEach(r => {
+      if (!combined[r.day]) combined[r.day] = { m: 0, l: 0, xl: 0, bg: 0 };
+      combined[r.day].m += r.m; combined[r.day].l += r.l;
+      combined[r.day].xl += r.xl; combined[r.day].bg += r.bg;
+    });
+  });
+  const days = Object.keys(combined).map(Number).sort((a,b)=>a-b);
+  const labels = days.map(d => `day${d}`);
+  const chartOpts = {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 12 } },
+      tooltip: { ...tooltipDefaults },
+    },
+    scales: {
+      x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
+      y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+    },
+  };
+  let datasets;
+  if (mode === 'daily') {
+    datasets = [
+      { label: 'M',   data: days.map(d => combined[d].m),  backgroundColor: '#3b82f6cc', stack: 's' },
+      { label: 'L',   data: days.map(d => combined[d].l),  backgroundColor: '#10b981cc', stack: 's' },
+      { label: '2L',  data: days.map(d => combined[d].xl), backgroundColor: '#f59e0bcc', stack: 's' },
+      { label: '袋品', data: days.map(d => combined[d].bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+    ];
+  } else {
+    let cm=0,cl=0,cxl=0,cbg=0;
+    datasets = [
+      { label: 'M',   data: days.map(d=>{cm+=combined[d].m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's' },
+      { label: 'L',   data: days.map(d=>{cl+=combined[d].l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's' },
+      { label: '2L',  data: days.map(d=>{cxl+=combined[d].xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's' },
+      { label: '袋品', data: days.map(d=>{cbg+=combined[d].bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's' },
+    ];
+  }
+  const canvas = document.getElementById('weekly-zoom-canvas');
+  if (canvas) weeklyZoomChart = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts });
 }
 
 function closeWeeklyZoom() {
   document.getElementById('weekly-zoom-modal').style.display = 'none';
   if (weeklyZoomChart) { try { weeklyZoomChart.destroy(); } catch(e) {} weeklyZoomChart = null; }
+  weeklyZoomCurrentIdx = null;
 }
 
 function parseSizeRowsFromTable(table, startDateStr) {
@@ -1043,9 +1116,6 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
       <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
-      <span class="sort-label" style="margin-left:12px">サイズ別:</span>
-      <button class="sort-btn${weeklySizeMode==='daily'?' active':''}" onclick="weeklySetSizeMode('daily')">日次収穫量</button>
-      <button class="sort-btn${weeklySizeMode==='cumul'?' active':''}" onclick="weeklySetSizeMode('cumul')">累計収穫量</button>
     </div>`;
 
   const title = weeklySizeMode === 'daily' ? 'サイズ別日次収穫量 (kg)' : 'サイズ別累計収穫量 (kg)';
