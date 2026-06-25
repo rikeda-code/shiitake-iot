@@ -916,7 +916,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
           const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
           const sd = parseDateStr(c.startDate);
           const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
-          const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot : '';
+          const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)$/, '') : '';
           return `<span style="font-size:0.7rem;color:${color}">${c.name}${startStr}${lotStr}</span>`;
         }).join('')
       }</div>
@@ -963,7 +963,7 @@ function openWeeklyZoom(idx) {
       const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
       const sd = parseDateStr(c.startDate);
       const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
-      const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot : '';
+      const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)$/, '') : '';
       return `<span style="font-size:0.75rem;color:${color};margin-right:8px">${c.name}${startStr}${lotStr}</span>`;
     }).join('');
   }
@@ -1453,7 +1453,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     // ラベル: 群馬3-12(6/15)L3 形式
     const sd = parseDateStr(c.startDate);
     const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
-    const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot : '';
+    const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)$/, '') : '';
     const containerLabel = `${c.siteName}${c.name}${startStr}${lotStr}`;
 
     return {
