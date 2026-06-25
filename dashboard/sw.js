@@ -1,4 +1,4 @@
-const CACHE = 'shiitake-v5';
+const CACHE = 'shiitake-v6';
 const STATIC = [];
 
 self.addEventListener('install', e => {
