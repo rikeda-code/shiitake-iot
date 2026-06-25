@@ -749,6 +749,8 @@ async function fetchTargetLine() {
 let weeklyState = null; // { containerData, targetData }
 let weeklyZoomGroups = null; // groupKeys → { label, containers }
 let weeklyZoomChart = null;
+let weeklySizeMode = null; // null | 'daily' | 'cumul'
+let weeklySizeCharts = [];
 
 async function loadWeeklySection() {
   const section = document.getElementById('weekly-section');
@@ -781,8 +783,9 @@ async function loadWeeklySection() {
         try {
           const table = await fetchSheet(c.siteId, c.name, 0);
           const { bedCount, rows, lot: sheetLot } = parseContainerRowsV2(table, c.startDate);
+          const sizeRows = parseSizeRowsFromTable(table, c.startDate);
           if (c.siteName === '南丹') console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length);
-          return { ...c, bedCount, rows, lot: sheetLot || c.lot || '' };
+          return { ...c, bedCount, rows, sizeRows, lot: sheetLot || c.lot || '' };
         } catch (e) {
           if (c.siteName === '南丹') console.warn('[南丹 ERR]', c.name, e.message);
           return { ...c, bedCount: null, rows: [] };
@@ -882,7 +885,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   ).join('');
 
   const sortBar = `
-    <div class="weekly-sort-bar">
+    <div class="weekly-sort-bar" style="flex-wrap:wrap;gap:6px">
       <span class="sort-label">並び順:</span>
       <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
       <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
@@ -892,6 +895,9 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
       <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
+      <span class="sort-label" style="margin-left:12px">サイズ別:</span>
+      <button class="sort-btn${weeklySizeMode==='daily'?' active':''}" onclick="weeklySetSizeMode('daily')">日次収穫量</button>
+      <button class="sort-btn${weeklySizeMode==='cumul'?' active':''}" onclick="weeklySetSizeMode('cumul')">累計収穫量</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -942,13 +948,174 @@ function closeWeeklyZoom() {
   if (weeklyZoomChart) { try { weeklyZoomChart.destroy(); } catch(e) {} weeklyZoomChart = null; }
 }
 
+function parseSizeRowsFromTable(table, startDateStr) {
+  const allRows = table.rows || [];
+  let isTypeB = false, isTypeC = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
+  }
+  if (!isTypeB) {
+    for (let ri = 13; ri < Math.min(25, allRows.length); ri++) {
+      const v = allRows[ri]?.c?.[1]?.v;
+      if (typeof v === 'string' && /^\d+日$/.test(v)) { isTypeC = true; break; }
+    }
+  }
+  const result = [];
+  if (isTypeB) {
+    const startD = parseDateStr(startDateStr);
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      if (!rowDate || !startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m = parseFloat(cells[6]?.v) || 0, l = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0, bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) result.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else {
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      let dayNum;
+      if (isTypeC) {
+        const dm = String(cells[1]?.v ?? '').match(/^(\d+)日$/);
+        if (!dm) continue;
+        dayNum = parseInt(dm[1]);
+      } else {
+        dayNum = cells[1]?.v;
+        if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
+      }
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m = parseFloat(cells[6]?.v) || 0, l = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0, bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) result.push({ day: dayNum, m, l, xl, bg });
+    }
+  }
+  return result;
+}
+
+function weeklySetSizeMode(mode) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  weeklySizeMode = weeklySizeMode === mode ? null : mode;
+  const groupMode = section.dataset.groupMode || 'week';
+  const sortOrder = section.dataset.sortOrder || 'desc';
+  weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklySizeCharts = [];
+  if (weeklySizeMode) {
+    renderWeeklySizeSection(section, weeklyState, groupMode, sortOrder);
+  } else {
+    renderWeeklySection(section, weeklyState, groupMode, sortOrder);
+  }
+}
+
+function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
+  weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklySizeCharts = [];
+
+  const valid = state.containerData.filter(c => c.sizeRows?.length > 0);
+  const chartOpts = {
+    responsive: true, maintainAspectRatio: false,
+    animation: false,
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 8 } },
+      tooltip: { ...tooltipDefaults },
+    },
+    scales: {
+      x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 15 }, grid: { color: '#1e2235' } },
+      y: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+    },
+  };
+
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+
+  const sortBtns = `
+    <div class="weekly-sort-bar" style="flex-wrap:wrap;gap:6px">
+      <span class="sort-label">並び順:</span>
+      <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
+      <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
+      <span class="sort-label" style="margin-left:12px">グループ:</span>
+      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
+      <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
+      <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
+      <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
+      <span class="sort-label" style="margin-left:12px">サイズ別:</span>
+      <button class="sort-btn${weeklySizeMode==='daily'?' active':''}" onclick="weeklySetSizeMode('daily')">日次収穫量</button>
+      <button class="sort-btn${weeklySizeMode==='cumul'?' active':''}" onclick="weeklySetSizeMode('cumul')">累計収穫量</button>
+    </div>`;
+
+  const title = weeklySizeMode === 'daily' ? 'サイズ別日次収穫量 (kg)' : 'サイズ別累計収穫量 (kg)';
+  const cardsHtml = valid.map((c, idx) => {
+    const siteColor = siteColors[c.siteName] || '#8892a4';
+    return `
+      <div class="weekly-chart-card">
+        <div class="weekly-chart-title">
+          <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
+          ${c.startDate ? `<span style="font-size:0.72rem;color:#8892a4;margin-left:6px">${c.startDate}</span>` : ''}
+        </div>
+        <div class="chart-wrap" style="height:220px"><canvas id="wcs-${idx}"></canvas></div>
+      </div>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:4px">${title}<span class="sub">全拠点・コンテナ別</span></div>
+    <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:8px">${sortBtns}</div>
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  section.dataset.groupMode = groupMode;
+  section.dataset.sortOrder = sortOrder;
+
+  valid.forEach((c, idx) => {
+    const canvas = document.getElementById(`wcs-${idx}`);
+    if (!canvas) return;
+    const sizeRows = c.sizeRows;
+    let datasets;
+    if (weeklySizeMode === 'daily') {
+      const labels = sizeRows.map(r => `day${r.day}`);
+      datasets = [
+        { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+        { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+        { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+        { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+      ];
+      const chart = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts });
+      weeklySizeCharts.push(chart);
+    } else {
+      let cm = 0, cl = 0, cxl = 0, cbg = 0;
+      const cumM = [], cumL = [], cumXL = [], cumBG = [];
+      for (const r of sizeRows) {
+        cm += r.m; cl += r.l; cxl += r.xl; cbg += r.bg;
+        cumM.push(+cm.toFixed(2)); cumL.push(+cl.toFixed(2));
+        cumXL.push(+cxl.toFixed(2)); cumBG.push(+cbg.toFixed(2));
+      }
+      const labels = sizeRows.map(r => `day${r.day}`);
+      datasets = [
+        { label: 'M',   data: cumM,  backgroundColor: '#3b82f6cc', stack: 's' },
+        { label: 'L',   data: cumL,  backgroundColor: '#10b981cc', stack: 's' },
+        { label: '2L',  data: cumXL, backgroundColor: '#f59e0bcc', stack: 's' },
+        { label: '袋品', data: cumBG, backgroundColor: '#8b5cf6cc', stack: 's' },
+      ];
+      const chart = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts });
+      weeklySizeCharts.push(chart);
+    }
+  });
+}
+
 function weeklySetSort(order) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
   const groupMode = section.dataset.groupMode || 'week';
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
-  renderWeeklySection(section, weeklyState, groupMode, order);
+  if (weeklySizeMode) {
+    renderWeeklySizeSection(section, weeklyState, groupMode, order);
+  } else {
+    renderWeeklySection(section, weeklyState, groupMode, order);
+  }
 }
 
 function weeklySetGroup(mode) {
@@ -957,6 +1124,7 @@ function weeklySetGroup(mode) {
   const sortOrder = section.dataset.sortOrder || 'desc';
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
+  weeklySizeMode = null;
   renderWeeklySection(section, weeklyState, mode, sortOrder);
 }
 
