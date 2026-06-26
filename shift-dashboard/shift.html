@@ -150,7 +150,7 @@
 
 <script>
 const MEMBERS = ['久保', '古田', '太田'];
-const DESTINATIONS = ['志摩⇔いなべ①', '志摩⇔いなべ②', '志摩⇔南丹①', '志摩⇔南丹②', 'いなべ⇔南丹'];
+const DESTINATIONS = ['志摩⇔いなべ①', '志摩⇔いなべ②', '志摩⇔南丹①', '志摩⇔南丹②', 'いなべ⇔南丹①', 'いなべ⇔南丹②'];
 const START_YEAR = 2026, START_MONTH = 6;
 const DAY_NAMES = ['日','月','火','水','木','金','土'];
 const STORAGE_KEY = 'shift_store';
@@ -334,7 +334,7 @@ function render() {
   const GROUPS = [
     { label: '志摩⇔いなべ', keys: ['志摩⇔いなべ①', '志摩⇔いなべ②'] },
     { label: '志摩⇔南丹',   keys: ['志摩⇔南丹①',   '志摩⇔南丹②']   },
-    { label: 'いなべ⇔南丹', keys: ['いなべ⇔南丹']                     },
+    { label: 'いなべ⇔南丹', keys: ['いなべ⇔南丹①', 'いなべ⇔南丹②']   },
   ];
   let shtml = `<table class="summary-table"><thead><tr><th>行き先</th>${MEMBERS.map(mem=>`<th>${mem}</th>`).join('')}<th style="color:#6b7280">未割当</th></tr></thead><tbody>`;
   GROUPS.forEach(g => {
