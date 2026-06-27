@@ -2667,7 +2667,7 @@ async function renderMekakiTab() {
         const startRaw = cells[2];
         const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
         const startDate = gvizToDate(startRaw);
-        const lot   = cv(cells[3]).trim();
+        const lot   = (cells[3]?.f ?? (cells[3]?.v != null ? String(cells[3].v) : '')).trim();
         const gouki = cv(cells[4]).trim();
         const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
         const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
