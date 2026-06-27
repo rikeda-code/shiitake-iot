@@ -2642,7 +2642,7 @@ async function renderMekakiTab() {
   try {
     const [table, bedMap] = await Promise.all([
       (async () => {
-        const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=0`;
+        const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
         const res = await fetch(url);
         const text = await res.text();
         const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
@@ -2667,7 +2667,21 @@ async function renderMekakiTab() {
         const startRaw = cells[2];
         const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
         const startDate = gvizToDate(startRaw);
-        const lot   = (cells[3]?.f ?? (cells[3]?.v != null ? String(cells[3].v) : '')).trim();
+        const lotCell = cells[3];
+        let lot = '';
+        if (lotCell != null) {
+          if (lotCell.f != null && lotCell.f !== '') {
+            lot = String(lotCell.f).trim();
+          } else if (lotCell.v != null) {
+            const lv = lotCell.v;
+            if (typeof lv === 'string' && /^Date\(/.test(lv)) {
+              const m = lv.match(/^Date\((\d+),(\d+),(\d+)\)/);
+              lot = m ? `${parseInt(m[2])+1}/${parseInt(m[3])}` : lv;
+            } else {
+              lot = String(lv).trim();
+            }
+          }
+        }
         const gouki = cv(cells[4]).trim();
         const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
         const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
