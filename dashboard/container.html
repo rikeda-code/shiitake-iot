@@ -2558,6 +2558,14 @@ function parseWeightRows(table) {
       if (isRecent) {
         current = { startDate, containerNo: dVal, lot: aVal, measurements: [] };
         containers.push(current);
+        // 1本目の計測値がヘッダー行と同じ行に入っている場合
+        if (fVal != null || hVal != null) {
+          current.measurements.push({
+            idx: 1,
+            before: typeof fVal === 'number' ? fVal : null,
+            after:  typeof hVal === 'number' ? hVal : null,
+          });
+        }
       } else {
         current = null;
       }
@@ -2611,8 +2619,8 @@ function drawWeightCharts(result) {
       data: {
         labels,
         datasets: [
-          { label: '散水前重量', data: beforeData, backgroundColor: site.color + '99', stack: 's' },
-          { label: '吸水量',     data: absorbData, backgroundColor: '#f97316cc',        stack: 's' },
+          { label: '散水前重量', data: beforeData, backgroundColor: '#60a5facc', stack: 's' },
+          { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc',        stack: 's' },
         ],
       },
       options: {
