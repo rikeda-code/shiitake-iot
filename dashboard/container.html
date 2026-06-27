@@ -2501,12 +2501,13 @@ async function showDetail(containerName, overrideSiteId) {
 
 const WEIGHT_SHEET_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
 const WEIGHT_SITES = [
-  { name: 'いなべ', color: '#38bdf8' },
-  { name: '群馬',   color: '#f97316' },
-  { name: '南丹',   color: '#34d399' },
-  { name: '自社菌床', color: '#f59e0b' },
+  { name: 'いなべ',   sheetName: 'いなべ',   color: '#38bdf8' },
+  { name: '群馬',     sheetName: '群馬',     color: '#f97316' },
+  { name: '南丹',     sheetName: '南丹',     color: '#34d399' },
+  { name: '自社菌床', sheetName: '自社菌床', color: '#f59e0b' },
 ];
-let weightTabLoaded = false;
+let weightActiveSite = 0;
+let weightData = null; // { site, containers, error }[]
 
 async function fetchWeightSheet(sheetName) {
   const url = `https://docs.google.com/spreadsheets/d/${WEIGHT_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
@@ -2516,39 +2517,51 @@ async function fetchWeightSheet(sheetName) {
   return json.table;
 }
 
+function gvizToDate(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  const f = cell.f;
+  // gviz Date object: v = "Date(2026,3,29)"
+  if (typeof v === 'string') {
+    const m = v.match(/^Date\((\d+),(\d+),(\d+)\)/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
+    return parseDateStr(v);
+  }
+  // numeric serial (days since 1899-12-30)
+  if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+  // formatted string fallback
+  if (f) return parseDateStr(f);
+  return null;
+}
+
 function parseWeightRows(table) {
-  // 各行: A=ロット, C=栽培開始日, D=号機, F=散水前重量, H=散水後重量
-  // 1コンテナ=6行、コンテナ間に空行
+  // A=ロット, C=栽培開始日, D=号機, F=散水前重量, H=散水後重量
+  // 1コンテナ=6行計測、コンテナ間に空行
   const rows = table.rows || [];
   const containers = [];
   let current = null;
 
   for (const row of rows) {
     const cells = row?.c || [];
-    const cVal = cells[2]?.v ?? cells[2]?.f ?? null;
-    const dVal = cells[3]?.v != null ? String(cells[3].v).trim() : '';
-    const fVal = cells[5]?.v;
-    const hVal = cells[7]?.v;
+    const aVal = String(cells[0]?.v ?? '').trim();
+    const cCell = cells[2];
+    const dVal  = cells[3]?.v != null ? String(cells[3].v).trim() : '';
+    const fVal  = cells[5]?.v;
+    const hVal  = cells[7]?.v;
 
-    // コンテナヘッダー行: C列に日付、D列に号機番号
-    if (cVal && dVal && dVal !== '') {
-      // 日付パース
-      let startDate = null;
-      if (typeof cVal === 'number') {
-        // gviz シリアル値 (days since 1899-12-30)
-        startDate = new Date(Date.UTC(1899, 11, 30) + cVal * 86400000);
-      } else if (typeof cVal === 'string') {
-        startDate = parseDateStr(cVal);
-      }
+    // コンテナヘッダー行: D列に号機番号が入っている行
+    if (dVal !== '') {
+      const startDate = gvizToDate(cCell);
       // 2025/10以降のみ
-      if (startDate && (startDate.getFullYear() > 2025 || (startDate.getFullYear() === 2025 && startDate.getMonth() >= 9))) {
-        current = { startDate, containerNo: dVal, lot: String(cells[0]?.v ?? '').trim(), measurements: [] };
+      const isRecent = startDate && (startDate.getFullYear() > 2025 ||
+        (startDate.getFullYear() === 2025 && startDate.getMonth() >= 9));
+      if (isRecent) {
+        current = { startDate, containerNo: dVal, lot: aVal, measurements: [] };
         containers.push(current);
       } else {
         current = null;
       }
     } else if (current && (fVal != null || hVal != null)) {
-      // 計測行
       current.measurements.push({
         idx: current.measurements.length + 1,
         before: typeof fVal === 'number' ? fVal : null,
@@ -2559,82 +2572,90 @@ function parseWeightRows(table) {
   return containers;
 }
 
+function renderWeightSiteContent(result) {
+  const { site, containers, error } = result;
+  if (error) return `<div style="color:#f87171;font-size:0.85rem;padding:16px">取得エラー: ${error}</div>`;
+  if (containers.length === 0) return `<div style="color:#64748b;font-size:0.85rem;padding:16px">データなし（2025.10以降）</div>`;
+
+  const sorted = [...containers].sort((a, b) => b.startDate - a.startDate);
+  return sorted.map(c => {
+    const sd = c.startDate;
+    const dateStr = `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}`;
+    const avgBefore = c.measurements.filter(m => m.before != null).map(m => m.before);
+    const avgAfter  = c.measurements.filter(m => m.after  != null).map(m => m.after);
+    const avgB = avgBefore.length ? Math.round(avgBefore.reduce((s,v)=>s+v,0)/avgBefore.length) : null;
+    const avgA = avgAfter.length  ? Math.round(avgAfter.reduce((s,v)=>s+v,0)/avgAfter.length)   : null;
+    return `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:12px 16px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="color:#e2e8f0;font-weight:700;font-size:0.95rem">${c.containerNo}号機</span>
+        <span style="color:#64748b;font-size:0.82rem">${dateStr} 開始</span>
+        ${c.lot ? `<span style="color:#94a3b8;font-size:0.78rem">${c.lot}</span>` : ''}
+        ${avgB != null ? `<span style="color:#7dd3fc;font-size:0.82rem">散水前平均: ${avgB.toLocaleString()}g</span>` : ''}
+        ${avgA != null ? `<span style="color:#6ee7b7;font-size:0.82rem">散水後平均: ${avgA.toLocaleString()}g</span>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+        <thead><tr style="color:#64748b">
+          <th style="text-align:left;padding:3px 8px;border-bottom:1px solid #2e3148">本</th>
+          <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">散水前(g)</th>
+          <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">散水後(g)</th>
+          <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">吸水量(g)</th>
+        </tr></thead>
+        <tbody>${c.measurements.map(m => {
+          const diff = (m.before != null && m.after != null) ? m.after - m.before : null;
+          return `<tr style="border-bottom:1px solid #1e2235">
+            <td style="padding:4px 8px;color:#94a3b8">${m.idx}</td>
+            <td style="text-align:right;padding:4px 8px;color:#7dd3fc">${m.before != null ? m.before.toLocaleString() : '—'}</td>
+            <td style="text-align:right;padding:4px 8px;color:#6ee7b7">${m.after  != null ? m.after.toLocaleString()  : '—'}</td>
+            <td style="text-align:right;padding:4px 8px;color:${diff != null && diff > 0 ? '#f97316' : '#64748b'}">${diff != null ? '+' + diff.toLocaleString() : '—'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+}
+
+function renderWeightSubTabs() {
+  const section = document.getElementById('weight-section');
+  if (!section || !weightData) return;
+  const site = WEIGHT_SITES[weightActiveSite];
+  const subTabHtml = WEIGHT_SITES.map((s, i) => {
+    const active = i === weightActiveSite;
+    return `<button onclick="weightSetSite(${i})" style="
+      padding:8px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;
+      color:${active ? s.color : '#64748b'};
+      border-bottom:2px solid ${active ? s.color : 'transparent'};
+      transition:color 0.15s">${s.name}</button>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    <div style="display:flex;gap:4px;border-bottom:1px solid #2e3148;margin-bottom:16px">${subTabHtml}</div>
+    <div id="weight-content">${renderWeightSiteContent(weightData[weightActiveSite])}</div>`;
+}
+
+function weightSetSite(idx) {
+  weightActiveSite = idx;
+  renderWeightSubTabs();
+}
+
 async function renderWeightTab() {
   const section = document.getElementById('weight-section');
   if (!section) return;
-  if (weightTabLoaded) return;
-  weightTabLoaded = true;
+  if (weightData) { renderWeightSubTabs(); return; }
 
   section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
 
-  const results = await Promise.all(WEIGHT_SITES.map(async site => {
+  weightData = await Promise.all(WEIGHT_SITES.map(async site => {
     try {
-      const table = await fetchWeightSheet(site.name);
-      const containers = parseWeightRows(table);
-      return { site, containers, error: null };
+      const table = await fetchWeightSheet(site.sheetName);
+      return { site, containers: parseWeightRows(table), error: null };
     } catch(e) {
       return { site, containers: [], error: e.message };
     }
   }));
 
-  let html = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>`;
-
-  for (const { site, containers, error } of results) {
-    html += `<div style="margin-bottom:32px">
-      <div style="color:${site.color};font-size:1rem;font-weight:700;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #2e3148">${site.name}</div>`;
-
-    if (error) {
-      html += `<div style="color:#f87171;font-size:0.85rem">取得エラー: ${error}</div>`;
-    } else if (containers.length === 0) {
-      html += `<div style="color:#64748b;font-size:0.85rem">データなし（2025.10以降）</div>`;
-    } else {
-      // 新しい順
-      const sorted = [...containers].sort((a, b) => b.startDate - a.startDate);
-      for (const c of sorted) {
-        const sd = c.startDate;
-        const dateStr = `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}`;
-        const avgBefore = c.measurements.filter(m => m.before != null).map(m => m.before);
-        const avgAfter  = c.measurements.filter(m => m.after  != null).map(m => m.after);
-        const avgB = avgBefore.length ? Math.round(avgBefore.reduce((s,v)=>s+v,0)/avgBefore.length) : null;
-        const avgA = avgAfter.length  ? Math.round(avgAfter.reduce((s,v)=>s+v,0)/avgAfter.length)   : null;
-
-        html += `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:12px 16px;margin-bottom:10px">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-            <span style="color:#e2e8f0;font-weight:700;font-size:0.95rem">${c.containerNo}号機</span>
-            <span style="color:#64748b;font-size:0.82rem">${dateStr} 開始</span>
-            ${c.lot ? `<span style="color:#94a3b8;font-size:0.78rem">${c.lot}</span>` : ''}
-            ${avgB != null ? `<span style="color:#7dd3fc;font-size:0.82rem">散水前平均: ${avgB.toLocaleString()}g</span>` : ''}
-            ${avgA != null ? `<span style="color:#6ee7b7;font-size:0.82rem">散水後平均: ${avgA.toLocaleString()}g</span>` : ''}
-          </div>
-          <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-            <thead>
-              <tr style="color:#64748b">
-                <th style="text-align:left;padding:3px 8px;border-bottom:1px solid #2e3148">本</th>
-                <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">散水前(g)</th>
-                <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">散水後(g)</th>
-                <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">吸水量(g)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${c.measurements.map(m => {
-                const diff = (m.before != null && m.after != null) ? m.after - m.before : null;
-                return `<tr style="border-bottom:1px solid #1e2235">
-                  <td style="padding:4px 8px;color:#94a3b8">${m.idx}</td>
-                  <td style="text-align:right;padding:4px 8px;color:#7dd3fc">${m.before != null ? m.before.toLocaleString() : '—'}</td>
-                  <td style="text-align:right;padding:4px 8px;color:#6ee7b7">${m.after  != null ? m.after.toLocaleString()  : '—'}</td>
-                  <td style="text-align:right;padding:4px 8px;color:${diff != null && diff > 0 ? '#f97316' : '#64748b'}">${diff != null ? '+' + diff.toLocaleString() : '—'}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>`;
-      }
-    }
-    html += `</div>`;
-  }
-
-  section.innerHTML = html;
+  renderWeightSubTabs();
 }
 
 if ('serviceWorker' in navigator) {
