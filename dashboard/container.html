@@ -245,6 +245,8 @@
         <button class="sort-btn" id="zoom-btn-cumul" onclick="weeklyZoomSetMode('cumul')" style="font-size:0.78rem">累計収穫量</button>
         <button class="sort-btn" id="zoom-btn-daily" onclick="weeklyZoomSetMode('daily')" style="font-size:0.78rem">サイズ別日次</button>
         <button class="sort-btn" id="zoom-btn-size-cumul" onclick="weeklyZoomSetMode('size-cumul')" style="font-size:0.78rem">サイズ別累計</button>
+        <button class="sort-btn" id="zoom-btn-weight" onclick="weeklyZoomSetMode('weight')" style="font-size:0.78rem">菌床重量</button>
+        <button class="sort-btn" id="zoom-btn-mekaki" onclick="weeklyZoomSetMode('mekaki')" style="font-size:0.78rem">芽かき量</button>
       </div>
     </div>
     <div id="weekly-zoom-body"></div>
@@ -969,7 +971,7 @@ function openWeeklyZoom(idx) {
 }
 
 function weeklyZoomUpdateBtns() {
-  ['cumul','daily','size-cumul'].forEach(m => {
+  ['cumul','daily','size-cumul','weight','mekaki'].forEach(m => {
     const btn = document.getElementById('zoom-btn-' + m);
     if (btn) btn.classList.toggle('active', weeklyZoomMode === m);
   });
@@ -983,6 +985,8 @@ function weeklyZoomDestroyAll() {
 
 function weeklyZoomRender() {
   weeklyZoomDestroyAll();
+  if (weeklyZoomMode === 'weight') { weeklyZoomRenderWeight(); return; }
+  if (weeklyZoomMode === 'mekaki') { weeklyZoomRenderMekaki(); return; }
   const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
   const body = document.getElementById('weekly-zoom-body');
 
@@ -1050,6 +1054,231 @@ function weeklyZoomRender() {
     }
     weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts }));
   });
+}
+
+async function weeklyZoomRenderWeight() {
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const body = document.getElementById('weekly-zoom-body');
+  body.innerHTML = '<div style="color:#94a3b8;padding:16px">データ読み込み中...</div>';
+
+  if (!weightData) {
+    weightData = await Promise.all(WEIGHT_SITES.map(async site => {
+      try {
+        const table = await fetchWeightSheet(site.sheetName);
+        return { site, containers: parseWeightRows(table), error: null };
+      } catch(e) {
+        return { site, containers: [], error: e.message };
+      }
+    }));
+  }
+
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+  const results = containers.map(c => {
+    const siteEntry = weightData.find(w => w.site.name === c.siteName);
+    if (!siteEntry) return { c, wc: null };
+    const no = c.no;
+    const startD = c.startDate ? parseDateStr(c.startDate) : null;
+    const wc = (siteEntry.containers || []).find(w => {
+      if (String(w.containerNo) !== String(no)) return false;
+      if (startD && w.startDate) {
+        const diff = Math.abs(w.startDate - startD);
+        return diff < 14 * 86400000;
+      }
+      return true;
+    });
+    return { c, wc };
+  }).filter(x => x.wc);
+
+  if (!results.length) {
+    body.innerHTML = '<div style="color:#64748b;padding:16px">菌床重量データなし</div>';
+    return;
+  }
+
+  body.innerHTML = results.map((x, i) => {
+    const siteColor = siteColors[x.c.siteName] || '#8892a4';
+    const sd = x.wc.startDate;
+    const dateStr = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}` : '';
+    return `<div style="margin-bottom:24px">
+      <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">
+        <span style="color:${siteColor}">${x.c.siteName}</span> ${x.c.name}
+        <span style="color:#64748b;font-size:0.78rem;margin-left:6px">${dateStr}</span>
+      </div>
+      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
+        <canvas id="wzw-${i}"></canvas>
+      </div>
+    </div>`;
+  }).join('');
+
+  results.forEach((x, i) => {
+    const canvas = document.getElementById(`wzw-${i}`);
+    if (!canvas) return;
+    const wc = x.wc;
+    const labels = wc.measurements.map(m => `${m.idx}本目`);
+    const beforeData = wc.measurements.map(m => m.before ?? 0);
+    const absorbData = wc.measurements.map(m =>
+      (m.before != null && m.after != null) ? Math.max(0, m.after - m.before) : 0
+    );
+    const ch = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: '散水前重量', data: beforeData, backgroundColor: '#60a5facc', stack: 's' },
+          { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc', stack: 's' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}g`,
+              footer: items => `散水後: ${Math.round(items.reduce((s,i) => s+i.parsed.y, 0)).toLocaleString()}g`,
+            },
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#a0aec0', footerColor: '#6ee7b7',
+          },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4' }, grid: { color: '#1e2235' } },
+          y: { stacked: true, ticks: { color: '#8892a4', callback: v => v.toLocaleString() }, grid: { color: '#1e2235' } },
+        },
+      },
+    });
+    weeklyZoomSubCharts.push(ch);
+  });
+}
+
+async function weeklyZoomRenderMekaki() {
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const body = document.getElementById('weekly-zoom-body');
+  body.innerHTML = '<div style="color:#94a3b8;padding:16px">データ読み込み中...</div>';
+
+  if (!mekakiRows) {
+    try {
+      const [table, bedMap] = await Promise.all([
+        (async () => {
+          const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
+          const res = await fetch(url);
+          const text = await res.text();
+          const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+          return json.table;
+        })(),
+        buildBedCountMap(),
+      ]);
+      mekakiRows = (table.rows || [])
+        .filter(row => {
+          const cells = row?.c || [];
+          if (!cells[0]?.v && !cells[4]?.v) return false;
+          const sd = gvizToDate(cells[2]);
+          if (!sd) return false;
+          return sd.getFullYear() > 2025 || (sd.getFullYear() === 2025 && sd.getMonth() >= 9);
+        })
+        .map(row => {
+          const cells = row?.c || [];
+          const cv = v => v?.v != null ? String(v.v) : (v?.f ?? '');
+          const siteName = cv(cells[0]).trim();
+          const hozon    = cv(cells[1]).trim();
+          const startRaw = cells[2];
+          const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
+          const startDate = gvizToDate(startRaw);
+          const lotCell = cells[3];
+          let lot = '';
+          if (lotCell != null) {
+            if (lotCell.f != null && lotCell.f !== '') {
+              lot = String(lotCell.f).trim();
+            } else if (lotCell.v != null) {
+              const lv = lotCell.v;
+              if (typeof lv === 'string' && /^Date\(/.test(lv)) {
+                const m = lv.match(/^Date\((\d+),(\d+),(\d+)\)/);
+                lot = m ? `${parseInt(m[2])+1}/${parseInt(m[3])}` : lv;
+              } else {
+                lot = String(lv).trim();
+              }
+            }
+          }
+          const gouki = cv(cells[4]).trim();
+          const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
+          const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
+          const m3 = cells[7]?.v != null ? parseFloat(cells[7].v) : null;
+          const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
+          const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+          const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
+          const startDateKey = gvizDateStr(startRaw?.v, startRaw?.f) ?? '';
+          const no = gouki.replace(/\(.*\)/, '').trim();
+          const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
+          const converted = (total != null && bedCount != null && bedCount > 0)
+            ? (bedCount !== 2520 ? +(total * 2520 / bedCount).toFixed(2) : total) : null;
+          return { siteName, hozon, startStr, startDate, lot, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
+        })
+        .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+    } catch(e) {
+      body.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
+      return;
+    }
+  }
+
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+  const rows = containers.map(c => {
+    const no = c.no;
+    const startD = c.startDate ? parseDateStr(c.startDate) : null;
+    const match = mekakiRows.find(r => {
+      if (r.siteName !== c.siteName) return false;
+      const rno = r.gouki.replace(/\(.*\)/, '').trim();
+      if (rno !== String(no)) return false;
+      if (startD && r.startDate) {
+        return Math.abs(r.startDate - startD) < 14 * 86400000;
+      }
+      return true;
+    });
+    return { c, match };
+  });
+
+  if (!rows.some(r => r.match)) {
+    body.innerHTML = '<div style="color:#64748b;padding:16px">芽かき量データなし</div>';
+    return;
+  }
+
+  body.innerHTML = `<div style="overflow-x:auto">
+    <table style="border-collapse:collapse;font-size:0.82rem;width:100%">
+      <thead>
+        <tr style="border-bottom:1px solid #2e3148">
+          <th style="padding:8px 10px;color:#8892a4;text-align:left;white-space:nowrap">拠点</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:left;white-space:nowrap">号機</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:right;white-space:nowrap">1回目</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:right;white-space:nowrap">2回目</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:right;white-space:nowrap">3回目</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:right;white-space:nowrap">4回目</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:right;white-space:nowrap">5回目</th>
+          <th style="padding:8px 10px;color:#8892a4;text-align:right;white-space:nowrap">合計(kg)</th>
+          <th style="padding:8px 10px;color:#6ee7b7;text-align:right;white-space:nowrap">2520換算(kg)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(({ c, match }) => {
+          const color = siteColors[c.siteName] || '#8892a4';
+          if (!match) return `<tr style="border-bottom:1px solid #1e2235">
+            <td style="padding:8px 10px;color:${color}">${c.siteName}</td>
+            <td style="padding:8px 10px;color:#e2e8f0">${c.name}</td>
+            <td colspan="7" style="padding:8px 10px;color:#64748b;font-size:0.78rem">データなし</td>
+          </tr>`;
+          const fmt = v => v != null ? v.toFixed(1) : '-';
+          return `<tr style="border-bottom:1px solid #1e2235">
+            <td style="padding:8px 10px;color:${color}">${match.siteName}</td>
+            <td style="padding:8px 10px;color:#e2e8f0">${match.gouki}</td>
+            <td style="padding:8px 10px;color:#cbd5e1;text-align:right">${fmt(match.m1)}</td>
+            <td style="padding:8px 10px;color:#cbd5e1;text-align:right">${fmt(match.m2)}</td>
+            <td style="padding:8px 10px;color:#cbd5e1;text-align:right">${fmt(match.m3)}</td>
+            <td style="padding:8px 10px;color:#cbd5e1;text-align:right">${fmt(match.m4)}</td>
+            <td style="padding:8px 10px;color:#cbd5e1;text-align:right">${fmt(match.m5)}</td>
+            <td style="padding:8px 10px;color:#e2e8f0;text-align:right;font-weight:600">${fmt(match.total)}</td>
+            <td style="padding:8px 10px;color:#6ee7b7;text-align:right;font-weight:700">${match.converted != null ? match.converted.toFixed(2) : '-'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
 }
 
 function weeklyZoomSetMode(mode) {
