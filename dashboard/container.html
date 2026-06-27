@@ -2548,10 +2548,93 @@ async function buildBedCountMap() {
   return map;
 }
 
+const MEKAKI_SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+let mekakiRows = null; // parsed row objects
+let mekakiFilters = { site: '', hozon: '', lot: '' };
+
+function mekakiRenderTable() {
+  const filtered = mekakiRows.filter(r =>
+    (!mekakiFilters.site  || r.siteName === mekakiFilters.site) &&
+    (!mekakiFilters.hozon || r.hozon    === mekakiFilters.hozon) &&
+    (!mekakiFilters.lot   || r.lot      === mekakiFilters.lot)
+  );
+  const fmtN = v => v != null ? v.toLocaleString() : '—';
+  const tbody = document.getElementById('mekaki-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = filtered.map(r => {
+    const siteColor = MEKAKI_SITE_COLORS[r.siteName] || '#94a3b8';
+    return `<tr style="border-bottom:1px solid #1e2235">
+      <td style="padding:5px 8px;color:${siteColor};font-weight:600;white-space:nowrap">${r.siteName}</td>
+      <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${r.hozon}</td>
+      <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${r.startStr}</td>
+      <td style="padding:5px 8px;color:#94a3b8">${r.lot}</td>
+      <td style="padding:5px 8px;text-align:right;color:#64748b">${r.bedCount != null ? r.bedCount.toLocaleString() : '—'}</td>
+      <td style="padding:5px 8px;color:#e2e8f0;white-space:nowrap">${r.gouki}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m1)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m2)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m3)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m4)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m5)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#e2e8f0;font-weight:600">${fmtN(r.total)}</td>
+      <td style="padding:5px 8px;text-align:right;color:${r.converted != null && r.converted >= 200 ? '#f87171' : '#a78bfa'};font-weight:600">${r.converted != null ? r.converted.toLocaleString() : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function mekakiSetFilter(key, val) {
+  mekakiFilters[key] = val;
+  // Update active filter button style
+  document.querySelectorAll(`[data-mf="${key}"]`).forEach(btn => {
+    const isActive = btn.dataset.val === val;
+    btn.style.background = isActive ? '#a78bfa33' : '';
+    btn.style.color = isActive ? '#a78bfa' : '#cbd5e1';
+  });
+  mekakiRenderTable();
+  // Close all dropdowns
+  document.querySelectorAll('.mekaki-dropdown').forEach(d => d.style.display = 'none');
+}
+
+function mekakiToggleDropdown(key) {
+  const dd = document.getElementById(`mekaki-dd-${key}`);
+  if (!dd) return;
+  const isOpen = dd.style.display === 'block';
+  document.querySelectorAll('.mekaki-dropdown').forEach(d => d.style.display = 'none');
+  dd.style.display = isOpen ? 'none' : 'block';
+}
+
+// Close dropdowns on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.mekaki-filter-th')) {
+    document.querySelectorAll('.mekaki-dropdown').forEach(d => d.style.display = 'none');
+  }
+});
+
+function mekakiFilterHeader(label, key) {
+  const vals = [...new Set(mekakiRows.map(r => r[key]).filter(Boolean))].sort();
+  const active = !!mekakiFilters[key];
+  const items = ['(すべて)', ...vals].map(v => {
+    const val = v === '(すべて)' ? '' : v;
+    const isCur = mekakiFilters[key] === val;
+    return `<div data-mf="${key}" data-val="${val}" onclick="mekakiSetFilter('${key}','${val}')"
+      style="padding:6px 12px;cursor:pointer;color:${isCur ? '#a78bfa' : '#cbd5e1'};background:${isCur ? '#a78bfa22' : 'none'};white-space:nowrap"
+      onmouseover="this.style.background='#2e3148'" onmouseout="this.style.background='${isCur ? '#a78bfa22' : 'none'}'">
+      ${isCur ? '✓ ' : ''}${v}</div>`;
+  }).join('');
+  return `<th class="mekaki-filter-th" style="padding:0;position:relative;white-space:nowrap">
+    <div onclick="mekakiToggleDropdown('${key}')" style="padding:6px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none">
+      <span style="color:${active ? '#a78bfa' : '#64748b'}">${label}</span>
+      <span style="font-size:0.7rem;color:${active ? '#a78bfa' : '#64748b'}">▼</span>
+    </div>
+    <div id="mekaki-dd-${key}" class="mekaki-dropdown" style="display:none;position:absolute;top:100%;left:0;background:#1a1d27;border:1px solid #2e3148;border-radius:6px;z-index:200;min-width:120px;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
+      ${items}
+    </div>
+  </th>`;
+}
+
 async function renderMekakiTab() {
   const section = document.getElementById('mekaki-section');
   if (!section) return;
-  if (mekakiData) { section.innerHTML = mekakiData; return; }
+  if (mekakiRows) { renderMekakiSection(section); return; }
 
   section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
@@ -2568,94 +2651,72 @@ async function renderMekakiTab() {
       buildBedCountMap(),
     ]);
 
-    const rows = (table.rows || []).filter(row => {
-      const cells = row?.c || [];
-      if (!cells[0]?.v && !cells[4]?.v) return false;
-      // 2025/10以降のみ
-      const startCell = cells[2];
-      const sd = gvizToDate(startCell);
-      if (!sd) return false;
-      return sd.getFullYear() > 2025 || (sd.getFullYear() === 2025 && sd.getMonth() >= 9);
-    });
+    mekakiRows = (table.rows || [])
+      .filter(row => {
+        const cells = row?.c || [];
+        if (!cells[0]?.v && !cells[4]?.v) return false;
+        const sd = gvizToDate(cells[2]);
+        if (!sd) return false;
+        return sd.getFullYear() > 2025 || (sd.getFullYear() === 2025 && sd.getMonth() >= 9);
+      })
+      .map(row => {
+        const cells = row?.c || [];
+        const cv = v => v?.v != null ? String(v.v) : (v?.f ?? '');
+        const siteName = cv(cells[0]).trim();
+        const hozon    = cv(cells[1]).trim();
+        const startRaw = cells[2];
+        const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
+        const startDate = gvizToDate(startRaw);
+        const lot   = cv(cells[3]).trim();
+        const gouki = cv(cells[4]).trim();
+        const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
+        const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
+        const m3 = cells[7]?.v != null ? parseFloat(cells[7].v) : null;
+        const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
+        const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+        const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
+        const startDateKey = gvizDateStr(startRaw?.v, startRaw?.f) ?? '';
+        const no = gouki.replace(/\(.*\)/, '').trim();
+        const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
+        const converted = (total != null && bedCount != null && bedCount > 0)
+          ? (bedCount !== 2520 ? +(total * 2520 / bedCount).toFixed(2) : total) : null;
+        return { siteName, hozon, startStr, startDate, lot, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
+      })
+      // 日付新しい順
+      .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
-    const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
-
-    const rowsHtml = rows.map(row => {
-      const cells = row?.c || [];
-      const cv = v => v?.v != null ? v.v : (v?.f ?? '');
-      const siteName = String(cv(cells[0])).trim();
-      const hozon    = String(cv(cells[1])).trim();
-      const startRaw = cells[2];
-      const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
-      const lot      = String(cv(cells[3])).trim();
-      const gouki    = String(cv(cells[4])).trim();
-      const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
-      const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
-      const m3 = cells[7]?.v != null ? parseFloat(cells[7].v) : null;
-      const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
-      const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
-      const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
-
-      // 菌床本数をマップから取得
-      const startDateKey = gvizDateStr(startRaw?.v, startRaw?.f) ?? '';
-      const no = gouki.replace(/\(.*\)/, '').trim();
-      const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
-
-      // 2520換算
-      const converted = (total != null && bedCount != null && bedCount > 0)
-        ? (bedCount !== 2520 ? +(total * 2520 / bedCount).toFixed(2) : total)
-        : null;
-
-      const siteColor = SITE_COLORS[siteName] || '#94a3b8';
-      const fmt = v => v != null ? v : '';
-      const fmtN = v => v != null ? v.toLocaleString() : '—';
-
-      return `<tr style="border-bottom:1px solid #1e2235">
-        <td style="padding:5px 8px;color:${siteColor};font-weight:600;white-space:nowrap">${fmt(siteName)}</td>
-        <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${fmt(hozon)}</td>
-        <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${fmt(startStr)}</td>
-        <td style="padding:5px 8px;color:#94a3b8">${fmt(lot)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#64748b">${bedCount != null ? bedCount.toLocaleString() : '—'}</td>
-        <td style="padding:5px 8px;color:#e2e8f0;white-space:nowrap">${fmt(gouki)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(m1)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(m2)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(m3)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(m4)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(m5)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#e2e8f0;font-weight:600">${fmtN(total)}</td>
-        <td style="padding:5px 8px;text-align:right;color:${converted != null && converted >= 200 ? '#f87171' : '#a78bfa'};font-weight:600">${converted != null ? converted.toLocaleString() : '—'}</td>
-      </tr>`;
-    }).join('');
-
-    const html = `
-      <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
-      <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
-          <thead>
-            <tr style="color:#64748b;border-bottom:2px solid #2e3148;background:#1a1d27">
-              <th style="padding:6px 8px;text-align:left">拠点</th>
-              <th style="padding:6px 8px;text-align:left">保存条件</th>
-              <th style="padding:6px 8px;text-align:left">栽培開始</th>
-              <th style="padding:6px 8px;text-align:left">菌床ロット</th>
-              <th style="padding:6px 8px;text-align:right">菌床本数</th>
-              <th style="padding:6px 8px;text-align:left">号機</th>
-              <th style="padding:6px 8px;text-align:right">1回目</th>
-              <th style="padding:6px 8px;text-align:right">2回目</th>
-              <th style="padding:6px 8px;text-align:right">3回目</th>
-              <th style="padding:6px 8px;text-align:right">4回目</th>
-              <th style="padding:6px 8px;text-align:right">5回目</th>
-              <th style="padding:6px 8px;text-align:right">合計(kg)</th>
-              <th style="padding:6px 8px;text-align:right;color:#a78bfa">2520換算(kg)</th>
-            </tr>
-          </thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-      </div>`;
-    mekakiData = html;
-    section.innerHTML = html;
+    renderMekakiSection(section);
   } catch(e) {
     section.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
   }
+}
+
+function renderMekakiSection(section) {
+  section.innerHTML = `
+    <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
+        <thead>
+          <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
+            ${mekakiFilterHeader('拠点', 'siteName')}
+            ${mekakiFilterHeader('保存条件', 'hozon')}
+            <th style="padding:6px 8px;color:#64748b;text-align:left">栽培開始</th>
+            ${mekakiFilterHeader('菌床ロット', 'lot')}
+            <th style="padding:6px 8px;color:#64748b;text-align:right">菌床本数</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:left">号機</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">1回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">2回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">3回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">4回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">5回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">合計(kg)</th>
+            <th style="padding:6px 8px;color:#a78bfa;text-align:right">2520換算(kg)</th>
+          </tr>
+        </thead>
+        <tbody id="mekaki-tbody"></tbody>
+      </table>
+    </div>`;
+  mekakiRenderTable();
 }
 
 // ── 菌床重量タブ ──────────────────────────────────────────────────────────────
