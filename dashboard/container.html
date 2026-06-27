@@ -229,6 +229,7 @@
 <section id="weekly-section" style="margin:0 32px 40px;"></section>
 <section id="lot-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="scatter-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="weight-section" style="display:none;margin:0 32px 40px;"></section>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -1804,15 +1805,18 @@ async function loadCurrentSite(forceRefresh = false) {
 let weeklyTabActive = false;
 let lotTabActive = false;
 let scatterTabActive = false;
+let weightTabActive = false;
 let scatterEndedData = null; // { siteName, no, name, startDate, endDate, days, harvest }[]
 const scatterMonthCharts = {};
 
 function updateTabVisibility() {
-  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive;
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive;
   document.getElementById('main').style.display = anyAlt ? 'none' : '';
   document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
   document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
   document.getElementById('scatter-section').style.display = scatterTabActive ? '' : 'none';
+  document.getElementById('weight-section').style.display = weightTabActive ? '' : 'none';
+  if (weightTabActive) renderWeightTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
@@ -2119,10 +2123,11 @@ function initTabs() {
       btn.style.borderBottomColor = site.color;
     }
     btn.addEventListener('click', () => {
-      if (!weeklyTabActive && !lotTabActive && !scatterTabActive && currentSiteIdx === i) return;
+      if (!weeklyTabActive && !lotTabActive && !scatterTabActive && !weightTabActive && currentSiteIdx === i) return;
       weeklyTabActive = false;
       lotTabActive = false;
       scatterTabActive = false;
+      weightTabActive = false;
       currentSiteIdx = i;
       tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
         b.classList.toggle('active', j === i);
@@ -2149,6 +2154,7 @@ function initTabs() {
     weeklyTabActive = false;
     lotTabActive = true;
     scatterTabActive = false;
+    weightTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2170,6 +2176,7 @@ function initTabs() {
     weeklyTabActive = false;
     lotTabActive = false;
     scatterTabActive = true;
+    weightTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2182,6 +2189,28 @@ function initTabs() {
   });
   tabsEl.appendChild(scatterBtn);
 
+  // 菌床重量 tab
+  const weightBtn = document.createElement('button');
+  weightBtn.className = 'tab-btn';
+  weightBtn.textContent = '菌床重量';
+  weightBtn.addEventListener('click', () => {
+    if (weightTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = ''; b.style.borderBottomColor = '';
+    });
+    weightBtn.classList.add('active');
+    weightBtn.style.color = '#fb7185';
+    weightBtn.style.borderBottomColor = '#fb7185';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(weightBtn);
+
   // Standalone weekly tab
   const weeklyBtn = document.createElement('button');
   weeklyBtn.className = 'tab-btn';
@@ -2191,6 +2220,7 @@ function initTabs() {
     weeklyTabActive = true;
     lotTabActive = false;
     scatterTabActive = false;
+    weightTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2465,6 +2495,146 @@ async function showDetail(containerName, overrideSiteId) {
       options: chartOpts,
     });
   }
+}
+
+// ── 菌床重量タブ ──────────────────────────────────────────────────────────────
+
+const WEIGHT_SHEET_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
+const WEIGHT_SITES = [
+  { name: 'いなべ', color: '#38bdf8' },
+  { name: '群馬',   color: '#f97316' },
+  { name: '南丹',   color: '#34d399' },
+  { name: '自社菌床', color: '#f59e0b' },
+];
+let weightTabLoaded = false;
+
+async function fetchWeightSheet(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${WEIGHT_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+  return json.table;
+}
+
+function parseWeightRows(table) {
+  // 各行: A=ロット, C=栽培開始日, D=号機, F=散水前重量, H=散水後重量
+  // 1コンテナ=6行、コンテナ間に空行
+  const rows = table.rows || [];
+  const containers = [];
+  let current = null;
+
+  for (const row of rows) {
+    const cells = row?.c || [];
+    const cVal = cells[2]?.v ?? cells[2]?.f ?? null;
+    const dVal = cells[3]?.v != null ? String(cells[3].v).trim() : '';
+    const fVal = cells[5]?.v;
+    const hVal = cells[7]?.v;
+
+    // コンテナヘッダー行: C列に日付、D列に号機番号
+    if (cVal && dVal && dVal !== '') {
+      // 日付パース
+      let startDate = null;
+      if (typeof cVal === 'number') {
+        // gviz シリアル値 (days since 1899-12-30)
+        startDate = new Date(Date.UTC(1899, 11, 30) + cVal * 86400000);
+      } else if (typeof cVal === 'string') {
+        startDate = parseDateStr(cVal);
+      }
+      // 2025/10以降のみ
+      if (startDate && (startDate.getFullYear() > 2025 || (startDate.getFullYear() === 2025 && startDate.getMonth() >= 9))) {
+        current = { startDate, containerNo: dVal, lot: String(cells[0]?.v ?? '').trim(), measurements: [] };
+        containers.push(current);
+      } else {
+        current = null;
+      }
+    } else if (current && (fVal != null || hVal != null)) {
+      // 計測行
+      current.measurements.push({
+        idx: current.measurements.length + 1,
+        before: typeof fVal === 'number' ? fVal : null,
+        after:  typeof hVal === 'number' ? hVal : null,
+      });
+    }
+  }
+  return containers;
+}
+
+async function renderWeightTab() {
+  const section = document.getElementById('weight-section');
+  if (!section) return;
+  if (weightTabLoaded) return;
+  weightTabLoaded = true;
+
+  section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
+
+  const results = await Promise.all(WEIGHT_SITES.map(async site => {
+    try {
+      const table = await fetchWeightSheet(site.name);
+      const containers = parseWeightRows(table);
+      return { site, containers, error: null };
+    } catch(e) {
+      return { site, containers: [], error: e.message };
+    }
+  }));
+
+  let html = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>`;
+
+  for (const { site, containers, error } of results) {
+    html += `<div style="margin-bottom:32px">
+      <div style="color:${site.color};font-size:1rem;font-weight:700;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #2e3148">${site.name}</div>`;
+
+    if (error) {
+      html += `<div style="color:#f87171;font-size:0.85rem">取得エラー: ${error}</div>`;
+    } else if (containers.length === 0) {
+      html += `<div style="color:#64748b;font-size:0.85rem">データなし（2025.10以降）</div>`;
+    } else {
+      // 新しい順
+      const sorted = [...containers].sort((a, b) => b.startDate - a.startDate);
+      for (const c of sorted) {
+        const sd = c.startDate;
+        const dateStr = `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}`;
+        const avgBefore = c.measurements.filter(m => m.before != null).map(m => m.before);
+        const avgAfter  = c.measurements.filter(m => m.after  != null).map(m => m.after);
+        const avgB = avgBefore.length ? Math.round(avgBefore.reduce((s,v)=>s+v,0)/avgBefore.length) : null;
+        const avgA = avgAfter.length  ? Math.round(avgAfter.reduce((s,v)=>s+v,0)/avgAfter.length)   : null;
+
+        html += `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:12px 16px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+            <span style="color:#e2e8f0;font-weight:700;font-size:0.95rem">${c.containerNo}号機</span>
+            <span style="color:#64748b;font-size:0.82rem">${dateStr} 開始</span>
+            ${c.lot ? `<span style="color:#94a3b8;font-size:0.78rem">${c.lot}</span>` : ''}
+            ${avgB != null ? `<span style="color:#7dd3fc;font-size:0.82rem">散水前平均: ${avgB.toLocaleString()}g</span>` : ''}
+            ${avgA != null ? `<span style="color:#6ee7b7;font-size:0.82rem">散水後平均: ${avgA.toLocaleString()}g</span>` : ''}
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+            <thead>
+              <tr style="color:#64748b">
+                <th style="text-align:left;padding:3px 8px;border-bottom:1px solid #2e3148">本</th>
+                <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">散水前(g)</th>
+                <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">散水後(g)</th>
+                <th style="text-align:right;padding:3px 8px;border-bottom:1px solid #2e3148">吸水量(g)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${c.measurements.map(m => {
+                const diff = (m.before != null && m.after != null) ? m.after - m.before : null;
+                return `<tr style="border-bottom:1px solid #1e2235">
+                  <td style="padding:4px 8px;color:#94a3b8">${m.idx}</td>
+                  <td style="text-align:right;padding:4px 8px;color:#7dd3fc">${m.before != null ? m.before.toLocaleString() : '—'}</td>
+                  <td style="text-align:right;padding:4px 8px;color:#6ee7b7">${m.after  != null ? m.after.toLocaleString()  : '—'}</td>
+                  <td style="text-align:right;padding:4px 8px;color:${diff != null && diff > 0 ? '#f97316' : '#64748b'}">${diff != null ? '+' + diff.toLocaleString() : '—'}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      }
+    }
+    html += `</div>`;
+  }
+
+  section.innerHTML = html;
 }
 
 if ('serviceWorker' in navigator) {
