@@ -1125,16 +1125,45 @@ async function weeklyZoomRenderWeight() {
     const jishaContainers = jishaEntry.containers || [];
     console.log('[自社菌床 weight] total:', jishaContainers.length);
     jishaContainers.slice(0, 8).forEach((w, i) => console.log(`  [${i}] lot="${w.lot}" no=${w.containerNo} startDate=${w.startDate}`));
-    const seenLots = new Set();
+
+    // 対象グループの栽培開始日範囲を収集（自社菌床ロット判定）
+    const jishaLots = new Set();
+    const jishaStartDates = [];
     containers.forEach(c => {
       const lot = c.lot || '';
-      console.log('[自社菌床 weight] checking c.lot:', lot, 'isJisha:', isJishaLot(lot));
-      if (!isJishaLot(lot) || seenLots.has(lot)) return;
-      seenLots.add(lot);
-      const matches = (jishaEntry.containers || []).filter(w => w.lot === lot);
-      console.log('[自社菌床 weight] lot', lot, '→ matches:', matches.length);
-      matches.forEach(wc => jishaResults.push({ c: { ...c, siteName: '自社菌床', name: `${lot} ${wc.containerNo}号機` }, wc }));
+      if (!isJishaLot(lot)) return;
+      jishaLots.add(lot);
+      const d = parseDateStr(c.startDate);
+      if (d) jishaStartDates.push(d);
     });
+
+    if (jishaLots.size > 0) {
+      // ① ロット名完全一致で試みる
+      let matchedByLot = jishaContainers.filter(w => jishaLots.has(w.lot));
+      console.log('[自社菌床 weight] lot match:', matchedByLot.length);
+
+      // ② 一致ゼロなら startDate の近さ（±60日）でフォールバック
+      if (matchedByLot.length === 0 && jishaStartDates.length > 0) {
+        const earliest = Math.min(...jishaStartDates.map(d => d.getTime()));
+        const latest   = Math.max(...jishaStartDates.map(d => d.getTime()));
+        matchedByLot = jishaContainers.filter(w => {
+          if (!w.startDate) return false;
+          const t = w.startDate.getTime();
+          return t >= earliest - 60*86400000 && t <= latest + 60*86400000;
+        });
+        console.log('[自社菌床 weight] date-range fallback match:', matchedByLot.length);
+      }
+
+      // ③ それでもゼロなら全件表示
+      const finalMatches = matchedByLot.length > 0 ? matchedByLot : jishaContainers;
+      const representativeC = containers.find(c => isJishaLot(c.lot || '')) || containers[0];
+      finalMatches.forEach(wc => {
+        jishaResults.push({
+          c: { ...representativeC, siteName: '自社菌床', name: `${wc.lot || '自社'} ${wc.containerNo}号機` },
+          wc,
+        });
+      });
+    }
   }
 
   const siteResults = containers.map(c => {
