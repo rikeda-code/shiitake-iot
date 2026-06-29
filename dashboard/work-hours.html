@@ -18,238 +18,63 @@
       --accent-nandan: #34d399;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
-      min-height: 100vh;
-    }
-    header {
-      padding: 20px 32px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', 'Hiragino Sans', sans-serif; min-height: 100vh; }
+    header { padding: 20px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
     header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
     header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
     #last-updated { font-size: 0.8rem; color: var(--muted); }
-    #refresh-btn {
-      background: var(--border);
-      border: none;
-      color: var(--text);
-      padding: 8px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.85rem;
-      transition: background 0.2s;
-    }
+    #refresh-btn { background: var(--border); border: none; color: var(--text); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; transition: background 0.2s; }
     #refresh-btn:hover { background: #3a3f5c; }
-
-    /* Tabs */
-    .tabs {
-      display: flex;
-      gap: 4px;
-      padding: 20px 32px 0;
-      flex-wrap: wrap;
-    }
-    .tab-btn {
-      padding: 10px 24px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-bottom: none;
-      color: var(--muted);
-      cursor: pointer;
-      border-radius: 8px 8px 0 0;
-      font-size: 0.9rem;
-      font-family: inherit;
-      transition: background 0.15s, color 0.15s;
-    }
-    .tab-btn.active {
-      background: var(--surface2);
-      color: var(--text);
-      border-bottom: 2px solid var(--surface2);
-      margin-bottom: -1px;
-    }
+    .tabs { display: flex; gap: 4px; padding: 20px 32px 0; flex-wrap: wrap; }
+    .tab-btn { padding: 10px 24px; background: var(--surface); border: 1px solid var(--border); border-bottom: none; color: var(--muted); cursor: pointer; border-radius: 8px 8px 0 0; font-size: 0.9rem; font-family: inherit; transition: background 0.15s, color 0.15s; }
+    .tab-btn.active { background: var(--surface2); color: var(--text); border-bottom: 2px solid var(--surface2); margin-bottom: -1px; }
     .tab-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
     .tab-btn.summary-tab { border-color: #f97316; color: #f97316; }
     .tab-btn.summary-tab.active { color: var(--text); border-color: var(--border); }
-
-    main {
-      padding: 0 32px 32px;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-    }
-
-    /* Site panel */
-    .site-panel {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-top: 2px solid var(--border);
-      border-radius: 0 8px 8px 8px;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    /* KPI row */
-    .kpi-row {
-      display: flex;
-      gap: 24px;
-      flex-wrap: wrap;
-    }
-    .kpi {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 20px;
-      min-width: 140px;
-    }
+    main { padding: 0 32px 32px; display: flex; flex-direction: column; gap: 24px; }
+    .site-panel { background: var(--surface2); border: 1px solid var(--border); border-top: 2px solid var(--border); border-radius: 0 8px 8px 8px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+    .kpi-row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; min-width: 140px; }
     .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
     .kpi-value { font-size: 1.3rem; font-weight: 700; }
-
-    /* Controls */
-    .controls {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      flex-wrap: wrap;
-    }
+    .controls { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
     .control-group { display: flex; flex-direction: column; gap: 6px; }
     .control-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
     .select-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-    .select-btn {
-      padding: 5px 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 0.8rem;
-      font-family: inherit;
-      transition: all 0.15s;
-    }
+    .select-btn { padding: 5px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); cursor: pointer; font-size: 0.8rem; font-family: inherit; transition: all 0.15s; }
     .select-btn:hover { border-color: #4a5070; color: var(--text); }
-
-    /* Employee filter */
-    .emp-filter {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      max-height: 180px;
-      overflow-y: auto;
-    }
+    .emp-filter { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; max-height: 180px; overflow-y: auto; }
     .emp-filter::-webkit-scrollbar { width: 4px; }
     .emp-filter::-webkit-scrollbar-track { background: transparent; }
     .emp-filter::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .emp-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 3px 4px;
-      cursor: pointer;
-      border-radius: 4px;
-      font-size: 0.85rem;
-      transition: background 0.1s;
-    }
+    .emp-checkbox { display: flex; align-items: center; gap: 8px; padding: 3px 4px; cursor: pointer; border-radius: 4px; font-size: 0.85rem; transition: background 0.1s; }
     .emp-checkbox:hover { background: var(--surface2); }
     .emp-checkbox input { cursor: pointer; accent-color: var(--accent-inabe); }
-    .color-dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    /* Chart */
-    .chart-wrap {
-      position: relative;
-      height: 380px;
-    }
-
-    /* Loading / error */
-    .loading, .error-msg {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 300px;
-      font-size: 0.9rem;
-      color: var(--muted);
-    }
+    .color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .chart-wrap { position: relative; height: 380px; }
+    .loading, .error-msg { display: flex; align-items: center; justify-content: center; height: 300px; font-size: 0.9rem; color: var(--muted); }
     .error-msg { color: #f87171; }
-
-    /* Summary table */
-    .summary-panel {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-top: 2px solid var(--border);
-      border-radius: 0 8px 8px 8px;
-      overflow-x: auto;
-    }
-    .summary-table {
-      border-collapse: collapse;
-      font-size: 0.82rem;
-      min-width: 700px;
-      width: 100%;
-    }
-    .summary-table th {
-      background: var(--surface);
-      color: var(--muted);
-      padding: 8px 12px;
-      text-align: center;
-      border: 1px solid var(--border);
-      white-space: nowrap;
-      font-weight: 600;
-      font-size: 0.78rem;
-      letter-spacing: 0.03em;
-      position: sticky;
-      top: 0;
-      z-index: 2;
-    }
+    .summary-panel { background: var(--surface2); border: 1px solid var(--border); border-top: 2px solid var(--border); border-radius: 0 8px 8px 8px; overflow-x: auto; }
+    .summary-table { border-collapse: collapse; font-size: 0.82rem; min-width: 700px; width: 100%; }
+    .summary-table th { background: var(--surface); color: var(--muted); padding: 8px 12px; text-align: center; border: 1px solid var(--border); white-space: nowrap; font-weight: 600; font-size: 0.78rem; letter-spacing: 0.03em; position: sticky; top: 0; z-index: 2; }
     .summary-table th.col-site { text-align: left; position: sticky; left: 0; z-index: 3; }
-    .summary-table th.col-work { text-align: left; }
-    .summary-table th.col-emp  { text-align: left; }
-    .summary-table td {
-      padding: 5px 12px;
-      border: 1px solid var(--border);
-      white-space: nowrap;
-    }
-    .summary-table td.col-site {
-      font-weight: 700;
-      font-size: 0.85rem;
-      vertical-align: top;
-      color: var(--text);
-      position: sticky;
-      left: 0;
-      background: var(--surface);
-      z-index: 1;
-    }
-    .summary-table td.col-work {
-      font-weight: 600;
-      vertical-align: top;
-    }
+    .summary-table th.col-work, .summary-table th.col-emp { text-align: left; }
+    .summary-table td { padding: 5px 12px; border: 1px solid var(--border); white-space: nowrap; }
+    .summary-table td.col-site { font-weight: 700; font-size: 0.85rem; vertical-align: top; color: var(--text); position: sticky; left: 0; background: var(--surface); z-index: 1; }
+    .summary-table td.col-work { font-weight: 600; vertical-align: top; }
     .summary-table td.col-emp { color: var(--muted); padding-left: 8px; }
     .summary-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .summary-table td.total-row { font-weight: 700; color: var(--text); }
-    .summary-table tr.wt-saibai  td:not(.col-site) { background: rgba(52,211,153,0.07); }
-    .summary-table tr.wt-shukka  td:not(.col-site) { background: rgba(250,204,21,0.07); }
-    .summary-table tr.wt-haisou  td:not(.col-site) { background: rgba(248,113,113,0.07); }
-    .summary-table tr.wt-kyoten  td:not(.col-site) { background: rgba(249,115,22,0.09); }
+    .summary-table tr.wt-saibai td:not(.col-site) { background: rgba(52,211,153,0.07); }
+    .summary-table tr.wt-shukka td:not(.col-site) { background: rgba(250,204,21,0.07); }
+    .summary-table tr.wt-haisou td:not(.col-site) { background: rgba(248,113,113,0.07); }
+    .summary-table tr.wt-kyoten td:not(.col-site) { background: rgba(249,115,22,0.09); }
     .summary-table tr.kind-total td { font-weight: 700; }
     .summary-table tr.section-sep td { border-top: 2px solid var(--border); }
-
-    @media (max-width: 640px) {
-      header, .tabs, main { padding-left: 16px; padding-right: 16px; }
-      .chart-wrap { height: 280px; }
-    }
+    @media (max-width: 640px) { header, .tabs, main { padding-left: 16px; padding-right: 16px; } .chart-wrap { height: 280px; } }
   </style>
 </head>
 <body>
-
 <header>
   <div>
     <h1>&#x23F1; 勤務時間ダッシュボード</h1>
@@ -260,29 +85,19 @@
     <button id="refresh-btn" onclick="loadAll()">&#x21BB; 更新</button>
   </div>
 </header>
-
 <div class="tabs" id="tabs"></div>
 <main id="main"></main>
-
 <script>
 const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
-
 const SITES = ['いなべ', '群馬', '南丹'];
-const SITE_COLORS = {
-  'いなべ': '#38bdf8',
-  '群馬':   '#a78bfa',
-  '南丹':   '#34d399',
-};
-
+const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#a78bfa', '南丹': '#34d399' };
 const EMP_COLORS = [
-  '#38bdf8','#a78bfa','#34d399','#f97316','#f43f5e','#facc15',
-  '#fb923c','#4ade80','#818cf8','#e879f9','#2dd4bf','#fbbf24',
-  '#60a5fa','#c084fc','#86efac','#fca5a5','#67e8f9','#fde68a',
-  '#a3e635','#f9a8d4','#7dd3fc','#d8b4fe','#6ee7b7','#fcd34d',
-  '#93c5fd','#c4b5fd','#bbf7d0','#fecaca','#99f6e4','#fef08a',
-  '#bef264','#fbcfe8','#e0f2fe','#ede9fe','#dcfce7','#fef9c3',
-  '#fce7f3',
+  '#38bdf8','#a78bfa','#34d399','#f97316','#f43f5e','#facc15','#fb923c','#4ade80',
+  '#818cf8','#e879f9','#2dd4bf','#fbbf24','#60a5fa','#c084fc','#86efac','#fca5a5',
+  '#67e8f9','#fde68a','#a3e635','#f9a8d4','#7dd3fc','#d8b4fe','#6ee7b7','#fcd34d',
+  '#93c5fd','#c4b5fd','#bbf7d0','#fecaca','#99f6e4','#fef08a','#bef264','#fbcfe8',
+  '#e0f2fe','#ede9fe','#dcfce7','#fef9c3','#fce7f3',
 ];
 
 function classifyEmp(emp) {
@@ -290,7 +105,6 @@ function classifyEmp(emp) {
   if (emp.includes('社員') || emp.includes('技能実習')) return '社員・技能実習生';
   return 'パート';
 }
-
 function workTypeClass(wt) {
   if (!wt) return '';
   if (wt.includes('拠点')) return 'wt-kyoten';
@@ -300,10 +114,7 @@ function workTypeClass(wt) {
   return '';
 }
 
-let allData = null;
-let activeBase = null;
-let activeMode = null;
-let chartInstance = null;
+let allData = null, activeBase = null, activeMode = null, chartInstance = null;
 
 async function fetchSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=2`;
@@ -314,16 +125,13 @@ async function fetchSheet() {
 
 function parseDuration(cell) {
   if (!cell) return null;
-  if (typeof cell.v === 'number') {
-    const h = cell.v * 24;
-    return h > 0 ? Math.round(h * 10) / 10 : null;
-  }
+  if (typeof cell.v === 'number') { const h = cell.v * 24; return h > 0 ? Math.round(h*10)/10 : null; }
   if (cell.f) {
     const f = String(cell.f).replace(/^-/, '').trim();
     const parts = f.split(':').map(Number);
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
       const h = parts[0] > 500 ? parts[0]/60 + parts[1]/3600 : parts[0] + parts[1]/60;
-      return h > 0 ? Math.round(h * 10) / 10 : null;
+      return h > 0 ? Math.round(h*10)/10 : null;
     }
   }
   return null;
@@ -332,9 +140,7 @@ function parseDuration(cell) {
 function shimeToMonth(label) {
   const m = label.match(/(\d+)\/\d+締/);
   if (!m) return label;
-  let closeMonth = parseInt(m[1]);
-  let workMonth = closeMonth - 1;
-  let year = 2025;
+  let closeMonth = parseInt(m[1]), workMonth = closeMonth - 1, year = 2025;
   if (workMonth <= 0) { workMonth += 12; year = 2024; }
   if (closeMonth <= 6) year = 2026;
   else if (closeMonth <= 12) year = 2025;
@@ -344,16 +150,15 @@ function shimeToMonth(label) {
 function buildDataset(json) {
   const cols = json.table.cols;
   const rows = json.table.rows || [];
-
   let baseIdx = -1, nameIdx = -1, empIdx = -1, workIdx = -1;
   const jissituCols = [];
 
   cols.forEach((c, i) => {
     if (!c) return;
     const label = (c.label || '').trim();
-    if (label === '拠点') baseIdx = i;
-    if (label === '雇用区分') empIdx = i;
-    if (label === '業務区分') workIdx = i;
+    if (label.includes('拠点') && !label.includes('時間') && !label.includes('実質')) baseIdx = i;
+    if (label.includes('雇用区分')) empIdx = i;
+    if (label.includes('業務区分')) workIdx = i;
     if (label.includes('実質勤務時間')) {
       const sm = label.match(/(\d+\/\d+締)/);
       jissituCols.push({ month: sm ? shimeToMonth(sm[1]) : label, idx: i });
@@ -379,7 +184,19 @@ function buildDataset(json) {
 
   if (baseIdx === -1) baseIdx = 3;
   if (empIdx  === -1) empIdx  = 2;
+  if (workIdx === -1 || workIdx === baseIdx || workIdx === empIdx) {
+    const firstMonth = jissituCols.length > 0 ? jissituCols[0].idx : 99;
+    for (let i = 0; i < firstMonth; i++) {
+      if (i !== baseIdx && i !== empIdx && i !== nameIdx && cols[i]) { workIdx = i; break; }
+    }
+  }
   if (workIdx === -1) workIdx = 4;
+
+  // Build debug info
+  const firstMonthIdx = jissituCols[0]?.idx ?? 20;
+  const debugCols = cols.slice(0, Math.min(cols.length, firstMonthIdx))
+    .map((c, i) => `${i}:${(c?.label||'').trim()||'(空)'}`).join(', ');
+  const debugIdx = `base=${baseIdx} emp=${empIdx} work=${workIdx} name=${nameIdx}`;
 
   const monthCounts = {};
   const months = jissituCols.map(({ month }) => {
@@ -389,7 +206,6 @@ function buildDataset(json) {
 
   const validBases = new Set(['いなべ', '群馬', '南丹']);
   const employees = [];
-
   rows.forEach(row => {
     const cells = row.c || [];
     const base = String(cells[baseIdx]?.v ?? '').trim();
@@ -404,7 +220,7 @@ function buildDataset(json) {
     employees.push({ name, base, workType, employment, empClass, hours });
   });
 
-  return { months, employees };
+  return { months, employees, debugCols, debugIdx };
 }
 
 function inferNextMonth(base, occurrence) {
@@ -415,7 +231,7 @@ function inferNextMonth(base, occurrence) {
   return `${year}年${month}月`;
 }
 
-/* ── Tabs ── */
+/* Tabs */
 function renderTabs(bases) {
   const tabsEl = document.getElementById('tabs');
   tabsEl.innerHTML = '';
@@ -445,7 +261,7 @@ function renderTabs(bases) {
   tabsEl.appendChild(sBtn);
 }
 
-/* ── Site panel ── */
+/* Site panel */
 function renderBasePanel() {
   const main = document.getElementById('main');
   const { months, employees } = allData;
@@ -500,7 +316,6 @@ function renderBasePanel() {
       <span>${type} <span style="color:var(--muted);font-size:0.78rem">(${count}名)</span></span>`;
     empFilter.appendChild(label);
   });
-
   buildChart();
 }
 
@@ -535,34 +350,22 @@ function buildChart() {
     const vals = baseEmps.map(e => e.hours[mi]).filter(h => h !== null);
     return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10 : null;
   });
-  datasets.push({
-    label: '拠点平均', data: avgData, borderColor: '#f97316',
-    backgroundColor: 'transparent', borderWidth: 2.5, borderDash: [6,4],
-    pointRadius: 0, tension: 0.3, spanGaps: true, order: -1,
-  });
+  datasets.push({ label: '拠点平均', data: avgData, borderColor: '#f97316', backgroundColor: 'transparent', borderWidth: 2.5, borderDash: [6,4], pointRadius: 0, tension: 0.3, spanGaps: true, order: -1 });
 
   const ctx = document.getElementById('main-chart').getContext('2d');
   if (chartInstance) chartInstance.destroy();
   chartInstance = new Chart(ctx, {
-    type: 'line',
-    data: { labels: months, datasets },
+    type: 'line', data: { labels: months, datasets },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: datasets.length <= 10, labels: { color: '#8892a4', font:{size:11}, boxWidth:12, padding:10 } },
-        tooltip: {
-          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
-          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
-          callbacks: { label: ctx => ctx.parsed.y===null ? null : `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h` },
-        },
+        tooltip: { backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1, titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: ctx => ctx.parsed.y===null?null:`${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h` } },
       },
       scales: {
         x: { ticks:{color:'#8892a4',font:{size:11},maxRotation:45}, grid:{color:'#1e2235'} },
-        y: {
-          ticks:{color:'#8892a4',font:{size:11},callback:v=>`${v} h`}, grid:{color:'#1e2235'},
-          suggestedMin:0, title:{display:true,text:'実質勤務時間 (h)',color:'#8892a4',font:{size:11}},
-        },
+        y: { ticks:{color:'#8892a4',font:{size:11},callback:v=>`${v} h`}, grid:{color:'#1e2235'}, suggestedMin:0, title:{display:true,text:'実質勤務時間 (h)',color:'#8892a4',font:{size:11}} },
       },
     },
   });
@@ -574,29 +377,29 @@ function toggleAll(checked) {
   updateChart();
 }
 
-/* ── Summary table ── */
-function fmtH(h) {
-  if (h === null || h === undefined || isNaN(h)) return '—';
-  return h.toFixed(1) + ' h';
-}
+/* Summary */
+function fmtH(h) { return (h===null||h===undefined||isNaN(h)) ? '—' : h.toFixed(1)+' h'; }
 
 function renderSummary() {
-  const { months, employees } = allData;
+  const { months, employees, debugCols, debugIdx } = allData;
+  const uniqWT = [...new Set(employees.map(e => e.workType).filter(Boolean))];
+
+  let out = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:0.73rem;color:var(--muted);word-break:break-all">
+    <b style="color:#f97316">列検出</b>: ${debugIdx} &nbsp;|&nbsp; 業務区分の値: <b style="color:var(--text)">${uniqWT.slice(0,12).join(' / ')||'（なし）'}</b><br>
+    <span style="font-size:0.68rem">列ラベル: ${debugCols}</span>
+  </div>`;
 
   const workTypeOrder = [];
   employees.forEach(e => { if (e.workType && !workTypeOrder.includes(e.workType)) workTypeOrder.push(e.workType); });
   const nonKyoten = workTypeOrder.filter(wt => !wt.includes('拠点'));
   const kyoten    = workTypeOrder.filter(wt =>  wt.includes('拠点'));
   const orderedWT = [...nonKyoten, ...kyoten];
-
   const EMP_CLASSES = ['社員・技能実習生', 'パート'];
 
-  let html = `<div class="summary-panel"><table class="summary-table">
+  out += `<div class="summary-panel"><table class="summary-table">
     <thead><tr>
-      <th class="col-site">拠点</th>
-      <th class="col-work">業務区分</th>
-      <th class="col-emp">区分</th>
-      ${months.map(m => `<th>${m}</th>`).join('')}
+      <th class="col-site">拠点</th><th class="col-work">業務区分</th><th class="col-emp">区分</th>
+      ${months.map(m=>`<th>${m}</th>`).join('')}
     </tr></thead><tbody>`;
 
   SITES.forEach(site => {
@@ -608,71 +411,50 @@ function renderSummary() {
 
     siteWT.forEach((wt, wtIdx) => {
       const wtEmps = siteEmps.filter(e => e.workType === wt);
-      const wtCls  = workTypeClass(wt);
-      const isSep  = wtIdx > 0;
-      let wtFirst  = true;
+      const wtCls = workTypeClass(wt);
+      let wtFirst = true;
 
       const kinds = [
         { label: '計／時間',
-          sub: EMP_CLASSES.map(ec => ({ label: ec, vals: months.map((_, mi) => {
-            const v = wtEmps.filter(e=>e.empClass===ec).map(e=>e.hours[mi]).filter(h=>h!==null);
-            return v.length ? v.reduce((a,b)=>a+b,0) : null;
-          }) })),
-          total: months.map((_, mi) => { const v=wtEmps.map(e=>e.hours[mi]).filter(h=>h!==null); return v.length?v.reduce((a,b)=>a+b,0):null; }),
+          sub: EMP_CLASSES.map(ec => ({ label: ec, vals: months.map((_,mi) => { const v=wtEmps.filter(e=>e.empClass===ec).map(e=>e.hours[mi]).filter(h=>h!==null); return v.length?v.reduce((a,b)=>a+b,0):null; }) })),
+          total: months.map((_,mi) => { const v=wtEmps.map(e=>e.hours[mi]).filter(h=>h!==null); return v.length?v.reduce((a,b)=>a+b,0):null; }),
         },
         { label: '計／人数', isCount: true,
-          sub: EMP_CLASSES.map(ec => ({ label: ec, vals: months.map((_, mi) => {
-            const n = wtEmps.filter(e=>e.empClass===ec && e.hours[mi]!==null).length;
-            return n || null;
-          }) })),
-          total: months.map((_, mi) => { const n=wtEmps.filter(e=>e.hours[mi]!==null).length; return n||null; }),
+          sub: EMP_CLASSES.map(ec => ({ label: ec, vals: months.map((_,mi) => { const n=wtEmps.filter(e=>e.empClass===ec&&e.hours[mi]!==null).length; return n||null; }) })),
+          total: months.map((_,mi) => { const n=wtEmps.filter(e=>e.hours[mi]!==null).length; return n||null; }),
         },
         { label: '計／平均',
-          sub: EMP_CLASSES.map(ec => ({ label: ec, vals: months.map((_, mi) => {
-            const v=wtEmps.filter(e=>e.empClass===ec).map(e=>e.hours[mi]).filter(h=>h!==null);
-            return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;
-          }) })),
-          total: months.map((_, mi) => { const v=wtEmps.map(e=>e.hours[mi]).filter(h=>h!==null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; }),
+          sub: EMP_CLASSES.map(ec => ({ label: ec, vals: months.map((_,mi) => { const v=wtEmps.filter(e=>e.empClass===ec).map(e=>e.hours[mi]).filter(h=>h!==null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; }) })),
+          total: months.map((_,mi) => { const v=wtEmps.map(e=>e.hours[mi]).filter(h=>h!==null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; }),
         },
       ];
 
       kinds.forEach(kind => {
         kind.sub.forEach(sub => {
-          html += `<tr class="${wtCls}${isSep && wtFirst ? ' section-sep' : ''}">`;
-          if (firstRow) {
-            html += `<td class="col-site" rowspan="${siteRowSpan}" style="color:${SITE_COLORS[site]||'#fff'}">${site}</td>`;
-            firstRow = false;
-          }
-          if (wtFirst) {
-            html += `<td class="col-work" rowspan="9">${wt}</td>`;
-            wtFirst = false;
-          }
-          html += `<td class="col-emp">${sub.label}</td>`;
-          sub.vals.forEach(v => {
-            html += `<td class="num">${kind.isCount ? (v!==null?v+' 名':'—') : fmtH(v)}</td>`;
-          });
-          html += '</tr>';
+          out += `<tr class="${wtCls}${wtIdx>0&&wtFirst?' section-sep':''}">`;
+          if (firstRow) { out += `<td class="col-site" rowspan="${siteRowSpan}" style="color:${SITE_COLORS[site]||'#fff'}">${site}</td>`; firstRow=false; }
+          if (wtFirst)  { out += `<td class="col-work" rowspan="9">${wt}</td>`; wtFirst=false; }
+          out += `<td class="col-emp">${sub.label}</td>`;
+          sub.vals.forEach(v => { out += `<td class="num">${kind.isCount?(v!==null?v+' 名':'—'):fmtH(v)}</td>`; });
+          out += '</tr>';
         });
-        html += `<tr class="${wtCls} kind-total"><td class="col-emp total-row">${kind.label}</td>`;
-        kind.total.forEach(v => {
-          html += `<td class="num total-row">${kind.isCount?(v!==null?v+' 名':'—'):fmtH(v)}</td>`;
-        });
-        html += '</tr>';
+        out += `<tr class="${wtCls} kind-total"><td class="col-emp total-row">${kind.label}</td>`;
+        kind.total.forEach(v => { out += `<td class="num total-row">${kind.isCount?(v!==null?v+' 名':'—'):fmtH(v)}</td>`; });
+        out += '</tr>';
       });
     });
   });
 
-  html += '</tbody></table></div>';
-  document.getElementById('main').innerHTML = html;
+  out += '</tbody></table></div>';
+  document.getElementById('main').innerHTML = out;
 }
 
-/* ── Main ── */
+/* Main */
 async function loadAll() {
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('tabs').innerHTML = '';
   document.getElementById('last-updated').textContent = '';
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-
   try {
     const json = await fetchSheet();
     allData = buildDataset(json);
@@ -688,7 +470,6 @@ async function loadAll() {
     console.error(e);
   }
 }
-
 loadAll();
 </script>
 </body>
