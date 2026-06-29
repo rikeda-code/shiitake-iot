@@ -3301,13 +3301,25 @@ async function renderWeightTab() {
   renderWeightSubTabs();
 }
 
+window.addEventListener('error', e => {
+  const el = document.getElementById('main');
+  if (el) el.innerHTML = `<div style="color:#f87171;padding:24px;font-size:0.85rem">
+    JS Error: ${e.message}<br>${e.filename}:${e.lineno}</div>`;
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('[unhandled rejection]', e.reason);
+});
+
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=7');
+  navigator.serviceWorker.register('sw.js?v=8');
 }
 
 initTabs();
 updateTabVisibility();
-loadCurrentSite();
+loadCurrentSite().catch(e => {
+  const el = document.getElementById('main');
+  if (el) el.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
+});
 loadWeeklySection();
 
 setInterval(() => {
