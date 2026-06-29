@@ -3146,7 +3146,7 @@ function parseWeightRows(table) {
 
   for (const row of rows) {
     const cells = row?.c || [];
-    const aVal = String(cells[0]?.v ?? '').trim();
+    const aVal = String(cells[0]?.v ?? '').trim().replace(/^自社菌床/, '').trim();
     const cCell = cells[2];
     const dVal  = cells[3]?.v != null ? String(cells[3].v).trim() : '';
     const fVal  = cells[5]?.v;
