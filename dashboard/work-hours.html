@@ -360,15 +360,12 @@ function buildDataset(json) {
   const cols = json.table.cols;
   const rows = json.table.rows || [];
 
-  let baseIdx = -1, nameIdx = -1, empIdx = -1, workIdx = -1;
   const jissituCols = [];
 
+  // Step 1: detect monthly 実質勤務時間 columns from labels
   cols.forEach((c, i) => {
     if (!c) return;
     const label = (c.label || '').trim();
-    if (label === '拠点') baseIdx = i;
-    if (label === '雇用区分') empIdx = i;
-    if (label === '業務区分') workIdx = i;
     if (label.includes('実質勤務時間')) {
       const shimeMatch = label.match(/(\d+\/\d+締)/);
       const monthLabel = shimeMatch ? shimeToMonth(shimeMatch[1]) : label;
@@ -376,6 +373,7 @@ function buildDataset(json) {
     }
   });
 
+  // Fallback: look for 締め日 pattern in label, use +2 offset for 実質勤務時間
   if (jissituCols.length === 0) {
     cols.forEach((c, i) => {
       if (!c) return;
@@ -386,19 +384,52 @@ function buildDataset(json) {
     });
   }
 
-  if (nameIdx === -1) {
-    const firstJissitu = jissituCols.length > 0 ? jissituCols[0].idx : 99;
-    for (let i = firstJissitu - 3; i < firstJissitu; i++) {
-      if (i >= 0 && cols[i] && (cols[i].label || '').trim() === '') {
-        nameIdx = i; break;
-      }
+  const firstMonthIdx = jissituCols.length > 0 ? jissituCols[0].idx : cols.length;
+
+  // Step 2: detect static columns by scanning data values
+  const VALID_BASES   = new Set(['いなべ', '群馬', '南丹']);
+  const VALID_WORKS   = new Set(['栽培', '出荷', '配送', '拠点業務']);
+  const EMP_KEYWORDS  = ['社員', 'アルバイト', 'パート', '技能実習', '正社員', '契約社員'];
+
+  // Tally how many rows have each known value type per column
+  const baseScore = {}, workScore = {}, empScore = {}, nameScore = {};
+  const sampleRows = rows.slice(0, 30);
+
+  sampleRows.forEach(row => {
+    const cells = row.c || [];
+    for (let i = 0; i < firstMonthIdx; i++) {
+      const v = String(cells[i]?.v ?? '').trim();
+      if (!v) continue;
+      if (VALID_BASES.has(v))                             baseScore[i] = (baseScore[i] || 0) + 1;
+      if (VALID_WORKS.has(v) || ['栽培','出荷','配送'].some(w => v.includes(w)))
+                                                          workScore[i] = (workScore[i] || 0) + 1;
+      if (EMP_KEYWORDS.some(k => v.includes(k)))         empScore[i]  = (empScore[i]  || 0) + 1;
     }
-    if (nameIdx === -1) nameIdx = 7;
+  });
+
+  function bestIdx(scores, fallback) {
+    let best = -1, bestVal = 0;
+    Object.entries(scores).forEach(([k, v]) => {
+      if (v > bestVal) { bestVal = v; best = parseInt(k); }
+    });
+    return best === -1 ? fallback : best;
   }
 
-  if (baseIdx === -1) baseIdx = 3;
-  if (empIdx  === -1) empIdx  = 2;
-  if (workIdx === -1) workIdx = 4; // fallback
+  const baseIdx = bestIdx(baseScore, 3);
+  const workIdx = bestIdx(workScore, 4);
+  const empIdx  = bestIdx(empScore,  2);
+
+  // 氏名: first pre-monthly column not assigned to base/work/emp that has non-empty string values
+  let nameIdx = -1;
+  for (let i = 0; i < firstMonthIdx; i++) {
+    if (i === baseIdx || i === workIdx || i === empIdx) continue;
+    const hasValues = sampleRows.some(row => {
+      const v = String(row.c?.[i]?.v ?? '').trim();
+      return v.length > 0 && !VALID_BASES.has(v) && !['栽培','出荷','配送'].some(w => v.includes(w));
+    });
+    if (hasValues) { nameIdx = i; break; }
+  }
+  if (nameIdx === -1) nameIdx = baseIdx > 0 ? baseIdx - 1 : 7;
 
   // Deduplicate months
   const monthCounts = {};
@@ -408,13 +439,12 @@ function buildDataset(json) {
     return month;
   });
 
-  const validBases = new Set(['いなべ', '群馬', '南丹']);
   const employees = [];
 
   rows.forEach(row => {
     const cells = row.c || [];
     const base = String(cells[baseIdx]?.v ?? '').trim();
-    if (!validBases.has(base)) return;
+    if (!VALID_BASES.has(base)) return;
 
     const name = String(cells[nameIdx]?.v ?? cells[nameIdx]?.f ?? '').trim();
     if (!name) return;
@@ -429,7 +459,13 @@ function buildDataset(json) {
     employees.push({ name, base, workType, employment, empClass, hours });
   });
 
-  return { months, employees };
+  // Debug info
+  const debugCols = cols.slice(0, Math.min(cols.length, firstMonthIdx))
+    .map((c, i) => `${i}:${(c?.label||'').trim()||'(空)'}`)
+    .join(', ');
+  const debugIdx = `base=${baseIdx} emp=${empIdx} work=${workIdx} name=${nameIdx}`;
+
+  return { months, employees, debugCols, debugIdx };
 }
 
 function inferNextMonth(base, occurrence) {
@@ -658,8 +694,16 @@ function fmtH(h) {
 }
 
 function renderSummary() {
-  const { months, employees } = allData;
+  const { months, employees, debugCols, debugIdx } = allData;
   const main = document.getElementById('main');
+
+  // Debug panel: show column detection results
+  const uniqWorkTypes = [...new Set(employees.map(e => e.workType).filter(Boolean))];
+  main.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:12px 16px;font-size:0.75rem;color:#8892a4;margin-bottom:0">
+    <b style="color:#f97316">列検出結果</b>: ${debugIdx}<br>
+    <b>列ラベル</b>: ${debugCols}<br>
+    <b>業務区分の値（先頭10件）</b>: ${uniqWorkTypes.slice(0,10).join(' / ') || '（なし）'}
+  </div>`;
 
   // Determine work-type display order (in appearance order from data, plus 拠点合計 at end)
   const workTypeOrder = [];
