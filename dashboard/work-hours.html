@@ -181,6 +181,36 @@
     }
     .error-msg { color: #f87171; }
 
+    /* ── Summary shell & sub-tabs ── */
+    .summary-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .summary-subtabs {
+      display: flex;
+      gap: 4px;
+    }
+    .summary-subtab {
+      padding: 8px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 6px 6px 0 0;
+      font-size: 0.85rem;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+    .summary-subtab.active {
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom: 2px solid var(--surface2);
+      margin-bottom: -1px;
+    }
+    .summary-subtab:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
     /* ── Summary table ── */
     .summary-panel {
       background: var(--surface2);
@@ -189,6 +219,97 @@
       border-radius: 0 8px 8px 8px;
       overflow-x: auto;
     }
+
+    /* ── Summary chart ── */
+    .schart-shell {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+    .schart-section { display: flex; flex-direction: column; gap: 12px; }
+    .schart-header {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .schart-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .series-check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      color: var(--muted);
+      transition: border-color 0.15s, color 0.15s;
+      user-select: none;
+    }
+    .series-check:has(input:checked) { border-color: #4a5070; color: var(--text); }
+    .series-check input { display: none; }
+    .schart-wrap { position: relative; height: 300px; }
+
+    /* ── Roster table ── */
+    .roster-panel {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      overflow-x: auto;
+    }
+    .roster-table {
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      min-width: 600px;
+      width: 100%;
+    }
+    .roster-table th {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      cursor: pointer;
+      user-select: none;
+    }
+    .roster-table th:hover { color: var(--text); }
+    .roster-table th.sort-asc::after  { content: ' ▲'; font-size: 0.7em; }
+    .roster-table th.sort-desc::after { content: ' ▼'; font-size: 0.7em; }
+    .roster-table th.col-site { position: sticky; left: 0; z-index: 3; text-align: left; }
+    .roster-table td {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .roster-table td.col-site {
+      font-weight: 700;
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+    }
+    .roster-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .roster-table tbody tr:hover td { background: var(--surface2) !important; }
     .summary-table {
       border-collapse: collapse;
       font-size: 0.82rem;
@@ -682,30 +803,71 @@ function toggleAll(checked) {
   updateChart();
 }
 
-/* ── Summary table ─────────────────────────────────────────────── */
+/* ── Summary helpers ───────────────────────────────────────────── */
 function fmtH(h) {
   if (h === null || h === undefined || isNaN(h)) return '—';
   return h.toFixed(1) + ' h';
 }
 
+const SUMMARY_COLORS = [
+  '#34d399','#6ee7b7',  // 栽培
+  '#facc15','#fde68a',  // 出荷
+  '#f87171','#fca5a5',  // 配送
+  '#fb923c','#fed7aa',  // 拠点業務
+  '#60a5fa','#93c5fd',  // その他
+  '#c084fc','#e879f9',
+];
+const TOTAL_COLOR = '#e2e8f0';
+
+function getOrderedWorkTypes(employees) {
+  const order = [];
+  employees.forEach(e => { if (e.workType && !order.includes(e.workType)) order.push(e.workType); });
+  return [...order.filter(wt => !wt.includes('拠点')), ...order.filter(wt => wt.includes('拠点'))];
+}
+
+let summaryChartInstances = {};
+
+function destroySummaryCharts() {
+  Object.values(summaryChartInstances).forEach(c => c.destroy());
+  summaryChartInstances = {};
+}
+
+/* ── Summary shell (sub-tabs) ──────────────────────────────────── */
 function renderSummary() {
-  const { months, employees } = allData;
+  destroySummaryCharts();
   const main = document.getElementById('main');
-  main.innerHTML = '';
+  main.innerHTML = `
+    <div class="summary-shell">
+      <div class="summary-subtabs" id="summary-subtabs">
+        <button class="summary-subtab active" data-tab="table">📋 表</button>
+        <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
+        <button class="summary-subtab" data-tab="roster">👤 名簿</button>
+      </div>
+      <div id="summary-content"></div>
+    </div>`;
 
-  // Determine work-type display order (in appearance order from data, plus 拠点合計 at end)
-  const workTypeOrder = [];
-  employees.forEach(e => {
-    if (e.workType && !workTypeOrder.includes(e.workType)) workTypeOrder.push(e.workType);
+  document.querySelectorAll('.summary-subtab').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.summary-subtab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      destroySummaryCharts();
+      const tab = btn.dataset.tab;
+      if (tab === 'table')  renderSummaryTable();
+      else if (tab === 'chart')  renderSummaryChart();
+      else renderSummaryRoster();
+    };
   });
-  // Put 拠点 entries last
-  const nonKyoten = workTypeOrder.filter(wt => !wt.includes('拠点'));
-  const kyoten    = workTypeOrder.filter(wt => wt.includes('拠点'));
-  const orderedWorkTypes = [...nonKyoten, ...kyoten];
 
+  renderSummaryTable();
+}
+
+/* ── Summary: 表タブ ───────────────────────────────────────────── */
+function renderSummaryTable() {
+  const { months, employees } = allData;
+  const content = document.getElementById('summary-content');
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
   const EMP_CLASSES = ['社員・技能実習生', 'パート'];
 
-  // Build table HTML
   let html = `<div class="summary-panel"><table class="summary-table">
     <thead><tr>
       <th class="col-site">拠点</th>
@@ -718,23 +880,15 @@ function renderSummary() {
     const siteEmps = employees.filter(e => e.base === site);
     if (!siteEmps.length) return;
 
-    const siteWorkTypes = orderedWorkTypes.filter(wt =>
-      siteEmps.some(e => e.workType === wt)
-    );
-    const totalRows = siteWorkTypes.length * 9; // 9 rows per work type
-    let siteRowSpan = totalRows + 6; // +6 for site total rows (時間×3 + 人数×3)
-
+    const siteWorkTypes = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
+    const totalRows = siteWorkTypes.length * 9;
+    let siteRowSpan = totalRows + 6;
     let firstRow = true;
 
     siteWorkTypes.forEach((wt, wtIdx) => {
       const wtEmps = siteEmps.filter(e => e.workType === wt);
       const wtClass = workTypeClass(wt);
       const isSep = wtIdx > 0;
-
-      // Rows per work type:
-      // 時間: 社員, パート, 計
-      // 人数: 社員, パート, 計
-      // 平均: 社員, パート, 計
 
       const kinds = [
         { label: '計／時間', sub: EMP_CLASSES.map(ec => ({
@@ -780,7 +934,6 @@ function renderSummary() {
       const wtRowCount = 9;
 
       kinds.forEach(kind => {
-        // Sub rows (社員・技能実習生, パート)
         kind.sub.forEach(sub => {
           html += `<tr class="${wtClass}${isSep && wtFirstRow ? ' section-sep' : ''}">`;
           if (firstRow) {
@@ -797,7 +950,6 @@ function renderSummary() {
           });
           html += '</tr>';
         });
-        // Total row
         html += `<tr class="${wtClass} kind-total">`;
         html += `<td class="col-emp total-row">${kind.label}</td>`;
         kind.total.forEach(v => {
@@ -807,7 +959,6 @@ function renderSummary() {
       });
     });
 
-    // Site total rows: 時間（社員・技能実習生 / パート / 計）+ 人数（社員・技能実習生 / パート / 計）
     const EMP_CLASSES_INNER = ['社員・技能実習生', 'パート'];
     EMP_CLASSES_INNER.forEach((ec, ecIdx) => {
       const vals = months.map((_, mi) =>
@@ -844,7 +995,220 @@ function renderSummary() {
   });
 
   html += '</tbody></table></div>';
-  main.innerHTML += html;
+  content.innerHTML = html;
+}
+
+/* ── Summary: グラフタブ ───────────────────────────────────────── */
+function buildSiteSeriesList(site) {
+  const { employees, months } = allData;
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+  const EMP_CLASSES = ['社員・技能実習生', 'パート'];
+  const siteEmps = employees.filter(e => e.base === site);
+  const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
+
+  const series = [];
+  let colorIdx = 0;
+  siteWTs.forEach(wt => {
+    EMP_CLASSES.forEach(ec => {
+      const emps = siteEmps.filter(e => e.workType === wt && e.empClass === ec);
+      if (!emps.length) return;
+      const data = months.map((_, mi) => {
+        const vals = emps.map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0) * 10) / 10 : null;
+      });
+      series.push({
+        label: `${wt} / ${ec}`,
+        data,
+        color: SUMMARY_COLORS[colorIdx++ % SUMMARY_COLORS.length],
+        isTotal: false,
+      });
+    });
+  });
+
+  // 拠点合計
+  const totalData = months.map((_, mi) => {
+    const vals = siteEmps.map(e => e.hours[mi]).filter(h => h !== null);
+    return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0) * 10) / 10 : null;
+  });
+  series.push({ label: '拠点合計（時間）', data: totalData, color: TOTAL_COLOR, isTotal: true });
+
+  return series;
+}
+
+function renderSummaryChart() {
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => allData.employees.some(e => e.base === s));
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach(site => {
+    const siteId = 'sc_' + site;
+    const series = buildSiteSeriesList(site);
+    html += `
+      <div class="schart-section">
+        <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
+        <div class="schart-controls" id="ctrl-${siteId}">
+          ${series.map((s, i) => `
+            <label class="series-check">
+              <input type="checkbox" data-site="${siteId}" data-idx="${i}" checked
+                     onchange="updateSummaryChart('${siteId}')">
+              <span class="color-dot" style="background:${s.color}"></span>
+              ${s.label}
+            </label>`).join('')}
+        </div>
+        <div class="schart-wrap"><canvas id="${siteId}"></canvas></div>
+      </div>`;
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  activeSites.forEach(site => {
+    const siteId = 'sc_' + site;
+    const series = buildSiteSeriesList(site);
+    const ctx = document.getElementById(siteId).getContext('2d');
+    const datasets = series.map(s => ({
+      label: s.label,
+      data: s.data,
+      borderColor: s.color,
+      backgroundColor: s.color + '22',
+      borderWidth: s.isTotal ? 2.5 : 1.8,
+      borderDash: s.isTotal ? [6, 4] : [],
+      pointRadius: s.isTotal ? 0 : 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+      order: s.isTotal ? -1 : 0,
+    }));
+    summaryChartInstances[siteId] = new Chart(ctx, {
+      type: 'line',
+      data: { labels: allData.months, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1e2235',
+            borderColor: '#3a3f5c',
+            borderWidth: 1,
+            titleColor: '#e2e8f0',
+            bodyColor: '#a0aec0',
+            callbacks: {
+              label: ctx => ctx.parsed.y !== null
+                ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h` : null,
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#8892a4', font: { size: 11 }, maxRotation: 45 },
+            grid: { color: '#1e2235' },
+          },
+          y: {
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' },
+            suggestedMin: 0,
+            title: { display: true, text: '実質勤務時間 (h)', color: '#8892a4', font: { size: 11 } },
+          },
+        },
+      },
+    });
+  });
+}
+
+function updateSummaryChart(siteId) {
+  const chart = summaryChartInstances[siteId];
+  if (!chart) return;
+  document.querySelectorAll(`[data-site="${siteId}"]`).forEach((cb, i) => {
+    chart.data.datasets[i].hidden = !cb.checked;
+  });
+  chart.update();
+}
+
+/* ── Summary: 名簿タブ ─────────────────────────────────────────── */
+let rosterSortCol = 'site';
+let rosterSortAsc = true;
+
+function renderSummaryRoster() {
+  const { months, employees } = allData;
+  const content = document.getElementById('summary-content');
+
+  const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+
+  function rosterSorted(col) {
+    const copy = [...employees];
+    copy.sort((a, b) => {
+      let va, vb;
+      if (col === 'site') {
+        va = (SITE_ORDER[a.base] ?? 99) * 1000 + orderedWorkTypes.indexOf(a.workType) * 10;
+        vb = (SITE_ORDER[b.base] ?? 99) * 1000 + orderedWorkTypes.indexOf(b.workType) * 10;
+      } else if (col === 'work')    { va = a.workType; vb = b.workType; }
+      else if (col === 'emp')       { va = a.employment; vb = b.employment; }
+      else if (col === 'name')      { va = a.name; vb = b.name; }
+      else if (col === 'total')     { va = a.hours.reduce((s,h)=>s+(h||0),0); vb = b.hours.reduce((s,h)=>s+(h||0),0); }
+      else if (col === 'avg')       {
+        const ha = a.hours.filter(h=>h!==null); va = ha.length ? ha.reduce((s,h)=>s+h,0)/ha.length : 0;
+        const hb = b.hours.filter(h=>h!==null); vb = hb.length ? hb.reduce((s,h)=>s+h,0)/hb.length : 0;
+      }
+      if (typeof va === 'string') return rosterSortAsc ? va.localeCompare(vb,'ja') : vb.localeCompare(va,'ja');
+      return rosterSortAsc ? va - vb : vb - va;
+    });
+    return copy;
+  }
+
+  function buildRosterTable() {
+    const sorted = rosterSorted(rosterSortCol);
+    const recentMonths = allData.months.slice(-3);
+    const recentIdxs = recentMonths.map(m => allData.months.indexOf(m));
+
+    const cols = [
+      { key: 'site', label: '拠点' },
+      { key: 'work', label: '業務区分' },
+      { key: 'emp',  label: '雇用区分' },
+      { key: 'name', label: '氏名' },
+      { key: 'total', label: '累計 (h)' },
+      { key: 'avg',   label: '月平均 (h)' },
+    ];
+
+    let html = `<div class="roster-panel"><table class="roster-table"><thead><tr>`;
+    cols.forEach(c => {
+      const cls = c.key === 'site' ? ' col-site' : '';
+      const sortCls = rosterSortCol === c.key ? (rosterSortAsc ? ' sort-asc' : ' sort-desc') : '';
+      html += `<th class="${cls}${sortCls}" onclick="rosterSort('${c.key}')">${c.label}</th>`;
+    });
+    recentMonths.forEach(m => { html += `<th>${m}</th>`; });
+    html += '</tr></thead><tbody>';
+
+    sorted.forEach(e => {
+      const total = e.hours.reduce((s,h)=>s+(h||0),0);
+      const active = e.hours.filter(h=>h!==null);
+      const avg = active.length ? total/active.length : null;
+      html += `<tr>
+        <td class="col-site" style="color:${SITE_COLORS[e.base]||'#fff'}">${e.base}</td>
+        <td>${e.workType || '—'}</td>
+        <td>${e.employment || '—'}</td>
+        <td>${e.name}</td>
+        <td class="num">${total > 0 ? total.toFixed(1) + ' h' : '—'}</td>
+        <td class="num">${avg !== null ? avg.toFixed(1) + ' h' : '—'}</td>`;
+      recentIdxs.forEach(mi => {
+        const h = e.hours[mi];
+        html += `<td class="num">${h !== null ? h.toFixed(1) + ' h' : '—'}</td>`;
+      });
+      html += '</tr>';
+    });
+
+    html += `</tbody></table></div>`;
+    return html;
+  }
+
+  content.innerHTML = buildRosterTable();
+
+  window.rosterSort = function(col) {
+    if (rosterSortCol === col) rosterSortAsc = !rosterSortAsc;
+    else { rosterSortCol = col; rosterSortAsc = true; }
+    content.innerHTML = buildRosterTable();
+  };
 }
 
 /* ── Main ────────────────────────────────────────────────────────── */
