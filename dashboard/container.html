@@ -1122,7 +1122,9 @@ async function weeklyZoomRenderWeight() {
   // 自社菌床ロットの場合は同一ロットの全菌床エントリをまとめて表示（重複除去）
   const jishaResults = [];
   if (jishaEntry) {
-    console.log('[自社菌床 weight] containers:', (jishaEntry.containers || []).map(w => `lot="${w.lot}" no=${w.containerNo}`));
+    const jishaContainers = jishaEntry.containers || [];
+    console.log('[自社菌床 weight] total:', jishaContainers.length);
+    jishaContainers.slice(0, 8).forEach((w, i) => console.log(`  [${i}] lot="${w.lot}" no=${w.containerNo} startDate=${w.startDate}`));
     const seenLots = new Set();
     containers.forEach(c => {
       const lot = c.lot || '';
