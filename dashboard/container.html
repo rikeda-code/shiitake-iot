@@ -1053,23 +1053,27 @@ function weeklyZoomRender() {
       // reset accumulators for dataset generation
       cm=0; cl=0; cxl=0; cbg=0;
       datasets = [
-        { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y' },
-        { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y' },
-        { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y' },
-        { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y' },
+        { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
         {
-          label: '累計規格品率(M+L+2L)',
+          label: '累計パック品率(%)',
           data: packRateData,
           type: 'line',
           yAxisID: 'yRate',
           borderColor: '#f43f5e',
-          backgroundColor: '#f43f5e33',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5,
+          backgroundColor: '#f43f5e',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: '#f43f5e',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1.5,
+          pointHoverRadius: 6,
           fill: false,
           tension: 0.3,
           stack: undefined,
+          order: 0,
         },
       ];
       const comboOpts = {
