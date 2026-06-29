@@ -310,6 +310,53 @@
     }
     .roster-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .roster-table tbody tr:hover td { background: var(--surface2) !important; }
+
+    /* ── Roster filters ── */
+    .roster-filters {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-bottom: none;
+      border-radius: 0 8px 0 0;
+    }
+    .roster-filter-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .roster-filter-label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-right: 2px;
+      white-space: nowrap;
+    }
+    .roster-pill {
+      padding: 4px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .roster-pill.active {
+      border-color: #4a5070;
+      color: var(--text);
+      background: var(--surface2);
+    }
+    .roster-panel {
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+    }
     .summary-table {
       border-collapse: collapse;
       font-size: 0.82rem;
@@ -434,7 +481,7 @@ function workTypeClass(wt) {
   return '';
 }
 
-let allData = null; // { months, employees: [{name, base, workType, employment, empClass, hours:[]}] }
+let allData = null; // { months, employees, nameLabel }
 let activeBase = null;
 let activeMode = null; // 'site' | 'summary'
 let chartInstance = null;
@@ -581,7 +628,8 @@ function buildDataset(json) {
     employees.push({ name, base, workType, employment, empClass, hours });
   });
 
-  return { months, employees };
+  const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
+  return { months, employees, nameLabel };
 }
 
 function inferNextMonth(base, occurrence) {
@@ -854,7 +902,7 @@ function renderSummary() {
       const tab = btn.dataset.tab;
       if (tab === 'table')  renderSummaryTable();
       else if (tab === 'chart')  renderSummaryChart();
-      else renderSummaryRoster();
+      else { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
     };
   });
 
@@ -1128,86 +1176,122 @@ function updateSummaryChart(siteId) {
 /* ── Summary: 名簿タブ ─────────────────────────────────────────── */
 let rosterSortCol = 'site';
 let rosterSortAsc = true;
+let rosterFilterSites = new Set(SITES);
+let rosterFilterEmps  = null; // null = all; initialised on first render
 
 function renderSummaryRoster() {
-  const { months, employees } = allData;
+  const { months, employees, nameLabel } = allData;
   const content = document.getElementById('summary-content');
 
   const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
   const orderedWorkTypes = getOrderedWorkTypes(employees);
 
+  // Unique employment values from data (preserve order of appearance)
+  const allEmpTypes = [];
+  employees.forEach(e => {
+    const v = e.employment || '（未分類）';
+    if (!allEmpTypes.includes(v)) allEmpTypes.push(v);
+  });
+  if (rosterFilterEmps === null) rosterFilterEmps = new Set(allEmpTypes);
+
+  function filteredEmployees() {
+    return employees.filter(e =>
+      rosterFilterSites.has(e.base) &&
+      rosterFilterEmps.has(e.employment || '（未分類）')
+    );
+  }
+
   function rosterSorted(col) {
-    const copy = [...employees];
+    const copy = [...filteredEmployees()];
     copy.sort((a, b) => {
       let va, vb;
       if (col === 'site') {
         va = (SITE_ORDER[a.base] ?? 99) * 1000 + orderedWorkTypes.indexOf(a.workType) * 10;
         vb = (SITE_ORDER[b.base] ?? 99) * 1000 + orderedWorkTypes.indexOf(b.workType) * 10;
-      } else if (col === 'work')    { va = a.workType; vb = b.workType; }
-      else if (col === 'emp')       { va = a.employment; vb = b.employment; }
-      else if (col === 'name')      { va = a.name; vb = b.name; }
-      else if (col === 'total')     { va = a.hours.reduce((s,h)=>s+(h||0),0); vb = b.hours.reduce((s,h)=>s+(h||0),0); }
-      else if (col === 'avg')       {
-        const ha = a.hours.filter(h=>h!==null); va = ha.length ? ha.reduce((s,h)=>s+h,0)/ha.length : 0;
-        const hb = b.hours.filter(h=>h!==null); vb = hb.length ? hb.reduce((s,h)=>s+h,0)/hb.length : 0;
-      }
+      } else if (col === 'work') { va = a.workType; vb = b.workType; }
+      else if (col === 'emp')    { va = a.employment; vb = b.employment; }
+      else if (col === 'name')   { va = a.name; vb = b.name; }
       if (typeof va === 'string') return rosterSortAsc ? va.localeCompare(vb,'ja') : vb.localeCompare(va,'ja');
       return rosterSortAsc ? va - vb : vb - va;
     });
     return copy;
   }
 
-  function buildRosterTable() {
+  function buildContent() {
     const sorted = rosterSorted(rosterSortCol);
     const recentMonths = allData.months.slice(-3);
     const recentIdxs = recentMonths.map(m => allData.months.indexOf(m));
 
-    const cols = [
+    const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+
+    // Filter bar
+    let filterHtml = `<div class="roster-filters">
+      <div class="roster-filter-group">
+        <span class="roster-filter-label">拠点</span>`;
+    activeSites.forEach(s => {
+      const active = rosterFilterSites.has(s);
+      filterHtml += `<button class="roster-pill${active ? ' active' : ''}" onclick="rosterToggleSite('${s}')">${s}</button>`;
+    });
+    filterHtml += `</div><div class="roster-filter-group"><span class="roster-filter-label">雇用区分</span>`;
+    allEmpTypes.forEach(et => {
+      const active = rosterFilterEmps.has(et);
+      filterHtml += `<button class="roster-pill${active ? ' active' : ''}" onclick="rosterToggleEmp('${et.replace(/'/g, "\\'")}')">${et}</button>`;
+    });
+    filterHtml += `</div></div>`;
+
+    const tableCols = [
       { key: 'site', label: '拠点' },
       { key: 'work', label: '業務区分' },
       { key: 'emp',  label: '雇用区分' },
-      { key: 'name', label: '氏名' },
-      { key: 'total', label: '累計 (h)' },
-      { key: 'avg',   label: '月平均 (h)' },
+      { key: 'name', label: nameLabel || '氏名' },
     ];
 
-    let html = `<div class="roster-panel"><table class="roster-table"><thead><tr>`;
-    cols.forEach(c => {
+    let tableHtml = `<div class="roster-panel"><table class="roster-table"><thead><tr>`;
+    tableCols.forEach(c => {
       const cls = c.key === 'site' ? ' col-site' : '';
       const sortCls = rosterSortCol === c.key ? (rosterSortAsc ? ' sort-asc' : ' sort-desc') : '';
-      html += `<th class="${cls}${sortCls}" onclick="rosterSort('${c.key}')">${c.label}</th>`;
+      tableHtml += `<th class="${cls}${sortCls}" onclick="rosterSort('${c.key}')">${c.label}</th>`;
     });
-    recentMonths.forEach(m => { html += `<th>${m}</th>`; });
-    html += '</tr></thead><tbody>';
+    recentMonths.forEach(m => { tableHtml += `<th>${m}</th>`; });
+    tableHtml += '</tr></thead><tbody>';
 
-    sorted.forEach(e => {
-      const total = e.hours.reduce((s,h)=>s+(h||0),0);
-      const active = e.hours.filter(h=>h!==null);
-      const avg = active.length ? total/active.length : null;
-      html += `<tr>
-        <td class="col-site" style="color:${SITE_COLORS[e.base]||'#fff'}">${e.base}</td>
-        <td>${e.workType || '—'}</td>
-        <td>${e.employment || '—'}</td>
-        <td>${e.name}</td>
-        <td class="num">${total > 0 ? total.toFixed(1) + ' h' : '—'}</td>
-        <td class="num">${avg !== null ? avg.toFixed(1) + ' h' : '—'}</td>`;
-      recentIdxs.forEach(mi => {
-        const h = e.hours[mi];
-        html += `<td class="num">${h !== null ? h.toFixed(1) + ' h' : '—'}</td>`;
+    if (sorted.length === 0) {
+      tableHtml += `<tr><td colspan="${tableCols.length + recentMonths.length}" style="text-align:center;color:var(--muted);padding:24px">該当する従業員がいません</td></tr>`;
+    } else {
+      sorted.forEach(e => {
+        tableHtml += `<tr>
+          <td class="col-site" style="color:${SITE_COLORS[e.base]||'#fff'}">${e.base}</td>
+          <td>${e.workType || '—'}</td>
+          <td>${e.employment || '—'}</td>
+          <td>${e.name}</td>`;
+        recentIdxs.forEach(mi => {
+          const h = e.hours[mi];
+          tableHtml += `<td class="num">${h !== null ? h.toFixed(1) + ' h' : '—'}</td>`;
+        });
+        tableHtml += '</tr>';
       });
-      html += '</tr>';
-    });
+    }
+    tableHtml += `</tbody></table></div>`;
 
-    html += `</tbody></table></div>`;
-    return html;
+    return filterHtml + tableHtml;
   }
 
-  content.innerHTML = buildRosterTable();
+  content.innerHTML = buildContent();
 
   window.rosterSort = function(col) {
     if (rosterSortCol === col) rosterSortAsc = !rosterSortAsc;
     else { rosterSortCol = col; rosterSortAsc = true; }
-    content.innerHTML = buildRosterTable();
+    content.innerHTML = buildContent();
+  };
+  window.rosterToggleSite = function(site) {
+    if (rosterFilterSites.has(site)) rosterFilterSites.delete(site);
+    else rosterFilterSites.add(site);
+    content.innerHTML = buildContent();
+  };
+  window.rosterToggleEmp = function(et) {
+    if (rosterFilterEmps.has(et)) rosterFilterEmps.delete(et);
+    else rosterFilterEmps.add(et);
+    content.innerHTML = buildContent();
   };
 }
 
