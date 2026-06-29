@@ -1048,7 +1048,7 @@ function weeklyZoomRender() {
       const packRateData = sizeRows.map(r => {
         cm+=r.m; cl+=r.l; cxl+=r.xl; cbg+=r.bg;
         const total = cm+cl+cxl+cbg;
-        return total > 0 ? +((cbg/total)*100).toFixed(1) : null;
+        return total > 0 ? +(((cm+cl+cxl)/total)*100).toFixed(1) : null;
       });
       // reset accumulators for dataset generation
       cm=0; cl=0; cxl=0; cbg=0;
@@ -1058,7 +1058,7 @@ function weeklyZoomRender() {
         { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y' },
         { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y' },
         {
-          label: '累計パック品率',
+          label: '累計規格品率(M+L+2L)',
           data: packRateData,
           type: 'line',
           yAxisID: 'yRate',
