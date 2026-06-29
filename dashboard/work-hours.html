@@ -74,8 +74,7 @@
       margin-bottom: -1px;
     }
     .tab-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
-    .tab-btn.summary-tab { border-color: #f97316; color: #f97316; }
-    .tab-btn.summary-tab.active { color: var(--text); border-color: var(--border); }
+
 
     main {
       padding: 0 32px 32px;
@@ -394,7 +393,7 @@ function buildDataset(json) {
   const EMP_KEYWORDS  = ['社員', 'アルバイト', 'パート', '技能実習', '正社員', '契約社員'];
 
   // Tally how many rows have each known value type per column
-  const baseScore = {}, workScore = {}, empScore = {};
+  const baseScore = {}, workScore = {}, empScore = {}, nameScore = {};
   const sampleRows = rows.slice(0, 30);
 
   sampleRows.forEach(row => {
@@ -402,12 +401,10 @@ function buildDataset(json) {
     for (let i = 0; i < firstMonthIdx; i++) {
       const v = String(cells[i]?.v ?? '').trim();
       if (!v) continue;
-      if (VALID_BASES.has(v))
-        baseScore[i] = (baseScore[i] || 0) + 1;
+      if (VALID_BASES.has(v))                             baseScore[i] = (baseScore[i] || 0) + 1;
       if (VALID_WORKS.has(v) || ['栽培','出荷','配送'].some(w => v.includes(w)))
-        workScore[i] = (workScore[i] || 0) + 1;
-      if (EMP_KEYWORDS.some(k => v.includes(k)))
-        empScore[i]  = (empScore[i]  || 0) + 1;
+                                                          workScore[i] = (workScore[i] || 0) + 1;
+      if (EMP_KEYWORDS.some(k => v.includes(k)))         empScore[i]  = (empScore[i]  || 0) + 1;
     }
   });
 
@@ -463,13 +460,7 @@ function buildDataset(json) {
     employees.push({ name, base, workType, employment, empClass, hours });
   });
 
-  // Debug info
-  const debugCols = cols.slice(0, Math.min(cols.length, firstMonthIdx))
-    .map((c, i) => `${i}:${(c?.label||'').trim()||'(空)'}`)
-    .join(', ');
-  const debugIdx = `base=${baseIdx} emp=${empIdx} work=${workIdx} name=${nameIdx}`;
-
-  return { months, employees, debugCols, debugIdx };
+  return { months, employees };
 }
 
 function inferNextMonth(base, occurrence) {
@@ -698,16 +689,9 @@ function fmtH(h) {
 }
 
 function renderSummary() {
-  const { months, employees, debugCols, debugIdx } = allData;
+  const { months, employees } = allData;
   const main = document.getElementById('main');
-
-  // Debug panel: show column detection results
-  const uniqWorkTypes = [...new Set(employees.map(e => e.workType).filter(Boolean))];
-  main.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:12px 16px;font-size:0.75rem;color:#8892a4;margin-bottom:0">
-    <b style="color:#f97316">列検出結果</b>: ${debugIdx}<br>
-    <b>列ラベル</b>: ${debugCols}<br>
-    <b>業務区分の値（先頭10件）</b>: ${uniqWorkTypes.slice(0,10).join(' / ') || '（なし）'}
-  </div>`;
+  main.innerHTML = '';
 
   // Determine work-type display order (in appearance order from data, plus 拠点合計 at end)
   const workTypeOrder = [];
@@ -746,6 +730,11 @@ function renderSummary() {
       const wtEmps = siteEmps.filter(e => e.workType === wt);
       const wtClass = workTypeClass(wt);
       const isSep = wtIdx > 0;
+
+      // Rows per work type:
+      // 時間: 社員, パート, 計
+      // 人数: 社員, パート, 計
+      // 平均: 社員, パート, 計
 
       const kinds = [
         { label: '計／時間', sub: EMP_CLASSES.map(ec => ({
@@ -791,6 +780,7 @@ function renderSummary() {
       const wtRowCount = 9;
 
       kinds.forEach(kind => {
+        // Sub rows (社員・技能実習生, パート)
         kind.sub.forEach(sub => {
           html += `<tr class="${wtClass}${isSep && wtFirstRow ? ' section-sep' : ''}">`;
           if (firstRow) {
@@ -807,6 +797,7 @@ function renderSummary() {
           });
           html += '</tr>';
         });
+        // Total row
         html += `<tr class="${wtClass} kind-total">`;
         html += `<td class="col-emp total-row">${kind.label}</td>`;
         kind.total.forEach(v => {
