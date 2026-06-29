@@ -53,6 +53,7 @@
       display: flex;
       gap: 4px;
       padding: 20px 32px 0;
+      flex-wrap: wrap;
     }
     .tab-btn {
       padding: 10px 24px;
@@ -73,6 +74,8 @@
       margin-bottom: -1px;
     }
     .tab-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+    .tab-btn.summary-tab { border-color: #f97316; color: #f97316; }
+    .tab-btn.summary-tab.active { color: var(--text); border-color: var(--border); }
 
     main {
       padding: 0 32px 32px;
@@ -179,6 +182,76 @@
     }
     .error-msg { color: #f87171; }
 
+    /* ── Summary table ── */
+    .summary-panel {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      overflow-x: auto;
+    }
+    .summary-table {
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      min-width: 700px;
+      width: 100%;
+    }
+    .summary-table th {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 12px;
+      text-align: center;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .summary-table th.col-site { text-align: left; position: sticky; left: 0; z-index: 3; }
+    .summary-table th.col-work { text-align: left; }
+    .summary-table th.col-emp  { text-align: left; }
+    .summary-table td {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .summary-table td.col-site {
+      font-weight: 700;
+      font-size: 0.85rem;
+      vertical-align: top;
+      color: var(--text);
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+    }
+    .summary-table td.col-work {
+      font-weight: 600;
+      vertical-align: top;
+    }
+    .summary-table td.col-emp {
+      color: var(--muted);
+      padding-left: 8px;
+    }
+    .summary-table td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .summary-table td.total-row {
+      font-weight: 700;
+      color: var(--text);
+    }
+    /* Row type colors */
+    .summary-table tr.wt-栽培      td:not(.col-site) { background: rgba(52,211,153,0.06); }
+    .summary-table tr.wt-出荷      td:not(.col-site) { background: rgba(250,204,21,0.06); }
+    .summary-table tr.wt-配送      td:not(.col-site) { background: rgba(248,113,113,0.06); }
+    .summary-table tr.wt-拠点      td:not(.col-site) { background: rgba(249,115,22,0.08); }
+    .summary-table tr.kind-total   td { font-weight: 700; }
+    .summary-table tr.section-sep  td { border-top: 2px solid var(--border); }
+
     @media (max-width: 640px) {
       header, .tabs, main { padding-left: 16px; padding-right: 16px; }
       .chart-wrap { height: 280px; }
@@ -205,13 +278,13 @@
 const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
 
+const SITES = ['いなべ', '群馬', '南丹'];
 const SITE_COLORS = {
   'いなべ': '#38bdf8',
   '群馬':   '#a78bfa',
   '南丹':   '#34d399',
 };
 
-// Distinct color palette for individual employees
 const EMP_COLORS = [
   '#38bdf8','#a78bfa','#34d399','#f97316','#f43f5e','#facc15',
   '#fb923c','#4ade80','#818cf8','#e879f9','#2dd4bf','#fbbf24',
@@ -222,13 +295,31 @@ const EMP_COLORS = [
   '#fce7f3',
 ];
 
-let allData = null; // { months, employees: [{name, base, employment, hours:[]}] }
+// Map raw 雇用区分 value to summary category
+function classifyEmp(emp) {
+  if (!emp) return 'パート';
+  if (emp.includes('社員') || emp.includes('技能実習')) return '社員・技能実習生';
+  return 'パート'; // アルバイト, パート, etc.
+}
+
+// Work-type color class
+function workTypeClass(wt) {
+  if (!wt) return '';
+  if (wt.includes('拠点')) return 'wt-拠点';
+  if (wt.includes('配送')) return 'wt-配送';
+  if (wt.includes('出荷')) return 'wt-出荷';
+  if (wt.includes('栽培')) return 'wt-栽培';
+  return '';
+}
+
+let allData = null; // { months, employees: [{name, base, workType, employment, empClass, hours:[]}] }
 let activeBase = null;
+let activeMode = null; // 'site' | 'summary'
 let chartInstance = null;
 
 /* ── Fetch & parse ─────────────────────────────────────────────── */
 async function fetchSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=1`;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=2`;
   const res = await fetch(url);
   const text = await res.text();
   return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
@@ -236,18 +327,14 @@ async function fetchSheet() {
 
 function parseDuration(cell) {
   if (!cell) return null;
-  // gviz returns duration as fraction of a day (same as Google Sheets internal)
-  // Multiply by 24 to get hours.
   if (typeof cell.v === 'number') {
     const h = cell.v * 24;
     return h > 0 ? Math.round(h * 10) / 10 : null;
   }
-  // Fallback: parse formatted string "HHH:MM" or "HHH:MM:SS"
   if (cell.f) {
     const f = String(cell.f).replace(/^-/, '').trim();
     const parts = f.split(':').map(Number);
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      // If first part looks too large to be hours (>500), treat as minutes
       const h = parts[0] > 500
         ? parts[0] / 60 + parts[1] / 3600
         : parts[0] + parts[1] / 60;
@@ -257,53 +344,67 @@ function parseDuration(cell) {
   return null;
 }
 
+function shimeToMonth(label) {
+  const m = label.match(/(\d+)\/\d+締/);
+  if (!m) return label;
+  let closeMonth = parseInt(m[1]);
+  let workMonth = closeMonth - 1;
+  let year = 2025;
+  if (workMonth <= 0) { workMonth += 12; year = 2024; }
+  if (closeMonth <= 6) year = 2026;
+  else if (closeMonth <= 12) year = 2025;
+  return `${year}年${workMonth}月`;
+}
+
 function buildDataset(json) {
   const cols = json.table.cols;
   const rows = json.table.rows || [];
 
-  // Find column indices by label
-  let baseIdx = -1, nameIdx = -1, empIdx = -1;
-  const jissituCols = []; // {month, idx}
+  let baseIdx = -1, nameIdx = -1, empIdx = -1, workIdx = -1;
+  const jissituCols = [];
 
   cols.forEach((c, i) => {
+    if (!c) return;
     const label = (c.label || '').trim();
     if (label === '拠点') baseIdx = i;
     if (label === '雇用区分') empIdx = i;
-    // Name column: unlabeled column after 社員番号 — detect by position heuristic
-    // We'll detect name column as the first unlabeled string column after index 5
+    if (label === '業務区分') workIdx = i;
     if (label.includes('実質勤務時間')) {
-      const monthMatch = label.match(/^(.+?)\/実質/);
-      jissituCols.push({ month: monthMatch ? monthMatch[1] : `col${i}`, idx: i });
+      const shimeMatch = label.match(/(\d+\/\d+締)/);
+      const monthLabel = shimeMatch ? shimeToMonth(shimeMatch[1]) : label;
+      jissituCols.push({ month: monthLabel, idx: i });
     }
   });
 
-  // Name column: find unlabeled or empty-labeled string column between 社員番号 and month data
-  // It's typically the 8th column (index 7 in 0-based)
+  if (jissituCols.length === 0) {
+    cols.forEach((c, i) => {
+      if (!c) return;
+      const label = (c.label || '').trim();
+      if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
+        jissituCols.push({ month: shimeToMonth(label), idx: i + 2 });
+      }
+    });
+  }
+
   if (nameIdx === -1) {
-    // Find column just before the first 実質勤務時間 group
-    // Usually the pattern is: ...社員番号, (name), 総勤務, 有給, 実質...
     const firstJissitu = jissituCols.length > 0 ? jissituCols[0].idx : 99;
     for (let i = firstJissitu - 3; i < firstJissitu; i++) {
-      if (i >= 0 && (cols[i].label || '').trim() === '') {
-        nameIdx = i;
-        break;
+      if (i >= 0 && cols[i] && (cols[i].label || '').trim() === '') {
+        nameIdx = i; break;
       }
     }
-    // Fallback: column index 7
     if (nameIdx === -1) nameIdx = 7;
   }
 
   if (baseIdx === -1) baseIdx = 3;
-  if (empIdx === -1) empIdx = 2;
+  if (empIdx  === -1) empIdx  = 2;
+  if (workIdx === -1) workIdx = 4; // fallback
 
-  // Deduplicate months (handle repeated "2026年2月" → use occurrence order)
+  // Deduplicate months
   const monthCounts = {};
   const months = jissituCols.map(({ month }) => {
     monthCounts[month] = (monthCounts[month] || 0) + 1;
-    if (monthCounts[month] > 1) {
-      // Try to infer next month
-      return inferNextMonth(month, monthCounts[month]);
-    }
+    if (monthCounts[month] > 1) return inferNextMonth(month, monthCounts[month]);
     return month;
   });
 
@@ -319,20 +420,19 @@ function buildDataset(json) {
     if (!name) return;
 
     const employment = String(cells[empIdx]?.v ?? '').trim();
+    const workType   = String(cells[workIdx]?.v ?? '').trim();
+    const empClass   = classifyEmp(employment);
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
-
-    // Skip rows where all hours are null (summary/blank rows)
     if (hours.every(h => h === null)) return;
 
-    employees.push({ name, base, employment, hours });
+    employees.push({ name, base, workType, employment, empClass, hours });
   });
 
   return { months, employees };
 }
 
 function inferNextMonth(base, occurrence) {
-  // Parse "2026年2月" → add (occurrence-1) months
   const m = base.match(/^(\d+)年(\d+)月$/);
   if (!m) return `${base}(${occurrence})`;
   let year = parseInt(m[1]);
@@ -341,25 +441,42 @@ function inferNextMonth(base, occurrence) {
   return `${year}年${month}月`;
 }
 
-/* ── Render ────────────────────────────────────────────────────── */
+/* ── Tabs ──────────────────────────────────────────────────────── */
 function renderTabs(bases) {
   const tabsEl = document.getElementById('tabs');
   tabsEl.innerHTML = '';
+
   bases.forEach((base, i) => {
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
     btn.textContent = base;
-    btn.style.setProperty('--tab-color', SITE_COLORS[base] || '#38bdf8');
+    btn.dataset.base = base;
     btn.onclick = () => {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       activeBase = base;
+      activeMode = 'site';
+      document.getElementById('main').innerHTML = '';
       renderBasePanel();
     };
     tabsEl.appendChild(btn);
   });
+
+  // Summary tab
+  const sBtn = document.createElement('button');
+  sBtn.className = 'tab-btn summary-tab';
+  sBtn.textContent = '📊 サマリー';
+  sBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    sBtn.classList.add('active');
+    activeMode = 'summary';
+    document.getElementById('main').innerHTML = '';
+    renderSummary();
+  };
+  tabsEl.appendChild(sBtn);
 }
 
+/* ── Individual base panel ─────────────────────────────────────── */
 function renderBasePanel() {
   const main = document.getElementById('main');
   const { months, employees } = allData;
@@ -372,7 +489,7 @@ function renderBasePanel() {
         <div class="kpi-row" id="kpi-row"></div>
         <div class="controls">
           <div class="control-group">
-            <div class="control-label">従業員フィルター</div>
+            <div class="control-label">雇用区分フィルター</div>
             <div class="select-btns">
               <button class="select-btn" onclick="toggleAll(true)">全選択</button>
               <button class="select-btn" onclick="toggleAll(false)">全解除</button>
@@ -384,7 +501,6 @@ function renderBasePanel() {
       </div>`;
   }
 
-  // KPIs
   const kpiRow = document.getElementById('kpi-row');
   const validHours = baseEmps.flatMap(e => e.hours.filter(h => h !== null));
   const avgPerMonth = months.map((_, mi) => {
@@ -412,7 +528,6 @@ function renderBasePanel() {
       <div class="kpi-value">${months.length} ヶ月</div>
     </div>`;
 
-  // Employment type filter checkboxes (雇用区分グループ)
   const empFilter = document.getElementById('emp-filter');
   empFilter.innerHTML = '';
   const empTypes = [...new Set(baseEmps.map(e => e.employment || '（未分類）'))].sort();
@@ -433,8 +548,7 @@ function renderBasePanel() {
 }
 
 function getSelectedEmployees() {
-  const { employees } = allData;
-  const baseEmps = employees.filter(e => e.base === activeBase);
+  const baseEmps = allData.employees.filter(e => e.base === activeBase);
   const selectedTypes = new Set(
     [...document.querySelectorAll(`[id^="emptype-${activeBase}-"]`)]
       .filter(cb => cb.checked)
@@ -448,13 +562,12 @@ function buildChart() {
   const baseEmps = allData.employees.filter(e => e.base === activeBase);
   const selected = getSelectedEmployees();
 
-  // Build employment type → color index map
   const empTypes = [...new Set(baseEmps.map(e => e.employment || '（未分類）'))].sort();
   const typeColorIdx = {};
   empTypes.forEach((t, i) => { typeColorIdx[t] = i; });
 
-  const datasets = selected.map((emp, si) => {
-    const typeIdx = typeColorIdx[emp.employment || '（未分類）'] ?? si;
+  const datasets = selected.map(emp => {
+    const typeIdx = typeColorIdx[emp.employment || '（未分類）'] ?? 0;
     const color = EMP_COLORS[typeIdx % EMP_COLORS.length];
     return {
       label: `${emp.name}（${emp.employment || '未分類'}）`,
@@ -469,7 +582,6 @@ function buildChart() {
     };
   });
 
-  // Site average line
   const avgData = months.map((_, mi) => {
     const vals = baseEmps.map(e => e.hours[mi]).filter(h => h !== null);
     return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length * 10)/10 : null;
@@ -500,12 +612,7 @@ function buildChart() {
       plugins: {
         legend: {
           display: datasets.length <= 10,
-          labels: {
-            color: '#8892a4',
-            font: { size: 11 },
-            boxWidth: 12,
-            padding: 10,
-          },
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 10 },
         },
         tooltip: {
           backgroundColor: '#1e2235',
@@ -527,11 +634,7 @@ function buildChart() {
           grid: { color: '#1e2235' },
         },
         y: {
-          ticks: {
-            color: '#8892a4',
-            font: { size: 11 },
-            callback: v => `${v} h`,
-          },
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
           grid: { color: '#1e2235' },
           suggestedMin: 0,
           title: { display: true, text: '実質勤務時間 (h)', color: '#8892a4', font: { size: 11 } },
@@ -544,26 +647,155 @@ function buildChart() {
 function updateChart() { buildChart(); }
 
 function toggleAll(checked) {
-  document.querySelectorAll(`[id^="emptype-${activeBase}-"]`).forEach(cb => {
-    cb.checked = checked;
-  });
+  document.querySelectorAll(`[id^="emptype-${activeBase}-"]`).forEach(cb => { cb.checked = checked; });
   updateChart();
 }
 
-/* ── Main ──────────────────────────────────────────────────────── */
+/* ── Summary table ─────────────────────────────────────────────── */
+function fmtH(h) {
+  if (h === null || h === undefined || isNaN(h)) return '—';
+  return h.toFixed(1) + ' h';
+}
+
+function renderSummary() {
+  const { months, employees } = allData;
+  const main = document.getElementById('main');
+
+  // Determine work-type display order (in appearance order from data, plus 拠点合計 at end)
+  const workTypeOrder = [];
+  employees.forEach(e => {
+    if (e.workType && !workTypeOrder.includes(e.workType)) workTypeOrder.push(e.workType);
+  });
+  // Put 拠点 entries last
+  const nonKyoten = workTypeOrder.filter(wt => !wt.includes('拠点'));
+  const kyoten    = workTypeOrder.filter(wt => wt.includes('拠点'));
+  const orderedWorkTypes = [...nonKyoten, ...kyoten];
+
+  const EMP_CLASSES = ['社員・技能実習生', 'パート'];
+
+  // Build table HTML
+  let html = `<div class="summary-panel"><table class="summary-table">
+    <thead><tr>
+      <th class="col-site">拠点</th>
+      <th class="col-work">業務区分</th>
+      <th class="col-emp">区分</th>
+      ${months.map(m => `<th>${m}</th>`).join('')}
+    </tr></thead><tbody>`;
+
+  SITES.forEach(site => {
+    const siteEmps = employees.filter(e => e.base === site);
+    if (!siteEmps.length) return;
+
+    const siteWorkTypes = orderedWorkTypes.filter(wt =>
+      siteEmps.some(e => e.workType === wt)
+    );
+    const totalRows = siteWorkTypes.length * 9; // 9 rows per work type
+    let siteRowSpan = totalRows;
+
+    let firstRow = true;
+
+    siteWorkTypes.forEach((wt, wtIdx) => {
+      const wtEmps = siteEmps.filter(e => e.workType === wt);
+      const wtClass = workTypeClass(wt);
+      const isSep = wtIdx > 0;
+
+      // Rows per work type:
+      // 時間: 社員, パート, 計
+      // 人数: 社員, パート, 計
+      // 平均: 社員, パート, 計
+
+      const kinds = [
+        { label: '計／時間', sub: EMP_CLASSES.map(ec => ({
+            label: ec,
+            vals: months.map((_, mi) => {
+              const vals = wtEmps.filter(e => e.empClass === ec).map(e => e.hours[mi]).filter(h => h !== null);
+              return vals.length ? vals.reduce((a,b)=>a+b,0) : null;
+            }),
+          })),
+          total: months.map((_, mi) => {
+            const vals = wtEmps.map(e => e.hours[mi]).filter(h => h !== null);
+            return vals.length ? vals.reduce((a,b)=>a+b,0) : null;
+          }),
+        },
+        { label: '計／人数', sub: EMP_CLASSES.map(ec => ({
+            label: ec,
+            vals: months.map((_, mi) => {
+              const n = wtEmps.filter(e => e.empClass === ec && e.hours[mi] !== null).length;
+              return n || null;
+            }),
+          })),
+          total: months.map((_, mi) => {
+            const n = wtEmps.filter(e => e.hours[mi] !== null).length;
+            return n || null;
+          }),
+          isCount: true,
+        },
+        { label: '計／平均', sub: EMP_CLASSES.map(ec => ({
+            label: ec,
+            vals: months.map((_, mi) => {
+              const vals = wtEmps.filter(e => e.empClass === ec).map(e => e.hours[mi]).filter(h => h !== null);
+              return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+            }),
+          })),
+          total: months.map((_, mi) => {
+            const vals = wtEmps.map(e => e.hours[mi]).filter(h => h !== null);
+            return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+          }),
+        },
+      ];
+
+      let wtFirstRow = true;
+      const wtRowCount = 9;
+
+      kinds.forEach(kind => {
+        // Sub rows (社員・技能実習生, パート)
+        kind.sub.forEach(sub => {
+          html += `<tr class="${wtClass}${isSep && wtFirstRow ? ' section-sep' : ''}">`;
+          if (firstRow) {
+            html += `<td class="col-site" rowspan="${siteRowSpan}" style="color:${SITE_COLORS[site]||'#fff'}">${site}</td>`;
+            firstRow = false;
+          }
+          if (wtFirstRow) {
+            html += `<td class="col-work" rowspan="${wtRowCount}">${wt}</td>`;
+            wtFirstRow = false;
+          }
+          html += `<td class="col-emp">${sub.label}</td>`;
+          sub.vals.forEach(v => {
+            html += `<td class="num">${kind.isCount ? (v !== null ? v + ' 名' : '—') : fmtH(v)}</td>`;
+          });
+          html += '</tr>';
+        });
+        // Total row
+        html += `<tr class="${wtClass} kind-total">`;
+        html += `<td class="col-emp total-row">${kind.label}</td>`;
+        kind.total.forEach(v => {
+          html += `<td class="num total-row">${kind.isCount ? (v !== null ? v + ' 名' : '—') : fmtH(v)}</td>`;
+        });
+        html += '</tr>';
+      });
+    });
+  });
+
+  html += '</tbody></table></div>';
+  main.innerHTML = html;
+}
+
+/* ── Main ────────────────────────────────────────────────────────── */
 async function loadAll() {
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('tabs').innerHTML = '';
   document.getElementById('last-updated').textContent = '';
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
 
   try {
     const json = await fetchSheet();
     allData = buildDataset(json);
 
-    const bases = [...new Set(allData.employees.map(e => e.base))].filter(b => SITE_COLORS[b]);
+    const bases = SITES.filter(s => allData.employees.some(e => e.base === s));
     if (bases.length === 0) throw new Error('拠点データが見つかりません');
 
     activeBase = bases[0];
+    activeMode = 'site';
     renderTabs(bases);
     document.getElementById('main').innerHTML = '';
     renderBasePanel();
