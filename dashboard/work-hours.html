@@ -412,18 +412,20 @@ function renderBasePanel() {
       <div class="kpi-value">${months.length} ヶ月</div>
     </div>`;
 
-  // Employee filter checkboxes
+  // Employment type filter checkboxes (雇用区分グループ)
   const empFilter = document.getElementById('emp-filter');
   empFilter.innerHTML = '';
-  baseEmps.forEach((emp, i) => {
+  const empTypes = [...new Set(baseEmps.map(e => e.employment || '（未分類）'))].sort();
+  empTypes.forEach((type, i) => {
     const color = EMP_COLORS[i % EMP_COLORS.length];
-    const id = `emp-${activeBase}-${i}`;
+    const id = `emptype-${activeBase}-${i}`;
+    const count = baseEmps.filter(e => (e.employment || '（未分類）') === type).length;
     const label = document.createElement('label');
     label.className = 'emp-checkbox';
     label.innerHTML = `
-      <input type="checkbox" id="${id}" checked onchange="updateChart()">
+      <input type="checkbox" id="${id}" data-type="${type}" checked onchange="updateChart()">
       <span class="color-dot" style="background:${color}"></span>
-      <span>${emp.name}</span>`;
+      <span>${type} <span style="color:var(--muted);font-size:0.78rem">(${count}名)</span></span>`;
     empFilter.appendChild(label);
   });
 
@@ -433,10 +435,12 @@ function renderBasePanel() {
 function getSelectedEmployees() {
   const { employees } = allData;
   const baseEmps = employees.filter(e => e.base === activeBase);
-  return baseEmps.filter((emp, i) => {
-    const cb = document.getElementById(`emp-${activeBase}-${i}`);
-    return cb && cb.checked;
-  });
+  const selectedTypes = new Set(
+    [...document.querySelectorAll(`[id^="emptype-${activeBase}-"]`)]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.type)
+  );
+  return baseEmps.filter(e => selectedTypes.has(e.employment || '（未分類）'));
 }
 
 function buildChart() {
@@ -444,12 +448,16 @@ function buildChart() {
   const baseEmps = allData.employees.filter(e => e.base === activeBase);
   const selected = getSelectedEmployees();
 
+  // Build employment type → color index map
+  const empTypes = [...new Set(baseEmps.map(e => e.employment || '（未分類）'))].sort();
+  const typeColorIdx = {};
+  empTypes.forEach((t, i) => { typeColorIdx[t] = i; });
+
   const datasets = selected.map((emp, si) => {
-    // Find original index for color
-    const origIdx = baseEmps.indexOf(emp);
-    const color = EMP_COLORS[origIdx % EMP_COLORS.length];
+    const typeIdx = typeColorIdx[emp.employment || '（未分類）'] ?? si;
+    const color = EMP_COLORS[typeIdx % EMP_COLORS.length];
     return {
-      label: emp.name,
+      label: `${emp.name}（${emp.employment || '未分類'}）`,
       data: emp.hours,
       borderColor: color,
       backgroundColor: color + '22',
@@ -536,11 +544,8 @@ function buildChart() {
 function updateChart() { buildChart(); }
 
 function toggleAll(checked) {
-  const { employees } = allData;
-  const baseEmps = employees.filter(e => e.base === activeBase);
-  baseEmps.forEach((_, i) => {
-    const cb = document.getElementById(`emp-${activeBase}-${i}`);
-    if (cb) cb.checked = checked;
+  document.querySelectorAll(`[id^="emptype-${activeBase}-"]`).forEach(cb => {
+    cb.checked = checked;
   });
   updateChart();
 }
