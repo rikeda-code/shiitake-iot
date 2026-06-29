@@ -6,49 +6,40 @@
   <title>勤務時間ダッシュボード</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --surface2: #1e2235;
-      --border: #2e3148;
-      --text: #e2e8f0;
-      --muted: #8892a4;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', 'Hiragino Sans', sans-serif; min-height: 100vh; }
-    header { padding: 20px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
-    header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
-    #last-updated { font-size: 0.8rem; color: var(--muted); }
-    #refresh-btn { background: var(--border); border: none; color: var(--text); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
-    #refresh-btn:hover { background: #3a3f5c; }
-    .tabs { display: flex; gap: 4px; padding: 20px 32px 0; }
-    .tab-btn { padding: 10px 24px; background: var(--surface); border: 1px solid var(--border); border-bottom: none; color: var(--muted); cursor: pointer; border-radius: 8px 8px 0 0; font-size: 0.9rem; font-family: inherit; }
-    .tab-btn.active { background: var(--surface2); color: var(--text); border-bottom: 2px solid var(--surface2); margin-bottom: -1px; }
-    .tab-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
-    main { padding: 0 32px 32px; display: flex; flex-direction: column; gap: 24px; }
-    .site-panel { background: var(--surface2); border: 1px solid var(--border); border-top: 2px solid var(--border); border-radius: 0 8px 8px 8px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-    .kpi-row { display: flex; gap: 24px; flex-wrap: wrap; }
-    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; min-width: 140px; }
-    .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
-    .kpi-value { font-size: 1.3rem; font-weight: 700; }
-    .control-group { display: flex; flex-direction: column; gap: 6px; }
-    .control-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-    .select-btns { display: flex; gap: 6px; }
-    .select-btn { padding: 5px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); cursor: pointer; font-size: 0.8rem; font-family: inherit; }
-    .select-btn:hover { color: var(--text); }
-    .emp-filter { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; max-height: 180px; overflow-y: auto; }
-    .emp-filter::-webkit-scrollbar { width: 4px; }
-    .emp-filter::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .emp-checkbox { display: flex; align-items: center; gap: 8px; padding: 3px 4px; cursor: pointer; border-radius: 4px; font-size: 0.85rem; }
-    .emp-checkbox:hover { background: var(--surface2); }
-    .emp-checkbox input { cursor: pointer; }
-    .color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    .chart-wrap { position: relative; height: 380px; }
-    .loading, .error-msg { display: flex; align-items: center; justify-content: center; height: 300px; font-size: 0.9rem; color: var(--muted); }
-    .error-msg { color: #f87171; flex-direction: column; gap: 8px; }
-    .debug { font-size: 0.75rem; color: #666; max-width: 600px; word-break: break-all; }
-    @media (max-width: 640px) { header, .tabs, main { padding-left: 16px; padding-right: 16px; } .chart-wrap { height: 280px; } }
+    :root { --bg:#0f1117; --surface:#1a1d27; --surface2:#1e2235; --border:#2e3148; --text:#e2e8f0; --muted:#8892a4; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--text); font-family:'Segoe UI','Hiragino Sans',sans-serif; min-height:100vh; }
+    header { padding:20px 32px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+    header h1 { font-size:1.4rem; font-weight:700; letter-spacing:.04em; }
+    header .subtitle { font-size:.85rem; color:var(--muted); margin-top:4px; }
+    #last-updated { font-size:.8rem; color:var(--muted); }
+    #refresh-btn { background:var(--border); border:none; color:var(--text); padding:8px 16px; border-radius:6px; cursor:pointer; font-size:.85rem; }
+    #refresh-btn:hover { background:#3a3f5c; }
+    .tabs { display:flex; gap:4px; padding:20px 32px 0; }
+    .tab-btn { padding:10px 24px; background:var(--surface); border:1px solid var(--border); border-bottom:none; color:var(--muted); cursor:pointer; border-radius:8px 8px 0 0; font-size:.9rem; font-family:inherit; }
+    .tab-btn.active { background:var(--surface2); color:var(--text); border-bottom:2px solid var(--surface2); margin-bottom:-1px; }
+    .tab-btn:hover:not(.active) { background:var(--surface2); color:var(--text); }
+    main { padding:0 32px 32px; display:flex; flex-direction:column; gap:24px; }
+    .site-panel { background:var(--surface2); border:1px solid var(--border); border-top:2px solid var(--border); border-radius:0 8px 8px 8px; padding:24px; display:flex; flex-direction:column; gap:20px; }
+    .kpi-row { display:flex; gap:24px; flex-wrap:wrap; }
+    .kpi { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 20px; min-width:140px; }
+    .kpi-label { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+    .kpi-value { font-size:1.3rem; font-weight:700; }
+    .control-group { display:flex; flex-direction:column; gap:6px; }
+    .control-label { font-size:.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .select-btns { display:flex; gap:6px; }
+    .select-btn { padding:5px 12px; background:var(--surface); border:1px solid var(--border); border-radius:4px; color:var(--muted); cursor:pointer; font-size:.8rem; font-family:inherit; }
+    .select-btn:hover { color:var(--text); }
+    .emp-filter { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; max-height:180px; overflow-y:auto; }
+    .emp-filter::-webkit-scrollbar { width:4px; }
+    .emp-filter::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+    .emp-checkbox { display:flex; align-items:center; gap:8px; padding:3px 4px; cursor:pointer; border-radius:4px; font-size:.85rem; }
+    .emp-checkbox:hover { background:var(--surface2); }
+    .color-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .chart-wrap { position:relative; height:380px; }
+    .loading,.error-msg { display:flex; align-items:center; justify-content:center; height:300px; font-size:.9rem; color:var(--muted); }
+    .error-msg { color:#f87171; flex-direction:column; gap:8px; text-align:center; padding:24px; }
+    @media(max-width:640px){ header,.tabs,main{padding-left:16px;padding-right:16px;} .chart-wrap{height:280px;} }
   </style>
 </head>
 <body>
@@ -67,7 +58,7 @@
 <script>
 const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
-const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#a78bfa', '南丹': '#34d399' };
+const SITE_COLORS = { 'いなべ':'#38bdf8', '群馬':'#a78bfa', '南丹':'#34d399' };
 const EMP_COLORS = [
   '#38bdf8','#a78bfa','#34d399','#f97316','#f43f5e','#facc15',
   '#fb923c','#4ade80','#818cf8','#e879f9','#2dd4bf','#fbbf24',
@@ -76,14 +67,14 @@ const EMP_COLORS = [
   '#93c5fd','#c4b5fd','#bbf7d0','#fecaca','#99f6e4','#fef08a',
   '#bef264','#fbcfe8','#e0f2fe','#ede9fe','#dcfce7','#fef9c3','#fce7f3',
 ];
-let allData = null, activeBase = null, chartInstance = null;
+let allData=null, activeBase=null, chartInstance=null;
 
 async function fetchSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=1`;
+  // headers=2 combines 2 header rows: "9/10締" + "実質勤務時間" etc.
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=2`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const text = await res.text();
-  // Strip JSONP wrapper
   const jsonStr = text.replace(/^[\s\S]*?\(/, '').replace(/\);?\s*$/, '');
   return JSON.parse(jsonStr);
 }
@@ -98,12 +89,29 @@ function parseDuration(cell) {
     const f = String(cell.f).replace(/^-/, '').trim();
     const parts = f.split(':').map(Number);
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      // If first part > 500, assume minutes:seconds format
-      const h = parts[0] > 500 ? parts[0] / 60 + parts[1] / 3600 : parts[0] + parts[1] / 60;
+      // >500 in first part means it's minutes:seconds format
+      const h = parts[0] > 500 ? parts[0]/60 + parts[1]/3600 : parts[0] + parts[1]/60;
       return h > 0 ? Math.round(h * 10) / 10 : null;
     }
   }
   return null;
+}
+
+// Convert締め label "9/10締" -> display label "2025年8月"
+// 9/10締 = 8月分 (Sept 10 closing = August work period)
+function shimeToMonth(label) {
+  // Match patterns like "9/10締", "10/10締", "1/10締" etc.
+  const m = label.match(/(\d+)\/\d+締/);
+  if (!m) return label;
+  let closeMonth = parseInt(m[1]); // month when closed
+  // Work month = close month - 1
+  let workMonth = closeMonth - 1;
+  let year = 2025;
+  if (workMonth <= 0) { workMonth += 12; year = 2024; }
+  // Adjust year: if closeMonth <= 6 it's 2026 closing = 2025-2026 work period
+  if (closeMonth <= 6) year = 2026;
+  else if (closeMonth <= 12) year = 2025;
+  return `${year}年${workMonth}月`;
 }
 
 function buildDataset(json) {
@@ -112,45 +120,56 @@ function buildDataset(json) {
   const rows = json.table.rows || [];
 
   let baseIdx = -1, nameIdx = -1, empIdx = -1;
-  const jissituCols = [];
+  const jissituCols = []; // {month, idx}
 
   cols.forEach((c, i) => {
-    if (!c) return; // null guard
+    if (!c) return;
     const label = (c.label || '').trim();
+
+    // With headers=2, labels look like:
+    // "拠点" or "雇用区分" for fixed columns
+    // "9/10締 実質勤務時間" for month+type combined
     if (label === '拠点') baseIdx = i;
     if (label === '雇用区分') empIdx = i;
+
+    // Detect 実質勤務時間 columns
     if (label.includes('実質勤務時間')) {
-      const m = label.match(/^(.+?)\/実質/);
-      jissituCols.push({ month: m ? m[1] : `col${i}`, idx: i });
+      // Extract month part from combined label
+      const shimeMatch = label.match(/(\d+\/\d+締)/);
+      const monthLabel = shimeMatch ? shimeToMonth(shimeMatch[1]) : label;
+      jissituCols.push({ month: monthLabel, idx: i });
     }
   });
 
+  // If headers=2 didn't combine properly, fall back: look for 締 pattern
+  // and treat col+2 as 実質
   if (jissituCols.length === 0) {
-    // Debug: show column labels to help diagnose
-    const labels = cols.map((c,i) => `${i}:${c ? (c.label||'(empty)') : 'null'}`).join(', ');
+    cols.forEach((c, i) => {
+      if (!c) return;
+      const label = (c.label || '').trim();
+      if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
+        jissituCols.push({ month: shimeToMonth(label), idx: i + 2 });
+      }
+    });
+  }
+
+  if (jissituCols.length === 0) {
+    const labels = cols.map((c,i)=>`${i}:${c?(c.label||'(empty)'):'null'}`).join(', ');
     throw new Error(`実質勤務時間列が見つかりません\n列: ${labels}`);
   }
 
-  // Name column: unlabeled string column just before the first month group
+  // Name column: find unlabeled column just before the first month group
   if (nameIdx === -1) {
     const firstJ = jissituCols[0].idx;
-    for (let i = firstJ - 3; i < firstJ; i++) {
-      if (i >= 0 && cols[i] && (cols[i].label || '').trim() === '') {
-        nameIdx = i; break;
-      }
+    for (let i = Math.max(0, firstJ - 5); i < firstJ; i++) {
+      if (cols[i] && (cols[i].label || '').trim() === '') { nameIdx = i; break; }
     }
     if (nameIdx === -1) nameIdx = 7;
   }
   if (baseIdx === -1) baseIdx = 3;
   if (empIdx === -1) empIdx = 2;
 
-  // Deduplicate repeated month labels
-  const monthCounts = {};
-  const months = jissituCols.map(({ month }) => {
-    monthCounts[month] = (monthCounts[month] || 0) + 1;
-    return monthCounts[month] > 1 ? inferNextMonth(month, monthCounts[month]) : month;
-  });
-
+  const months = jissituCols.map(c => c.month);
   const validBases = new Set(['いなべ', '群馬', '南丹']);
   const employees = [];
 
@@ -167,14 +186,6 @@ function buildDataset(json) {
 
   if (employees.length === 0) throw new Error('従業員データが見つかりません');
   return { months, employees };
-}
-
-function inferNextMonth(base, occurrence) {
-  const m = base.match(/^(\d+)年(\d+)月$/);
-  if (!m) return `${base}(${occurrence})`;
-  let year = parseInt(m[1]), month = parseInt(m[2]) + (occurrence - 1);
-  while (month > 12) { month -= 12; year++; }
-  return `${year}年${month}月`;
 }
 
 function renderTabs(bases) {
@@ -216,21 +227,20 @@ function renderBasePanel() {
     <div class="chart-wrap"><canvas id="main-chart"></canvas></div>`;
   main.appendChild(panel);
 
-  // KPIs
   const avgPerMonth = months.map((_, mi) => {
     const vals = baseEmps.map(e => e.hours[mi]).filter(h => h !== null);
     return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
   }).filter(v => v !== null);
   const grandAvg = avgPerMonth.length ? avgPerMonth.reduce((a,b)=>a+b,0)/avgPerMonth.length : 0;
-  const allH = baseEmps.flatMap(e => e.hours.filter(h=>h!==null));
+  const allH = baseEmps.flatMap(e => e.hours.filter(h => h !== null));
   const maxH = allH.length ? Math.max(...allH) : 0;
+
   document.getElementById('kpi-row').innerHTML = `
     <div class="kpi"><div class="kpi-label">従業員数</div><div class="kpi-value" style="color:${baseColor}">${baseEmps.length} 名</div></div>
     <div class="kpi"><div class="kpi-label">月平均勤務（拠点平均）</div><div class="kpi-value">${grandAvg.toFixed(1)} h</div></div>
     <div class="kpi"><div class="kpi-label">個人月間最大</div><div class="kpi-value">${maxH.toFixed(1)} h</div></div>
     <div class="kpi"><div class="kpi-label">集計月数</div><div class="kpi-value">${months.length} ヶ月</div></div>`;
 
-  // Checkboxes
   const empFilter = document.getElementById('emp-filter');
   baseEmps.forEach((emp, i) => {
     const color = EMP_COLORS[i % EMP_COLORS.length];
@@ -239,7 +249,6 @@ function renderBasePanel() {
     lbl.innerHTML = `<input type="checkbox" id="emp-${activeBase}-${i}" checked onchange="buildChart()"><span class="color-dot" style="background:${color}"></span><span>${emp.name}</span>`;
     empFilter.appendChild(lbl);
   });
-
   buildChart();
 }
 
@@ -250,13 +259,10 @@ function buildChart() {
     const cb = document.getElementById(`emp-${activeBase}-${i}`);
     return cb && cb.checked;
   });
-
   const datasets = selected.map(emp => {
-    const origIdx = baseEmps.indexOf(emp);
-    const color = EMP_COLORS[origIdx % EMP_COLORS.length];
+    const color = EMP_COLORS[baseEmps.indexOf(emp) % EMP_COLORS.length];
     return { label: emp.name, data: emp.hours, borderColor: color, backgroundColor: color+'22', borderWidth: 1.8, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, spanGaps: true };
   });
-
   const avgData = months.map((_, mi) => {
     const vals = baseEmps.map(e => e.hours[mi]).filter(h => h !== null);
     return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10 : null;
@@ -312,7 +318,7 @@ async function loadAll() {
     document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
   } catch (e) {
     document.getElementById('main').innerHTML =
-      `<div class="error-msg"><span>データ取得エラー: ${e.message}</span></div>`;
+      `<div class="error-msg"><span>データ取得エラー</span><span style="font-size:.8rem;color:#888">${e.message}</span></div>`;
     console.error(e);
   }
 }
