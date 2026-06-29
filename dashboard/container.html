@@ -1122,12 +1122,15 @@ async function weeklyZoomRenderWeight() {
   // 自社菌床ロットの場合は同一ロットの全菌床エントリをまとめて表示（重複除去）
   const jishaResults = [];
   if (jishaEntry) {
+    console.log('[自社菌床 weight] containers:', (jishaEntry.containers || []).map(w => `lot="${w.lot}" no=${w.containerNo}`));
     const seenLots = new Set();
     containers.forEach(c => {
       const lot = c.lot || '';
+      console.log('[自社菌床 weight] checking c.lot:', lot, 'isJisha:', isJishaLot(lot));
       if (!isJishaLot(lot) || seenLots.has(lot)) return;
       seenLots.add(lot);
       const matches = (jishaEntry.containers || []).filter(w => w.lot === lot);
+      console.log('[自社菌床 weight] lot', lot, '→ matches:', matches.length);
       matches.forEach(wc => jishaResults.push({ c: { ...c, siteName: '自社菌床', name: `${lot} ${wc.containerNo}号機` }, wc }));
     });
   }
@@ -3108,6 +3111,7 @@ function parseWeightRows(table) {
   const rows = table.rows || [];
   const containers = [];
   let current = null;
+  let stickyLot = ''; // A列ロットは最初の行にのみ記入されることがあるため引き継ぐ
 
   for (const row of rows) {
     const cells = row?.c || [];
@@ -3117,6 +3121,8 @@ function parseWeightRows(table) {
     const fVal  = cells[5]?.v;
     const hVal  = cells[7]?.v;
 
+    if (aVal !== '') stickyLot = aVal;
+
     // コンテナヘッダー行: D列に号機番号が入っている行
     if (dVal !== '') {
       const startDate = gvizToDate(cCell);
@@ -3124,7 +3130,7 @@ function parseWeightRows(table) {
       const isRecent = startDate && (startDate.getFullYear() > 2025 ||
         (startDate.getFullYear() === 2025 && startDate.getMonth() >= 9));
       if (isRecent) {
-        current = { startDate, containerNo: dVal, lot: aVal, measurements: [] };
+        current = { startDate, containerNo: dVal, lot: stickyLot, measurements: [] };
         containers.push(current);
         // 1本目の計測値がヘッダー行と同じ行に入っている場合
         if (fVal != null || hVal != null) {
