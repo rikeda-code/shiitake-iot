@@ -251,6 +251,8 @@
     .summary-table tr.wt-拠点      td:not(.col-site) { background: rgba(249,115,22,0.08); }
     .summary-table tr.kind-total   td { font-weight: 700; }
     .summary-table tr.section-sep  td { border-top: 2px solid var(--border); }
+    .summary-table tr.site-total   td { background: rgba(255,255,255,0.04); font-weight: 700; border-top: 2px solid var(--border); }
+    .summary-table tr.site-total-last td { background: rgba(255,255,255,0.07); font-weight: 800; color: var(--text); }
 
     @media (max-width: 640px) {
       header, .tabs, main { padding-left: 16px; padding-right: 16px; }
@@ -736,7 +738,7 @@ function renderSummary() {
       siteEmps.some(e => e.workType === wt)
     );
     const totalRows = siteWorkTypes.length * 9; // 9 rows per work type
-    let siteRowSpan = totalRows;
+    let siteRowSpan = totalRows + 3; // +3 for site total rows
 
     let firstRow = true;
 
@@ -813,6 +815,26 @@ function renderSummary() {
         html += '</tr>';
       });
     });
+
+    // Site total rows (合計欄): 社員・技能実習生 / パート / 合計
+    EMP_CLASSES.forEach((ec, ecIdx) => {
+      const vals = months.map((_, mi) =>
+        siteEmps.filter(e => e.empClass === ec).map(e => e.hours[mi]).filter(h => h !== null)
+          .reduce((a, b) => a + b, 0) || null
+      );
+      html += `<tr class="site-total">`;
+      if (ecIdx === 0) html += `<td class="col-work" rowspan="3" style="font-weight:800;color:var(--text);vertical-align:top;border-top:2px solid var(--border)">合計</td>`;
+      html += `<td class="col-emp">${ec}</td>`;
+      vals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+      html += '</tr>';
+    });
+    const grandVals = months.map((_, mi) =>
+      siteEmps.map(e => e.hours[mi]).filter(h => h !== null).reduce((a, b) => a + b, 0) || null
+    );
+    html += `<tr class="site-total-last">`;
+    html += `<td class="col-emp">合計</td>`;
+    grandVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    html += '</tr>';
   });
 
   html += '</tbody></table></div>';
