@@ -1376,9 +1376,12 @@ async function weeklyZoomRenderMekaki() {
     const rounds = ['1回目','2回目','3回目','4回目','5回目'];
     const datasets = rounds.map((label, ri) => ({
       label,
-      data: matchedRows.map(({ match }) => {
-        const v = [match.m1, match.m2, match.m3, match.m4, match.m5][ri];
-        return v != null ? v : 0;
+      data: matchedRows.map(({ match, c }) => {
+        const raw = [match.m1, match.m2, match.m3, match.m4, match.m5][ri];
+        if (raw == null) return 0;
+        const bc = match.bedCount > 0 ? match.bedCount : (c.bedCount > 0 ? c.bedCount : null);
+        if (bc && bc !== 2520) return +(raw * 2520 / bc).toFixed(2);
+        return raw;
       }),
       backgroundColor: ROUND_COLORS[ri],
     }));
@@ -1394,7 +1397,7 @@ async function weeklyZoomRenderMekaki() {
           legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 8 } },
           tooltip: {
             callbacks: {
-              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x != null ? ctx.parsed.x.toFixed(1) : 0} kg`,
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x != null ? ctx.parsed.x.toFixed(1) : 0} kg (2520換算)`,
             },
             backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
             titleColor: '#e2e8f0', bodyColor: '#a0aec0',
