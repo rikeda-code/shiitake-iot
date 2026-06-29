@@ -164,6 +164,15 @@
       flex-shrink: 0;
     }
 
+    /* Chart section label */
+    .chart-section-label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding-top: 4px;
+    }
+
     /* Chart */
     .chart-wrap {
       position: relative;
@@ -485,6 +494,7 @@ let allData = null; // { months, employees, nameLabel }
 let activeBase = null;
 let activeMode = null; // 'site' | 'summary'
 let chartInstance = null;
+let countChartInstance = null;
 
 /* ── Fetch & parse ─────────────────────────────────────────────── */
 async function fetchSheet() {
@@ -680,6 +690,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     sBtn.classList.add('active');
     activeMode = 'summary';
+    if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
     document.getElementById('main').innerHTML = '';
     renderSummary();
   };
@@ -690,7 +701,7 @@ function renderTabs(bases) {
 function renderBasePanel() {
   const main = document.getElementById('main');
   const { months, employees } = allData;
-  const baseEmps = employees.filter(e => e.base === activeBase);
+  const baseEmps = employees.filter(e => e.base === activeBase && e.workType);
   const baseColor = SITE_COLORS[activeBase] || '#38bdf8';
 
   if (!document.getElementById('site-panel')) {
@@ -707,7 +718,10 @@ function renderBasePanel() {
             <div class="emp-filter" id="emp-filter"></div>
           </div>
         </div>
+        <div class="chart-section-label">勤務時間グラフ</div>
         <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+        <div class="chart-section-label">人数グラフ（栽培 / 出荷 / 配送 ／ 社員 / パート / 技能実習生）</div>
+        <div class="chart-wrap" style="height:260px"><canvas id="count-chart"></canvas></div>
       </div>`;
   }
 
@@ -755,10 +769,11 @@ function renderBasePanel() {
   });
 
   buildChart();
+  buildCountChart();
 }
 
 function getSelectedEmployees() {
-  const baseEmps = allData.employees.filter(e => e.base === activeBase);
+  const baseEmps = allData.employees.filter(e => e.base === activeBase && e.workType);
   const selectedTypes = new Set(
     [...document.querySelectorAll(`[id^="emptype-${activeBase}-"]`)]
       .filter(cb => cb.checked)
@@ -769,7 +784,7 @@ function getSelectedEmployees() {
 
 function buildChart() {
   const { months } = allData;
-  const baseEmps = allData.employees.filter(e => e.base === activeBase);
+  const baseEmps = allData.employees.filter(e => e.base === activeBase && e.workType);
   const selected = getSelectedEmployees();
 
   const empTypes = [...new Set(baseEmps.map(e => e.employment || '（未分類）'))].sort();
@@ -856,6 +871,101 @@ function buildChart() {
 
 function updateChart() { buildChart(); }
 
+function buildCountChart() {
+  const { months } = allData;
+  const baseEmps = allData.employees.filter(e => e.base === activeBase && e.workType);
+
+  const WT_SERIES = [
+    { label: '栽培', key: '栽培', color: '#34d399' },
+    { label: '出荷', key: '出荷', color: '#facc15' },
+    { label: '配送', key: '配送', color: '#f87171' },
+  ];
+  const ET_SERIES = [
+    { label: '社員',       match: e => (e.employment||'').includes('社員') && !(e.employment||'').includes('技能'), color: '#60a5fa' },
+    { label: 'パート',     match: e => ['パート','アルバイト'].some(k => (e.employment||'').includes(k)),          color: '#fb923c' },
+    { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
+  ];
+
+  const datasets = [];
+
+  WT_SERIES.forEach(wt => {
+    const data = months.map((_, mi) =>
+      baseEmps.filter(e => e.workType.includes(wt.key) && e.hours[mi] !== null).length || null
+    );
+    datasets.push({
+      label: wt.label,
+      data,
+      borderColor: wt.color,
+      backgroundColor: wt.color + '33',
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+    });
+  });
+
+  ET_SERIES.forEach(et => {
+    const data = months.map((_, mi) =>
+      baseEmps.filter(e => et.match(e) && e.hours[mi] !== null).length || null
+    );
+    datasets.push({
+      label: et.label,
+      data,
+      borderColor: et.color,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderDash: [6, 3],
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+    });
+  });
+
+  const ctx = document.getElementById('count-chart')?.getContext('2d');
+  if (!ctx) return;
+  if (countChartInstance) countChartInstance.destroy();
+
+  countChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: months, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 10 },
+        },
+        tooltip: {
+          backgroundColor: '#1e2235',
+          borderColor: '#3a3f5c',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#a0aec0',
+          callbacks: {
+            label: ctx => ctx.parsed.y !== null ? `${ctx.dataset.label}: ${ctx.parsed.y} 名` : null,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', font: { size: 11 }, maxRotation: 45 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} 名`, stepSize: 1 },
+          grid: { color: '#1e2235' },
+          suggestedMin: 0,
+          title: { display: true, text: '人数 (名)', color: '#8892a4', font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
 function toggleAll(checked) {
   document.querySelectorAll(`[id^="emptype-${activeBase}-"]`).forEach(cb => { cb.checked = checked; });
   updateChart();
@@ -935,7 +1045,7 @@ function renderSummaryTable() {
     </tr></thead><tbody>`;
 
   SITES.forEach(site => {
-    const siteEmps = employees.filter(e => e.base === site);
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
     if (!siteEmps.length) return;
 
     const siteWorkTypes = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
@@ -1206,6 +1316,7 @@ function renderSummaryRoster() {
 
   function filteredEmployees() {
     return employees.filter(e =>
+      e.workType &&
       rosterFilterSites.has(e.base) &&
       rosterFilterEmps.has(e.employment || '（未分類）')
     );
@@ -1315,6 +1426,7 @@ async function loadAll() {
   document.getElementById('tabs').innerHTML = '';
   document.getElementById('last-updated').textContent = '';
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
 
   try {
     const json = await fetchSheet();
