@@ -588,26 +588,27 @@ function buildDataset(json) {
   const workIdx = bestIdx(workScore, 4);
   const empIdx  = bestIdx(empScore,  2);
 
-  // 氏名: prefer column whose label contains 名前 or 氏名
-  let nameIdx = -1;
-  cols.forEach((c, i) => {
-    if (i >= firstMonthIdx || nameIdx !== -1) return;
-    const lbl = (c?.label || '').trim();
-    if (lbl.includes('名前') || lbl.includes('氏名')) nameIdx = i;
+  // 氏名: H列 (index 7) — confirmed by spreadsheet structure
+  // Verify col 7 has string values; if not, scan for a column with Japanese name-like strings
+  let nameIdx = 7;
+  const col7HasNames = sampleRows.some(row => {
+    const v = String(row.c?.[7]?.v ?? '').trim();
+    return v.length > 1 && isNaN(Number(v)) && !VALID_BASES.has(v);
   });
-
-  // fallback: first pre-monthly column not assigned to base/work/emp with string values
-  if (nameIdx === -1) {
+  if (!col7HasNames) {
+    // fallback: find column with string values not matching base/work/emp known values
+    nameIdx = -1;
     for (let i = 0; i < firstMonthIdx; i++) {
       if (i === baseIdx || i === workIdx || i === empIdx) continue;
-      const hasValues = sampleRows.some(row => {
+      const hasNames = sampleRows.some(row => {
         const v = String(row.c?.[i]?.v ?? '').trim();
-        return v.length > 0 && !VALID_BASES.has(v) && !['栽培','出荷','配送'].some(w => v.includes(w));
+        return v.length > 1 && isNaN(Number(v)) && !VALID_BASES.has(v) &&
+               !VALID_WORKS.has(v) && !EMP_KEYWORDS.some(k => v.includes(k));
       });
-      if (hasValues) { nameIdx = i; break; }
+      if (hasNames) { nameIdx = i; break; }
     }
+    if (nameIdx === -1) nameIdx = 7;
   }
-  if (nameIdx === -1) nameIdx = 7;
 
   // Deduplicate months
   const monthCounts = {};
