@@ -1114,7 +1114,26 @@ async function weeklyZoomRenderWeight() {
   }
 
   const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
-  const results = containers.map(c => {
+
+  // 自社菌床ロット判定: "6A", "5O" のように 数字+アルファベット
+  const isJishaLot = lot => lot && /^\d+[A-Z]+$/.test(lot.trim());
+  const jishaEntry = weightData.find(w => w.site.name === '自社菌床');
+
+  // 自社菌床ロットの場合は同一ロットの全菌床エントリをまとめて表示（重複除去）
+  const jishaResults = [];
+  if (jishaEntry) {
+    const seenLots = new Set();
+    containers.forEach(c => {
+      const lot = c.lot || '';
+      if (!isJishaLot(lot) || seenLots.has(lot)) return;
+      seenLots.add(lot);
+      const matches = (jishaEntry.containers || []).filter(w => w.lot === lot);
+      matches.forEach(wc => jishaResults.push({ c: { ...c, siteName: '自社菌床', name: `${lot} ${wc.containerNo}号機` }, wc }));
+    });
+  }
+
+  const siteResults = containers.map(c => {
+    if (isJishaLot(c.lot || '')) return { c, wc: null }; // 自社菌床ロットはjishaResultsで処理
     const siteEntry = weightData.find(w => w.site.name === c.siteName);
     if (!siteEntry) return { c, wc: null };
     const no = c.no;
@@ -1129,6 +1148,8 @@ async function weeklyZoomRenderWeight() {
     });
     return { c, wc };
   }).filter(x => x.wc);
+
+  const results = [...siteResults, ...jishaResults];
 
   if (!results.length) {
     body.innerHTML = '<div style="color:#64748b;padding:16px">菌床重量データなし</div>';
@@ -1273,7 +1294,17 @@ async function weeklyZoomRenderMekaki() {
       }
       return true;
     });
-    return { c, match };
+    // converted が null の場合は c.bedCount でフォールバック計算
+    const getConverted = (match, c) => {
+      if (match.converted != null) return match.converted;
+      const total = match.total;
+      const bc = c.bedCount > 0 ? c.bedCount : null;
+      if (total != null && bc != null) {
+        return bc !== 2520 ? +(total * 2520 / bc).toFixed(2) : total;
+      }
+      return null;
+    };
+    return { c, match, converted: match ? getConverted(match, c) : null };
   });
 
   if (!rows.some(r => r.match)) {
@@ -1293,9 +1324,9 @@ async function weeklyZoomRenderMekaki() {
       <canvas id="wzm-chart"></canvas>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
-      ${matchedRows.map(({ c, match }) => {
+      ${matchedRows.map(({ c, match, converted }) => {
         const color = siteColors[c.siteName] || '#8892a4';
-        const conv = match.converted != null ? match.converted.toFixed(2) + ' kg' : '-';
+        const conv = converted != null ? converted.toFixed(2) + ' kg' : '-';
         return `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:6px;padding:6px 12px;font-size:0.78rem">
           <span style="color:${color}">${match.siteName}</span>
           <span style="color:#e2e8f0;margin-left:4px">${match.gouki}</span>
