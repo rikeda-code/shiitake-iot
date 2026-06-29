@@ -1301,7 +1301,7 @@ async function weeklyZoomRenderMekaki() {
           const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
           const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
           const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
-          const startDateKey = gvizDateStr(startRaw?.v, startRaw?.f) ?? '';
+          const startDateKey = gvizDateStr(startRaw?.v, null) ?? '';
           const no = gouki.replace(/\(.*\)/, '').trim();
           const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
           const converted = (total != null && bedCount != null && bedCount > 0)
