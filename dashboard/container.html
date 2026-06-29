@@ -1123,7 +1123,6 @@ async function weeklyZoomRenderWeight() {
   const jishaResults = [];
   if (jishaEntry) {
     const jishaContainers = jishaEntry.containers || [];
-    console.log('[自社菌床 weight] total:', jishaContainers.length);
     jishaContainers.slice(0, 8).forEach((w, i) => console.log(`  [${i}] lot="${w.lot}" no=${w.containerNo} startDate=${w.startDate}`));
 
     // 対象グループの栽培開始日範囲を収集（自社菌床ロット判定）
@@ -1140,8 +1139,6 @@ async function weeklyZoomRenderWeight() {
     if (jishaLots.size > 0) {
       // ① ロット名完全一致で試みる
       let matchedByLot = jishaContainers.filter(w => jishaLots.has(w.lot));
-      console.log('[自社菌床 weight] lot match:', matchedByLot.length);
-
       // ② 一致ゼロなら startDate の近さ（±60日）でフォールバック
       if (matchedByLot.length === 0 && jishaStartDates.length > 0) {
         const earliest = Math.min(...jishaStartDates.map(d => d.getTime()));
@@ -1151,7 +1148,6 @@ async function weeklyZoomRenderWeight() {
           const t = w.startDate.getTime();
           return t >= earliest - 60*86400000 && t <= latest + 60*86400000;
         });
-        console.log('[自社菌床 weight] date-range fallback match:', matchedByLot.length);
       }
 
       // ③ それでもゼロなら全件表示
@@ -3058,7 +3054,7 @@ async function renderMekakiTab() {
         const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
         const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
         const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
-        const startDateKey = gvizDateStr(startRaw?.v, startRaw?.f) ?? '';
+        const startDateKey = gvizDateStr(startRaw?.v, null) ?? '';
         const no = gouki.replace(/\(.*\)/, '').trim();
         const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
         const converted = (total != null && bedCount != null && bedCount > 0)
@@ -3302,29 +3298,48 @@ async function renderWeightTab() {
 }
 
 window.addEventListener('error', e => {
+  console.error('[global error]', e.message, e.filename, e.lineno);
   const el = document.getElementById('main');
-  if (el) el.innerHTML = `<div style="color:#f87171;padding:24px;font-size:0.85rem">
-    JS Error: ${e.message}<br>${e.filename}:${e.lineno}</div>`;
+  if (el && !el.innerHTML.trim()) {
+    el.innerHTML = `<div style="color:#f87171;padding:24px;font-size:0.85rem">
+      JS Error: ${e.message}<br>${e.filename}:${e.lineno}</div>`;
+  }
 });
 window.addEventListener('unhandledrejection', e => {
   console.error('[unhandled rejection]', e.reason);
 });
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=8');
+  navigator.serviceWorker.register('sw.js?v=8').catch(() => {});
 }
 
-initTabs();
-updateTabVisibility();
+try { initTabs(); } catch(e) {
+  console.error('[initTabs error]', e);
+  document.getElementById('tabs').innerHTML =
+    `<span style="color:#f87171;padding:12px;font-size:0.85rem">タブ初期化エラー: ${e.message}</span>`;
+}
+try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
+
 loadCurrentSite().catch(e => {
   const el = document.getElementById('main');
   if (el) el.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
 });
-loadWeeklySection();
+loadWeeklySection().catch(() => {});
+
+// 10秒後にまだ#mainが空なら「再読み込みを促す」メッセージを出す
+setTimeout(() => {
+  const el = document.getElementById('main');
+  if (el && !el.innerHTML.trim()) {
+    el.innerHTML = `<div style="color:#94a3b8;padding:32px;text-align:center">
+      データを取得できませんでした。<br>
+      <button onclick="location.reload()" style="margin-top:12px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem">再読み込み</button>
+    </div>`;
+  }
+}, 10000);
 
 setInterval(() => {
   loadCurrentSite(true);
-  loadWeeklySection();
+  loadWeeklySection().catch(() => {});
 }, 3 * 60 * 60 * 1000);
 </script>
 </body>
