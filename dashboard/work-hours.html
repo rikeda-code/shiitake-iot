@@ -736,7 +736,7 @@ function renderSummary() {
       siteEmps.some(e => e.workType === wt)
     );
     const totalRows = siteWorkTypes.length * 9; // 9 rows per work type
-    let siteRowSpan = totalRows + 3; // +3 for site total rows
+    let siteRowSpan = totalRows + 6; // +6 for site total rows (時間×3 + 人数×3)
 
     let firstRow = true;
 
@@ -821,7 +821,7 @@ function renderSummary() {
       });
     });
 
-    // Site total rows (合計欄): 社員・技能実習生 / パート / 合計
+    // Site total rows: 時間（社員・技能実習生 / パート / 計）+ 人数（社員・技能実習生 / パート / 計）
     const EMP_CLASSES_INNER = ['社員・技能実習生', 'パート'];
     EMP_CLASSES_INNER.forEach((ec, ecIdx) => {
       const vals = months.map((_, mi) =>
@@ -829,18 +829,31 @@ function renderSummary() {
           .reduce((a, b) => a + b, 0) || null
       );
       html += `<tr class="site-total">`;
-      if (ecIdx === 0) html += `<td class="col-work" rowspan="3" style="font-weight:800;color:var(--text);vertical-align:top;border-top:2px solid var(--border)">合計</td>`;
-      html += `<td class="col-emp">${ec}</td>`;
+      if (ecIdx === 0) html += `<td class="col-work" rowspan="6" style="font-weight:800;color:var(--text);vertical-align:top;border-top:2px solid var(--border)">合計</td>`;
+      html += `<td class="col-emp">${ec}（時間）</td>`;
       vals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
       html += '</tr>';
     });
-    // Grand total row
-    const grandVals = months.map((_, mi) =>
+    const grandHourVals = months.map((_, mi) =>
       siteEmps.map(e => e.hours[mi]).filter(h => h !== null).reduce((a, b) => a + b, 0) || null
     );
-    html += `<tr class="site-total-last">`;
-    html += `<td class="col-emp">合計</td>`;
-    grandVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    html += `<tr class="site-total-last"><td class="col-emp">計／時間</td>`;
+    grandHourVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    html += '</tr>';
+
+    EMP_CLASSES_INNER.forEach(ec => {
+      const vals = months.map((_, mi) =>
+        siteEmps.filter(e => e.empClass === ec && e.hours[mi] !== null).length || null
+      );
+      html += `<tr class="site-total"><td class="col-emp">${ec}（人数）</td>`;
+      vals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+      html += '</tr>';
+    });
+    const grandCountVals = months.map((_, mi) =>
+      siteEmps.filter(e => e.hours[mi] !== null).length || null
+    );
+    html += `<tr class="site-total-last"><td class="col-emp">計／人数</td>`;
+    grandCountVals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
     html += '</tr>';
   });
 
