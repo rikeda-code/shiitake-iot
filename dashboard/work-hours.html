@@ -1007,7 +1007,8 @@ function renderSummary() {
   main.innerHTML = `
     <div class="summary-shell">
       <div class="summary-subtabs" id="summary-subtabs">
-        <button class="summary-subtab active" data-tab="table">📋 表</button>
+        <button class="summary-subtab active" data-tab="table">📋 業務区分別</button>
+        <button class="summary-subtab" data-tab="emptype">👥 雇用形態別</button>
         <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
         <button class="summary-subtab" data-tab="roster">👤 名簿</button>
       </div>
@@ -1020,7 +1021,8 @@ function renderSummary() {
       btn.classList.add('active');
       destroySummaryCharts();
       const tab = btn.dataset.tab;
-      if (tab === 'table')  renderSummaryTable();
+      if (tab === 'table')       renderSummaryTable();
+      else if (tab === 'emptype') renderSummaryByEmpType();
       else if (tab === 'chart')  renderSummaryChart();
       else { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
     };
@@ -1201,6 +1203,83 @@ function buildSiteSeriesList(site) {
   series.push({ label: '拠点合計（時間）', data: totalData, color: TOTAL_COLOR, isTotal: true });
 
   return series;
+}
+
+/* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
+function renderSummaryByEmpType() {
+  const { months, employees } = allData;
+  const content = document.getElementById('summary-content');
+
+  function detailEmp(emp) {
+    if (!emp) return 'パート';
+    if (emp.includes('技能実習')) return '技能実習生';
+    if (emp.includes('社員'))    return '社員';
+    return 'パート';
+  }
+
+  const EMP_TYPES = ['社員', '技能実習生', 'パート'];
+  const EMP_COLORS_MAP = { '社員': '#60a5fa', '技能実習生': '#c084fc', 'パート': '#fb923c' };
+  const SITE_ROW_SPAN = EMP_TYPES.length * 2 + 2;
+
+  let html = `<div class="summary-panel"><table class="summary-table">
+    <thead><tr>
+      <th class="col-site">拠点</th>
+      <th class="col-work">雇用形態</th>
+      <th class="col-emp">区分</th>
+      ${months.map(m => `<th>${m}</th>`).join('')}
+    </tr></thead><tbody>`;
+
+  SITES.forEach(site => {
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    if (!siteEmps.length) return;
+
+    let firstRow = true;
+
+    EMP_TYPES.forEach((et, etIdx) => {
+      const etEmps = siteEmps.filter(e => detailEmp(e.employment) === et);
+      const color = EMP_COLORS_MAP[et];
+      const isSep = etIdx > 0;
+
+      const hourVals = months.map((_, mi) => {
+        const vals = etEmps.map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      });
+      html += `<tr${isSep ? ' class="section-sep"' : ''}>`;
+      if (firstRow) {
+        html += `<td class="col-site" rowspan="${SITE_ROW_SPAN}" style="color:${SITE_COLORS[site]||'#fff'}">${site}</td>`;
+        firstRow = false;
+      }
+      html += `<td class="col-work" rowspan="2" style="color:${color}">${et}</td>`;
+      html += `<td class="col-emp">時間</td>`;
+      hourVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+      html += '</tr>';
+
+      const countVals = months.map((_, mi) => {
+        const n = etEmps.filter(e => e.hours[mi] !== null).length;
+        return n || null;
+      });
+      html += '<tr>';
+      html += `<td class="col-emp">人数</td>`;
+      countVals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+      html += '</tr>';
+    });
+
+    const totalHours = months.map((_, mi) => {
+      const vals = siteEmps.map(e => e.hours[mi]).filter(h => h !== null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    });
+    html += '<tr class="site-total-last"><td class="col-emp" colspan="2" style="font-weight:800">合計／時間</td>';
+    totalHours.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    html += '</tr>';
+
+    const totalCount = months.map((_, mi) => siteEmps.filter(e => e.hours[mi] !== null).length || null);
+    html += '<tr class="site-total-last"><td class="col-emp" colspan="2" style="font-weight:800">合計／人数</td>';
+    totalCount.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  content.innerHTML = html;
 }
 
 function renderSummaryChart() {
