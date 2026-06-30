@@ -1249,8 +1249,8 @@ function renderSummaryWorkChart() {
   const WT_COLORS = { '栽培': '#34d399', '出荷': '#facc15', '配送': '#f87171', '拠点業務': '#fb923c' };
 
   let html = '<div class="schart-shell">';
-  activeSites.forEach(site => {
-    const cid = 'wc_' + site.replace(/[^a-z0-9]/gi, '_');
+  activeSites.forEach((site, si) => {
+    const cid = 'wc_' + si;
     html += `
       <div class="schart-section">
         <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
@@ -1263,8 +1263,8 @@ function renderSummaryWorkChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  activeSites.forEach(site => {
-    const cid = 'wc_' + site.replace(/[^a-z0-9]/gi, '_');
+  activeSites.forEach((site, si) => {
+    const cid = 'wc_' + si;
     const siteEmps = employees.filter(e => e.base === site && e.workType);
     const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
     const datasetsH = siteWTs.map(wt => ({
@@ -1300,8 +1300,8 @@ function renderSummaryEmpChart() {
   }
 
   let html = '<div class="schart-shell">';
-  activeSites.forEach(site => {
-    const cid = 'ec_' + site.replace(/[^a-z0-9]/gi, '_');
+  activeSites.forEach((site, si) => {
+    const cid = 'ec_' + si;
     html += `
       <div class="schart-section">
         <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
@@ -1314,8 +1314,8 @@ function renderSummaryEmpChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  activeSites.forEach(site => {
-    const cid = 'ec_' + site.replace(/[^a-z0-9]/gi, '_');
+  activeSites.forEach((site, si) => {
+    const cid = 'ec_' + si;
     const siteEmps = employees.filter(e => e.base === site && e.workType);
     const datasetsH = EMP_TYPES.map(et => ({
       label: et,
@@ -1416,8 +1416,8 @@ function renderSummaryChart() {
   const activeSites = SITES.filter(s => allData.employees.some(e => e.base === s));
 
   let html = '<div class="schart-shell">';
-  activeSites.forEach(site => {
-    const siteId = 'sc_' + site;
+  activeSites.forEach((site, si) => {
+    const siteId = 'sc_' + si;
     const series = buildSiteSeriesList(site);
     html += `
       <div class="schart-section">
@@ -1437,8 +1437,8 @@ function renderSummaryChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  activeSites.forEach(site => {
-    const siteId = 'sc_' + site;
+  activeSites.forEach((site, si) => {
+    const siteId = 'sc_' + si;
     const series = buildSiteSeriesList(site);
     const ctx = document.getElementById(siteId).getContext('2d');
     const datasets = series.map(s => ({
