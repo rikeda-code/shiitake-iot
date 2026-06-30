@@ -593,8 +593,17 @@ function parseContainerRowsV2(table, startDateStr) {
     return (r >= lo && r <= hi && Math.abs(n - r) < 0.5) ? r : null;
   };
   if (isTypeB) {
-    // Type B: bedCount is at H3 (row index 2, col index 7)
+    // Type B: bedCount is at H3 (row index 2, col index 7); fallback to wider scan
     bedCount = nearInt(allRows[2]?.c?.[7]?.v);
+    if (bedCount === null) {
+      outer: for (let ri = 1; ri <= 4; ri++) {
+        const cells = allRows[ri]?.c || [];
+        for (let ci = 4; ci <= 12; ci++) {
+          bedCount = nearInt(cells[ci]?.v, 10, 9999);
+          if (bedCount !== null) break outer;
+        }
+      }
+    }
   } else if (isTypeC) {
     // Type C: scan rows 0-2 for bedCount
     for (let ri = 0; ri <= 2 && bedCount === null; ri++) {
@@ -604,9 +613,6 @@ function parseContainerRowsV2(table, startDateStr) {
         if (bedCount !== null) break;
       }
     }
-    console.log('[TypeC bedCount]', startDateStr, 'bedCount=', bedCount,
-      'row0=', (allRows[0]?.c||[]).slice(0,15).map(c=>c?.v).join('|'),
-      'row1=', (allRows[1]?.c||[]).slice(0,15).map(c=>c?.v).join('|'));
   } else {
     // Type A: scan rows 1-4, cols 4-12
     for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
@@ -618,13 +624,32 @@ function parseContainerRowsV2(table, startDateStr) {
 
   const rows = [];
   if (isTypeB) {
-    // Type B (南丹): date in col5, daily total in col13
+    // Type B (南丹): date in col4-6, daily total in col13
     const startD = parseDateStr(startDateStr);
+    const startYear = startD ? startD.getFullYear() : new Date().getFullYear();
     for (let ri = 0; ri < allRows.length; ri++) {
       const cells = allRows[ri]?.c || [];
       const ds = cells[3]?.v;
       if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
-      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      // Try cols 5, 4, 6 for row date
+      let rowDate = null;
+      for (const dc of [5, 4, 6]) {
+        rowDate = cellToDate(cells[dc]?.v, cells[dc]?.f);
+        if (rowDate) break;
+      }
+      // Fallback: short M/D date with start year context
+      if (!rowDate) {
+        for (const dc of [5, 4, 6]) {
+          const cell = cells[dc];
+          if (!cell) continue;
+          const md = parseDateMD(cell.v, cell.f);
+          if (md) {
+            rowDate = new Date(startYear, md.getMonth(), md.getDate());
+            if (startD && rowDate < startD) rowDate = new Date(startYear + 1, md.getMonth(), md.getDate());
+            break;
+          }
+        }
+      }
       if (!rowDate) continue;
       const v13 = parseFloat(cells[13]?.v);
       const daily = (!isNaN(v13) && v13 > 0) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
@@ -798,10 +823,8 @@ async function loadWeeklySection() {
           const table = await fetchSheet(c.siteId, c.name, 0);
           const { bedCount, rows, lot: sheetLot } = parseContainerRowsV2(table, c.startDate);
           const sizeRows = parseSizeRowsFromTable(table, c.startDate);
-          if (c.siteName === '南丹') console.log('[南丹]', c.name, 'bedCount=', bedCount, 'rows=', rows.length);
           return { ...c, bedCount, rows, sizeRows, lot: sheetLot || c.lot || '' };
         } catch (e) {
-          if (c.siteName === '南丹') console.warn('[南丹 ERR]', c.name, e.message);
           return { ...c, bedCount: null, rows: [] };
         }
       }),
