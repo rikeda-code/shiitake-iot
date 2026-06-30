@@ -1220,9 +1220,17 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
         tooltip: {
           backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
           titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          footerColor: '#e2e8f0',
           callbacks: {
-            label: ctx => ctx.parsed.y != null
-              ? `${ctx.dataset.label}: ${isCount ? ctx.parsed.y + ' 名' : ctx.parsed.y.toFixed(1) + ' h'}` : null,
+            label: ctx => {
+              if (ctx.parsed.y == null || ctx.parsed.y === 0) return null;
+              return `${ctx.dataset.label}: ${isCount ? ctx.parsed.y + ' 名' : ctx.parsed.y.toFixed(1) + ' h'}`;
+            },
+            footer: items => {
+              const total = items.reduce((s, ctx) => s + (ctx.parsed.y || 0), 0);
+              if (!total) return '';
+              return `合計: ${isCount ? total + ' 名' : total.toFixed(1) + ' h'}`;
+            },
           },
         },
       },
