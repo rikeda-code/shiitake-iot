@@ -1007,8 +1007,10 @@ function renderSummary() {
   main.innerHTML = `
     <div class="summary-shell">
       <div class="summary-subtabs" id="summary-subtabs">
-        <button class="summary-subtab active" data-tab="table">📋 業務区分別</button>
-        <button class="summary-subtab" data-tab="emptype">👥 雇用形態別</button>
+        <button class="summary-subtab active" data-tab="table">📋 業務区分別（表）</button>
+        <button class="summary-subtab" data-tab="work-chart">📊 業務区分別（グラフ）</button>
+        <button class="summary-subtab" data-tab="emptype">👥 雇用形態別（表）</button>
+        <button class="summary-subtab" data-tab="emp-chart">📊 雇用形態別（グラフ）</button>
         <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
         <button class="summary-subtab" data-tab="roster">👤 名簿</button>
       </div>
@@ -1021,9 +1023,11 @@ function renderSummary() {
       btn.classList.add('active');
       destroySummaryCharts();
       const tab = btn.dataset.tab;
-      if (tab === 'table')       renderSummaryTable();
-      else if (tab === 'emptype') renderSummaryByEmpType();
-      else if (tab === 'chart')  renderSummaryChart();
+      if (tab === 'table')         renderSummaryTable();
+      else if (tab === 'work-chart') renderSummaryWorkChart();
+      else if (tab === 'emptype')  renderSummaryByEmpType();
+      else if (tab === 'emp-chart') renderSummaryEmpChart();
+      else if (tab === 'chart')    renderSummaryChart();
       else { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
     };
   });
@@ -1203,6 +1207,131 @@ function buildSiteSeriesList(site) {
   series.push({ label: '拠点合計（時間）', data: totalData, color: TOTAL_COLOR, isTotal: true });
 
   return series;
+}
+
+/* ── Shared: stacked bar chart builder ─────────────────────────── */
+function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
+  function barOpts(yLabel, isCount) {
+    return {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 8 } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: {
+            label: ctx => ctx.parsed.y != null
+              ? `${ctx.dataset.label}: ${isCount ? ctx.parsed.y + ' 名' : ctx.parsed.y.toFixed(1) + ' h'}` : null,
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 11 }, callback: v => isCount ? `${v} 名` : `${v} h` },
+          grid: { color: '#1e2235' }, suggestedMin: 0,
+          title: { display: true, text: yLabel, color: '#8892a4', font: { size: 11 } } },
+      },
+    };
+  }
+  const hCtx = document.getElementById(containerId + '_h')?.getContext('2d');
+  if (hCtx) summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets: datasetsH }, options: barOpts('実質勤務時間 (h)', false) });
+  const nCtx = document.getElementById(containerId + '_n')?.getContext('2d');
+  if (nCtx) summaryChartInstances[containerId + '_n'] = new Chart(nCtx, { type: 'bar', data: { labels: months, datasets: datasetsN }, options: barOpts('人数 (名)', true) });
+}
+
+/* ── Summary: 業務区分別グラフ ─────────────────────────────────── */
+function renderSummaryWorkChart() {
+  const { months, employees } = allData;
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+  const WT_COLORS = { '栽培': '#34d399', '出荷': '#facc15', '配送': '#f87171', '拠点業務': '#fb923c' };
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach(site => {
+    const cid = 'wc_' + site.replace(/[^a-z0-9]/gi, '_');
+    html += `
+      <div class="schart-section">
+        <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="${cid}_h"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="${cid}_n"></canvas></div></div>
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  activeSites.forEach(site => {
+    const cid = 'wc_' + site.replace(/[^a-z0-9]/gi, '_');
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
+    const datasetsH = siteWTs.map(wt => ({
+      label: wt,
+      data: months.map((_, mi) => {
+        const vals = siteEmps.filter(e => e.workType === wt).map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)*10)/10 : null;
+      }),
+      backgroundColor: WT_COLORS[wt] || '#60a5fa',
+    }));
+    const datasetsN = siteWTs.map(wt => ({
+      label: wt,
+      data: months.map((_, mi) => siteEmps.filter(e => e.workType === wt && e.hours[mi] !== null).length || null),
+      backgroundColor: WT_COLORS[wt] || '#60a5fa',
+    }));
+    buildStackedBarSection(cid, months, datasetsH, datasetsN);
+  });
+}
+
+/* ── Summary: 雇用形態別グラフ ─────────────────────────────────── */
+function renderSummaryEmpChart() {
+  const { months, employees } = allData;
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  const EMP_TYPES = ['社員', '技能実習生', 'パート'];
+  const EMP_COLORS_MAP = { '社員': '#60a5fa', '技能実習生': '#c084fc', 'パート': '#fb923c' };
+
+  function detailEmp(emp) {
+    if (!emp) return 'パート';
+    if (emp.includes('技能実習')) return '技能実習生';
+    if (emp.includes('社員')) return '社員';
+    return 'パート';
+  }
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach(site => {
+    const cid = 'ec_' + site.replace(/[^a-z0-9]/gi, '_');
+    html += `
+      <div class="schart-section">
+        <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="${cid}_h"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="${cid}_n"></canvas></div></div>
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  activeSites.forEach(site => {
+    const cid = 'ec_' + site.replace(/[^a-z0-9]/gi, '_');
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    const datasetsH = EMP_TYPES.map(et => ({
+      label: et,
+      data: months.map((_, mi) => {
+        const vals = siteEmps.filter(e => detailEmp(e.employment) === et).map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)*10)/10 : null;
+      }),
+      backgroundColor: EMP_COLORS_MAP[et],
+    }));
+    const datasetsN = EMP_TYPES.map(et => ({
+      label: et,
+      data: months.map((_, mi) => siteEmps.filter(e => detailEmp(e.employment) === et && e.hours[mi] !== null).length || null),
+      backgroundColor: EMP_COLORS_MAP[et],
+    }));
+    buildStackedBarSection(cid, months, datasetsH, datasetsN);
+  });
 }
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
