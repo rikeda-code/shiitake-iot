@@ -1416,8 +1416,8 @@ function renderSummaryChart() {
   const activeSites = SITES.filter(s => allData.employees.some(e => e.base === s));
 
   let html = '<div class="schart-shell">';
-  activeSites.forEach(site => {
-    const siteId = 'sc_' + site;
+  activeSites.forEach((site, si) => {
+    const siteId = 'sc_' + si;
     const series = buildSiteSeriesList(site);
     html += `
       <div class="schart-section">
@@ -1437,8 +1437,8 @@ function renderSummaryChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  activeSites.forEach(site => {
-    const siteId = 'sc_' + site;
+  activeSites.forEach((site, si) => {
+    const siteId = 'sc_' + si;
     const series = buildSiteSeriesList(site);
     const ctx = document.getElementById(siteId).getContext('2d');
     const datasets = series.map(s => ({
