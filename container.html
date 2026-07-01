@@ -960,12 +960,6 @@ function openWeeklyZoom(idx) {
   const zoomLabelsEl = document.getElementById('weekly-zoom-labels');
   if (zoomLabelsEl) {
     zoomLabelsEl.innerHTML = "";
-      const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
-      const sd = parseDateStr(c.startDate);
-      const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
-      const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
-      return `<span style="font-size:0.75rem;color:${color};margin-right:8px">${c.name}${startStr}${lotStr}</span>`;
-    }).join('');
   }
   modal.style.display = 'flex';
   weeklyZoomUpdateBtns();
