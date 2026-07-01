@@ -3392,13 +3392,20 @@ function buildAnalysisDataset() {
   return weeklyState.containerData
     .filter(c => c.harvest != null)
     .map(c => {
-      // c.sizeRows の m/l/xl/bg はコンテナ全体の日次収穫量(kg)。パック品収穫量・
-      // サイズ別収穫量・日付タブ関連グラフでは、そのままkg表示とする。
+      // c.sizeRows の m/l/xl/bg はコンテナ全体の日次収穫量(kg)。
+      // 日付タブ(日別・パレート図)は複数コンテナを跨いで合計するためkgのまま使う。
       const sizeRows = c.sizeRows || [];
-      const sizeTotals = sizeRows.reduce((acc, r) => {
+      const rawSizeTotals = sizeRows.reduce((acc, r) => {
         acc.m += r.m; acc.l += r.l; acc.xl += r.xl; acc.bg += r.bg;
         return acc;
       }, { m: 0, l: 0, xl: 0, bg: 0 });
+      // コンテナ別タブ(パック品収穫量・サイズ別収穫量)は1菌床あたり(g/菌床)に換算する
+      const bedCount = c.bedCount > 0 ? c.bedCount : null;
+      const toPerBed = kg => bedCount ? +(kg * 1000 / bedCount).toFixed(2) : 0;
+      const sizeTotals = {
+        m: toPerBed(rawSizeTotals.m), l: toPerBed(rawSizeTotals.l),
+        xl: toPerBed(rawSizeTotals.xl), bg: toPerBed(rawSizeTotals.bg),
+      };
       const sizeSum = sizeTotals.m + sizeTotals.l + sizeTotals.xl + sizeTotals.bg;
       const sizeRatio = sizeSum > 0 ? {
         m:  +(sizeTotals.m  / sizeSum * 100).toFixed(1),
@@ -3906,7 +3913,7 @@ function renderAnalysisComparison(items, lotColorMap) {
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('pack')"><canvas id="analysis-pack-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量</div>
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量(g/菌床)</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('size')"><canvas id="analysis-size-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
@@ -4112,9 +4119,9 @@ function analysisPackChartConfig(items) {
     data: {
       labels: items.map(c => `${c.siteName}${c.no}`),
       datasets: [
-        { type: 'bar', label: 'パック品収穫量(M+L+2L, kg)', data: packValues,
+        { type: 'bar', label: 'パック品収穫量(M+L+2L, g/菌床)', data: packValues,
           backgroundColor: packColors.map(c => c.dark + 'cc'), stack: 's', yAxisID: 'y', order: 1 },
-        { type: 'bar', label: '袋品収穫量(kg)', data: bgValues,
+        { type: 'bar', label: '袋品収穫量(g/菌床)', data: bgValues,
           backgroundColor: packColors.map(c => c.light + 'cc'), stack: 's', yAxisID: 'y', order: 1 },
         { type: 'line', label: 'パック品率(%)', data: items.map(c => c.packRate),
           borderColor: '#facc15', pointBackgroundColor: packColors.map(c => c.dark),
@@ -4139,7 +4146,7 @@ const ANALYSIS_CHART_CONFIGS = {
   weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig, legend: analysisLotLegendHtml },
   mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
-  size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
+  size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
   dailycontainer: { title: '日別 コンテナ別収穫量(kg)', build: analysisDailyContainerChartConfig },
   dailysize: { title: '日別 サイズ別収穫量(kg)', build: analysisDailySizeChartConfig },
