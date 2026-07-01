@@ -3349,6 +3349,7 @@ let analysisSelected = new Set(); // Set<container.key>
 let analysisSubTab = 'container'; // 'container' | 'date'
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
 let analysisDateSize = 'm'; // 日付タブの日別サイズ別グラフで表示するサイズ
+let analysisParetoSize = 'total'; // コンテナ別パレート図で集計対象にするサイズ('total'=全サイズ合計)
 const analysisCharts = {};
 
 function analysisDestroyCharts() {
@@ -3391,18 +3392,9 @@ function buildAnalysisDataset() {
   return weeklyState.containerData
     .filter(c => c.harvest != null)
     .map(c => {
-      // c.sizeRows の m/l/xl/bg はコンテナ全体の日次収穫量(kg)。他の指標(g/菌床)に
-      // 揃えるため、菌床数で割って1菌床あたりのグラム換算に直しておく。
-      const bedCount = c.bedCount > 0 ? c.bedCount : null;
-      const sizeRows = bedCount
-        ? (c.sizeRows || []).map(r => ({
-            day: r.day,
-            m: +(r.m * 1000 / bedCount).toFixed(2),
-            l: +(r.l * 1000 / bedCount).toFixed(2),
-            xl: +(r.xl * 1000 / bedCount).toFixed(2),
-            bg: +(r.bg * 1000 / bedCount).toFixed(2),
-          }))
-        : [];
+      // c.sizeRows の m/l/xl/bg はコンテナ全体の日次収穫量(kg)。パック品収穫量・
+      // サイズ別収穫量・日付タブ関連グラフでは、そのままkg表示とする。
+      const sizeRows = c.sizeRows || [];
       const sizeTotals = sizeRows.reduce((acc, r) => {
         acc.m += r.m; acc.l += r.l; acc.xl += r.xl; acc.bg += r.bg;
         return acc;
@@ -3498,6 +3490,11 @@ function analysisSetDateRange(key, value) {
 
 function analysisSetDateSize(key) {
   analysisDateSize = key;
+  renderAnalysisTab();
+}
+
+function analysisSetParetoSize(key) {
+  analysisParetoSize = key;
   renderAnalysisTab();
 }
 
@@ -3652,15 +3649,17 @@ function analysisParetoChartOptions() {
 
 function analysisParetoContainerChartConfig(items) {
   const filtered = analysisDateRangeFilter(analysisBuildDailyRows(items));
+  const valueKey = analysisParetoSize === 'total' ? 'total' : analysisParetoSize;
   const byContainer = {};
-  filtered.forEach(r => { byContainer[r.containerLabel] = (byContainer[r.containerLabel] || 0) + r.total; });
+  filtered.forEach(r => { byContainer[r.containerLabel] = (byContainer[r.containerLabel] || 0) + r[valueKey]; });
   const entries = Object.entries(byContainer).map(([label, value], i) => ({ label, value, color: CONTAINER_PALETTE[i % CONTAINER_PALETTE.length] }));
   const pareto = analysisBuildPareto(entries);
+  const sizeLabel = ANALYSIS_SIZE_DEFS.find(sd => sd.key === analysisParetoSize)?.label || '全サイズ合計';
   return {
     data: {
       labels: pareto.labels,
       datasets: [
-        { type: 'bar', label: '収穫量(g/菌床)', data: pareto.values, backgroundColor: pareto.colors.map(c => (c || '#38bdf8') + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'bar', label: `収穫量(kg・${sizeLabel})`, data: pareto.values, backgroundColor: pareto.colors.map(c => (c || '#38bdf8') + 'cc'), yAxisID: 'y', order: 1 },
         { type: 'line', label: '累積構成比(%)', data: pareto.cumPct, borderColor: '#facc15', backgroundColor: '#facc15', pointBackgroundColor: '#facc15', pointRadius: 4, yAxisID: 'y1' },
       ],
     },
@@ -3678,7 +3677,7 @@ function analysisParetoSizeChartConfig(items) {
     data: {
       labels: pareto.labels,
       datasets: [
-        { type: 'bar', label: '収穫量(g/菌床)', data: pareto.values, backgroundColor: pareto.colors.map(c => (c || '#38bdf8') + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'bar', label: '収穫量(kg)', data: pareto.values, backgroundColor: pareto.colors.map(c => (c || '#38bdf8') + 'cc'), yAxisID: 'y', order: 1 },
         { type: 'line', label: '累積構成比(%)', data: pareto.cumPct, borderColor: '#facc15', backgroundColor: '#facc15', pointBackgroundColor: '#facc15', pointRadius: 4, yAxisID: 'y1' },
       ],
     },
@@ -3691,6 +3690,11 @@ function renderAnalysisDateView() {
     <button class="sort-btn${analysisDateSize === sd.key ? ' active' : ''}"
       style="${analysisDateSize === sd.key ? `color:${sd.color};border-color:${sd.color}` : ''}"
       onclick="analysisSetDateSize('${sd.key}')">${sd.label}</button>`).join('');
+
+  const paretoSizeButtons = [{ key: 'total', label: '全体', color: '#94a3b8' }, ...ANALYSIS_SIZE_DEFS].map(sd => `
+    <button class="sort-btn${analysisParetoSize === sd.key ? ' active' : ''}"
+      style="${analysisParetoSize === sd.key ? `color:${sd.color};border-color:${sd.color}` : ''}"
+      onclick="analysisSetParetoSize('${sd.key}')">${sd.label}</button>`).join('');
 
   return `
     <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
@@ -3705,18 +3709,21 @@ function renderAnalysisDateView() {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 コンテナ別収穫量</div>
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 コンテナ別収穫量(kg)</div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailycontainer')"><canvas id="analysis-dailycontainer-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(コンテナ別内訳)</div>
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(コンテナ別内訳・kg)</div>
           <div style="display:flex;gap:4px" onclick="event.stopPropagation()">${sizeButtons}</div>
         </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailysize')"><canvas id="analysis-dailysize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">構成比パレート図(コンテナ別)</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">構成比パレート図(コンテナ別)</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">${paretoSizeButtons}</div>
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretocontainer')"><canvas id="analysis-paretocontainer-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
@@ -4105,9 +4112,9 @@ function analysisPackChartConfig(items) {
     data: {
       labels: items.map(c => `${c.siteName}${c.no}`),
       datasets: [
-        { type: 'bar', label: 'パック品収穫量(M+L+2L, g/菌床)', data: packValues,
+        { type: 'bar', label: 'パック品収穫量(M+L+2L, kg)', data: packValues,
           backgroundColor: packColors.map(c => c.dark + 'cc'), stack: 's', yAxisID: 'y', order: 1 },
-        { type: 'bar', label: '袋品収穫量(g/菌床)', data: bgValues,
+        { type: 'bar', label: '袋品収穫量(kg)', data: bgValues,
           backgroundColor: packColors.map(c => c.light + 'cc'), stack: 's', yAxisID: 'y', order: 1 },
         { type: 'line', label: 'パック品率(%)', data: items.map(c => c.packRate),
           borderColor: '#facc15', pointBackgroundColor: packColors.map(c => c.dark),
@@ -4134,8 +4141,8 @@ const ANALYSIS_CHART_CONFIGS = {
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
-  dailycontainer: { title: '日別 コンテナ別収穫量', build: analysisDailyContainerChartConfig },
-  dailysize: { title: '日別 サイズ別収穫量', build: analysisDailySizeChartConfig },
+  dailycontainer: { title: '日別 コンテナ別収穫量(kg)', build: analysisDailyContainerChartConfig },
+  dailysize: { title: '日別 サイズ別収穫量(kg)', build: analysisDailySizeChartConfig },
   paretocontainer: { title: '構成比パレート図(コンテナ別)', build: analysisParetoContainerChartConfig },
   paretosize: { title: '構成比パレート図(サイズ別)', build: analysisParetoSizeChartConfig },
 };
