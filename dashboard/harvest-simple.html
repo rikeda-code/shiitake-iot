@@ -3463,6 +3463,40 @@ function analysisFormatLot(lot) {
   return lot.replace(/^自社/, '').trim() || '—';
 }
 
+const ANALYSIS_LOT_PALETTE = ['#38bdf8', '#34d399', '#f97316', '#facc15', '#f472b6', '#a78bfa', '#4ade80', '#fb7185', '#60a5fa', '#c084fc', '#2dd4bf', '#fbbf24'];
+const ANALYSIS_NO_LOT_COLOR = '#64748b';
+
+// 選択中コンテナの菌床ロットに一貫した色を割り当てる。ロット未記載は共通のグレー。
+function analysisBuildLotColorMap(items) {
+  const lots = [...new Set(items.map(c => analysisFormatLot(c.lot)))].filter(l => l !== '—').sort();
+  const map = {};
+  lots.forEach((lot, i) => { map[lot] = ANALYSIS_LOT_PALETTE[i % ANALYSIS_LOT_PALETTE.length]; });
+  map['—'] = ANALYSIS_NO_LOT_COLOR;
+  return map;
+}
+
+function analysisLotColorFor(lotColorMap, lot) {
+  return lotColorMap[analysisFormatLot(lot)] || ANALYSIS_NO_LOT_COLOR;
+}
+
+function analysisLotLegendHtml(lotColorMap) {
+  const entries = Object.entries(lotColorMap);
+  if (!entries.length) return '';
+  const chips = entries.map(([lot, color]) => `
+    <span style="display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;color:#94a3b8">
+      <span style="width:10px;height:10px;border-radius:3px;background:${color};display:inline-block"></span>${lot === '—' ? 'ロット未記載' : lot}
+    </span>`).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#13151f;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <span style="font-size:0.75rem;color:#64748b;font-weight:600">菌床ロット:</span>${chips}
+  </div>`;
+}
+
+function analysisAvg(values) {
+  const valid = values.filter(v => v != null && !isNaN(v));
+  if (!valid.length) return null;
+  return valid.reduce((a, b) => a + b, 0) / valid.length;
+}
+
 function analysisBulkAction(select, action) {
   const candidates = analysisFilteredCandidates();
   if (action === 'selectAll') candidates.forEach(c => analysisSelected.add(c.key));
@@ -3516,7 +3550,8 @@ async function renderAnalysisTab() {
     </label>`;
   }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
 
-  const comparisonHtml = allSelected.length ? renderAnalysisComparison(allSelected) : `
+  const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
+  const comparisonHtml = allSelected.length ? renderAnalysisComparison(allSelected, lotColorMap) : `
     <div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`;
 
   section.innerHTML = `
@@ -3569,15 +3604,15 @@ async function renderAnalysisTab() {
       <div>${comparisonHtml}</div>
     </div>`;
 
-  if (allSelected.length) drawAnalysisCharts(allSelected);
+  if (allSelected.length) drawAnalysisCharts(allSelected, lotColorMap);
 }
 
-function renderAnalysisComparison(items) {
+function renderAnalysisComparison(items, lotColorMap) {
   const rows = items.map((c, i) => {
     const siteColor = SITES.find(s => s.name === c.siteName)?.color || '#94a3b8';
     return `<tr style="border-bottom:1px solid #2e3148">
       <td style="padding:6px 8px;color:${siteColor};font-weight:600">${c.siteName} ${c.no}</td>
-      <td style="padding:6px 8px;color:#94a3b8;font-size:0.78rem">${analysisFormatLot(c.lot)}</td>
+      <td style="padding:6px 8px;color:${analysisLotColorFor(lotColorMap, c.lot)};font-size:0.78rem;font-weight:600">${analysisFormatLot(c.lot)}</td>
       <td style="padding:6px 8px;color:#94a3b8;font-size:0.78rem">${c.startDate || '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.days != null ? c.days + '日' : '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.harvest != null ? Math.round(c.harvest).toLocaleString('ja-JP') + 'g' : '—'}</td>
@@ -3608,6 +3643,7 @@ function renderAnalysisComparison(items) {
       </table>
     </div>
 
+    ${analysisLotLegendHtml(lotColorMap)}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫量・パック品率</div>
@@ -3628,27 +3664,44 @@ function renderAnalysisComparison(items) {
     </div>`;
 }
 
-function drawAnalysisCharts(items) {
+function analysisAvgLineDataset(label, value, color, yAxisID, count) {
+  return {
+    type: 'line', label, data: Array(count).fill(value != null ? +value.toFixed(1) : null),
+    borderColor: color, borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, yAxisID,
+  };
+}
+
+function drawAnalysisCharts(items, lotColorMap) {
   analysisDestroyCharts();
   const labels = items.map(c => `${c.siteName}${c.no}`);
+  const lotColors = items.map(c => analysisLotColorFor(lotColorMap, c.lot));
+  // ロットごとの塗り分けなので、x軸ラベル自体もロット色で表示する
+  const lotTickColor = ctx => lotColors[ctx.index] || '#8892a4';
 
   const harvestCanvas = document.getElementById('analysis-harvest-canvas');
   if (harvestCanvas) {
+    const harvestValues = items.map(c => c.harvest != null ? Math.round(c.harvest) : null);
+    const packValues = items.map(c => c.packRate);
+    const avgHarvest = analysisAvg(harvestValues);
+    const avgPack = analysisAvg(packValues);
     analysisCharts.harvest = new Chart(harvestCanvas, {
       data: {
         labels,
         datasets: [
-          { type: 'bar', label: '収穫量(g/菌床)', data: items.map(c => c.harvest != null ? Math.round(c.harvest) : null),
-            backgroundColor: '#38bdf8cc', yAxisID: 'y' },
-          { type: 'line', label: 'パック品率(%)', data: items.map(c => c.packRate),
-            borderColor: '#facc15', backgroundColor: '#facc15', yAxisID: 'y1' },
+          { type: 'bar', label: '収穫量(g/菌床)', data: harvestValues,
+            backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y' },
+          { type: 'line', label: 'パック品率(%)', data: packValues,
+            borderColor: '#facc15', pointBackgroundColor: lotColors, pointBorderColor: lotColors,
+            pointRadius: 4, yAxisID: 'y1' },
+          analysisAvgLineDataset('収穫量 平均', avgHarvest, '#e2e8f0', 'y', items.length),
+          analysisAvgLineDataset('パック品率 平均', avgPack, '#facc15', 'y1', items.length),
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
         scales: {
-          x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
           y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
           y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
         },
@@ -3658,20 +3711,25 @@ function drawAnalysisCharts(items) {
 
   const weightCanvas = document.getElementById('analysis-weight-canvas');
   if (weightCanvas) {
+    const weightValues = items.map(c => c.weight);
+    const mekakiValues = items.map(c => c.mekaki);
+    const avgWeight = analysisAvg(weightValues);
+    const avgMekaki = analysisAvg(mekakiValues);
     analysisCharts.weight = new Chart(weightCanvas, {
-      type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: '菌床重量(g)', data: items.map(c => c.weight), backgroundColor: '#fb7185cc', yAxisID: 'y' },
-          { label: '芽かき量(kg・2520換算)', data: items.map(c => c.mekaki), backgroundColor: '#a78bfacc', yAxisID: 'y1' },
+          { type: 'bar', label: '菌床重量(g)', data: weightValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y' },
+          { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + '55'), yAxisID: 'y1' },
+          analysisAvgLineDataset('菌床重量 平均', avgWeight, '#fb7185', 'y', items.length),
+          analysisAvgLineDataset('芽かき量 平均', avgMekaki, '#a78bfa', 'y1', items.length),
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
         scales: {
-          x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
           y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
           y1: { position: 'right', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
         },
@@ -3681,20 +3739,23 @@ function drawAnalysisCharts(items) {
 
   const sizeCanvas = document.getElementById('analysis-size-canvas');
   if (sizeCanvas) {
+    const totals = items.map(c => +(c.sizeTotals.m + c.sizeTotals.l + c.sizeTotals.xl + c.sizeTotals.bg).toFixed(2));
     analysisCharts.size = new Chart(sizeCanvas, {
-      type: 'bar',
       data: {
         labels,
-        datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
-          label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
-          data: items.map(c => +c.sizeTotals[sd.key].toFixed(2)),
-        })),
+        datasets: [
+          ...ANALYSIS_SIZE_DEFS.map(sd => ({
+            type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
+            data: items.map(c => +c.sizeTotals[sd.key].toFixed(2)),
+          })),
+          analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#e2e8f0', 'y', items.length),
+        ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
         scales: {
-          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
           y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
         },
       },
@@ -3704,13 +3765,17 @@ function drawAnalysisCharts(items) {
   const ratioCanvas = document.getElementById('analysis-ratio-canvas');
   if (ratioCanvas) {
     analysisCharts.ratio = new Chart(ratioCanvas, {
-      type: 'bar',
       data: {
         labels,
-        datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
-          label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
-          data: items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : 0),
-        })),
+        datasets: [
+          ...ANALYSIS_SIZE_DEFS.map(sd => ({
+            type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
+            data: items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : 0),
+          })),
+          ...ANALYSIS_SIZE_DEFS.map(sd => analysisAvgLineDataset(
+            `${sd.label} 平均`, analysisAvg(items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : null)), sd.color, 'y', items.length,
+          )),
+        ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -3719,7 +3784,7 @@ function drawAnalysisCharts(items) {
           tooltip: { ...tooltipDefaults, callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
         },
         scales: {
-          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
           y: { stacked: true, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
         },
       },
