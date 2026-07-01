@@ -2160,49 +2160,6 @@ function initTabs() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(lotBtn);
-
-  // 散布図 tab
-  const scatterBtn = document.createElement('button');
-  scatterBtn.className = 'tab-btn';
-  scatterBtn.textContent = '散布図';
-  scatterBtn.addEventListener('click', () => {
-    if (scatterTabActive) return;
-    weeklyTabActive = false;
-    lotTabActive = false;
-    scatterTabActive = true;
-    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
-      b.classList.remove('active');
-      b.style.color = ''; b.style.borderBottomColor = '';
-    });
-    scatterBtn.classList.add('active');
-    scatterBtn.style.color = '#e879f9';
-    scatterBtn.style.borderBottomColor = '#e879f9';
-    updateTabVisibility();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
-  tabsEl.appendChild(scatterBtn);
-
-  // Standalone weekly tab
-  const weeklyBtn = document.createElement('button');
-  weeklyBtn.className = 'tab-btn';
-  weeklyBtn.textContent = '週別累計';
-  weeklyBtn.addEventListener('click', () => {
-    if (weeklyTabActive) return;
-    weeklyTabActive = true;
-    lotTabActive = false;
-    scatterTabActive = false;
-    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
-      b.classList.remove('active');
-      b.style.color = '';
-      b.style.borderBottomColor = '';
-    });
-    weeklyBtn.classList.add('active');
-    weeklyBtn.style.color = '#94a3b8';
-    weeklyBtn.style.borderBottomColor = '#94a3b8';
-    updateTabVisibility();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
-  tabsEl.appendChild(weeklyBtn);
 }
 
 function closeDetail() {
