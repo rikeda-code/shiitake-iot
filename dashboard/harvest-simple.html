@@ -3682,10 +3682,14 @@ function analysisDarken(hex, amount = 0.4) {
 }
 
 function analysisAvgLineDataset(label, value, color, yAxisID, count) {
+  const dark = analysisDarken(color, 0.4);
   return {
     // orderを指定しないバー(order:1)より低い実効順位になり、平均線が棒グラフの上に描画される
     type: 'line', label, data: Array(count).fill(value != null ? +value.toFixed(1) : null),
-    borderColor: analysisDarken(color, 0.4), borderDash: [6, 4], borderWidth: 2.5, pointRadius: 0, yAxisID,
+    borderColor: dark, borderDash: [6, 4], borderWidth: 2.5, yAxisID,
+    // ポイントが無いとホバーで値が拾いにくいため、三角マーカーを付ける
+    pointStyle: 'triangle', pointRadius: 4, pointHoverRadius: 6,
+    pointBackgroundColor: dark, pointBorderColor: dark,
   };
 }
 
