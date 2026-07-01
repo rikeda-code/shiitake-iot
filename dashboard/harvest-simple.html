@@ -3494,7 +3494,7 @@ function analysisLotLegendHtml(lotColorMap) {
   if (!entries.length) return '';
   const chips = entries.map(([lot, color]) => `
     <span style="display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;color:#94a3b8">
-      <span style="width:10px;height:10px;border-radius:3px;background:${color};display:inline-block"></span>${lot === '—' ? 'ロット未記載' : lot}
+      <span style="width:10px;height:10px;border-radius:3px;background:${color};display:inline-block"></span>${lot === '—' ? '七河' : lot}
     </span>`).join('');
   return `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#13151f;border-radius:10px;padding:10px 14px;margin-bottom:12px">
     <span style="font-size:0.75rem;color:#64748b;font-weight:600">菌床ロット:</span>${chips}
