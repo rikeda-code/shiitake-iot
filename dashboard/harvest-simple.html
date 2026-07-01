@@ -3453,6 +3453,16 @@ function analysisClearSelection() {
   renderAnalysisTab();
 }
 
+const ANALYSIS_LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
+
+// 菌床ロットは自社菌床のみ記載されている(数字+アルファベット表記。例: 6A, 5O)。
+// 日本産・志摩産などの外部仕入れは対象外として「—」を返す。
+function analysisFormatLot(lot) {
+  if (!lot) return '—';
+  if (ANALYSIS_LOT_EXCLUDE.has(lot) || /^Date\(/.test(lot) || lot.includes('自動的に収穫量')) return '—';
+  return lot.replace(/^自社/, '').trim() || '—';
+}
+
 function analysisBulkAction(select, action) {
   const candidates = analysisFilteredCandidates();
   if (action === 'selectAll') candidates.forEach(c => analysisSelected.add(c.key));
@@ -3567,6 +3577,7 @@ function renderAnalysisComparison(items) {
     const siteColor = SITES.find(s => s.name === c.siteName)?.color || '#94a3b8';
     return `<tr style="border-bottom:1px solid #2e3148">
       <td style="padding:6px 8px;color:${siteColor};font-weight:600">${c.siteName} ${c.no}</td>
+      <td style="padding:6px 8px;color:#94a3b8;font-size:0.78rem">${analysisFormatLot(c.lot)}</td>
       <td style="padding:6px 8px;color:#94a3b8;font-size:0.78rem">${c.startDate || '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.days != null ? c.days + '日' : '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.harvest != null ? Math.round(c.harvest).toLocaleString('ja-JP') + 'g' : '—'}</td>
@@ -3583,6 +3594,7 @@ function renderAnalysisComparison(items) {
         <thead>
           <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
             <th style="padding:6px 8px;text-align:left;color:#64748b">コンテナ</th>
+            <th style="padding:6px 8px;text-align:left;color:#64748b">菌床ロット</th>
             <th style="padding:6px 8px;text-align:left;color:#64748b">開始日</th>
             <th style="padding:6px 8px;text-align:right;color:#64748b">栽培日数</th>
             <th style="padding:6px 8px;text-align:right;color:#64748b">収穫量</th>
