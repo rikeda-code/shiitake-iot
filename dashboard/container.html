@@ -959,7 +959,7 @@ function openWeeklyZoom(idx) {
   // コンテナラベル（拠点名なし）をタイトル下に表示
   const zoomLabelsEl = document.getElementById('weekly-zoom-labels');
   if (zoomLabelsEl) {
-    zoomLabelsEl.innerHTML = "";
+    zoomLabelsEl.innerHTML = weeklyZoomGroups[idx].containers.map(c => {
       const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
       const sd = parseDateStr(c.startDate);
       const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
