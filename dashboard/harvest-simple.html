@@ -3346,6 +3346,9 @@ let analysisFilters = {
   minDays: '', maxDays: '', dateFrom: '', dateTo: '',
 };
 let analysisSelected = new Set(); // Set<container.key>
+let analysisSubTab = 'container'; // 'container' | 'date'
+let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
+let analysisDateSize = 'm'; // 日付タブの日別サイズ別グラフで表示するサイズ
 const analysisCharts = {};
 
 function analysisDestroyCharts() {
@@ -3425,6 +3428,7 @@ function buildAnalysisDataset() {
         startDate: c.startDate, endDate: c.endDate, days: c.days,
         harvest: c.harvest, packRate: c.packRate, lot: c.lot,
         sizeTotals, sizeRatio, weightBefore, weightAbsorb, mekaki,
+        sizeRows: sizeRows, // 日別(day=栽培N日目)のサイズ内訳。日付タブで実際の日付に変換して使う
       };
     });
 }
@@ -3471,6 +3475,21 @@ function analysisClearSelection() {
   renderAnalysisTab();
 }
 
+function analysisSetSubTab(tab) {
+  analysisSubTab = tab;
+  renderAnalysisTab();
+}
+
+function analysisSetDateRange(key, value) {
+  analysisDateRange[key] = value;
+  renderAnalysisTab();
+}
+
+function analysisSetDateSize(key) {
+  analysisDateSize = key;
+  renderAnalysisTab();
+}
+
 const ANALYSIS_LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
 
 // 菌床ロットは自社菌床のみ記載されている(数字+アルファベット表記。例: 6A, 5O)。
@@ -3513,6 +3532,187 @@ function analysisAvg(values) {
   const valid = values.filter(v => v != null && !isNaN(v));
   if (!valid.length) return null;
   return valid.reduce((a, b) => a + b, 0) / valid.length;
+}
+
+// ── 日付タブ用データ変換 ──────────────────────────────────────────────
+// sizeRowsの day(栽培N日目)を実際の暦日に変換し、コンテナ横断でフラット化する
+function analysisBuildDailyRows(items) {
+  const rows = [];
+  items.forEach(c => {
+    const startD = parseDateStr(c.startDate);
+    if (!startD) return;
+    (c.sizeRows || []).forEach(r => {
+      const total = r.m + r.l + r.xl + r.bg;
+      if (total <= 0) return;
+      const d = new Date(startD);
+      d.setDate(d.getDate() + (r.day - 1));
+      rows.push({
+        dateObj: d,
+        dateKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+        containerLabel: `${c.siteName}${c.no}`,
+        m: r.m, l: r.l, xl: r.xl, bg: r.bg, total,
+      });
+    });
+  });
+  return rows;
+}
+
+function analysisDateRangeFilter(dailyRows) {
+  const from = analysisDateRange.from ? new Date(analysisDateRange.from) : null;
+  const to = analysisDateRange.to ? new Date(analysisDateRange.to) : null;
+  return dailyRows.filter(r => (!from || r.dateObj >= from) && (!to || r.dateObj <= to));
+}
+
+// 日付×コンテナで積み上げ棒グラフ用データセットを作る
+function analysisBuildDatePivot(dailyRows, valueKey) {
+  const dateKeys = [...new Set(dailyRows.map(r => r.dateKey))].sort();
+  const containers = [...new Set(dailyRows.map(r => r.containerLabel))];
+  const map = {};
+  dailyRows.forEach(r => {
+    const bucket = (map[r.dateKey] ||= {});
+    bucket[r.containerLabel] = (bucket[r.containerLabel] || 0) + r[valueKey];
+  });
+  const labels = dateKeys.map(k => { const [, m, d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; });
+  const datasets = containers.map((cl, i) => ({
+    type: 'bar', label: cl, stack: 's',
+    backgroundColor: CONTAINER_PALETTE[i % CONTAINER_PALETTE.length] + 'cc',
+    data: dateKeys.map(k => +((map[k]?.[cl]) || 0).toFixed(2)),
+  }));
+  return { labels, datasets };
+}
+
+// 構成比パレート図用: 値の降順に並べ替え、累積構成比(%)を計算する
+function analysisBuildPareto(entries) {
+  const sorted = [...entries].filter(e => e.value > 0).sort((a, b) => b.value - a.value);
+  const total = sorted.reduce((s, e) => s + e.value, 0);
+  let cum = 0;
+  const cumPct = sorted.map(e => { cum += e.value; return total > 0 ? +(cum / total * 100).toFixed(1) : 0; });
+  return {
+    labels: sorted.map(e => e.label),
+    values: sorted.map(e => +e.value.toFixed(2)),
+    colors: sorted.map(e => e.color || null),
+    cumPct,
+  };
+}
+
+function analysisDailyContainerChartConfig(items) {
+  const filtered = analysisDateRangeFilter(analysisBuildDailyRows(items));
+  const pivot = analysisBuildDatePivot(filtered, 'total');
+  return {
+    data: { labels: pivot.labels, datasets: pivot.datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+function analysisDailySizeChartConfig(items) {
+  const filtered = analysisDateRangeFilter(analysisBuildDailyRows(items));
+  const pivot = analysisBuildDatePivot(filtered, analysisDateSize);
+  return {
+    data: { labels: pivot.labels, datasets: pivot.datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+function analysisParetoChartOptions() {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+    scales: {
+      x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
+    },
+  };
+}
+
+function analysisParetoContainerChartConfig(items) {
+  const filtered = analysisDateRangeFilter(analysisBuildDailyRows(items));
+  const byContainer = {};
+  filtered.forEach(r => { byContainer[r.containerLabel] = (byContainer[r.containerLabel] || 0) + r.total; });
+  const entries = Object.entries(byContainer).map(([label, value], i) => ({ label, value, color: CONTAINER_PALETTE[i % CONTAINER_PALETTE.length] }));
+  const pareto = analysisBuildPareto(entries);
+  return {
+    data: {
+      labels: pareto.labels,
+      datasets: [
+        { type: 'bar', label: '収穫量(g/菌床)', data: pareto.values, backgroundColor: pareto.colors.map(c => (c || '#38bdf8') + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'line', label: '累積構成比(%)', data: pareto.cumPct, borderColor: '#facc15', backgroundColor: '#facc15', pointBackgroundColor: '#facc15', pointRadius: 4, yAxisID: 'y1' },
+      ],
+    },
+    options: analysisParetoChartOptions(),
+  };
+}
+
+function analysisParetoSizeChartConfig(items) {
+  const filtered = analysisDateRangeFilter(analysisBuildDailyRows(items));
+  const totals = { m: 0, l: 0, xl: 0, bg: 0 };
+  filtered.forEach(r => { totals.m += r.m; totals.l += r.l; totals.xl += r.xl; totals.bg += r.bg; });
+  const entries = ANALYSIS_SIZE_DEFS.map(sd => ({ label: sd.label, value: totals[sd.key], color: sd.color }));
+  const pareto = analysisBuildPareto(entries);
+  return {
+    data: {
+      labels: pareto.labels,
+      datasets: [
+        { type: 'bar', label: '収穫量(g/菌床)', data: pareto.values, backgroundColor: pareto.colors.map(c => (c || '#38bdf8') + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'line', label: '累積構成比(%)', data: pareto.cumPct, borderColor: '#facc15', backgroundColor: '#facc15', pointBackgroundColor: '#facc15', pointRadius: 4, yAxisID: 'y1' },
+      ],
+    },
+    options: analysisParetoChartOptions(),
+  };
+}
+
+function renderAnalysisDateView() {
+  const sizeButtons = ANALYSIS_SIZE_DEFS.map(sd => `
+    <button class="sort-btn${analysisDateSize === sd.key ? ' active' : ''}"
+      style="${analysisDateSize === sd.key ? `color:${sd.color};border-color:${sd.color}` : ''}"
+      onclick="analysisSetDateSize('${sd.key}')">${sd.label}</button>`).join('');
+
+  return `
+    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">対象期間(収穫日) ※未指定の場合は全期間</div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="date" value="${analysisDateRange.from}" oninput="analysisSetDateRange('from', this.value)"
+          style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+        <span style="color:#64748b">〜</span>
+        <input type="date" value="${analysisDateRange.to}" oninput="analysisSetDateRange('to', this.value)"
+          style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px">
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 コンテナ別収穫量</div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailycontainer')"><canvas id="analysis-dailycontainer-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(コンテナ別内訳)</div>
+          <div style="display:flex;gap:4px" onclick="event.stopPropagation()">${sizeButtons}</div>
+        </div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailysize')"><canvas id="analysis-dailysize-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">構成比パレート図(コンテナ別)</div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretocontainer')"><canvas id="analysis-paretocontainer-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">構成比パレート図(サイズ別)</div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretosize')"><canvas id="analysis-paretosize-canvas"></canvas></div>
+      </div>
+    </div>`;
 }
 
 function analysisBulkAction(select, action) {
@@ -3569,11 +3769,18 @@ async function renderAnalysisTab() {
   }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
 
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
-  const comparisonHtml = allSelected.length ? renderAnalysisComparison(allSelected, lotColorMap) : `
-    <div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`;
+  const rightHtml = !allSelected.length
+    ? `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`
+    : (analysisSubTab === 'date' ? renderAnalysisDateView() : renderAnalysisComparison(allSelected, lotColorMap));
+
+  const subTabHtml = [
+    { key: 'container', label: 'コンテナ別' },
+    { key: 'date', label: '日付' },
+  ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
     <div class="section-title">分析<span class="sub">コンテナ横断比較</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">${subTabHtml}</div>
 
     <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
       <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end">
@@ -3619,7 +3826,7 @@ async function renderAnalysisTab() {
         </div>
         ${candidateListHtml}
       </div>
-      <div>${comparisonHtml}</div>
+      <div>${rightHtml}</div>
     </div>`;
 
   if (allSelected.length) drawAnalysisCharts(allSelected, lotColorMap);
@@ -3916,6 +4123,10 @@ const ANALYSIS_CHART_CONFIGS = {
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
+  dailycontainer: { title: '日別 コンテナ別収穫量', build: analysisDailyContainerChartConfig },
+  dailysize: { title: '日別 サイズ別収穫量', build: analysisDailySizeChartConfig },
+  paretocontainer: { title: '構成比パレート図(コンテナ別)', build: analysisParetoContainerChartConfig },
+  paretosize: { title: '構成比パレート図(サイズ別)', build: analysisParetoSizeChartConfig },
 };
 
 let analysisZoomState = null; // { items, lotColorMap, lotColors, lotTickColor }
