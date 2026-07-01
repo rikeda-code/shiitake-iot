@@ -3075,7 +3075,7 @@ async function ensureMekakiRows() {
         const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
         const converted = (total != null && bedCount != null && bedCount > 0)
           ? (bedCount !== 2520 ? +(total * 2520 / bedCount).toFixed(2) : total) : null;
-        return { siteName, hozon, startStr, startDate, lot, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
+        return { siteName, hozon, startStr, startDate, lot, no, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
       })
       // 日付新しい順
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
@@ -3404,11 +3404,16 @@ function buildAnalysisDataset() {
       const targetDate = parseDateStr(c.startDate);
       const idxKey = `${c.siteName}|${c.no}`;
 
+      // 菌床重量: 散水前重量(初期重量)と吸水量(散水後-散水前)を計測値ごとに平均する
       const wMatch = analysisClosestByDate(weightIndex[idxKey], targetDate);
-      let weight = null;
+      let weightBefore = null, weightAbsorb = null;
       if (wMatch && wMatch.measurements.length) {
-        const afters = wMatch.measurements.map(m => m.after).filter(v => v != null);
-        if (afters.length) weight = +(afters.reduce((a, b) => a + b, 0) / afters.length).toFixed(1);
+        const befores = wMatch.measurements.map(m => m.before).filter(v => v != null);
+        const absorbs = wMatch.measurements
+          .filter(m => m.before != null && m.after != null)
+          .map(m => Math.max(0, m.after - m.before));
+        if (befores.length) weightBefore = +(befores.reduce((a, b) => a + b, 0) / befores.length).toFixed(1);
+        if (absorbs.length) weightAbsorb = +(absorbs.reduce((a, b) => a + b, 0) / absorbs.length).toFixed(1);
       }
 
       const mMatch = analysisClosestByDate(mekakiIndex[idxKey], targetDate);
@@ -3419,7 +3424,7 @@ function buildAnalysisDataset() {
         siteName: c.siteName, no: c.no, name: c.name,
         startDate: c.startDate, endDate: c.endDate, days: c.days,
         harvest: c.harvest, packRate: c.packRate, lot: c.lot,
-        sizeTotals, sizeRatio, weight, mekaki,
+        sizeTotals, sizeRatio, weightBefore, weightAbsorb, mekaki,
       };
     });
 }
@@ -3627,7 +3632,7 @@ function renderAnalysisComparison(items, lotColorMap) {
       <td style="padding:6px 8px;text-align:right">${c.days != null ? c.days + '日' : '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.harvest != null ? Math.round(c.harvest).toLocaleString('ja-JP') + 'g' : '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.packRate != null ? c.packRate + '%' : '—'}</td>
-      <td style="padding:6px 8px;text-align:right">${c.weight != null ? c.weight.toLocaleString('ja-JP') + 'g' : '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.weightBefore != null ? `初期${c.weightBefore.toLocaleString('ja-JP')}g+吸水${(c.weightAbsorb ?? 0).toLocaleString('ja-JP')}g` : '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.mekaki != null ? c.mekaki.toLocaleString('ja-JP') + 'kg' : '—'}</td>
       <td style="padding:6px 8px;text-align:right">${c.sizeRatio ? `M${c.sizeRatio.m}/L${c.sizeRatio.l}/2L${c.sizeRatio.xl}/袋${c.sizeRatio.bg}%` : '—'}</td>
     </tr>`;
@@ -3660,8 +3665,12 @@ function renderAnalysisComparison(items, lotColorMap) {
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('harvest')"><canvas id="analysis-harvest-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量・芽かき量</div>
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量(初期重量+吸水量)</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weight')"><canvas id="analysis-weight-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">芽かき量</div>
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('mekaki')"><canvas id="analysis-mekaki-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量</div>
@@ -3723,16 +3732,38 @@ function analysisHarvestChartConfig(items, lotColors, lotTickColor) {
 }
 
 function analysisWeightChartConfig(items, lotColors, lotTickColor) {
-  const weightValues = items.map(c => c.weight);
+  // 菌床重量タブ(drawWeightCharts)と同じ配色: 散水前重量(初期重量)+吸水量の積み上げ
+  const beforeValues = items.map(c => c.weightBefore);
+  const absorbValues = items.map(c => c.weightAbsorb);
+  const totals = items.map((c, i) => (beforeValues[i] ?? 0) + (absorbValues[i] ?? 0));
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        { type: 'bar', label: '菌床初期重量(g)', data: beforeValues, backgroundColor: '#60a5facc', stack: 's', order: 1 },
+        { type: 'bar', label: '吸水量(g)', data: absorbValues, backgroundColor: '#fa8072cc', stack: 's', order: 1 },
+        analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#94a3b8', 'y', items.length),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
   const mekakiValues = items.map(c => c.mekaki);
   return {
     data: {
       labels: items.map(c => `${c.siteName}${c.no}`),
       datasets: [
-        { type: 'bar', label: '菌床重量(g)', data: weightValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
-        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + '55'), yAxisID: 'y1', order: 1 },
-        analysisAvgLineDataset('菌床重量 平均', analysisAvg(weightValues), '#fb7185', 'y', items.length),
-        analysisAvgLineDataset('芽かき量 平均', analysisAvg(mekakiValues), '#a78bfa', 'y1', items.length),
+        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
+        analysisAvgLineDataset('芽かき量 平均', analysisAvg(mekakiValues), '#a78bfa', 'y', items.length),
       ],
     },
     options: {
@@ -3741,7 +3772,6 @@ function analysisWeightChartConfig(items, lotColors, lotTickColor) {
       scales: {
         x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-        y1: { position: 'right', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
       },
     },
   };
@@ -3801,7 +3831,8 @@ function analysisRatioChartConfig(items, lotColors, lotTickColor) {
 
 const ANALYSIS_CHART_CONFIGS = {
   harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig },
-  weight: { title: '菌床重量・芽かき量', build: analysisWeightChartConfig },
+  weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig },
+  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig },
   size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig },
 };
