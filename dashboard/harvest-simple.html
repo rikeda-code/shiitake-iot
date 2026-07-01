@@ -3676,6 +3676,11 @@ function renderAnalysisComparison(items, lotColorMap) {
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('mekaki')"><canvas id="analysis-mekaki-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">パック品収穫量</div>
+        ${analysisPackLegendHtml()}
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('pack')"><canvas id="analysis-pack-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('size')"><canvas id="analysis-size-canvas"></canvas></div>
       </div>
@@ -3832,12 +3837,82 @@ function analysisRatioChartConfig(items, lotColors, lotTickColor) {
   };
 }
 
+// 拠点×菌床ロット有無のカテゴリごとの配色(濃色=パック品、淡色=袋品)
+const ANALYSIS_PACK_CATEGORY_COLORS = {
+  '群馬':       { dark: '#f97316', light: '#fdba74' }, // オレンジ / 薄オレンジ
+  'いなべ':     { dark: '#3b82f6', light: '#93c5fd' }, // 青 / 薄青
+  '南丹':       { dark: '#22c55e', light: '#86efac' }, // 緑 / 薄緑
+  'いなべ自社菌床': { dark: '#06b6d4', light: '#67e8f9' }, // 水色 / 薄水色
+  '南丹自社菌床':   { dark: '#84cc16', light: '#bef264' }, // 黄緑 / 薄黄緑
+};
+const ANALYSIS_PACK_DEFAULT_COLOR = { dark: '#94a3b8', light: '#cbd5e1' };
+
+function analysisPackCategoryFor(c) {
+  const hasLot = analysisFormatLot(c.lot) !== '—';
+  if (c.siteName === 'いなべ' || c.siteName === '南丹') return hasLot ? `${c.siteName}自社菌床` : c.siteName;
+  return c.siteName;
+}
+
+function analysisPackColorFor(category) {
+  return ANALYSIS_PACK_CATEGORY_COLORS[category] || ANALYSIS_PACK_DEFAULT_COLOR;
+}
+
+function analysisPackLegendHtml() {
+  const chips = Object.entries(ANALYSIS_PACK_CATEGORY_COLORS).map(([cat, { dark, light }]) => `
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:0.75rem;color:#94a3b8">
+      <span style="display:inline-flex">
+        <span style="width:10px;height:10px;background:${dark};display:inline-block;border-radius:2px 0 0 2px"></span>
+        <span style="width:10px;height:10px;background:${light};display:inline-block;border-radius:0 2px 2px 0"></span>
+      </span>${cat}
+    </span>`).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#13151f;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <span style="font-size:0.75rem;color:#64748b;font-weight:600">拠点・菌床ロット(濃色=パック品/淡色=袋品):</span>${chips}
+  </div>`;
+}
+
+function analysisPackChartConfig(items) {
+  const categories = items.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
+  const packValues = items.map(c => +(c.sizeTotals.m + c.sizeTotals.l + c.sizeTotals.xl).toFixed(2));
+  const bgValues = items.map(c => +c.sizeTotals.bg.toFixed(2));
+  const packTickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
+
+  // カテゴリごとにパック品率の平均線を色分けして表示
+  const avgLines = [...new Set(categories)].map(cat => {
+    const rates = items.filter((c, i) => categories[i] === cat).map(c => c.packRate);
+    return analysisAvgLineDataset(`${cat} パック品率平均`, analysisAvg(rates), analysisPackColorFor(cat).dark, 'y1', items.length);
+  });
+
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        { type: 'bar', label: 'パック品収穫量(M+L+2L, g/菌床)', data: packValues,
+          backgroundColor: packColors.map(c => c.dark + 'cc'), stack: 's', yAxisID: 'y', order: 1 },
+        { type: 'bar', label: '袋品収穫量(g/菌床)', data: bgValues,
+          backgroundColor: packColors.map(c => c.light + 'cc'), stack: 's', yAxisID: 'y', order: 1 },
+        ...avgLines,
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: packTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
+      },
+    },
+  };
+}
+
 const ANALYSIS_CHART_CONFIGS = {
-  harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig },
-  weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig },
-  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig },
-  size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig },
-  ratio: { title: 'サイズ比率', build: analysisRatioChartConfig },
+  harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig, legend: analysisLotLegendHtml },
+  weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig, legend: analysisLotLegendHtml },
+  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
+  pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
+  size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
+  ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
 };
 
 let analysisZoomState = null; // { items, lotColorMap, lotColors, lotTickColor }
@@ -3863,7 +3938,7 @@ function analysisOpenZoom(key) {
   const cfg = ANALYSIS_CHART_CONFIGS[key];
   if (!cfg) return;
   document.getElementById('analysis-zoom-title').textContent = cfg.title;
-  document.getElementById('analysis-zoom-legend').innerHTML = analysisLotLegendHtml(lotColorMap);
+  document.getElementById('analysis-zoom-legend').innerHTML = cfg.legend ? cfg.legend(lotColorMap) : '';
   document.getElementById('analysis-zoom-modal').style.display = 'flex';
   if (analysisZoomChartInstance) { analysisZoomChartInstance.destroy(); analysisZoomChartInstance = null; }
   analysisZoomChartInstance = new Chart(document.getElementById('analysis-zoom-canvas'), cfg.build(items, lotColors, lotTickColor));
