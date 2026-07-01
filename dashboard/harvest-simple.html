@@ -252,6 +252,15 @@
   </div>
 </div>
 
+<!-- Analysis chart zoom modal -->
+<div id="analysis-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)analysisCloseZoom()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:1100px;padding:24px;position:relative;margin:auto">
+    <button onclick="analysisCloseZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
+    <div id="analysis-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:16px"></div>
+    <div style="position:relative;height:min(70vh,600px)"><canvas id="analysis-zoom-canvas"></canvas></div>
+  </div>
+</div>
+
 <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
     <button onclick="closeDetail()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.2rem;cursor:pointer">✕</button>
@@ -3647,149 +3656,182 @@ function renderAnalysisComparison(items, lotColorMap) {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫量・パック品率</div>
-        <div style="position:relative;height:260px"><canvas id="analysis-harvest-canvas"></canvas></div>
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('harvest')"><canvas id="analysis-harvest-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量・芽かき量</div>
-        <div style="position:relative;height:260px"><canvas id="analysis-weight-canvas"></canvas></div>
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weight')"><canvas id="analysis-weight-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量</div>
-        <div style="position:relative;height:260px"><canvas id="analysis-size-canvas"></canvas></div>
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('size')"><canvas id="analysis-size-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ比率</div>
-        <div style="position:relative;height:260px"><canvas id="analysis-ratio-canvas"></canvas></div>
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('ratio')"><canvas id="analysis-ratio-canvas"></canvas></div>
       </div>
     </div>`;
 }
 
+// 平均線は元の色をそのまま使うと同色の棒に埋もれて見えにくいため、濃い色に変換する
+function analysisDarken(hex, amount = 0.4) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+  const f = v => Math.max(0, Math.round(v * (1 - amount))).toString(16).padStart(2, '0');
+  return `#${f(r)}${f(g)}${f(b)}`;
+}
+
 function analysisAvgLineDataset(label, value, color, yAxisID, count) {
   return {
+    // orderを指定しないバー(order:1)より低い実効順位になり、平均線が棒グラフの上に描画される
     type: 'line', label, data: Array(count).fill(value != null ? +value.toFixed(1) : null),
-    borderColor: color, borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, yAxisID,
+    borderColor: analysisDarken(color, 0.4), borderDash: [6, 4], borderWidth: 2.5, pointRadius: 0, yAxisID,
   };
 }
 
+function analysisHarvestChartConfig(items, lotColors, lotTickColor) {
+  const harvestValues = items.map(c => c.harvest != null ? Math.round(c.harvest) : null);
+  const packValues = items.map(c => c.packRate);
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        { type: 'bar', label: '収穫量(g/菌床)', data: harvestValues,
+          backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'line', label: 'パック品率(%)', data: packValues,
+          borderColor: '#facc15', pointBackgroundColor: lotColors, pointBorderColor: lotColors,
+          pointRadius: 4, yAxisID: 'y1' },
+        analysisAvgLineDataset('収穫量 平均', analysisAvg(harvestValues), '#94a3b8', 'y', items.length),
+        analysisAvgLineDataset('パック品率 平均', analysisAvg(packValues), '#facc15', 'y1', items.length),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
+      },
+    },
+  };
+}
+
+function analysisWeightChartConfig(items, lotColors, lotTickColor) {
+  const weightValues = items.map(c => c.weight);
+  const mekakiValues = items.map(c => c.mekaki);
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        { type: 'bar', label: '菌床重量(g)', data: weightValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + '55'), yAxisID: 'y1', order: 1 },
+        analysisAvgLineDataset('菌床重量 平均', analysisAvg(weightValues), '#fb7185', 'y', items.length),
+        analysisAvgLineDataset('芽かき量 平均', analysisAvg(mekakiValues), '#a78bfa', 'y1', items.length),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y1: { position: 'right', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
+      },
+    },
+  };
+}
+
+function analysisSizeChartConfig(items, lotColors, lotTickColor) {
+  const totals = items.map(c => +(c.sizeTotals.m + c.sizeTotals.l + c.sizeTotals.xl + c.sizeTotals.bg).toFixed(2));
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        ...ANALYSIS_SIZE_DEFS.map(sd => ({
+          type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc', order: 1,
+          data: items.map(c => +c.sizeTotals[sd.key].toFixed(2)),
+        })),
+        analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#94a3b8', 'y', items.length),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+function analysisRatioChartConfig(items, lotColors, lotTickColor) {
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        ...ANALYSIS_SIZE_DEFS.map(sd => ({
+          type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc', order: 1,
+          data: items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : 0),
+        })),
+        ...ANALYSIS_SIZE_DEFS.map(sd => analysisAvgLineDataset(
+          `${sd.label} 平均`, analysisAvg(items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : null)), sd.color, 'y', items.length,
+        )),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: { ...tooltipDefaults, callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+const ANALYSIS_CHART_CONFIGS = {
+  harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig },
+  weight: { title: '菌床重量・芽かき量', build: analysisWeightChartConfig },
+  size: { title: 'サイズ別収穫量', build: analysisSizeChartConfig },
+  ratio: { title: 'サイズ比率', build: analysisRatioChartConfig },
+};
+
+let analysisZoomState = null; // { items, lotColors, lotTickColor }
+let analysisZoomChartInstance = null;
+
 function drawAnalysisCharts(items, lotColorMap) {
   analysisDestroyCharts();
-  const labels = items.map(c => `${c.siteName}${c.no}`);
   const lotColors = items.map(c => analysisLotColorFor(lotColorMap, c.lot));
   // ロットごとの塗り分けなので、x軸ラベル自体もロット色で表示する
   const lotTickColor = ctx => lotColors[ctx.index] || '#8892a4';
+  analysisZoomState = { items, lotColors, lotTickColor };
 
-  const harvestCanvas = document.getElementById('analysis-harvest-canvas');
-  if (harvestCanvas) {
-    const harvestValues = items.map(c => c.harvest != null ? Math.round(c.harvest) : null);
-    const packValues = items.map(c => c.packRate);
-    const avgHarvest = analysisAvg(harvestValues);
-    const avgPack = analysisAvg(packValues);
-    analysisCharts.harvest = new Chart(harvestCanvas, {
-      data: {
-        labels,
-        datasets: [
-          { type: 'bar', label: '収穫量(g/菌床)', data: harvestValues,
-            backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y' },
-          { type: 'line', label: 'パック品率(%)', data: packValues,
-            borderColor: '#facc15', pointBackgroundColor: lotColors, pointBorderColor: lotColors,
-            pointRadius: 4, yAxisID: 'y1' },
-          analysisAvgLineDataset('収穫量 平均', avgHarvest, '#e2e8f0', 'y', items.length),
-          analysisAvgLineDataset('パック品率 平均', avgPack, '#facc15', 'y1', items.length),
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
-        scales: {
-          x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
-        },
-      },
-    });
+  for (const key of Object.keys(ANALYSIS_CHART_CONFIGS)) {
+    const canvas = document.getElementById(`analysis-${key}-canvas`);
+    if (!canvas) continue;
+    analysisCharts[key] = new Chart(canvas, ANALYSIS_CHART_CONFIGS[key].build(items, lotColors, lotTickColor));
   }
+}
 
-  const weightCanvas = document.getElementById('analysis-weight-canvas');
-  if (weightCanvas) {
-    const weightValues = items.map(c => c.weight);
-    const mekakiValues = items.map(c => c.mekaki);
-    const avgWeight = analysisAvg(weightValues);
-    const avgMekaki = analysisAvg(mekakiValues);
-    analysisCharts.weight = new Chart(weightCanvas, {
-      data: {
-        labels,
-        datasets: [
-          { type: 'bar', label: '菌床重量(g)', data: weightValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y' },
-          { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + '55'), yAxisID: 'y1' },
-          analysisAvgLineDataset('菌床重量 平均', avgWeight, '#fb7185', 'y', items.length),
-          analysisAvgLineDataset('芽かき量 平均', avgMekaki, '#a78bfa', 'y1', items.length),
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
-        scales: {
-          x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y1: { position: 'right', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
-        },
-      },
-    });
-  }
+function analysisOpenZoom(key) {
+  if (!analysisZoomState) return;
+  const { items, lotColors, lotTickColor } = analysisZoomState;
+  const cfg = ANALYSIS_CHART_CONFIGS[key];
+  if (!cfg) return;
+  document.getElementById('analysis-zoom-title').textContent = cfg.title;
+  document.getElementById('analysis-zoom-modal').style.display = 'flex';
+  if (analysisZoomChartInstance) { analysisZoomChartInstance.destroy(); analysisZoomChartInstance = null; }
+  analysisZoomChartInstance = new Chart(document.getElementById('analysis-zoom-canvas'), cfg.build(items, lotColors, lotTickColor));
+}
 
-  const sizeCanvas = document.getElementById('analysis-size-canvas');
-  if (sizeCanvas) {
-    const totals = items.map(c => +(c.sizeTotals.m + c.sizeTotals.l + c.sizeTotals.xl + c.sizeTotals.bg).toFixed(2));
-    analysisCharts.size = new Chart(sizeCanvas, {
-      data: {
-        labels,
-        datasets: [
-          ...ANALYSIS_SIZE_DEFS.map(sd => ({
-            type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
-            data: items.map(c => +c.sizeTotals[sd.key].toFixed(2)),
-          })),
-          analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#e2e8f0', 'y', items.length),
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
-        scales: {
-          x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-        },
-      },
-    });
-  }
-
-  const ratioCanvas = document.getElementById('analysis-ratio-canvas');
-  if (ratioCanvas) {
-    analysisCharts.ratio = new Chart(ratioCanvas, {
-      data: {
-        labels,
-        datasets: [
-          ...ANALYSIS_SIZE_DEFS.map(sd => ({
-            type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
-            data: items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : 0),
-          })),
-          ...ANALYSIS_SIZE_DEFS.map(sd => analysisAvgLineDataset(
-            `${sd.label} 平均`, analysisAvg(items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : null)), sd.color, 'y', items.length,
-          )),
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 11 } } },
-          tooltip: { ...tooltipDefaults, callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
-        },
-        scales: {
-          x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
-          y: { stacked: true, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-        },
-      },
-    });
-  }
+function analysisCloseZoom() {
+  document.getElementById('analysis-zoom-modal').style.display = 'none';
+  if (analysisZoomChartInstance) { analysisZoomChartInstance.destroy(); analysisZoomChartInstance = null; }
 }
 
 window.addEventListener('error', e => {
