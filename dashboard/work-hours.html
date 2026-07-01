@@ -456,11 +456,12 @@
 const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
 
-const SITES = ['いなべ', '群馬', '南丹'];
+const SITES = ['いなべ', '群馬', '南丹', '鹿沼'];
 const SITE_COLORS = {
   'いなべ': '#38bdf8',
   '群馬':   '#a78bfa',
   '南丹':   '#34d399',
+  '鹿沼':   '#fb923c',
 };
 
 const EMP_COLORS = [
@@ -566,7 +567,7 @@ function buildDataset(json) {
   const firstMonthIdx = jissituCols.length > 0 ? jissituCols[0].idx : cols.length;
 
   // Step 2: detect static columns by scanning data values
-  const VALID_BASES   = new Set(['いなべ', '群馬', '南丹']);
+  const VALID_BASES   = new Set(['いなべ', '群馬', '南丹', '鹿沼']);
   const VALID_WORKS   = new Set(['栽培', '出荷', '配送', '拠点業務']);
   const EMP_KEYWORDS  = ['社員', 'アルバイト', 'パート', '技能実習', '正社員', '契約社員'];
 
@@ -1519,7 +1520,7 @@ function renderSummaryRoster() {
   const { months, employees, nameLabel } = allData;
   const content = document.getElementById('summary-content');
 
-  const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
+  const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2, '鹿沼': 3 };
   const orderedWorkTypes = getOrderedWorkTypes(employees);
 
   // Unique employment values from data (preserve order of appearance)
