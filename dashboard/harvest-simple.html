@@ -3436,7 +3436,10 @@ function analysisFilteredCandidates() {
   const maxD = analysisFilters.maxDays !== '' ? parseInt(analysisFilters.maxDays) : null;
 
   return (analysisDataset || []).filter(c => {
-    if (!analysisFilters.sites.has(c.siteName)) return false;
+    // 「自社菌床」は拠点ではなく菌床ロットを持つコンテナ(全拠点横断)を表す疑似拠点
+    const siteMatch = analysisFilters.sites.has(c.siteName) ||
+      (analysisFilters.sites.has('自社菌床') && analysisFormatLot(c.lot) !== '—');
+    if (!siteMatch) return false;
     if (minD != null && (c.days == null || c.days < minD)) return false;
     if (maxD != null && (c.days == null || c.days > maxD)) return false;
     const sd = parseDateStr(c.startDate);
@@ -3547,7 +3550,7 @@ async function renderAnalysisTab() {
   const hiddenSelected = (analysisDataset || []).filter(c => analysisSelected.has(c.key) && !candidates.includes(c));
   const allSelected = [...selected, ...hiddenSelected];
 
-  const siteFilterHtml = SITES.map(s => `
+  const siteFilterHtml = [...SITES, { name: '自社菌床', color: '#f59e0b' }].map(s => `
     <button class="sort-btn${analysisFilters.sites.has(s.name) ? ' active' : ''}"
       style="${analysisFilters.sites.has(s.name) ? `color:${s.color};border-color:${s.color}` : ''}"
       onclick="analysisToggleSite('${s.name}')">${s.name}</button>`).join('');
