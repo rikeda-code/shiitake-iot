@@ -3391,7 +3391,18 @@ function buildAnalysisDataset() {
   return weeklyState.containerData
     .filter(c => c.harvest != null)
     .map(c => {
-      const sizeRows = c.sizeRows || [];
+      // c.sizeRows の m/l/xl/bg はコンテナ全体の日次収穫量(kg)。他の指標(g/菌床)に
+      // 揃えるため、菌床数で割って1菌床あたりのグラム換算に直しておく。
+      const bedCount = c.bedCount > 0 ? c.bedCount : null;
+      const sizeRows = bedCount
+        ? (c.sizeRows || []).map(r => ({
+            day: r.day,
+            m: +(r.m * 1000 / bedCount).toFixed(2),
+            l: +(r.l * 1000 / bedCount).toFixed(2),
+            xl: +(r.xl * 1000 / bedCount).toFixed(2),
+            bg: +(r.bg * 1000 / bedCount).toFixed(2),
+          }))
+        : [];
       const sizeTotals = sizeRows.reduce((acc, r) => {
         acc.m += r.m; acc.l += r.l; acc.xl += r.xl; acc.bg += r.bg;
         return acc;
