@@ -229,6 +229,7 @@
 <section id="scatter-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="weight-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="mekaki-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -2194,6 +2195,7 @@ let lotTabActive = false;
 let scatterTabActive = false;
 let weightTabActive = false;
 let mekakiTabActive = false;
+let analysisTabActive = false;
 let scatterEndedData = null; // { siteName, no, name, startDate, endDate, days, harvest }[]
 const scatterMonthCharts = {};
 
@@ -2201,22 +2203,26 @@ function refreshActiveTab() {
   for (const k in cache) delete cache[k];
   weightData = null;
   mekakiRows = null;
+  analysisDataset = null;
   loadWeeklySection().catch(() => {});
   if (scatterTabActive) renderScatterTab();
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
+  if (analysisTabActive) renderAnalysisTab();
 }
 
 function updateTabVisibility() {
-  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive;
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive;
   document.getElementById('main').style.display = anyAlt ? 'none' : '';
   document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
   document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
   document.getElementById('scatter-section').style.display = scatterTabActive ? '' : 'none';
   document.getElementById('weight-section').style.display = weightTabActive ? '' : 'none';
   document.getElementById('mekaki-section').style.display = mekakiTabActive ? '' : 'none';
+  document.getElementById('analysis-section').style.display = analysisTabActive ? '' : 'none';
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
+  if (analysisTabActive) renderAnalysisTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
@@ -2525,7 +2531,8 @@ function initTabs() {
     lotTabActive = false;
     scatterTabActive = true;
     weightTabActive = false;
-      mekakiTabActive = false;
+    mekakiTabActive = false;
+    analysisTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2548,6 +2555,8 @@ function initTabs() {
     lotTabActive = false;
     scatterTabActive = false;
     weightTabActive = true;
+    mekakiTabActive = false;
+    analysisTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2567,7 +2576,7 @@ function initTabs() {
   mekakiBtn.addEventListener('click', () => {
     if (mekakiTabActive) return;
     weeklyTabActive = false; lotTabActive = false; scatterTabActive = false;
-    weightTabActive = false; mekakiTabActive = true;
+    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = ''; b.style.borderBottomColor = ''; });
     mekakiBtn.classList.add('active');
     mekakiBtn.style.color = '#a78bfa';
@@ -2587,7 +2596,8 @@ function initTabs() {
     lotTabActive = false;
     scatterTabActive = false;
     weightTabActive = false;
-      mekakiTabActive = false;
+    mekakiTabActive = false;
+    analysisTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2600,6 +2610,31 @@ function initTabs() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(weeklyBtn);
+
+  // 分析 tab
+  const analysisBtn = document.createElement('button');
+  analysisBtn.className = 'tab-btn';
+  analysisBtn.textContent = '分析';
+  analysisBtn.addEventListener('click', () => {
+    if (analysisTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = false;
+    mekakiTabActive = false;
+    analysisTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = '';
+      b.style.borderBottomColor = '';
+    });
+    analysisBtn.classList.add('active');
+    analysisBtn.style.color = '#22d3ee';
+    analysisBtn.style.borderBottomColor = '#22d3ee';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(analysisBtn);
 }
 
 function closeDetail() {
@@ -2973,27 +3008,21 @@ function mekakiFilterHeader(label, key) {
   </th>`;
 }
 
-async function renderMekakiTab() {
-  const section = document.getElementById('mekaki-section');
-  if (!section) return;
-  if (mekakiRows) { renderMekakiSection(section); return; }
+async function ensureMekakiRows() {
+  if (mekakiRows) return mekakiRows;
 
-  section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
-    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
+  const [table, bedMap] = await Promise.all([
+    (async () => {
+      const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
+      const res = await fetch(url);
+      const text = await res.text();
+      const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+      return json.table;
+    })(),
+    buildBedCountMap(),
+  ]);
 
-  try {
-    const [table, bedMap] = await Promise.all([
-      (async () => {
-        const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
-        const res = await fetch(url);
-        const text = await res.text();
-        const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
-        return json.table;
-      })(),
-      buildBedCountMap(),
-    ]);
-
-    mekakiRows = (table.rows || [])
+  mekakiRows = (table.rows || [])
       .filter(row => {
         const cells = row?.c || [];
         if (!cells[0]?.v && !cells[4]?.v) return false;
@@ -3041,6 +3070,19 @@ async function renderMekakiTab() {
       // 日付新しい順
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
+  return mekakiRows;
+}
+
+async function renderMekakiTab() {
+  const section = document.getElementById('mekaki-section');
+  if (!section) return;
+  if (mekakiRows) { renderMekakiSection(section); return; }
+
+  section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
+
+  try {
+    await ensureMekakiRows();
     renderMekakiSection(section);
   } catch(e) {
     section.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
@@ -3254,14 +3296,8 @@ function weightSetSite(idx) {
   renderWeightSubTabs();
 }
 
-async function renderWeightTab() {
-  const section = document.getElementById('weight-section');
-  if (!section) return;
-  if (weightData) { renderWeightSubTabs(); return; }
-
-  section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
-    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
-
+async function ensureWeightData() {
+  if (weightData) return weightData;
   weightData = await Promise.all(WEIGHT_SITES.map(async site => {
     try {
       const table = await fetchWeightSheet(site.sheetName);
@@ -3270,8 +3306,396 @@ async function renderWeightTab() {
       return { site, containers: [], error: e.message };
     }
   }));
+  return weightData;
+}
 
+async function renderWeightTab() {
+  const section = document.getElementById('weight-section');
+  if (!section) return;
+  if (weightData) { renderWeightSubTabs(); return; }
+
+  section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
+
+  await ensureWeightData();
   renderWeightSubTabs();
+}
+
+// ── 分析タブ ──────────────────────────────────────────────────────────────
+
+const ANALYSIS_SIZE_DEFS = [
+  { key: 'm',  label: 'M秀',  color: '#3b82f6' },
+  { key: 'l',  label: 'L秀',  color: '#10b981' },
+  { key: 'xl', label: '2L秀', color: '#f59e0b' },
+  { key: 'bg', label: '袋品', color: '#8b5cf6' },
+];
+
+let analysisDataset = null; // built lazily, invalidated by refreshActiveTab()
+let analysisFilters = {
+  sites: new Set(SITES.map(s => s.name)),
+  minDays: '', maxDays: '', dateFrom: '', dateTo: '',
+};
+let analysisSelected = new Set(); // Set<container.key>
+const analysisCharts = {};
+
+function analysisDestroyCharts() {
+  Object.values(analysisCharts).forEach(c => c && c.destroy());
+  Object.keys(analysisCharts).forEach(k => delete analysisCharts[k]);
+}
+
+// 号機・拠点が一致するエントリの中から、開始日が最も近いものを選ぶ
+function analysisClosestByDate(list, targetDate) {
+  if (!list || !list.length) return null;
+  if (!targetDate) return list[0];
+  let best = null, bestDiff = Infinity;
+  for (const item of list) {
+    if (!item.startDate) continue;
+    const diff = Math.abs(item.startDate - targetDate);
+    if (diff < bestDiff) { bestDiff = diff; best = item; }
+  }
+  return best || list[0];
+}
+
+function buildAnalysisDataset() {
+  if (!weeklyState) return [];
+
+  const weightIndex = {};
+  (weightData || []).forEach(({ site, containers }) => {
+    if (!SITES.some(s => s.name === site.name)) return; // 「自社菌床」シートは号機の対応が不明なため対象外
+    containers.forEach(c => {
+      const key = `${site.name}|${c.containerNo}`;
+      (weightIndex[key] ||= []).push(c);
+    });
+  });
+
+  const mekakiIndex = {};
+  (mekakiRows || []).forEach(r => {
+    if (!r.no) return;
+    const key = `${r.siteName}|${r.no}`;
+    (mekakiIndex[key] ||= []).push(r);
+  });
+
+  return weeklyState.containerData
+    .filter(c => c.harvest != null)
+    .map(c => {
+      const sizeRows = c.sizeRows || [];
+      const sizeTotals = sizeRows.reduce((acc, r) => {
+        acc.m += r.m; acc.l += r.l; acc.xl += r.xl; acc.bg += r.bg;
+        return acc;
+      }, { m: 0, l: 0, xl: 0, bg: 0 });
+      const sizeSum = sizeTotals.m + sizeTotals.l + sizeTotals.xl + sizeTotals.bg;
+      const sizeRatio = sizeSum > 0 ? {
+        m:  +(sizeTotals.m  / sizeSum * 100).toFixed(1),
+        l:  +(sizeTotals.l  / sizeSum * 100).toFixed(1),
+        xl: +(sizeTotals.xl / sizeSum * 100).toFixed(1),
+        bg: +(sizeTotals.bg / sizeSum * 100).toFixed(1),
+      } : null;
+
+      const targetDate = parseDateStr(c.startDate);
+      const idxKey = `${c.siteName}|${c.no}`;
+
+      const wMatch = analysisClosestByDate(weightIndex[idxKey], targetDate);
+      let weight = null;
+      if (wMatch && wMatch.measurements.length) {
+        const afters = wMatch.measurements.map(m => m.after).filter(v => v != null);
+        if (afters.length) weight = +(afters.reduce((a, b) => a + b, 0) / afters.length).toFixed(1);
+      }
+
+      const mMatch = analysisClosestByDate(mekakiIndex[idxKey], targetDate);
+      const mekaki = mMatch ? (mMatch.converted ?? mMatch.total ?? null) : null;
+
+      return {
+        key: `${c.siteName}|${c.no}|${c.startDate}`,
+        siteName: c.siteName, no: c.no, name: c.name,
+        startDate: c.startDate, endDate: c.endDate, days: c.days,
+        harvest: c.harvest, packRate: c.packRate, lot: c.lot,
+        sizeTotals, sizeRatio, weight, mekaki,
+      };
+    });
+}
+
+function analysisFilteredCandidates() {
+  const from = analysisFilters.dateFrom ? new Date(analysisFilters.dateFrom) : null;
+  const to = analysisFilters.dateTo ? new Date(analysisFilters.dateTo) : null;
+  const minD = analysisFilters.minDays !== '' ? parseInt(analysisFilters.minDays) : null;
+  const maxD = analysisFilters.maxDays !== '' ? parseInt(analysisFilters.maxDays) : null;
+
+  return (analysisDataset || []).filter(c => {
+    if (!analysisFilters.sites.has(c.siteName)) return false;
+    if (minD != null && (c.days == null || c.days < minD)) return false;
+    if (maxD != null && (c.days == null || c.days > maxD)) return false;
+    const sd = parseDateStr(c.startDate);
+    if (from && (!sd || sd < from)) return false;
+    if (to && (!sd || sd > to)) return false;
+    return true;
+  }).sort((a, b) => (parseDateStr(b.startDate) || 0) - (parseDateStr(a.startDate) || 0));
+}
+
+function analysisToggleSite(name) {
+  if (analysisFilters.sites.has(name)) analysisFilters.sites.delete(name);
+  else analysisFilters.sites.add(name);
+  renderAnalysisTab();
+}
+
+function analysisSetFilter(key, value) {
+  analysisFilters[key] = value;
+  renderAnalysisTab();
+}
+
+function analysisToggleSelect(key) {
+  if (analysisSelected.has(key)) analysisSelected.delete(key);
+  else analysisSelected.add(key);
+  renderAnalysisTab();
+}
+
+function analysisClearSelection() {
+  analysisSelected.clear();
+  renderAnalysisTab();
+}
+
+async function renderAnalysisTab() {
+  const section = document.getElementById('analysis-section');
+  if (!section) return;
+
+  if (!analysisDataset) {
+    section.innerHTML = `<div class="section-title">分析<span class="sub">コンテナ横断比較</span></div>
+      <div class="loading">データを読み込み中...</div>`;
+    try {
+      await Promise.all([
+        weeklyState ? Promise.resolve() : loadWeeklySection(),
+        ensureWeightData(),
+        ensureMekakiRows(),
+      ]);
+      analysisDataset = buildAnalysisDataset();
+    } catch (e) {
+      section.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
+      return;
+    }
+    if (!analysisTabActive) return; // タブ切替後に非同期処理が終わった場合は描画しない
+  }
+
+  const candidates = analysisFilteredCandidates();
+  const selected = candidates.filter(c => analysisSelected.has(c.key));
+  // フィルターから外れて見えなくなった選択も比較には残す
+  const hiddenSelected = (analysisDataset || []).filter(c => analysisSelected.has(c.key) && !candidates.includes(c));
+  const allSelected = [...selected, ...hiddenSelected];
+
+  const siteFilterHtml = SITES.map(s => `
+    <button class="sort-btn${analysisFilters.sites.has(s.name) ? ' active' : ''}"
+      style="${analysisFilters.sites.has(s.name) ? `color:${s.color};border-color:${s.color}` : ''}"
+      onclick="analysisToggleSite('${s.name}')">${s.name}</button>`).join('');
+
+  const candidateListHtml = candidates.length ? candidates.map(c => {
+    const checked = analysisSelected.has(c.key);
+    const harvestStr = c.harvest != null ? `${Math.round(c.harvest).toLocaleString('ja-JP')}g/菌床` : '—';
+    const safeKey = c.key.replace(/'/g, "\\'");
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;${checked ? 'background:#22d3ee1a' : ''}" onmouseover="this.style.background='#22d3ee1a'" onmouseout="this.style.background='${checked ? '#22d3ee1a' : ''}'">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="analysisToggleSelect('${safeKey}')">
+      <span style="color:${SITES.find(s => s.name === c.siteName)?.color || '#94a3b8'};font-weight:700;font-size:0.82rem">${c.siteName}</span>
+      <span style="font-size:0.85rem;color:#e2e8f0">${c.no}号機</span>
+      <span style="font-size:0.75rem;color:#64748b">${c.startDate || '—'} 開始・${c.days != null ? c.days + '日' : '—'}</span>
+      <span style="margin-left:auto;font-size:0.8rem;color:#94a3b8">${harvestStr}</span>
+    </label>`;
+  }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
+
+  const comparisonHtml = allSelected.length ? renderAnalysisComparison(allSelected) : `
+    <div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`;
+
+  section.innerHTML = `
+    <div class="section-title">分析<span class="sub">コンテナ横断比較</span></div>
+
+    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end">
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">拠点</div>
+          <div style="display:flex;gap:6px">${siteFilterHtml}</div>
+        </div>
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">栽培日数</div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <input type="number" placeholder="下限" value="${analysisFilters.minDays}" oninput="analysisSetFilter('minDays', this.value)"
+              style="width:64px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+            <span style="color:#64748b">〜</span>
+            <input type="number" placeholder="上限" value="${analysisFilters.maxDays}" oninput="analysisSetFilter('maxDays', this.value)"
+              style="width:64px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+            <span style="color:#64748b;font-size:0.78rem">日</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">栽培開始日</div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <input type="date" value="${analysisFilters.dateFrom}" oninput="analysisSetFilter('dateFrom', this.value)"
+              style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+            <span style="color:#64748b">〜</span>
+            <input type="date" value="${analysisFilters.dateTo}" oninput="analysisSetFilter('dateTo', this.value)"
+              style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+          </div>
+        </div>
+        ${analysisSelected.size ? `<button class="sort-btn" onclick="analysisClearSelection()" style="margin-left:auto">選択解除 (${analysisSelected.size})</button>` : ''}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;align-items:start">
+      <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:8px;max-height:520px;overflow-y:auto">
+        ${candidateListHtml}
+      </div>
+      <div>${comparisonHtml}</div>
+    </div>`;
+
+  if (allSelected.length) drawAnalysisCharts(allSelected);
+}
+
+function renderAnalysisComparison(items) {
+  const rows = items.map((c, i) => {
+    const siteColor = SITES.find(s => s.name === c.siteName)?.color || '#94a3b8';
+    return `<tr style="border-bottom:1px solid #2e3148">
+      <td style="padding:6px 8px;color:${siteColor};font-weight:600">${c.siteName} ${c.no}</td>
+      <td style="padding:6px 8px;color:#94a3b8;font-size:0.78rem">${c.startDate || '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.days != null ? c.days + '日' : '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.harvest != null ? Math.round(c.harvest).toLocaleString('ja-JP') + 'g' : '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.packRate != null ? c.packRate + '%' : '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.weight != null ? c.weight.toLocaleString('ja-JP') + 'g' : '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.mekaki != null ? c.mekaki.toLocaleString('ja-JP') + 'kg' : '—'}</td>
+      <td style="padding:6px 8px;text-align:right">${c.sizeRatio ? `M${c.sizeRatio.m}/L${c.sizeRatio.l}/2L${c.sizeRatio.xl}/袋${c.sizeRatio.bg}%` : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div style="overflow-x:auto;margin-bottom:20px">
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:720px">
+        <thead>
+          <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
+            <th style="padding:6px 8px;text-align:left;color:#64748b">コンテナ</th>
+            <th style="padding:6px 8px;text-align:left;color:#64748b">開始日</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">栽培日数</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">収穫量</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">パック品率</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">菌床重量</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">芽かき量</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">サイズ比率</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫量・パック品率</div>
+        <div style="position:relative;height:260px"><canvas id="analysis-harvest-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量・芽かき量</div>
+        <div style="position:relative;height:260px"><canvas id="analysis-weight-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量</div>
+        <div style="position:relative;height:260px"><canvas id="analysis-size-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ比率</div>
+        <div style="position:relative;height:260px"><canvas id="analysis-ratio-canvas"></canvas></div>
+      </div>
+    </div>`;
+}
+
+function drawAnalysisCharts(items) {
+  analysisDestroyCharts();
+  const labels = items.map(c => `${c.siteName}${c.no}`);
+
+  const harvestCanvas = document.getElementById('analysis-harvest-canvas');
+  if (harvestCanvas) {
+    analysisCharts.harvest = new Chart(harvestCanvas, {
+      data: {
+        labels,
+        datasets: [
+          { type: 'bar', label: '収穫量(g/菌床)', data: items.map(c => c.harvest != null ? Math.round(c.harvest) : null),
+            backgroundColor: '#38bdf8cc', yAxisID: 'y' },
+          { type: 'line', label: 'パック品率(%)', data: items.map(c => c.packRate),
+            borderColor: '#facc15', backgroundColor: '#facc15', yAxisID: 'y1' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+        scales: {
+          x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  const weightCanvas = document.getElementById('analysis-weight-canvas');
+  if (weightCanvas) {
+    analysisCharts.weight = new Chart(weightCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: '菌床重量(g)', data: items.map(c => c.weight), backgroundColor: '#fb7185cc', yAxisID: 'y' },
+          { label: '芽かき量(kg・2520換算)', data: items.map(c => c.mekaki), backgroundColor: '#a78bfacc', yAxisID: 'y1' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+        scales: {
+          x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y1: { position: 'right', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  const sizeCanvas = document.getElementById('analysis-size-canvas');
+  if (sizeCanvas) {
+    analysisCharts.size = new Chart(sizeCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
+          label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
+          data: items.map(c => +c.sizeTotals[sd.key].toFixed(2)),
+        })),
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        },
+      },
+    });
+  }
+
+  const ratioCanvas = document.getElementById('analysis-ratio-canvas');
+  if (ratioCanvas) {
+    analysisCharts.ratio = new Chart(ratioCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
+          label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
+          data: items.map(c => c.sizeRatio ? c.sizeRatio[sd.key] : 0),
+        })),
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 11 } } },
+          tooltip: { ...tooltipDefaults, callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          y: { stacked: true, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        },
+      },
+    });
+  }
 }
 
 window.addEventListener('error', e => {
