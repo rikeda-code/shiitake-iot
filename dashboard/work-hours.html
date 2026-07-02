@@ -607,10 +607,15 @@ function shimeToMonth(label) {
   if (!m) return label;
   let closeMonth = parseInt(m[1]);
   let workMonth = closeMonth - 1;
-  let year = 2025;
-  if (workMonth <= 0) { workMonth += 12; year = 2024; }
-  if (closeMonth <= 6) year = 2026;
-  else if (closeMonth <= 12) year = 2025;
+  let year;
+  if (workMonth <= 0) {
+    workMonth += 12;
+    year = 2025; // 1月締め → 12月の仕事 → 2025年12月
+  } else if (closeMonth <= 6) {
+    year = 2026; // 2〜6月締め → 1〜5月の仕事 → 2026年
+  } else {
+    year = 2025; // 7〜12月締め → 6〜11月の仕事 → 2025年
+  }
   return `${year}年${workMonth}月`;
 }
 
