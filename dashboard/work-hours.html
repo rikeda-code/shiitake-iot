@@ -1962,8 +1962,9 @@ function renderProductivityCharts(workData, prodData) {
   // Calculate productivity per site
   const data = {};
   sites.forEach(site => {
-    const cultivationH = workHours(site, wt => wt.includes('栽培'));
-    const shippingH    = workHours(site, wt => wt.includes('出荷'));
+    // Match summary table classification (配送・栽培 → 配送, not 栽培)
+    const cultivationH = workHours(site, wt => workTypeClass(wt) === 'wt-栽培');
+    const shippingH    = workHours(site, wt => workTypeClass(wt) === 'wt-出荷');
     const harvest      = prodVals(site, '収穫量(kg)');
     const shipKg       = prodVals(site, '出荷量(kg)');
     const shipPcs      = prodVals(site, '合計(点数)');
@@ -1997,35 +1998,15 @@ function renderProductivityCharts(workData, prodData) {
     </div>`;
   }
 
-  // Chart definitions: each has a productivity line (left Y) + volume bars (right Y) + hours bars (right Y2)
+  // Chart definitions: productivity line (left Y) + volume bars (right Y)
   const metrics = [
-    {
-      key: 'harvestPerH', title: '① 栽培生産性', sub: '栽培時間 × 収穫量', unit: 'kg/h', decimals: 1,
-      volKey: 'harvest',     volUnit: 'kg',  volLabel: '収穫量',
-      hKey:   'cultivationH', hLabel: '栽培時間',
-    },
-    {
-      key: 'shipKgPerH', title: '② 出荷生産性（重量）', sub: '出荷時間 × 出荷量', unit: 'kg/h', decimals: 1,
-      volKey: 'shipKg',     volUnit: 'kg',  volLabel: '出荷量',
-      hKey:   'shippingH',  hLabel: '出荷時間',
-    },
-    {
-      key: 'shipPcsPerH', title: '③ 出荷生産性（点数）', sub: '出荷時間 × 合計点数', unit: '点/h', decimals: 0,
-      volKey: 'shipPcs',    volUnit: '点',  volLabel: '合計点数',
-      hKey:   'shippingH',  hLabel: '出荷時間',
-    },
+    { key: 'harvestPerH', title: '① 栽培生産性', sub: '栽培時間あたり収穫量', unit: 'kg/h', decimals: 1, volKey: 'harvest', volUnit: 'kg', volLabel: '収穫量' },
+    { key: 'shipKgPerH',  title: '② 出荷生産性（重量）', sub: '出荷時間あたり出荷量', unit: 'kg/h', decimals: 1, volKey: 'shipKg',  volUnit: 'kg', volLabel: '出荷量' },
+    { key: 'shipPcsPerH', title: '③ 出荷生産性（点数）', sub: '出荷時間あたり合計点数', unit: '点/h', decimals: 0, volKey: 'shipPcs', volUnit: '点', volLabel: '合計点数' },
   ];
 
-  // Combo chart options: left Y = productivity (line), right Y = volume (bar), right Y2 = hours (bar)
-  function comboOpts(ratioUnit, ratioDecimals, volUnit, hUnit) {
-    const ttFmt = (ctx) => {
-      const v = ctx.parsed.y;
-      if (v === null || v === undefined) return null;
-      const u = ctx.dataset.yAxisID === 'y'  ? ratioUnit :
-                ctx.dataset.yAxisID === 'y1' ? volUnit   : hUnit;
-      const dec = ctx.dataset.yAxisID === 'y' ? ratioDecimals : (u === '点' ? 0 : 1);
-      return `${ctx.dataset.label}: ${dec === 0 ? Math.round(v).toLocaleString('ja-JP') : v.toFixed(dec)} ${u}`;
-    };
+  // Combo chart options: left Y = productivity (line), right Y = volume (bar)
+  function comboOpts(ratioUnit, ratioDecimals, volUnit) {
     return {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
@@ -2034,7 +2015,16 @@ function renderProductivityCharts(workData, prodData) {
         tooltip: {
           backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
           titleColor: '#e2e8f0', bodyColor: '#a0aec0',
-          callbacks: { label: ttFmt },
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (v === null || v === undefined) return null;
+              if (ctx.dataset.yAxisID === 'y') {
+                return `${ctx.dataset.label}: ${ratioDecimals === 0 ? Math.round(v).toLocaleString('ja-JP') : v.toFixed(ratioDecimals)} ${ratioUnit}`;
+              }
+              return `${ctx.dataset.label}: ${volUnit === '点' ? Math.round(v).toLocaleString('ja-JP') : v.toLocaleString('ja-JP')} ${volUnit}`;
+            },
+          },
         },
       },
       scales: {
@@ -2047,14 +2037,9 @@ function renderProductivityCharts(workData, prodData) {
         },
         y1: {
           position: 'right',
-          ticks: { color: '#6b7a90', font: { size: 10 }, callback: v => `${(v/1000).toFixed(0)}k ${volUnit}` },
+          ticks: { color: '#6b7a90', font: { size: 10 }, callback: v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}` },
           grid: { drawOnChartArea: false }, suggestedMin: 0,
           title: { display: true, text: volUnit, color: '#6b7a90', font: { size: 10 } },
-        },
-        y2: {
-          position: 'right',
-          ticks: { color: '#556070', font: { size: 10 }, callback: v => `${v} ${hUnit}` },
-          grid: { drawOnChartArea: false }, suggestedMin: 0, display: false,
         },
       },
     };
@@ -2062,7 +2047,9 @@ function renderProductivityCharts(workData, prodData) {
 
   // Render HTML
   let html = `<div class="prod-panel">
-    <div class="chart-section-label">📈 生産性 ／ 最新月: ${lastMonth}</div>
+    <div class="chart-section-label">📈 生産性 ／ 最新月: ${lastMonth}
+      <span style="float:right;font-size:0.72rem">※ 栽培・出荷時間はサマリー表の業務区分（配送・栽培・出荷は除外）</span>
+    </div>
     <div class="kpi-row">
       ${metrics.map(m => sites.map(s => kpiHtml(m.title, s, m.key, m.unit, m.decimals)).join('')).join('')}
     </div>`;
@@ -2071,7 +2058,7 @@ function renderProductivityCharts(workData, prodData) {
     html += `<div class="schart-section">
       <div class="schart-header">${m.title}
         <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">${m.sub}</span>
-        <span style="float:right;font-size:0.72rem;color:var(--muted)">折れ線: ${m.unit}　棒（濃）: ${m.volLabel}(${m.volUnit})　棒（薄）: ${m.hLabel}(h)</span>
+        <span style="float:right;font-size:0.72rem;color:var(--muted)">折れ線(左軸): ${m.unit}　棒(右軸): ${m.volLabel}(${m.volUnit})</span>
       </div>
       <div class="schart-wrap" style="height:340px"><canvas id="prd-${i}"></canvas></div>
     </div>`;
@@ -2085,10 +2072,9 @@ function renderProductivityCharts(workData, prodData) {
     const ctx = document.getElementById(`prd-${i}`)?.getContext('2d');
     if (!ctx) return;
 
-    // Build datasets: productivity lines (y) + volume bars (y1) + hours bars (y2)
     const datasets = [];
 
-    // Productivity lines per site
+    // Productivity lines per site (left Y)
     sites.forEach(site => {
       const color = SITE_COLORS[site] || '#fff';
       datasets.push({
@@ -2107,39 +2093,24 @@ function renderProductivityCharts(workData, prodData) {
       });
     });
 
-    // Volume bars per site
+    // Volume bars per site (right Y)
     sites.forEach(site => {
       const color = SITE_COLORS[site] || '#fff';
       datasets.push({
         type: 'bar',
         label: `${site} ${m.volLabel}(${m.volUnit})`,
         data: data[site][m.volKey],
-        backgroundColor: color + '55',
-        borderColor: color + '99',
+        backgroundColor: color + '44',
+        borderColor: color + '88',
         borderWidth: 1,
         yAxisID: 'y1',
         order: 2,
       });
     });
 
-    // Hours bars per site (lighter)
-    sites.forEach(site => {
-      const color = SITE_COLORS[site] || '#fff';
-      datasets.push({
-        type: 'bar',
-        label: `${site} ${m.hLabel}(h)`,
-        data: data[site][m.hKey],
-        backgroundColor: color + '28',
-        borderColor: color + '55',
-        borderWidth: 1,
-        yAxisID: 'y2',
-        order: 3,
-      });
-    });
-
     productivityChartInstances[`prd-${i}`] = new Chart(ctx, {
       data: { labels: commonMonths, datasets },
-      options: comboOpts(m.unit, m.decimals, m.volUnit, 'h'),
+      options: comboOpts(m.unit, m.decimals, m.volUnit),
     });
   });
 }
