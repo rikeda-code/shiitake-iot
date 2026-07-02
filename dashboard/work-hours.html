@@ -1954,7 +1954,7 @@ const STD_DEFAULT = [
   { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    metricKey: null,           note: '毎月固定時間' },
-  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   metricKey: 'パック数',     note: 'パック数 × 秒/個 ÷ 3600' },
   { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   metricKey: '袋数量',       note: '袋数量 × 秒/個 ÷ 3600' },
   { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
   { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
