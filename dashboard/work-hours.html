@@ -1959,7 +1959,19 @@ const STD_DEFAULT = [
 ];
 
 function loadStdSettings() {
-  try { const s = localStorage.getItem(STD_STORAGE_KEY); if (s) return JSON.parse(s); } catch(e) {}
+  try {
+    const s = localStorage.getItem(STD_STORAGE_KEY);
+    if (s) {
+      const saved = JSON.parse(s);
+      // Merge: fill missing metricKey from STD_DEFAULT by task name
+      const defaultByTask = {};
+      STD_DEFAULT.forEach(r => { defaultByTask[r.task] = r; });
+      return saved.map(r => {
+        const def = defaultByTask[r.task];
+        return def ? { ...def, ...r, metricKey: r.metricKey !== undefined ? r.metricKey : def.metricKey } : r;
+      });
+    }
+  } catch(e) {}
   return JSON.parse(JSON.stringify(STD_DEFAULT));
 }
 function saveStdSettings(rows) { localStorage.setItem(STD_STORAGE_KEY, JSON.stringify(rows)); }
@@ -2185,6 +2197,8 @@ function renderStdHoursTable(prodData) {
       const sampleD = [...monthData].reverse().find(d => d.containers !== null);
       const sampleContainers = sampleD ? sampleD.containers : null;
 
+      const mkey = r.metricKey || '';
+
       // Status icon
       const statusIcon = r.val === null
         ? '<span style="color:var(--muted)">未設定</span>'
@@ -2192,29 +2206,28 @@ function renderStdHoursTable(prodData) {
           ? '<span style="color:#34d399">●</span>'
           : '<span style="color:#f59e0b">○</span>';
 
-      // Basis: show metric source + latest value
-      let basisDesc;
-      const mkey = r.metricKey || '';
-      if (r.col === 'fixedH') {
-        basisDesc = `固定 ${r.val} h/月`;
-      } else if (r.col === 'kgPerH') {
-        basisDesc = sampleContainers !== null
-          ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} kg ÷ ${r.val} kg/h`
-          : `${mkey}: データなし`;
-      } else if (r.col === 'perContainer') {
-        basisDesc = sampleContainers !== null
-          ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} コンテナ × ${r.val} ${r.unit}`
-          : `${mkey}: データなし`;
-      } else if (r.col === 'perPiece') {
-        basisDesc = r.val !== null
-          ? (sampleContainers !== null ? `${sampleContainers.toLocaleString('ja-JP')} 点 × ${r.val} 秒` : `${mkey}: データなし`)
-          : '設定値なし';
-      } else if (r.col === 'perCs') {
-        basisDesc = sampleContainers !== null
-          ? `${sampleContainers.toLocaleString('ja-JP')} cs × ${r.val} 秒`
-          : `${mkey}: データなし`;
-      } else {
-        basisDesc = '—';
+      // Basis description (skip if val not set)
+      let basisDesc = '—';
+      if (r.val !== null) {
+        if (r.col === 'fixedH') {
+          basisDesc = `固定 ${r.val} h/月`;
+        } else if (r.col === 'kgPerH') {
+          basisDesc = sampleContainers !== null
+            ? `${sampleContainers.toLocaleString('ja-JP')} kg ÷ ${r.val} kg/h`
+            : `${mkey}: データなし`;
+        } else if (r.col === 'perContainer') {
+          basisDesc = sampleContainers !== null
+            ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} コンテナ × ${r.val} ${r.unit}`
+            : `${mkey}: データなし`;
+        } else if (r.col === 'perPiece') {
+          basisDesc = sampleContainers !== null
+            ? `${sampleContainers.toLocaleString('ja-JP')} 点 × ${r.val} 秒`
+            : `${mkey}: データなし`;
+        } else if (r.col === 'perCs') {
+          basisDesc = sampleContainers !== null
+            ? `${sampleContainers.toLocaleString('ja-JP')} cs × ${r.val} 秒`
+            : `${mkey}: データなし`;
+        }
       }
 
       html += `<tr>${divCell}
