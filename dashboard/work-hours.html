@@ -2191,7 +2191,7 @@ function renderStdHoursTable(prodData) {
       monthData.forEach(d => {
         if (d.h !== null) {
           const disp = d.h < 10 ? d.h.toFixed(1) : Math.round(d.h).toLocaleString('ja-JP');
-          html += `<td class="col-num">${disp}</td>`;
+          html += `<td class="col-num">${disp}<span style="font-size:0.68rem;color:var(--muted)"> h</span></td>`;
         } else {
           html += `<td class="col-num empty" style="color:#444">—</td>`;
         }
@@ -2214,7 +2214,7 @@ function renderStdHoursTable(prodData) {
         </td>`;
       totals.forEach(t => {
         html += t !== null
-          ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}</td>`
+          ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
           : `<td class="col-num empty">—</td>`;
       });
       html += `<td></td></tr>`;
@@ -2229,7 +2229,7 @@ function renderStdHoursTable(prodData) {
       <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
     grandTotals.forEach(t => {
       html += t !== null
-        ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}</td>`
+        ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
         : `<td class="col-num empty">—</td>`;
     });
     html += `<td></td></tr>`;
