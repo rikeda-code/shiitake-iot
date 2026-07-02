@@ -826,6 +826,19 @@ function renderTabs(bases) {
     renderStdHoursTab();
   };
   tabsEl.appendChild(shBtn);
+
+  // 比較 tab
+  const cmpBtn = document.createElement('button');
+  cmpBtn.className = 'tab-btn compare-tab';
+  cmpBtn.textContent = '📊 比較';
+  cmpBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    cmpBtn.classList.add('active');
+    activeMode = 'compare';
+    document.getElementById('main').innerHTML = '';
+    renderCompareTab();
+  };
+  tabsEl.appendChild(cmpBtn);
 }
 
 /* ── Individual base panel ─────────────────────────────────────── */
@@ -2609,6 +2622,212 @@ async function loadAll() {
     document.getElementById('main').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
     console.error(e);
   }
+}
+
+/* ── 比較タブ: 標準工数 vs 実績工数 ────────────────────────────── */
+function renderCompareTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">比較データを計算中...</div>';
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+  fetchProductionSheet().then(prodData => {
+    renderCompareCharts(prodData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+  });
+}
+
+function renderCompareCharts(prodData) {
+  const main = document.getElementById('main');
+  const { months: workMonths, employees } = allData;
+  const { months: prodMonths, records } = prodData;
+  const rows = loadStdSettings();
+  const conv = loadCsConv();
+
+  const normWorkMonths = workMonths.map(m => normalizeMonth(m));
+  const commonMonths = prodMonths.map(m => normalizeMonth(m));
+
+  const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
+
+  function getProdVal(site, metricKey, mi) {
+    const r = records.find(r => r.site === site && r.metric === metricKey);
+    return r ? (r.values[mi] ?? null) : null;
+  }
+
+  function calcRow(site, r, mi) {
+    const v = r.val;
+    if (v === null || v === undefined) return { h: null };
+    const mkey = r.metricKey || null;
+    if (r.col === 'kgPerH' && v > 0) {
+      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
+      return { h: kg !== null ? kg / v : null };
+    }
+    if (r.col === 'fixedH') return { h: v };
+    if (r.col === 'perContainer') {
+      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
+      if (containers !== null) {
+        const hPer = r.unit === 'h' ? v : v / 60;
+        return { h: containers * hPer };
+      }
+      return { h: null };
+    }
+    if (r.col === 'perPiece') {
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
+      if (pcs !== null) {
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: pcs * secPer / 3600 };
+      }
+      return { h: null };
+    }
+    if (r.col === 'perCs') {
+      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
+      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
+      if (pcs !== null) {
+        const cs = calcCs(pcs, bara, conv);
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: cs * secPer / 3600 };
+      }
+      return { h: null };
+    }
+    return { h: null };
+  }
+
+  function workHours(site, typeFilter) {
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+    return commonMonths.map(m => {
+      const wi = normWorkMonths.indexOf(m);
+      if (wi < 0) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  }
+
+  // Task colors for stacked bar (20 distinct colors)
+  const TASK_COLORS = [
+    '#60a5fa','#34d399','#f472b6','#fbbf24','#a78bfa',
+    '#38bdf8','#4ade80','#fb923c','#e879f9','#facc15',
+    '#93c5fd','#6ee7b7','#fca5a5','#c4b5fd','#86efac',
+    '#fdba74','#f9a8d4','#67e8f9','#bef264','#fde68a',
+  ];
+
+  const divs = ['栽培', '出荷'];
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📊 標準工数 vs 実績工数 比較
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 積み上げ棒 = 標準工数（タスク別）　折れ線 = 実績工数</span>
+    </div>`;
+
+  availSites.forEach(site => {
+    const siteColor = SITE_COLORS[site] || '#fff';
+    html += `<div style="margin-bottom:32px">
+      <div class="schart-header" style="color:${siteColor}">${site}</div>`;
+
+    divs.forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualH = workHours(site, typeFilter);
+
+      html += `<div class="schart-section">
+        <div class="schart-header">${div}
+          <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 標準 vs 実績（h）</span>
+        </div>
+        <div class="schart-wrap" style="height:320px"><canvas id="cmp-${site}-${div}"></canvas></div>
+      </div>`;
+
+      // Store for later chart draw
+      if (!window._cmpChartData) window._cmpChartData = {};
+      window._cmpChartData[`${site}-${div}`] = { divRows, actualH, div };
+    });
+
+    html += `</div>`;
+  });
+
+  html += `</div>`;
+  main.innerHTML = html;
+
+  // Draw charts after DOM update
+  const compareChartInstances = {};
+  availSites.forEach(site => {
+    divs.forEach(div => {
+      const key = `${site}-${div}`;
+      const d = window._cmpChartData[key];
+      if (!d) return;
+      const ctx = document.getElementById(`cmp-${key}`)?.getContext('2d');
+      if (!ctx) return;
+
+      const { divRows, actualH } = d;
+      const labels = commonMonths;
+      const datasets = [];
+
+      // Stacked bar datasets: one per task
+      divRows.forEach((r, ri) => {
+        const data = commonMonths.map((_, mi) => {
+          const res = calcRow(site, r, mi);
+          return res.h !== null ? Math.round(res.h * 10) / 10 : null;
+        });
+        datasets.push({
+          type: 'bar',
+          label: r.task,
+          data,
+          backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+          borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+          borderWidth: 0,
+          stack: 'std',
+          yAxisID: 'y',
+          order: 2,
+        });
+      });
+
+      // Actual hours line
+      datasets.push({
+        type: 'line',
+        label: '実績工数',
+        data: actualH,
+        borderColor: '#f87171',
+        backgroundColor: '#f8717122',
+        borderWidth: 2.5,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        tension: 0.3,
+        spanGaps: true,
+        yAxisID: 'y',
+        order: 0,
+      });
+
+      const opts = {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          tooltip: {
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (v === null || v === undefined) return null;
+                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            stacked: false,
+            position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' }, suggestedMin: 0,
+            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+          },
+        },
+      };
+
+      if (compareChartInstances[key]) compareChartInstances[key].destroy();
+      compareChartInstances[key] = new Chart(ctx, { data: { labels, datasets }, options: opts });
+    });
+  });
 }
 
 loadAll();
