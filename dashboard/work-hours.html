@@ -1974,7 +1974,12 @@ function loadStdSettings() {
       STD_DEFAULT.forEach(r => { defaultByTask[r.task] = r; });
       return saved.map(r => {
         const def = defaultByTask[r.task];
-        return def ? { ...def, ...r, metricKey: r.metricKey !== undefined ? r.metricKey : def.metricKey } : r;
+        // Only take user-editable fields (val, metricKey) from saved — col/unit/note always come from STD_DEFAULT
+        return def ? {
+          ...def,
+          val: r.val !== undefined ? r.val : def.val,
+          metricKey: r.metricKey !== undefined ? r.metricKey : def.metricKey,
+        } : r;
       });
     }
   } catch(e) {}
