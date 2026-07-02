@@ -1937,24 +1937,25 @@ function pcsPerCs(conv) {
 }
 
 const STD_DEFAULT = [
-  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', note: '収穫量(kg) ÷ kg/h' },
-  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    note: '毎月固定時間' },
-  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
-  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
-  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
-  { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    note: '毎月固定時間' },
-  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perPiece',     val: 30,   unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perPiece',     val: 30,   unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
+  // metricKey: 生産実績シートの対応メトリック名（perContainerはタスク別、その他は固定）
+  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    metricKey: '菌床入れ',     note: '菌床入れコンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    metricKey: '芽かき',       note: '芽かきコンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', metricKey: '収穫量(kg)',   note: '収穫量(kg) ÷ kg/h' },
+  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    metricKey: '注水',         note: '注水コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   metricKey: '散水',         note: '散水コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    metricKey: '廃棄',         note: '廃棄コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    metricKey: null,           note: '毎月固定時間' },
+  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
+  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
+  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
+  { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    metricKey: null,          note: '毎月固定時間' },
+  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
 ];
 
 function loadStdSettings() {
@@ -2112,41 +2113,41 @@ function renderStdHoursTable(prodData) {
     const v = r.val;
     if (v === null || v === undefined) return { h: null, basis: '—' };
 
+    const mkey = r.metricKey || null;
+
     if (r.col === 'kgPerH' && v > 0) {
-      const kg = getProdVal(site, '収穫量(kg)', mi);
+      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
       return { h: kg !== null ? kg / v : null,
-               basis: kg !== null ? `${kg.toLocaleString('ja-JP')} kg` : 'データなし' };
+               containers: kg };
     }
-    if (r.col === 'fixedH') return { h: v, basis: '固定' };
+    if (r.col === 'fixedH') return { h: v, containers: null };
 
     if (r.col === 'perContainer') {
-      const containers = getProdVal(site, '稼働コンテナ数', mi);
+      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
       if (containers !== null) {
-        const hPer = r.unit === 'h' ? v : v / 60; // 分→h
-        return { h: containers * hPer,
-                 basis: `${containers.toLocaleString('ja-JP')} コンテナ` };
+        const hPer = r.unit === 'h' ? v : v / 60;
+        return { h: containers * hPer, containers };
       }
-      return { h: null, basis: 'データなし(稼働コンテナ数)' };
+      return { h: null, containers: null };
     }
     if (r.col === 'perPiece') {
-      const pcs = getProdVal(site, '合計(点数)', mi);
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
       if (pcs !== null) {
         const secPer = r.unit === '秒' ? v : v * 60;
-        return { h: pcs * secPer / 3600, basis: `${pcs.toLocaleString('ja-JP')} 点` };
+        return { h: pcs * secPer / 3600, containers: pcs };
       }
-      return { h: null, basis: 'データなし' };
+      return { h: null, containers: null };
     }
     if (r.col === 'perCs') {
-      const pcs = getProdVal(site, '合計(点数)', mi);
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
       if (pcs !== null) {
         const cs = pcs * csPerPcs;
         const secPer = r.unit === '秒' ? v : v * 60;
-        return { h: cs * secPer / 3600,
-                 basis: `${Math.round(cs).toLocaleString('ja-JP')} cs (${pcs.toLocaleString('ja-JP')}点)` };
+        return { h: cs * secPer / 3600, containers: Math.round(cs) };
       }
-      return { h: null, basis: 'データなし' };
+      return { h: null, containers: null };
     }
-    return { h: null, basis: '—' };
+    return { h: null, containers: null };
   }
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
@@ -2180,22 +2181,41 @@ function renderStdHoursTable(prodData) {
 
       const monthData = commonMonths.map((_, mi) => calcRow(site, r, mi));
       const hasData = monthData.some(d => d.h !== null);
+      // Pick latest month's containers value as sample
+      const sampleD = [...monthData].reverse().find(d => d.containers !== null);
+      const sampleContainers = sampleD ? sampleD.containers : null;
 
-      // Describe what data drives this row
-      const COL_BASIS = {
-        kgPerH:       `収穫量(kg) ÷ ${r.val} kg/h`,
-        fixedH:       `固定 ${r.val} h/月`,
-        perContainer: `稼働コンテナ数 × ${r.val} ${r.unit}`,
-        perPiece:     r.val !== null ? `合計(点数) × ${r.val} 秒/個` : '設定値なし',
-        perCs:        `合計(点数) ÷ P/cs × ${r.val} 秒/cs`,
-      };
-      const basisDesc = COL_BASIS[r.col] || '—';
+      // Status icon
       const statusIcon = r.val === null
         ? '<span style="color:var(--muted)">未設定</span>'
         : hasData
           ? '<span style="color:#34d399">●</span>'
           : '<span style="color:#f59e0b">○</span>';
-      // ○=データなし ●=計算済み
+
+      // Basis: show metric source + latest value
+      let basisDesc;
+      const mkey = r.metricKey || '';
+      if (r.col === 'fixedH') {
+        basisDesc = `固定 ${r.val} h/月`;
+      } else if (r.col === 'kgPerH') {
+        basisDesc = sampleContainers !== null
+          ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} kg ÷ ${r.val} kg/h`
+          : `${mkey}: データなし`;
+      } else if (r.col === 'perContainer') {
+        basisDesc = sampleContainers !== null
+          ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} コンテナ × ${r.val} ${r.unit}`
+          : `${mkey}: データなし`;
+      } else if (r.col === 'perPiece') {
+        basisDesc = r.val !== null
+          ? (sampleContainers !== null ? `${sampleContainers.toLocaleString('ja-JP')} 点 × ${r.val} 秒` : `${mkey}: データなし`)
+          : '設定値なし';
+      } else if (r.col === 'perCs') {
+        basisDesc = sampleContainers !== null
+          ? `${sampleContainers.toLocaleString('ja-JP')} cs × ${r.val} 秒`
+          : `${mkey}: データなし`;
+      } else {
+        basisDesc = '—';
+      }
 
       html += `<tr>${divCell}
         <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
