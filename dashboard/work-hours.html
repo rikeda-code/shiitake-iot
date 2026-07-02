@@ -783,6 +783,19 @@ function renderTabs(bases) {
     renderProductionTab();
   };
   tabsEl.appendChild(pBtn);
+
+  // Productivity tab
+  const prBtn = document.createElement('button');
+  prBtn.className = 'tab-btn productivity-tab';
+  prBtn.textContent = '📈 生産性';
+  prBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    prBtn.classList.add('active');
+    activeMode = 'productivity';
+    document.getElementById('main').innerHTML = '';
+    renderProductivityTab();
+  };
+  tabsEl.appendChild(prBtn);
 }
 
 /* ── Individual base panel ─────────────────────────────────────── */
@@ -1873,6 +1886,239 @@ function renderProductionTable({ months, records }) {
     </div></div>`;
 
   main.innerHTML = html;
+}
+
+/* ── Productivity ─────────────────────────────────────────────────── */
+
+// "2025年10月" → "2025/10"
+function normalizeMonth(m) {
+  return String(m).replace(/(\d+)年(\d+)月/, (_, y, mo) => `${y}/${parseInt(mo)}`);
+}
+
+const productivityChartInstances = {};
+
+function renderProductivityTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">生産性データを計算中...</div>';
+
+  Object.values(productivityChartInstances).forEach(c => c.destroy());
+  Object.keys(productivityChartInstances).forEach(k => delete productivityChartInstances[k]);
+
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+
+  fetchProductionSheet().then(prodData => {
+    renderProductivityCharts(allData, prodData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">エラー: ${e.message}</div>`;
+    console.error(e);
+  });
+}
+
+function renderProductivityCharts(workData, prodData) {
+  const main = document.getElementById('main');
+  const { months: workMonths, employees } = workData;
+  const { months: prodMonths, records } = prodData;
+
+  // Normalize work-hours months for matching
+  const normWorkMonths = workMonths.map(normalizeMonth);
+
+  // Common months that appear in both datasets
+  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(m));
+  if (!commonMonths.length) {
+    main.innerHTML = '<div class="loading">共通月が見つかりません（月ラベル形式を確認してください）</div>';
+    return;
+  }
+
+  // Collect all sites that appear in production data
+  const prodSites = [...new Set(records.map(r => r.site))];
+  // Use sites that appear in both work data and production data
+  const sites = SITES.filter(s => prodSites.includes(s) && employees.some(e => e.base === s));
+  if (!sites.length) {
+    main.innerHTML = '<div class="loading">拠点データの突合ができませんでした</div>';
+    return;
+  }
+
+  // Helper: sum hours by workType filter for a site, indexed by common month
+  function workHours(site, typeFilter) {
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+    return commonMonths.map(m => {
+      const wi = normWorkMonths.indexOf(m);
+      if (wi < 0) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  }
+
+  // Helper: get production metric values aligned to commonMonths
+  function prodVals(site, metric) {
+    const r = records.find(x => x.site === site && x.metric === metric);
+    if (!r) return commonMonths.map(() => null);
+    return commonMonths.map(m => {
+      const pi = prodMonths.indexOf(m);
+      return (pi >= 0 && r.values[pi] !== null) ? r.values[pi] : null;
+    });
+  }
+
+  // Calculate productivity per site
+  const data = {};
+  sites.forEach(site => {
+    const cultivationH = workHours(site, wt => wt.includes('栽培'));
+    const shippingH    = workHours(site, wt => wt.includes('出荷'));
+    const harvest      = prodVals(site, '収穫量(kg)');
+    const shipKg       = prodVals(site, '出荷量(kg)');
+    const shipPcs      = prodVals(site, '合計(点数)');
+
+    const ratio = (a, b) => a.map((v, i) =>
+      (v !== null && b[i] !== null && b[i] > 0) ? Math.round(v / b[i] * 10) / 10 : null
+    );
+
+    data[site] = {
+      cultivationH,
+      shippingH,
+      harvestPerH:  ratio(harvest, cultivationH),
+      shipKgPerH:   ratio(shipKg,  shippingH),
+      shipPcsPerH:  ratio(shipPcs, shippingH),
+      harvest,
+      shipKg,
+      shipPcs,
+    };
+  });
+
+  // Build latest-month KPI values
+  const lastMonth = commonMonths[commonMonths.length - 1];
+  const lastIdx   = commonMonths.length - 1;
+
+  function kpiHtml(label, site, key, unit, decimals = 1) {
+    const v = data[site]?.[key]?.[lastIdx];
+    const color = SITE_COLORS[site] || '#e2e8f0';
+    return `<div class="kpi">
+      <div class="kpi-label" style="color:${color}">${site}</div>
+      <div class="kpi-value">${v !== null && v !== undefined ? v.toFixed(decimals) : '—'} <span style="font-size:0.7em;color:var(--muted)">${unit}</span></div>
+    </div>`;
+  }
+
+  const metrics = [
+    { key: 'harvestPerH',  title: '① 栽培生産性', sub: '栽培時間あたり収穫量', unit: 'kg/h',  decimals: 1 },
+    { key: 'shipKgPerH',   title: '② 出荷生産性（重量）', sub: '出荷時間あたり出荷量', unit: 'kg/h', decimals: 1 },
+    { key: 'shipPcsPerH',  title: '③ 出荷生産性（点数）', sub: '出荷時間あたり合計点数', unit: '点/h', decimals: 0 },
+  ];
+
+  const lineOpts = (unit, decimals) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 8 } },
+      tooltip: {
+        backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+        titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+        callbacks: {
+          label: ctx => ctx.parsed.y !== null
+            ? `${ctx.dataset.label}: ${decimals === 0 ? Math.round(ctx.parsed.y).toLocaleString('ja-JP') : ctx.parsed.y.toFixed(decimals)} ${unit}`
+            : null,
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+      y: {
+        ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} ${unit}` },
+        grid: { color: '#1e2235' }, suggestedMin: 0,
+      },
+    },
+  });
+
+  // Hours bar chart options
+  const barOpts = (unit) => ({
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 8 } },
+      tooltip: {
+        backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+        titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+        callbacks: { label: ctx => ctx.parsed.y !== null ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} ${unit}` : null },
+      },
+    },
+    scales: {
+      x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+      y: { ticks: { color: '#8892a4', callback: v => `${v} ${unit}` }, grid: { color: '#1e2235' }, suggestedMin: 0 },
+    },
+  });
+
+  // Render HTML
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📈 生産性 ／ 最新月: ${lastMonth}</div>
+    <div class="kpi-row">
+      ${metrics.map(m => sites.map(s => kpiHtml(m.title, s, m.key, m.unit, m.decimals)).join('')).join('')}
+    </div>`;
+
+  // Productivity line charts
+  metrics.forEach((m, i) => {
+    html += `<div class="schart-section">
+      <div class="schart-header">${m.title} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">${m.sub}（${m.unit}）</span></div>
+      <div class="schart-wrap"><canvas id="prd-${i}"></canvas></div>
+    </div>`;
+  });
+
+  // Hours breakdown charts
+  html += `<div class="schart-section">
+    <div class="schart-header">参考: 栽培・出荷 実質勤務時間 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">(h)</span></div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:6px">栽培時間</div><div class="schart-wrap"><canvas id="prd-cult-h"></canvas></div></div>
+      <div style="flex:1;min-width:280px"><div style="font-size:0.75rem;color:var(--muted);margin-bottom:6px">出荷時間</div><div class="schart-wrap"><canvas id="prd-ship-h"></canvas></div></div>
+    </div>
+  </div>
+  </div>`;
+
+  main.innerHTML = html;
+
+  // Draw productivity charts
+  metrics.forEach((m, i) => {
+    const ctx = document.getElementById(`prd-${i}`)?.getContext('2d');
+    if (!ctx) return;
+    productivityChartInstances[`prd-${i}`] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: commonMonths,
+        datasets: sites.map(site => ({
+          label: site,
+          data: data[site][m.key],
+          borderColor: SITE_COLORS[site] || '#fff',
+          backgroundColor: (SITE_COLORS[site] || '#fff') + '22',
+          borderWidth: 2.5,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          tension: 0.3,
+          spanGaps: true,
+        })),
+      },
+      options: lineOpts(m.unit, m.decimals),
+    });
+  });
+
+  // Draw hours bar charts
+  [
+    { id: 'prd-cult-h', key: 'cultivationH' },
+    { id: 'prd-ship-h', key: 'shippingH' },
+  ].forEach(({ id, key }) => {
+    const ctx = document.getElementById(id)?.getContext('2d');
+    if (!ctx) return;
+    productivityChartInstances[id] = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: commonMonths,
+        datasets: sites.map(site => ({
+          label: site,
+          data: data[site][key],
+          backgroundColor: (SITE_COLORS[site] || '#fff') + 'aa',
+          borderColor: SITE_COLORS[site] || '#fff',
+          borderWidth: 1,
+        })),
+      },
+      options: barOpts('h'),
+    });
+  });
 }
 
 /* ── Main ────────────────────────────────────────────────────────── */
