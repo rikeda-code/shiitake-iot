@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, claude/brave-maxwell-zp8yn3]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -45,8 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: claude/brave-maxwell-zp8yn3
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
