@@ -1998,15 +1998,22 @@ function renderProductivityCharts(workData, prodData) {
     </div>`;
   }
 
-  // Chart definitions: productivity line (left Y) + volume bars (right Y)
+  // Chart definitions: productivity line (left Y) + volume/time bars (right Y)
+  const barMode = window._prodBarMode || 'volume';
   const metrics = [
-    { key: 'harvestPerH', title: '① 栽培生産性', sub: '栽培時間あたり収穫量', unit: 'kg/h', decimals: 1, volKey: 'harvest', volUnit: 'kg', volLabel: '収穫量' },
-    { key: 'shipKgPerH',  title: '② 出荷生産性（重量）', sub: '出荷時間あたり出荷量', unit: 'kg/h', decimals: 1, volKey: 'shipKg',  volUnit: 'kg', volLabel: '出荷量' },
-    { key: 'shipPcsPerH', title: '③ 出荷生産性（点数）', sub: '出荷時間あたり合計点数', unit: '点/h', decimals: 0, volKey: 'shipPcs', volUnit: '点', volLabel: '合計点数' },
+    { key: 'harvestPerH', title: '① 栽培生産性', sub: '栽培時間あたり収穫量', unit: 'kg/h', decimals: 1,
+      volKey: 'harvest',    volUnit: 'kg', volLabel: '収穫量',
+      hKey:   'cultivationH', hUnit: 'h', hLabel: '栽培時間' },
+    { key: 'shipKgPerH',  title: '② 出荷生産性（重量）', sub: '出荷時間あたり出荷量', unit: 'kg/h', decimals: 1,
+      volKey: 'shipKg',     volUnit: 'kg', volLabel: '出荷量',
+      hKey:   'shippingH',  hUnit: 'h', hLabel: '出荷時間' },
+    { key: 'shipPcsPerH', title: '③ 出荷生産性（点数）', sub: '出荷時間あたり合計点数', unit: '点/h', decimals: 0,
+      volKey: 'shipPcs',    volUnit: '点', volLabel: '合計点数',
+      hKey:   'shippingH',  hUnit: 'h', hLabel: '出荷時間' },
   ];
 
-  // Combo chart options: left Y = productivity (line), right Y = volume (bar)
-  function comboOpts(ratioUnit, ratioDecimals, volUnit) {
+  // Combo chart options: left Y = productivity (line), right Y = volume/time (bar)
+  function comboOpts(ratioUnit, ratioDecimals, barUnit) {
     return {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
@@ -2022,7 +2029,8 @@ function renderProductivityCharts(workData, prodData) {
               if (ctx.dataset.yAxisID === 'y') {
                 return `${ctx.dataset.label}: ${ratioDecimals === 0 ? Math.round(v).toLocaleString('ja-JP') : v.toFixed(ratioDecimals)} ${ratioUnit}`;
               }
-              return `${ctx.dataset.label}: ${volUnit === '点' ? Math.round(v).toLocaleString('ja-JP') : v.toLocaleString('ja-JP')} ${volUnit}`;
+              const u = ctx.dataset._barUnit || barUnit;
+              return `${ctx.dataset.label}: ${u === '点' ? Math.round(v).toLocaleString('ja-JP') : v.toLocaleString('ja-JP')} ${u}`;
             },
           },
         },
@@ -2039,7 +2047,7 @@ function renderProductivityCharts(workData, prodData) {
           position: 'right',
           ticks: { color: '#6b7a90', font: { size: 10 }, callback: v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}` },
           grid: { drawOnChartArea: false }, suggestedMin: 0,
-          title: { display: true, text: volUnit, color: '#6b7a90', font: { size: 10 } },
+          title: { display: true, text: barUnit, color: '#6b7a90', font: { size: 10 } },
         },
       },
     };
@@ -2048,7 +2056,11 @@ function renderProductivityCharts(workData, prodData) {
   // Render HTML
   let html = `<div class="prod-panel">
     <div class="chart-section-label">📈 生産性 ／ 最新月: ${lastMonth}
-      <span style="float:right;font-size:0.72rem">※ 栽培・出荷時間はサマリー表の業務区分（配送・栽培・出荷は除外）</span>
+      <span style="float:right;display:flex;align-items:center;gap:6px;font-size:0.78rem">
+        <span style="color:var(--muted)">棒グラフ:</span>
+        <button id="prd-toggle-vol" class="select-btn" style="padding:2px 10px" onclick="switchProdBar('volume')">生産量</button>
+        <button id="prd-toggle-time" class="select-btn" style="padding:2px 10px" onclick="switchProdBar('time')">時間</button>
+      </span>
     </div>
     <div class="kpi-row">
       ${metrics.map(m => sites.map(s => kpiHtml(m.title, s, m.key, m.unit, m.decimals)).join('')).join('')}
@@ -2058,7 +2070,7 @@ function renderProductivityCharts(workData, prodData) {
     html += `<div class="schart-section">
       <div class="schart-header">${m.title}
         <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">${m.sub}</span>
-        <span style="float:right;font-size:0.72rem;color:var(--muted)">折れ線(左軸): ${m.unit}　棒(右軸): ${m.volLabel}(${m.volUnit})</span>
+        <span style="float:right;font-size:0.72rem;color:var(--muted)">折れ線(左軸): ${m.unit}　棒(右軸): 生産量/時間 切替</span>
       </div>
       <div class="schart-wrap" style="height:340px"><canvas id="prd-${i}"></canvas></div>
     </div>`;
@@ -2066,6 +2078,10 @@ function renderProductivityCharts(workData, prodData) {
 
   html += `</div>`;
   main.innerHTML = html;
+
+  // Store references for toggle function
+  window._prodBarMode = barMode;
+  window._prodBarData = { metrics, data, sites };
 
   // Draw combo charts
   metrics.forEach((m, i) => {
@@ -2093,27 +2109,74 @@ function renderProductivityCharts(workData, prodData) {
       });
     });
 
-    // Volume bars per site (right Y)
+    // Volume/time bars per site (right Y) — controlled by barMode
+    const barKey  = barMode === 'volume' ? m.volKey  : m.hKey;
+    const barUnit = barMode === 'volume' ? m.volUnit : m.hUnit;
+    const barLbl  = barMode === 'volume' ? m.volLabel : m.hLabel;
     sites.forEach(site => {
       const color = SITE_COLORS[site] || '#fff';
       datasets.push({
         type: 'bar',
-        label: `${site} ${m.volLabel}(${m.volUnit})`,
-        data: data[site][m.volKey],
+        label: `${site} ${barLbl}(${barUnit})`,
+        data: data[site][barKey],
         backgroundColor: color + '44',
         borderColor: color + '88',
         borderWidth: 1,
         yAxisID: 'y1',
         order: 2,
+        _barUnit: barUnit,
       });
     });
 
     productivityChartInstances[`prd-${i}`] = new Chart(ctx, {
       data: { labels: commonMonths, datasets },
-      options: comboOpts(m.unit, m.decimals, m.volUnit),
+      options: comboOpts(m.unit, m.decimals, barUnit),
     });
   });
+
+  // Set initial toggle button styles
+  updateProdToggleButtons();
 }
+
+function updateProdToggleButtons() {
+  const volBtn  = document.getElementById('prd-toggle-vol');
+  const timeBtn = document.getElementById('prd-toggle-time');
+  if (!volBtn || !timeBtn) return;
+  const accentStyle = 'background:var(--accent-inabe);color:#000;border-color:var(--accent-inabe)';
+  const plainStyle  = '';
+  if (window._prodBarMode === 'time') {
+    volBtn.style.cssText  = plainStyle;
+    timeBtn.style.cssText = accentStyle;
+  } else {
+    volBtn.style.cssText  = accentStyle;
+    timeBtn.style.cssText = plainStyle;
+  }
+}
+
+window.switchProdBar = function(mode) {
+  window._prodBarMode = mode;
+  updateProdToggleButtons();
+  // Need access to metrics and data; re-read from closure via a stored reference
+  if (!window._prodBarData) return;
+  const { metrics, data, sites } = window._prodBarData;
+  metrics.forEach((m, i) => {
+    const chart = productivityChartInstances[`prd-${i}`];
+    if (!chart) return;
+    const isVol   = mode === 'volume';
+    const barKey  = isVol ? m.volKey  : m.hKey;
+    const barUnit = isVol ? m.volUnit : m.hUnit;
+    const barLbl  = isVol ? m.volLabel : m.hLabel;
+    const n = sites.length;
+    sites.forEach((site, si) => {
+      const ds = chart.data.datasets[n + si];
+      ds.data     = data[site][barKey];
+      ds.label    = `${site} ${barLbl}(${barUnit})`;
+      ds._barUnit = barUnit;
+    });
+    chart.options.scales.y1.title.text = barUnit;
+    chart.update();
+  });
+};
 
 /* ── Main ────────────────────────────────────────────────────────── */
 async function loadAll() {
