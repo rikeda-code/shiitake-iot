@@ -135,7 +135,8 @@ function analyzeSchedule(sheet) {
   // 書き込みは日付×工程セル単位で小数第1位に四捨五入
   const roundedCountResult = countResult.map(row => row.map(round1));
   sheet.getRange(keywordStartRow, DATA_START_COL, keywords.length, numCols)
-       .setValues(roundedCountResult);
+       .setValues(roundedCountResult)
+       .setNumberFormat("0.#"); // 整数値は小数点以下を表示しない（以前の書式が残らないよう毎回上書き）
 
   // ── ② 日別稼働コンテナ数（可視行のみ）──────────────────
   const activeCount = new Array(numCols).fill(0);
@@ -213,6 +214,10 @@ function analyzeSchedule(sheet) {
 
     sheet.getRange(summaryStartRow, summaryCol, summaryData.length, 1)
          .setValues(summaryData);
+
+    // 工程ごとの合計行も整数値は小数点以下を表示しない（以前の書式が残らないよう毎回上書き）
+    sheet.getRange(summaryStartRow, summaryCol, keywords.length, 1)
+         .setNumberFormat("0.#");
 
     // コンテナ稼働率の行だけパーセント書式
     sheet.getRange(summaryStartRow + keywords.length + 1, summaryCol)
