@@ -508,6 +508,10 @@
     .prod-table tr.metric-goukei td { font-weight: 700; }
     /* Site separator */
     .prod-table tr.site-start td { border-top: 2px solid var(--border); }
+    /* Standard settings table */
+    .std-set-table input.std-input:focus { outline: 1px solid var(--accent-inabe); border-color: var(--accent-inabe); }
+    .std-set-table input.std-input { transition: border-color 0.15s; }
+    .std-set-table td { vertical-align: middle; }
   </style>
 </head>
 <body>
@@ -796,6 +800,32 @@ function renderTabs(bases) {
     renderProductivityTab();
   };
   tabsEl.appendChild(prBtn);
+
+  // 標準工数設定 tab
+  const stBtn = document.createElement('button');
+  stBtn.className = 'tab-btn stdset-tab';
+  stBtn.textContent = '⚙️ 標準工数設定';
+  stBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    stBtn.classList.add('active');
+    activeMode = 'stdset';
+    document.getElementById('main').innerHTML = '';
+    renderStdSetTab();
+  };
+  tabsEl.appendChild(stBtn);
+
+  // 標準工数(h) tab
+  const shBtn = document.createElement('button');
+  shBtn.className = 'tab-btn stdhours-tab';
+  shBtn.textContent = '📋 標準工数(h)';
+  shBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    shBtn.classList.add('active');
+    activeMode = 'stdhours';
+    document.getElementById('main').innerHTML = '';
+    renderStdHoursTab();
+  };
+  tabsEl.appendChild(shBtn);
 }
 
 /* ── Individual base panel ─────────────────────────────────────── */
@@ -1885,6 +1915,254 @@ function renderProductionTable({ months, records }) {
   html += `</tbody></table>
     </div></div>`;
 
+  main.innerHTML = html;
+}
+
+/* ── 標準工数設定 ───────────────────────────────────────────────────── */
+
+const STD_STORAGE_KEY = 'shiitake_std_settings';
+
+const STD_DEFAULT = [
+  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    note: '1コンテナ当たりの作業時間' },
+  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    note: '1コンテナ当たりの作業時間' },
+  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', note: '収穫量(kg)÷kg/h = 収穫時間' },
+  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    note: '1コンテナ当たりの作業時間' },
+  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
+  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    note: '1コンテナ当たりの作業時間' },
+  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
+  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
+  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
+  { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    note: '毎月固定時間' },
+  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
+  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   note: '1個当たりの作業時間（秒）' },
+  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   note: '1cs当たりの作業時間（秒）' },
+  { div: '出荷', task: '段ボール作成',     col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
+  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   note: '1cs当たりの作業時間（秒）' },
+  { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    note: '毎月固定時間' },
+  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
+  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
+];
+
+function loadStdSettings() {
+  try { const s = localStorage.getItem(STD_STORAGE_KEY); if (s) return JSON.parse(s); } catch(e) {}
+  return JSON.parse(JSON.stringify(STD_DEFAULT));
+}
+function saveStdSettings(rows) { localStorage.setItem(STD_STORAGE_KEY, JSON.stringify(rows)); }
+
+function renderStdSetTab() {
+  const main = document.getElementById('main');
+  const rows = loadStdSettings();
+  window._stdRows = rows;
+
+  const colLabel = { perContainer: '1コンテナ当たり', kgPerH: '時間当たり(kg/h)', perCs: '1cs当たり', perPiece: '1個当たり', fixedH: '固定時間(h)' };
+  const allCols  = ['perContainer', 'kgPerH', 'perCs', 'perPiece', 'fixedH'];
+
+  // count rows per div for rowspan
+  const divCount = {};
+  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">⚙️ 標準工数設定
+      <span style="float:right;display:flex;gap:8px;align-items:center">
+        <button class="select-btn" style="padding:3px 14px" onclick="resetStdSettings()">リセット</button>
+        <button class="select-btn" style="padding:3px 14px;background:var(--accent-inabe);color:#000;border-color:var(--accent-inabe)" onclick="saveStdSettingsUI()">保存</button>
+      </span>
+    </div>
+    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値を編集後「保存」ボタンを押すと標準工数(h)タブに反映されます。単位は各セルの下に表示。</p>
+    <div class="prod-table-wrap">
+    <table class="prod-table std-set-table">
+      <thead><tr>
+        <th class="th-left" style="min-width:60px">業務区分</th>
+        <th class="th-left" style="min-width:130px">作業区分</th>
+        ${allCols.map(c => `<th style="min-width:110px">${colLabel[c]}</th>`).join('')}
+        <th class="th-left" style="min-width:180px">考え方</th>
+      </tr></thead>
+      <tbody>`;
+
+  let lastDiv = '';
+  rows.forEach((r, i) => {
+    const divCell = r.div !== lastDiv
+      ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
+      : '';
+    if (r.div !== lastDiv) lastDiv = r.div;
+
+    html += `<tr>${divCell}<td class="col-metric" style="font-size:0.82rem">${r.task}</td>`;
+    allCols.forEach(col => {
+      if (r.col === col) {
+        const v = (r.val !== null && r.val !== undefined) ? r.val : '';
+        html += `<td class="col-num" style="padding:2px 4px">
+          <input type="number" class="std-input" data-idx="${i}"
+            value="${v}" placeholder="—"
+            style="width:80px;text-align:right;background:#1a1f35;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+          <div style="font-size:0.68rem;color:var(--muted);text-align:right">${r.unit}</div>
+        </td>`;
+      } else {
+        html += `<td class="col-num empty" style="color:var(--muted)">—</td>`;
+      }
+    });
+    html += `<td class="col-metric" style="font-size:0.75rem;color:var(--muted)">${r.note}</td></tr>`;
+  });
+
+  html += `</tbody></table></div></div>`;
+  main.innerHTML = html;
+
+  main.querySelectorAll('.std-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.dataset.idx);
+      const raw = inp.value;
+      window._stdRows[idx].val = raw === '' ? null : parseFloat(raw);
+    });
+  });
+}
+
+window.saveStdSettingsUI = function() {
+  saveStdSettings(window._stdRows);
+  const btn = document.querySelector('.prod-panel .select-btn:last-child');
+  if (btn) { const orig = btn.textContent; btn.textContent = '保存済み ✓'; setTimeout(() => { btn.textContent = orig; }, 1500); }
+};
+
+window.resetStdSettings = function() {
+  if (!confirm('デフォルト値にリセットしますか？')) return;
+  window._stdRows = JSON.parse(JSON.stringify(STD_DEFAULT));
+  saveStdSettings(window._stdRows);
+  renderStdSetTab();
+};
+
+/* ── 標準工数(h) ────────────────────────────────────────────────────── */
+
+function renderStdHoursTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">標準工数を計算中...</div>';
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+  fetchProductionSheet().then(prodData => {
+    renderStdHoursTable(prodData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+  });
+}
+
+function renderStdHoursTable(prodData) {
+  const main = document.getElementById('main');
+  const rows = loadStdSettings();
+  const { months: prodMonths, records } = prodData;
+
+  const commonMonths = prodMonths.map(m => normalizeMonth(m));
+
+  function getProdVal(site, metricKey, mi) {
+    const r = records.find(r => r.site === site && r.metric === metricKey);
+    return r ? (r.values[mi] ?? null) : null;
+  }
+
+  function calcRow(site, r, mi) {
+    const v = r.val;
+    if (v === null || v === undefined) return { h: null, basis: '—' };
+    if (r.col === 'kgPerH' && v > 0) {
+      const kg = getProdVal(site, '収穫量(kg)', mi);
+      return { h: kg !== null ? kg / v : null, basis: kg !== null ? `${kg.toLocaleString('ja-JP')} kg` : 'データなし' };
+    }
+    if (r.col === 'fixedH') return { h: v, basis: '固定' };
+    if (r.col === 'perPiece') {
+      const pcs = getProdVal(site, '合計(点数)', mi);
+      if (pcs !== null) {
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: pcs * secPer / 3600, basis: `${pcs.toLocaleString('ja-JP')} 点` };
+      }
+      return { h: null, basis: 'データなし' };
+    }
+    // perContainer / perCs: no count data available
+    const tag = r.col === 'perContainer' ? 'コンテナ数要設定' : 'cs数要設定';
+    return { h: null, basis: tag };
+  }
+
+  const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
+  const divCount = {};
+  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📋 標準工数(h) ／ 生産実績 × 標準工数設定
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ コンテナ数・cs数が必要な項目は「要設定」と表示</span>
+    </div>`;
+
+  availSites.forEach(site => {
+    const siteColor = SITE_COLORS[site] || '#fff';
+    html += `<div style="margin-bottom:28px">
+      <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
+      <div class="prod-table-wrap"><table class="prod-table">
+        <thead><tr>
+          <th class="th-left" style="min-width:60px">業務区分</th>
+          <th class="th-left" style="min-width:130px">作業区分</th>
+          <th class="th-left" style="min-width:140px">計算根拠</th>
+          ${commonMonths.map(m => `<th>${m}</th>`).join('')}
+          <th class="th-left" style="min-width:130px">計算方法</th>
+        </tr></thead><tbody>`;
+
+    let lastDiv = '';
+    rows.forEach(r => {
+      const divCell = r.div !== lastDiv
+        ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
+        : '';
+      if (r.div !== lastDiv) lastDiv = r.div;
+
+      const monthData = commonMonths.map((_, mi) => calcRow(site, r, mi));
+      const basisSample = monthData.find(d => d.basis && d.basis !== '—')?.basis || '—';
+      const needsSetup  = basisSample.includes('要設定');
+
+      html += `<tr>${divCell}
+        <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
+        <td class="col-metric" style="font-size:0.75rem;color:${needsSetup ? '#f59e0b' : 'var(--muted)'}">
+          ${needsSetup ? `<span style="color:#f59e0b">⚠ ${basisSample}</span>` : basisSample}
+        </td>`;
+
+      monthData.forEach(d => {
+        if (d.h !== null) {
+          const disp = d.h < 10 ? d.h.toFixed(1) : Math.round(d.h).toLocaleString('ja-JP');
+          html += `<td class="col-num">${disp}</td>`;
+        } else {
+          html += `<td class="col-num empty" style="color:#444">—</td>`;
+        }
+      });
+
+      html += `<td class="col-metric" style="font-size:0.72rem;color:var(--muted)">${r.note}</td></tr>`;
+    });
+
+    // Subtotals per div
+    ['栽培', '出荷'].forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+      const totals = commonMonths.map((_, mi) => {
+        const vals = divRows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      });
+      const color = div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)';
+      html += `<tr style="font-weight:600;background:#1a1f35">
+        <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:var(--muted)">
+          ${div} 小計
+        </td>`;
+      totals.forEach(t => {
+        html += t !== null
+          ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}</td>`
+          : `<td class="col-num empty">—</td>`;
+      });
+      html += `<td></td></tr>`;
+    });
+
+    // Grand total
+    const grandTotals = commonMonths.map((_, mi) => {
+      const vals = rows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    });
+    html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
+      <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+    grandTotals.forEach(t => {
+      html += t !== null
+        ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}</td>`
+        : `<td class="col-num empty">—</td>`;
+    });
+    html += `<td></td></tr>`;
+
+    html += `</tbody></table></div></div>`;
+  });
+
+  html += `</div>`;
   main.innerHTML = html;
 }
 
