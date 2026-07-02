@@ -1922,25 +1922,39 @@ function renderProductionTable({ months, records }) {
 
 const STD_STORAGE_KEY = 'shiitake_std_settings';
 
+// cs conversion params stored separately
+const STD_CS_KEY = 'shiitake_std_cs';
+const STD_CS_DEFAULT = { packPcsPerCs: 30, bagPcsPerCs: 20, packRatio: 50 };
+function loadCsConv() {
+  try { const s = localStorage.getItem(STD_CS_KEY); if (s) return JSON.parse(s); } catch(e) {}
+  return { ...STD_CS_DEFAULT };
+}
+function saveCsConv(c) { localStorage.setItem(STD_CS_KEY, JSON.stringify(c)); }
+// Derived P/cs: weighted average of pack and bag
+function pcsPerCs(conv) {
+  const r = (conv.packRatio || 50) / 100;
+  return 1 / (r / conv.packPcsPerCs + (1 - r) / conv.bagPcsPerCs);
+}
+
 const STD_DEFAULT = [
-  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    note: '1コンテナ当たりの作業時間' },
-  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    note: '1コンテナ当たりの作業時間' },
-  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', note: '収穫量(kg)÷kg/h = 収穫時間' },
-  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    note: '1コンテナ当たりの作業時間' },
-  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
-  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    note: '1コンテナ当たりの作業時間' },
-  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
-  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
-  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   note: '1コンテナ当たりの作業時間（分）' },
+  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', note: '収穫量(kg) ÷ kg/h' },
+  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    note: '稼働コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    note: '毎月固定時間' },
-  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
-  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   note: '1個当たりの作業時間（秒）' },
-  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   note: '1cs当たりの作業時間（秒）' },
-  { div: '出荷', task: '段ボール作成',     col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
-  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   note: '1cs当たりの作業時間（秒）' },
+  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
+  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
+  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
   { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    note: '毎月固定時間' },
-  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
-  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perPiece',     val: 30,   unit: '秒',   note: '1個当たりの作業時間（秒）' },
+  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perPiece',     val: 30,   unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perPiece',     val: 30,   unit: '秒',   note: '合計点数 × 秒/個 ÷ 3600' },
 ];
 
 function loadStdSettings() {
@@ -1961,6 +1975,9 @@ function renderStdSetTab() {
   const divCount = {};
   rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
 
+  const conv = loadCsConv();
+  window._stdConv = conv;
+
   let html = `<div class="prod-panel">
     <div class="chart-section-label">⚙️ 標準工数設定
       <span style="float:right;display:flex;gap:8px;align-items:center">
@@ -1969,6 +1986,27 @@ function renderStdSetTab() {
       </span>
     </div>
     <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値を編集後「保存」ボタンを押すと標準工数(h)タブに反映されます。単位は各セルの下に表示。</p>
+    <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
+      <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">📦 出荷cs換算設定（段ボール系作業のcs数算出）</div>
+      <label style="font-size:0.78rem;color:var(--muted)">パック P/cs
+        <div><input type="number" id="cs-pack" value="${conv.packPcsPerCs}" min="1"
+          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
+      </label>
+      <label style="font-size:0.78rem;color:var(--muted)">袋 P/cs
+        <div><input type="number" id="cs-bag" value="${conv.bagPcsPerCs}" min="1"
+          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
+      </label>
+      <label style="font-size:0.78rem;color:var(--muted)">パック比率
+        <div><input type="number" id="cs-ratio" value="${conv.packRatio}" min="0" max="100"
+          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> %</span></div>
+      </label>
+      <div style="font-size:0.75rem;color:var(--muted)" id="cs-preview">
+        実効 P/cs = ${pcsPerCs(conv).toFixed(1)} 個/cs
+      </div>
+    </div>
     <div class="prod-table-wrap">
     <table class="prod-table std-set-table">
       <thead><tr>
@@ -2009,14 +2047,26 @@ function renderStdSetTab() {
   main.querySelectorAll('.std-input').forEach(inp => {
     inp.addEventListener('input', () => {
       const idx = parseInt(inp.dataset.idx);
-      const raw = inp.value;
-      window._stdRows[idx].val = raw === '' ? null : parseFloat(raw);
+      window._stdRows[idx].val = inp.value === '' ? null : parseFloat(inp.value);
+    });
+  });
+
+  ['cs-pack', 'cs-bag', 'cs-ratio'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      window._stdConv.packPcsPerCs = parseFloat(document.getElementById('cs-pack').value) || 30;
+      window._stdConv.bagPcsPerCs  = parseFloat(document.getElementById('cs-bag').value)  || 20;
+      window._stdConv.packRatio    = parseFloat(document.getElementById('cs-ratio').value) || 50;
+      const prev = document.getElementById('cs-preview');
+      if (prev) prev.textContent = `実効 P/cs = ${pcsPerCs(window._stdConv).toFixed(1)} 個/cs`;
     });
   });
 }
 
 window.saveStdSettingsUI = function() {
   saveStdSettings(window._stdRows);
+  if (window._stdConv) saveCsConv(window._stdConv);
   const btn = document.querySelector('.prod-panel .select-btn:last-child');
   if (btn) { const orig = btn.textContent; btn.textContent = '保存済み ✓'; setTimeout(() => { btn.textContent = orig; }, 1500); }
 };
@@ -2024,7 +2074,9 @@ window.saveStdSettingsUI = function() {
 window.resetStdSettings = function() {
   if (!confirm('デフォルト値にリセットしますか？')) return;
   window._stdRows = JSON.parse(JSON.stringify(STD_DEFAULT));
+  window._stdConv = { ...STD_CS_DEFAULT };
   saveStdSettings(window._stdRows);
+  saveCsConv(window._stdConv);
   renderStdSetTab();
 };
 
@@ -2053,14 +2105,29 @@ function renderStdHoursTable(prodData) {
     return r ? (r.values[mi] ?? null) : null;
   }
 
+  const conv = loadCsConv();
+  const csPerPcs = 1 / pcsPerCs(conv); // cs per piece
+
   function calcRow(site, r, mi) {
     const v = r.val;
     if (v === null || v === undefined) return { h: null, basis: '—' };
+
     if (r.col === 'kgPerH' && v > 0) {
       const kg = getProdVal(site, '収穫量(kg)', mi);
-      return { h: kg !== null ? kg / v : null, basis: kg !== null ? `${kg.toLocaleString('ja-JP')} kg` : 'データなし' };
+      return { h: kg !== null ? kg / v : null,
+               basis: kg !== null ? `${kg.toLocaleString('ja-JP')} kg` : 'データなし' };
     }
     if (r.col === 'fixedH') return { h: v, basis: '固定' };
+
+    if (r.col === 'perContainer') {
+      const containers = getProdVal(site, '稼働コンテナ数', mi);
+      if (containers !== null) {
+        const hPer = r.unit === 'h' ? v : v / 60; // 分→h
+        return { h: containers * hPer,
+                 basis: `${containers.toLocaleString('ja-JP')} コンテナ` };
+      }
+      return { h: null, basis: 'データなし(稼働コンテナ数)' };
+    }
     if (r.col === 'perPiece') {
       const pcs = getProdVal(site, '合計(点数)', mi);
       if (pcs !== null) {
@@ -2069,9 +2136,17 @@ function renderStdHoursTable(prodData) {
       }
       return { h: null, basis: 'データなし' };
     }
-    // perContainer / perCs: no count data available
-    const tag = r.col === 'perContainer' ? 'コンテナ数要設定' : 'cs数要設定';
-    return { h: null, basis: tag };
+    if (r.col === 'perCs') {
+      const pcs = getProdVal(site, '合計(点数)', mi);
+      if (pcs !== null) {
+        const cs = pcs * csPerPcs;
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: cs * secPer / 3600,
+                 basis: `${Math.round(cs).toLocaleString('ja-JP')} cs (${pcs.toLocaleString('ja-JP')}点)` };
+      }
+      return { h: null, basis: 'データなし' };
+    }
+    return { h: null, basis: '—' };
   }
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
@@ -2080,7 +2155,7 @@ function renderStdHoursTable(prodData) {
 
   let html = `<div class="prod-panel">
     <div class="chart-section-label">📋 標準工数(h) ／ 生産実績 × 標準工数設定
-      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ コンテナ数・cs数が必要な項目は「要設定」と表示</span>
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 稼働コンテナ数・合計点数は生産実績シートから取得　cs換算設定は⚙️タブで変更可</span>
     </div>`;
 
   availSites.forEach(site => {
