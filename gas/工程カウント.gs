@@ -224,8 +224,15 @@ function analyzeSchedule(sheet) {
       ? containerSum / (totalContainers * activeDays)
       : 0;
 
-    // 見出し行（締め日）
-    sheet.getRange(summaryHeaderRow, summaryCol).setValue(period.end);
+    // 見出し行（締め日）：C列はC1（データ開始日）を参照して10日締め日を算出する数式、
+    // それ以降は直前の列の締め日から1ヶ月後（=EDATE）を辿る数式にし、右方向に自動展開する
+    const dataStartCell = `${columnToLetter(DATA_START_COL)}${HEADER_DATE_ROW}`;
+    const headerFormula = (i === 0)
+      ? `=DATE(YEAR(${dataStartCell}), MONTH(${dataStartCell}) + IF(DAY(${dataStartCell})<=10, 0, 1), 10)`
+      : `=EDATE(${columnToLetter(summaryCol - 1)}${summaryHeaderRow}, 1)`;
+    sheet.getRange(summaryHeaderRow, summaryCol)
+         .setFormula(headerFormula)
+         .setNumberFormat(TOTAL_CONTAINER_ROW_DATE_FORMAT);
 
     const summaryData = [
       ...workSums.map(v => [v]),   // 工程ごとの合計
