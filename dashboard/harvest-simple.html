@@ -3346,11 +3346,22 @@ let analysisFilters = {
   minDays: '', maxDays: '', dateFrom: '', dateTo: '',
 };
 let analysisSelected = new Set(); // Set<container.key>
-let analysisSubTab = 'container'; // 'container' | 'date'
+let analysisSubTab = 'container'; // 'container' | 'date' | 'correlation'
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
 let analysisDateSize = 'm'; // 日付タブの日別サイズ別グラフで表示するサイズ
 let analysisParetoSize = 'total'; // コンテナ別パレート図で集計対象にするサイズ('total'=全サイズ合計)
 const analysisCharts = {};
+
+// ── 相関図タブ ──────────────────────────────────────────────────────────
+const ANALYSIS_CORR_METRICS = {
+  weight:   { label: '菌床重量(g)', get: c => (c.weightBefore != null && c.weightAbsorb != null) ? +(c.weightBefore + c.weightAbsorb).toFixed(1) : null },
+  days:     { label: '栽培日数(日)', get: c => c.days },
+  harvest:  { label: '収穫量(g/菌床)', get: c => c.harvest },
+  packRate: { label: 'パック品率(%)', get: c => c.packRate },
+  mekaki:   { label: '芽かき重量(kg)', get: c => c.mekaki },
+};
+let analysisCorrX = 'days';
+let analysisCorrY = 'harvest';
 
 function analysisDestroyCharts() {
   Object.values(analysisCharts).forEach(c => c && c.destroy());
@@ -3503,6 +3514,107 @@ function analysisSetDateSize(key) {
 function analysisSetParetoSize(key) {
   analysisParetoSize = key;
   renderAnalysisTab();
+}
+
+function analysisSetCorrX(key) {
+  analysisCorrX = key;
+  renderAnalysisTab();
+}
+
+function analysisSetCorrY(key) {
+  analysisCorrY = key;
+  renderAnalysisTab();
+}
+
+// ピアソンの相関係数
+function analysisPearsonR(points) {
+  const n = points.length;
+  if (n < 2) return null;
+  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
+  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0, denX = 0, denY = 0;
+  points.forEach(p => {
+    const dx = p.x - meanX, dy = p.y - meanY;
+    num += dx * dy; denX += dx * dx; denY += dy * dy;
+  });
+  if (denX === 0 || denY === 0) return null;
+  return num / Math.sqrt(denX * denY);
+}
+
+// 最小二乗法による近似直線
+function analysisLinearRegression(points) {
+  const n = points.length;
+  if (n < 2) return null;
+  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
+  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0, den = 0;
+  points.forEach(p => { num += (p.x - meanX) * (p.y - meanY); den += (p.x - meanX) ** 2; });
+  if (den === 0) return null;
+  const slope = num / den;
+  return { slope, intercept: meanY - slope * meanX };
+}
+
+function analysisCorrelationChartConfig(items, lotColors) {
+  const xm = ANALYSIS_CORR_METRICS[analysisCorrX];
+  const ym = ANALYSIS_CORR_METRICS[analysisCorrY];
+  const points = items.map((c, i) => ({ x: xm.get(c), y: ym.get(c), label: `${c.siteName}${c.no}`, color: lotColors[i] }))
+    .filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
+
+  const r = analysisPearsonR(points);
+  const reg = analysisLinearRegression(points);
+  const datasets = [
+    { type: 'scatter', label: 'コンテナ', data: points,
+      backgroundColor: points.map(p => p.color), pointRadius: 6, pointHoverRadius: 8 },
+  ];
+  if (reg && points.length >= 2) {
+    const xs = points.map(p => p.x);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    datasets.push({
+      type: 'line', label: `近似直線 (r=${r != null ? r.toFixed(2) : '—'})`,
+      data: [{ x: minX, y: reg.slope * minX + reg.intercept }, { x: maxX, y: reg.slope * maxX + reg.intercept }],
+      borderColor: '#facc15', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false,
+    });
+  }
+
+  return {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: { ...tooltipDefaults, callbacks: { label: ctx => ctx.raw.label ? `${ctx.raw.label}: ${xm.label} ${ctx.parsed.x} / ${ym.label} ${ctx.parsed.y}` : `${ctx.parsed.x}, ${ctx.parsed.y}` } },
+      },
+      scales: {
+        x: { title: { display: true, text: xm.label, color: '#8892a4', font: { size: 11 } }, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { title: { display: true, text: ym.label, color: '#8892a4', font: { size: 11 } }, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+function renderAnalysisCorrelationView(lotColorMap) {
+  const axisButtons = (current, setter) => Object.entries(ANALYSIS_CORR_METRICS).map(([key, m]) => `
+    <button class="sort-btn${current === key ? ' active' : ''}" onclick="${setter}('${key}')">${m.label}</button>`).join('');
+
+  return `
+    ${analysisLotLegendHtml(lotColorMap)}
+    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:16px">
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">X軸</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${axisButtons(analysisCorrX, 'analysisSetCorrX')}</div>
+        </div>
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">Y軸</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${axisButtons(analysisCorrY, 'analysisSetCorrY')}</div>
+        </div>
+      </div>
+    </div>
+    <div style="background:#13151f;border-radius:12px;padding:16px">
+      <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">相関図</div>
+      <div style="position:relative;height:480px;cursor:zoom-in" onclick="analysisOpenZoom('correlation')"><canvas id="analysis-correlation-canvas"></canvas></div>
+    </div>`;
 }
 
 const ANALYSIS_LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
@@ -3796,11 +3908,14 @@ async function renderAnalysisTab() {
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
   const rightHtml = !allSelected.length
     ? `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`
-    : (analysisSubTab === 'date' ? renderAnalysisDateView() : renderAnalysisComparison(allSelected, lotColorMap));
+    : (analysisSubTab === 'date' ? renderAnalysisDateView()
+      : analysisSubTab === 'correlation' ? renderAnalysisCorrelationView(lotColorMap)
+      : renderAnalysisComparison(allSelected, lotColorMap));
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
     { key: 'date', label: '日付' },
+    { key: 'correlation', label: '相関図' },
   ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
@@ -4152,6 +4267,7 @@ const ANALYSIS_CHART_CONFIGS = {
   dailysize: { title: '日別 サイズ別収穫量(kg)', build: analysisDailySizeChartConfig },
   paretocontainer: { title: '構成比パレート図(コンテナ別)', build: analysisParetoContainerChartConfig },
   paretosize: { title: '構成比パレート図(サイズ別)', build: analysisParetoSizeChartConfig },
+  correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: analysisLotLegendHtml },
 };
 
 let analysisZoomState = null; // { items, lotColorMap, lotColors, lotTickColor }
