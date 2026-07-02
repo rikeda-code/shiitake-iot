@@ -3554,11 +3554,14 @@ function analysisLinearRegression(points) {
   return { slope, intercept: meanY - slope * meanX };
 }
 
-function analysisCorrelationChartConfig(items, lotColors) {
+function analysisCorrelationChartConfig(items) {
   const xm = ANALYSIS_CORR_METRICS[analysisCorrX];
   const ym = ANALYSIS_CORR_METRICS[analysisCorrY];
-  const points = items.map((c, i) => ({ x: xm.get(c), y: ym.get(c), label: `${c.siteName}${c.no}`, color: lotColors[i] }))
-    .filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
+  // 拠点×菌床ロット有無のカテゴリで色分け(パック品収穫量グラフと同じ配色)
+  const points = items.map(c => ({
+    x: xm.get(c), y: ym.get(c), label: `${c.siteName}${c.no}`,
+    color: analysisPackColorFor(analysisPackCategoryFor(c)).dark,
+  })).filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
 
   const r = analysisPearsonR(points);
   const reg = analysisLinearRegression(points);
@@ -3593,12 +3596,12 @@ function analysisCorrelationChartConfig(items, lotColors) {
   };
 }
 
-function renderAnalysisCorrelationView(lotColorMap) {
+function renderAnalysisCorrelationView() {
   const axisButtons = (current, setter) => Object.entries(ANALYSIS_CORR_METRICS).map(([key, m]) => `
     <button class="sort-btn${current === key ? ' active' : ''}" onclick="${setter}('${key}')">${m.label}</button>`).join('');
 
   return `
-    ${analysisLotLegendHtml(lotColorMap)}
+    ${analysisPackLegendHtml()}
     <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
       <div style="display:flex;flex-wrap:wrap;gap:16px">
         <div>
@@ -3909,7 +3912,7 @@ async function renderAnalysisTab() {
   const rightHtml = !allSelected.length
     ? `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`
     : (analysisSubTab === 'date' ? renderAnalysisDateView()
-      : analysisSubTab === 'correlation' ? renderAnalysisCorrelationView(lotColorMap)
+      : analysisSubTab === 'correlation' ? renderAnalysisCorrelationView()
       : renderAnalysisComparison(allSelected, lotColorMap));
 
   const subTabHtml = [
@@ -4267,7 +4270,7 @@ const ANALYSIS_CHART_CONFIGS = {
   dailysize: { title: '日別 サイズ別収穫量(kg)', build: analysisDailySizeChartConfig },
   paretocontainer: { title: '構成比パレート図(コンテナ別)', build: analysisParetoContainerChartConfig },
   paretosize: { title: '構成比パレート図(サイズ別)', build: analysisParetoSizeChartConfig },
-  correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: analysisLotLegendHtml },
+  correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: analysisPackLegendHtml },
 };
 
 let analysisZoomState = null; // { items, lotColorMap, lotColors, lotTickColor }
