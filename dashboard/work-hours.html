@@ -1924,16 +1924,22 @@ const STD_STORAGE_KEY = 'shiitake_std_settings';
 
 // cs conversion params stored separately
 const STD_CS_KEY = 'shiitake_std_cs';
-const STD_CS_DEFAULT = { packPcsPerCs: 30, bagPcsPerCs: 20, packRatio: 50 };
+// pcsPerCs: パック・袋ともに30P/cs。バラ(バラ数メトリック)は1個=1cs
+const STD_CS_DEFAULT = { pcsPerCs: 30, baraMetric: 'バラ数' };
 function loadCsConv() {
-  try { const s = localStorage.getItem(STD_CS_KEY); if (s) return JSON.parse(s); } catch(e) {}
+  try { const s = localStorage.getItem(STD_CS_KEY); if (s) {
+    const saved = JSON.parse(s);
+    // migrate old format
+    if (saved.packPcsPerCs !== undefined) return { pcsPerCs: saved.packPcsPerCs || 30, baraMetric: saved.baraMetric || 'バラ数' };
+    return { ...STD_CS_DEFAULT, ...saved };
+  }} catch(e) {}
   return { ...STD_CS_DEFAULT };
 }
 function saveCsConv(c) { localStorage.setItem(STD_CS_KEY, JSON.stringify(c)); }
-// Derived P/cs: weighted average of pack and bag
-function pcsPerCs(conv) {
-  const r = (conv.packRatio || 50) / 100;
-  return 1 / (r / conv.packPcsPerCs + (1 - r) / conv.bagPcsPerCs);
+// cs数 = (合計点数 - バラ数) / pcsPerCs + バラ数
+function calcCs(pcs, bara, conv) {
+  const nonBara = Math.max(0, pcs - bara);
+  return nonBara / conv.pcsPerCs + bara;
 }
 
 const STD_DEFAULT = [
@@ -1944,18 +1950,18 @@ const STD_DEFAULT = [
   { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    metricKey: '注水',         note: '注水コンテナ数 × h/コンテナ' },
   { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   metricKey: '散水',         note: '散水コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    metricKey: '廃棄',         note: '廃棄コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   metricKey: '収穫',           note: '収穫コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
   { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    metricKey: null,           note: '毎月固定時間' },
   { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
-  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
-  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数 × 秒/cs ÷ 3600（cs=点数÷P/cs）' },
+  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   metricKey: '袋数量',       note: '袋数量 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
   { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    metricKey: null,          note: '毎月固定時間' },
-  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perPiece',     val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: '合計点数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
 ];
 
 function loadStdSettings() {
@@ -2000,25 +2006,20 @@ function renderStdSetTab() {
     </div>
     <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値を編集後「保存」ボタンを押すと標準工数(h)タブに反映されます。単位は各セルの下に表示。</p>
     <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
-      <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">📦 出荷cs換算設定（段ボール系作業のcs数算出）</div>
-      <label style="font-size:0.78rem;color:var(--muted)">パック P/cs
-        <div><input type="number" id="cs-pack" value="${conv.packPcsPerCs}" min="1"
-          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
-      </label>
-      <label style="font-size:0.78rem;color:var(--muted)">袋 P/cs
-        <div><input type="number" id="cs-bag" value="${conv.bagPcsPerCs}" min="1"
-          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
-      </label>
-      <label style="font-size:0.78rem;color:var(--muted)">パック比率
-        <div><input type="number" id="cs-ratio" value="${conv.packRatio}" min="0" max="100"
-          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-        <span style="font-size:0.7rem;color:var(--muted)"> %</span></div>
-      </label>
-      <div style="font-size:0.75rem;color:var(--muted)" id="cs-preview">
-        実効 P/cs = ${pcsPerCs(conv).toFixed(1)} 個/cs
+      <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">
+        📦 出荷cs換算設定　<span style="font-weight:400;font-size:0.72rem">cs数 = (合計点数 − バラ数) ÷ P/cs + バラ数</span>
       </div>
+      <label style="font-size:0.78rem;color:var(--muted)">パック・袋 P/cs
+        <div><input type="number" id="cs-pcs" value="${conv.pcsPerCs || 30}" min="1"
+          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
+      </label>
+      <label style="font-size:0.78rem;color:var(--muted)">バラのメトリック名
+        <div><input type="text" id="cs-bara" value="${conv.baraMetric || 'バラ数'}"
+          style="width:90px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> (生産実績シートのメトリック名)</span></div>
+      </label>
+      <div style="font-size:0.72rem;color:var(--muted)">バラ→1cs、パック・袋→${conv.pcsPerCs || 30}P/cs</div>
     </div>
     <div class="prod-table-wrap">
     <table class="prod-table std-set-table">
@@ -2064,15 +2065,12 @@ function renderStdSetTab() {
     });
   });
 
-  ['cs-pack', 'cs-bag', 'cs-ratio'].forEach(id => {
+  ['cs-pcs', 'cs-bara'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('input', () => {
-      window._stdConv.packPcsPerCs = parseFloat(document.getElementById('cs-pack').value) || 30;
-      window._stdConv.bagPcsPerCs  = parseFloat(document.getElementById('cs-bag').value)  || 20;
-      window._stdConv.packRatio    = parseFloat(document.getElementById('cs-ratio').value) || 50;
-      const prev = document.getElementById('cs-preview');
-      if (prev) prev.textContent = `実効 P/cs = ${pcsPerCs(window._stdConv).toFixed(1)} 個/cs`;
+      window._stdConv.pcsPerCs    = parseFloat(document.getElementById('cs-pcs').value) || 30;
+      window._stdConv.baraMetric  = document.getElementById('cs-bara').value.trim() || 'バラ数';
     });
   });
 }
@@ -2087,7 +2085,7 @@ window.saveStdSettingsUI = function() {
 window.resetStdSettings = function() {
   if (!confirm('デフォルト値にリセットしますか？')) return;
   window._stdRows = JSON.parse(JSON.stringify(STD_DEFAULT));
-  window._stdConv = { ...STD_CS_DEFAULT };
+  window._stdConv = { ...STD_CS_DEFAULT }; // pcsPerCs:30, baraMetric:'バラ数'
   saveStdSettings(window._stdRows);
   saveCsConv(window._stdConv);
   renderStdSetTab();
@@ -2119,7 +2117,6 @@ function renderStdHoursTable(prodData) {
   }
 
   const conv = loadCsConv();
-  const csPerPcs = 1 / pcsPerCs(conv); // cs per piece
 
   function calcRow(site, r, mi) {
     const v = r.val;
@@ -2151,9 +2148,10 @@ function renderStdHoursTable(prodData) {
       return { h: null, containers: null };
     }
     if (r.col === 'perCs') {
-      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
+      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
+      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
       if (pcs !== null) {
-        const cs = pcs * csPerPcs;
+        const cs = calcCs(pcs, bara, conv);
         const secPer = r.unit === '秒' ? v : v * 60;
         return { h: cs * secPer / 3600, containers: Math.round(cs) };
       }
