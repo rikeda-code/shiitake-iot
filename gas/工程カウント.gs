@@ -1,7 +1,8 @@
 /**
  * 栽培スケジュール分析
  * ①作業工程の発生回数カウント（キーワード行 × 日付列）
- *    A列が1の工程のみ作業量係数（菌床数÷2520）で重み付け、それ以外は+1の単純カウント
+ *    A列が1の工程のみ作業量係数（菌床数÷基準菌床数）で重み付け、それ以外は+1の単純カウント
+ *    基準菌床数はTOTAL_CONTAINER_CELLと同じ行のA列セル（例：A58）から都度取得する
  * ②日別稼働コンテナ数カウント
  * ②-2 コンテナ稼働率数式セット（稼働コンテナ数 ÷ 総コンテナ数）
  * ③月度サマリ（毎月10日締め。前月11日〜当月10日を1期間とする）
@@ -30,7 +31,7 @@ const CONTAINER_NO_COL   = 2;  // B列：コンテナ番号 / キーワード / 
 const TALLY_LABEL        = "稼働コンテナ数";
 const SUMMARY_HEADER_KEYWORD = "月次サマリ";
 const WEIGHT_FLAG_COL    = 1;  // A列：キーワード行のうち値が1の工程のみ重み付けを適用
-const BASE_BEDS_PER_CONTAINER = 2520; // 係数1.0となる基準菌床数
+const BASE_BEDS_COL      = 1;  // A列：TOTAL_CONTAINER_CELLと同じ行に基準菌床数（係数1.0）を入力
 const BEDS_IN_PATTERN  = /菌床入れ(\d{4})/; // 「xx菌床入れxxxx」のxxxx（拠点記号prefixは無視）
 const BEDS_OUT_PATTERN = /廃棄(\d{4})/;     // 「xx廃棄xxxx」のxxxx
 
@@ -94,6 +95,15 @@ function analyzeSchedule(sheet) {
     .getValues().map(r => r[0] === 1);
   const needsWeighting = weightFlags.some(Boolean);
 
+  // 基準菌床数（係数1.0となる菌床数）はTOTAL_CONTAINER_CELLと同じ行のA列から取得する
+  let baseBeds = null;
+  if (needsWeighting) {
+    baseBeds = Number(sheet.getRange(totalContainerRow, BASE_BEDS_COL).getValue());
+    if (!baseBeds || baseBeds <= 0) {
+      throw new Error(`基準菌床数セル（${columnToLetter(BASE_BEDS_COL)}${totalContainerRow}）に有効な数値がありません`);
+    }
+  }
+
   const numCols = dataEndCol - DATA_START_COL + 1;
 
   // ── 可視行のみ抽出 ────────────────────────────────────
@@ -114,12 +124,12 @@ function analyzeSchedule(sheet) {
     .getValues()[0];
 
   // ── ① 作業工程の発生回数（可視行のみ、優先順位マッチ＋1セル1カウント）──
-  // A列が1の工程のみ、+1ではなく+該当コンテナの作業量係数（菌床数÷2520）で加算する。
+  // A列が1の工程のみ、+1ではなく+該当コンテナの作業量係数（菌床数÷基準菌床数）で加算する。
   // A列が空白／1以外の工程は従来通り単純に+1する
   const countResult = keywords.map(() => new Array(numCols).fill(0));
 
   for (const rowOffset of visibleRowOffsets) {
-    const rowCoeffs = needsWeighting ? computeRowCoefficients(allData[rowOffset]) : null;
+    const rowCoeffs = needsWeighting ? computeRowCoefficients(allData[rowOffset], baseBeds) : null;
     for (let c = 0; c < numCols; c++) {
       const cell = String(allData[rowOffset][c]);
       if (cell === "" || cell === "undefined") continue;
@@ -321,12 +331,12 @@ function getPeriodEndDate(date) {
 
 // ── 作業量係数（重み付け）────────────────────────────────
 // 1行（1コンテナ）分のセル配列から、各列（日付）の係数を算出する。
-// 係数 ＝ そのセルが属する栽培サイクルの菌床数 ÷ BASE_BEDS_PER_CONTAINER
+// 係数 ＝ そのセルが属する栽培サイクルの菌床数 ÷ baseBeds（基準菌床数セルの値）
 //   1. 自セルから左方向に遡り、途中で別サイクルの「廃棄」を挟まずに
 //      最初に見つかる「菌床入れ」の菌床数を採用する
 //   2. 見つからない場合は、右方向で最初に見つかる「廃棄」の菌床数を採用する
 //   3. どちらも見つからない場合は係数 1.0
-function computeRowCoefficients(rowValues) {
+function computeRowCoefficients(rowValues, baseBeds) {
   const n = rowValues.length;
   const markers = []; // { col, type: "in" | "out", beds }
   for (let c = 0; c < n; c++) {
@@ -341,7 +351,7 @@ function computeRowCoefficients(rowValues) {
   for (let c = 0; c < n; c++) {
     let beds = leftScanForBeds(markers, c);
     if (beds === null) beds = rightScanForBeds(markers, c);
-    coeffs[c] = (beds === null) ? 1.0 : beds / BASE_BEDS_PER_CONTAINER;
+    coeffs[c] = (beds === null) ? 1.0 : beds / baseBeds;
   }
   return coeffs;
 }
