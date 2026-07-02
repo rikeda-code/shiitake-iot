@@ -2179,13 +2179,28 @@ function renderStdHoursTable(prodData) {
       if (r.div !== lastDiv) lastDiv = r.div;
 
       const monthData = commonMonths.map((_, mi) => calcRow(site, r, mi));
-      const basisSample = monthData.find(d => d.basis && d.basis !== '—')?.basis || '—';
-      const needsSetup  = basisSample.includes('要設定');
+      const hasData = monthData.some(d => d.h !== null);
+
+      // Describe what data drives this row
+      const COL_BASIS = {
+        kgPerH:       `収穫量(kg) ÷ ${r.val} kg/h`,
+        fixedH:       `固定 ${r.val} h/月`,
+        perContainer: `稼働コンテナ数 × ${r.val} ${r.unit}`,
+        perPiece:     r.val !== null ? `合計(点数) × ${r.val} 秒/個` : '設定値なし',
+        perCs:        `合計(点数) ÷ P/cs × ${r.val} 秒/cs`,
+      };
+      const basisDesc = COL_BASIS[r.col] || '—';
+      const statusIcon = r.val === null
+        ? '<span style="color:var(--muted)">未設定</span>'
+        : hasData
+          ? '<span style="color:#34d399">●</span>'
+          : '<span style="color:#f59e0b">○</span>';
+      // ○=データなし ●=計算済み
 
       html += `<tr>${divCell}
         <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
-        <td class="col-metric" style="font-size:0.75rem;color:${needsSetup ? '#f59e0b' : 'var(--muted)'}">
-          ${needsSetup ? `<span style="color:#f59e0b">⚠ ${basisSample}</span>` : basisSample}
+        <td class="col-metric" style="font-size:0.75rem">
+          ${statusIcon} <span style="color:var(--muted)">${basisDesc}</span>
         </td>`;
 
       monthData.forEach(d => {
