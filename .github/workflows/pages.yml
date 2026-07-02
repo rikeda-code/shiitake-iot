@@ -1,0 +1,53 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JS syntax in HTML files
+        run: |
+          node -e "
+          const fs = require('fs');
+          const files = fs.readdirSync('dashboard').filter(f => f.endsWith('.html'));
+          let ok = true;
+          files.forEach(f => {
+            const html = fs.readFileSync('dashboard/' + f, 'utf8');
+            const m = html.match(/<script[^>]*>([\s\S]*?)<\/script>/g) || [];
+            m.forEach(tag => {
+              const src = tag.replace(/<script[^>]*>/, '').replace(/<\/script>/, '');
+              if (src.trim().length < 100) return;
+              try { new Function(src); console.log(f + ': OK'); }
+              catch(e) { console.error(f + ': JS ERROR - ' + e.message); ok = false; }
+            });
+          });
+          if (!ok) process.exit(1);
+          "
+  deploy:
+    needs: validate
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+      - uses: actions/deploy-pages@v4
+        id: deployment

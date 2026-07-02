@@ -1,0 +1,25 @@
+{
+  "name": "収穫状況ダッシュボード",
+  "short_name": "収穫DB",
+  "description": "しいたけコンテナ別収穫可視化ダッシュボード",
+  "start_url": "container.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f1117",
+  "theme_color": "#1a1d27",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
