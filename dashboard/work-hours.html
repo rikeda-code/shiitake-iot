@@ -434,6 +434,80 @@
       header, .tabs, main { padding-left: 16px; padding-right: 16px; }
       .chart-wrap { height: 280px; }
     }
+
+    /* ── Production table ── */
+    .prod-panel {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .prod-table-wrap { overflow-x: auto; }
+    .prod-table {
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      min-width: 700px;
+      width: 100%;
+    }
+    .prod-table th {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 12px;
+      text-align: center;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .prod-table th.th-left { text-align: left; }
+    .prod-table td {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .prod-table td.col-site {
+      font-weight: 700;
+      font-size: 0.88rem;
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+      vertical-align: top;
+    }
+    .prod-table td.col-cat {
+      font-weight: 600;
+      vertical-align: top;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .prod-table td.col-metric { white-space: nowrap; }
+    .prod-table td.col-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .prod-table td.empty { color: var(--muted); }
+    /* Category row colors */
+    .prod-table tr.cat-seisan td { background: rgba(56,189,248,0.07); }
+    .prod-table tr.cat-seisan td.col-site { background: var(--surface); }
+    .prod-table tr.cat-saibai td { background: rgba(52,211,153,0.06); }
+    .prod-table tr.cat-saibai td.col-site { background: var(--surface); }
+    .prod-table tr.cat-syukka td { background: rgba(250,204,21,0.07); }
+    .prod-table tr.cat-syukka td.col-site { background: var(--surface); }
+    /* Special metric rows */
+    .prod-table tr.metric-syukka-kg td { background: rgba(250,204,21,0.16); }
+    .prod-table tr.metric-syukka-kg td.col-site { background: var(--surface); }
+    .prod-table tr.metric-syukka-kg .col-metric { color: #facc15; font-weight: 600; }
+    .prod-table tr.metric-goukei td { font-weight: 700; }
+    /* Site separator */
+    .prod-table tr.site-start td { border-top: 2px solid var(--border); }
   </style>
 </head>
 <body>
@@ -455,6 +529,7 @@
 <script>
 const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
+const PROD_GID = '2016642543'; // 整理済み_分析
 
 const SITES = ['いなべ', '群馬', '南丹'];
 const SITE_COLORS = {
@@ -695,6 +770,19 @@ function renderTabs(bases) {
     renderSummary();
   };
   tabsEl.appendChild(sBtn);
+
+  // Production tab
+  const pBtn = document.createElement('button');
+  pBtn.className = 'tab-btn production-tab';
+  pBtn.textContent = '🌱 生産実績';
+  pBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    pBtn.classList.add('active');
+    activeMode = 'production';
+    document.getElementById('main').innerHTML = '';
+    renderProductionTab();
+  };
+  tabsEl.appendChild(pBtn);
 }
 
 /* ── Individual base panel ─────────────────────────────────────── */
@@ -1634,6 +1722,157 @@ function renderSummaryRoster() {
     else rosterFilterEmps.add(et);
     content.innerHTML = buildContent();
   };
+}
+
+/* ── Production data ─────────────────────────────────────────────── */
+let productionData = null;
+
+async function fetchProductionSheet() {
+  if (productionData) return productionData;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${PROD_GID}&headers=1`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  productionData = parseProductionData(json);
+  return productionData;
+}
+
+function parseProductionData(json) {
+  const cols = json.table.cols;
+  const rows = json.table.rows;
+
+  // Detect month columns: index 3+ that have date-like labels (e.g. "2025/10")
+  const monthCols = [];
+  for (let i = 3; i < cols.length; i++) {
+    const label = (cols[i]?.label || '').trim();
+    if (/^\d{4}\/\d{1,2}$/.test(label)) monthCols.push({ idx: i, label });
+  }
+
+  const records = [];
+  let currentSite = '';
+  let currentCat = '';
+
+  rows.forEach(row => {
+    if (!row || !row.c) return;
+    const cells = row.c;
+    const raw = v => {
+      const c = cells[v];
+      return c ? (c.f || c.v || '') : '';
+    };
+    const siteVal = String(raw(0)).trim();
+    const catVal  = String(raw(1)).trim();
+    const metric  = String(raw(2)).trim();
+
+    if (siteVal) currentSite = siteVal;
+    if (catVal)  currentCat  = catVal;
+    if (!metric || metric === 'null') return;
+
+    const values = monthCols.map(m => {
+      const c = cells[m.idx];
+      if (!c || c.v === null || c.v === undefined || c.v === '') return null;
+      return typeof c.v === 'number' ? c.v : null;
+    });
+
+    records.push({ site: currentSite, cat: currentCat, metric, values });
+  });
+
+  return { months: monthCols.map(m => m.label), records };
+}
+
+function renderProductionTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">生産データを読み込み中...</div>';
+
+  fetchProductionSheet().then(data => {
+    renderProductionTable(data);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+    console.error(e);
+  });
+}
+
+function renderProductionTable({ months, records }) {
+  const main = document.getElementById('main');
+
+  if (!records.length) {
+    main.innerHTML = '<div class="loading">データが見つかりませんでした</div>';
+    return;
+  }
+
+  // Group records by site preserving order
+  const siteOrder = [];
+  const bySite = {};
+  records.forEach(r => {
+    if (!bySite[r.site]) { bySite[r.site] = []; siteOrder.push(r.site); }
+    bySite[r.site].push(r);
+  });
+
+  function rowClass(r) {
+    const classes = [];
+    if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
+    if (r.metric === '合計(点数)') classes.push('metric-goukei');
+    const cat = r.cat;
+    if (cat.includes('生産実績')) classes.push('cat-seisan');
+    else if (cat.includes('栽培')) classes.push('cat-saibai');
+    else if (cat.includes('出荷')) classes.push('cat-syukka');
+    return classes.join(' ');
+  }
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">🌱 生産実績 ／ 整理済み_分析</div>
+    <div class="prod-table-wrap">
+    <table class="prod-table">
+      <thead><tr>
+        <th class="th-left" style="min-width:70px">拠点</th>
+        <th class="th-left" style="min-width:120px">カテゴリ</th>
+        <th class="th-left" style="min-width:130px">指標</th>
+        ${months.map(m => `<th>${m}</th>`).join('')}
+      </tr></thead>
+      <tbody>`;
+
+  siteOrder.forEach((site, si) => {
+    const siteRecs = bySite[site];
+    const siteColor = SITE_COLORS[site] || '#e2e8f0';
+    let prevCat = '';
+
+    siteRecs.forEach((r, ri) => {
+      const isFirstSite = ri === 0;
+      const isNewCat = r.cat !== prevCat;
+      prevCat = r.cat;
+
+      const rc = rowClass(r);
+      const sepClass = (si > 0 && isFirstSite) ? 'site-start' : '';
+      html += `<tr class="${[rc, sepClass].filter(Boolean).join(' ')}">`;
+
+      // Site cell: only on first row of site
+      if (isFirstSite) {
+        html += `<td class="col-site" rowspan="${siteRecs.length}" style="color:${siteColor}">${site}</td>`;
+      }
+
+      // Category cell: only on first row of category group
+      if (isNewCat) {
+        const catCount = siteRecs.filter(x => x.cat === r.cat).length;
+        html += `<td class="col-cat" rowspan="${catCount}">${r.cat}</td>`;
+      }
+
+      // Metric
+      html += `<td class="col-metric">${r.metric}</td>`;
+
+      // Values
+      r.values.forEach(v => {
+        html += v !== null
+          ? `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`
+          : `<td class="col-num empty">—</td>`;
+      });
+
+      html += '</tr>';
+    });
+  });
+
+  html += `</tbody></table>
+    </div></div>`;
+
+  main.innerHTML = html;
 }
 
 /* ── Main ────────────────────────────────────────────────────────── */
