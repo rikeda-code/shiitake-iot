@@ -489,12 +489,14 @@ function attachTooltip(loc, yr) {
   attached.add(key);
 }
 
-// ────────── GAS 自動取得設定 ──────────
-// GAS Web App をデプロイ後、発行URLをここに貼り付ける
-const GAS_URL = '';  // ← ここにURLを貼る（例: 'https://script.google.com/macros/s/.../exec'）
+// ────────── スプレッドシート設定 ──────────
+// スプレッドシートを「リンクを知っている全員が閲覧可能」に設定すること
+const SHEET_ID   = '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY';
+const SHEET_CHIBA = '（ファ）千葉菌床納品';
+const SHEET_JISHA = '（培）志摩工場';
 
-// ────────── 菌床数 Data（フォールバック初期値）──────────
-// GAS取得成功時は上書きされる。失敗時はこの値を使用。
+// ────────── 菌床数 Data（フォールバック初期値: 〜2026年6月）──────────
+// スプレッドシート取得成功時は上書き。失敗時はこの値を使用。
 let CHIBA_2025 = {
   'いなべ': [0,0,0,0,0,0,0,0,0,0,0,0],
   '群馬':   [0,0,0,0,0,0,0,0,0,0,0,0],
@@ -871,9 +873,8 @@ document.addEventListener('click', e => {
   }
 });
 
-// ── GAS データ取得 ────────────────────────────────────────────
+// ── スプレッドシート自動取得 (gviz/tq) ──────────────────────
 function redrawActive() {
-  // 表示中のチャートを再描画（tooltip キャッシュをクリア）
   attached.clear();
   kinshōTooltipAttachedYrs.clear();
   const locBtn = document.querySelector('.tab-loc.active');
@@ -888,41 +889,115 @@ function redrawActive() {
   }
 }
 
-async function loadGasData() {
-  if (!GAS_URL) return; // URL未設定なら何もしない
+// gviz/tq でシートデータを取得
+async function fetchGviz(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+  const res  = await fetch(url);
+  const text = await res.text();
+  // JSONP ラッパーを除去
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  return json.table;
+}
 
+// gviz の日付セルを Date に変換（Date(2026,1,20) は月が0始まり）
+function gvizToDate(cell) {
+  if (!cell || cell.v == null) return null;
+  const v = String(cell.v);
+  const m = v.match(/^Date\((\d+),(\d+),(\d+)\)/);
+  if (m) return new Date(+m[1], +m[2], +m[3]);
+  // テキスト形式 "2026/2/20" のフォールバック
+  const p = v.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (p) return new Date(+p[1], +p[2]-1, +p[3]);
+  return null;
+}
+
+// 千葉菌床納品シートを解析（C列=日付, D列=拠点, H列=本数）
+function parseChibaTable(table) {
+  const locs = ['いなべ','群馬','南丹'];
+  const res  = {
+    2025: { 'いなべ': new Array(12).fill(0), '群馬': new Array(12).fill(0), '南丹': new Array(12).fill(0) },
+    2026: { 'いなべ': new Array(6).fill(0),  '群馬': new Array(6).fill(0),  '南丹': new Array(6).fill(0)  },
+  };
+  for (const row of (table.rows || [])) {
+    const c    = row.c || [];
+    const date = gvizToDate(c[2]);
+    const loc  = String(c[3]?.v || '').trim();
+    const cnt  = Number(c[7]?.v) || 0;
+    if (!date || !locs.includes(loc) || cnt <= 0) continue;
+    const yr = date.getFullYear();
+    const mo = date.getMonth(); // 0-based
+    if (yr === 2025 && mo < 12) res[2025][loc][mo] += cnt;
+    if (yr === 2026 && mo < 6)  res[2026][loc][mo] += cnt;
+  }
+  return res;
+}
+
+// 志摩工場シートを解析（A列=期間, K列=いなべ, M列=群馬, O列=南丹）
+function parseJishaTable(table) {
+  const res = {
+    2025: { 'いなべ': new Array(12).fill(0), '群馬': new Array(12).fill(0), '南丹': new Array(12).fill(0) },
+    2026: { 'いなべ': new Array(6).fill(0),  '群馬': new Array(6).fill(0),  '南丹': new Array(6).fill(0)  },
+  };
+  for (const row of (table.rows || [])) {
+    const c = row.c || [];
+    // A列：期間セル（"2025/1" テキスト or Date型）
+    let period = '';
+    if (c[0]?.v != null) {
+      const v = String(c[0].v);
+      const dm = v.match(/^Date\((\d+),(\d+),/);
+      period = dm ? `${+dm[1]}/${+dm[2]+1}` : v.trim();
+    }
+    const pm = period.match(/^(2025|2026)\/(\d{1,2})$/);
+    if (!pm) continue;
+    const yr = +pm[1], mo = +pm[2] - 1;
+    if (yr === 2025 && mo < 12) {
+      res[2025]['いなべ'][mo] = Number(c[10]?.v) || 0;
+      res[2025]['群馬'][mo]   = Number(c[12]?.v) || 0;
+      res[2025]['南丹'][mo]   = Number(c[14]?.v) || 0;
+    }
+    if (yr === 2026 && mo < 6) {
+      res[2026]['いなべ'][mo] = Number(c[10]?.v) || 0;
+      res[2026]['群馬'][mo]   = Number(c[12]?.v) || 0;
+      res[2026]['南丹'][mo]   = Number(c[14]?.v) || 0;
+    }
+  }
+  return res;
+}
+
+async function loadSheetData() {
   const badge = document.getElementById('sync-badge');
-  badge.textContent = '同期中…'; badge.style.color = 'var(--amber)';
+  badge.textContent = '同期中…'; badge.style.color = 'var(--amber-l)';
 
   try {
-    const res  = await fetch(GAS_URL, { redirect: 'follow' });
-    const json = await res.json();
+    const [chibaTbl, jishaTbl] = await Promise.all([
+      fetchGviz(SHEET_CHIBA),
+      fetchGviz(SHEET_JISHA),
+    ]);
 
-    // 菌床数データを上書き
-    if (json.chiba) {
-      if (json.chiba[2025]) CHIBA_2025 = json.chiba[2025];
-      if (json.chiba[2026]) CHIBA_2026 = json.chiba[2026];
-    }
-    if (json.jisha) {
-      if (json.jisha[2025]) JISHA_2025 = json.jisha[2025];
-      if (json.jisha[2026]) JISHA_2026 = json.jisha[2026];
-    }
+    const chibaData = parseChibaTable(chibaTbl);
+    const jishaData = parseJishaTable(jishaTbl);
 
-    badge.textContent = `最終同期: ${json.updatedAt || '完了'}`;
+    CHIBA_2025 = chibaData[2025];
+    CHIBA_2026 = chibaData[2026];
+    JISHA_2025 = jishaData[2025];
+    JISHA_2026 = jishaData[2026];
+
+    const now = new Date().toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    badge.textContent = `同期済 ${now}`;
     badge.style.color = 'var(--sage)';
     redrawActive();
   } catch (err) {
-    console.error('GAS 取得エラー:', err);
-    badge.textContent = '同期失敗（手動データを使用中）';
-    badge.style.color = 'var(--ship)';
+    console.error('シート取得エラー:', err);
+    badge.textContent = '同期失敗 — 保存データを表示中';
+    badge.style.color = 'var(--ship-l)';
   }
 }
 
 // Initial draw
 requestAnimationFrame(()=>{ drawChart('inabe',2025); attachTooltip('inabe',2025); });
 
-// GAS からデータ取得（ページ読み込み時）
-loadGasData();
+// スプレッドシートからデータ取得（ページ読み込み時）
+loadSheetData();
 
 window.addEventListener('resize', ()=>{
   const locBtn = document.querySelector('.tab-loc.active');
