@@ -678,7 +678,11 @@ function buildDataset(json) {
     return best === -1 ? fallback : best;
   }
 
-  const baseIdx = bestIdx(baseScore, 3);
+  // 拠点判定はE列（PRJ、index4）を使用。想定と異なる場合はスコアリングにフォールバック
+  let baseIdx = 4;
+  const col4HasValidBase = sampleRows.some(row => VALID_BASES.has(String(row.c?.[4]?.v ?? '').trim()));
+  if (!col4HasValidBase) baseIdx = bestIdx(baseScore, 3);
+
   const workIdx = bestIdx(workScore, 4);
   const empIdx  = bestIdx(empScore,  2);
 
