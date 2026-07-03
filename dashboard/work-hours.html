@@ -1594,6 +1594,14 @@ function renderSummaryChart() {
   html += '</div>';
   content.innerHTML = html;
 
+  // Compute shared y-axis max across all sites
+  const allSeriesData = activeSites.flatMap(site =>
+    buildSiteSeriesList(site).flatMap(s => s.data.filter(v => v !== null))
+  );
+  const summaryYMax = allSeriesData.length > 0
+    ? Math.ceil(Math.max(...allSeriesData) / 100) * 100
+    : undefined;
+
   activeSites.forEach((site, si) => {
     const siteId = 'sc_' + si;
     const series = buildSiteSeriesList(site);
@@ -1641,6 +1649,7 @@ function renderSummaryChart() {
             ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
             grid: { color: '#1e2235' },
             suggestedMin: 0,
+            max: summaryYMax,
             title: { display: true, text: '実質勤務時間 (h)', color: '#8892a4', font: { size: 11 } },
           },
         },
@@ -2751,6 +2760,29 @@ function renderCompareCharts(prodData) {
   html += `</div>`;
   main.innerHTML = html;
 
+  // Compute shared y-axis max per div across all sites
+  const divYMax = {};
+  divs.forEach(div => {
+    let maxVal = 0;
+    availSites.forEach(site => {
+      const key = `${site}-${div}`;
+      const d = window._cmpChartData[key];
+      if (!d) return;
+      commonMonths.forEach((_, mi) => {
+        // std total for this month
+        const stdTotal = d.divRows.reduce((s, r) => {
+          const res = calcRow(site, r, mi);
+          return s + (res.h !== null ? res.h : 0);
+        }, 0);
+        maxVal = Math.max(maxVal, stdTotal);
+        // actual hours
+        const ah = d.actualH[mi];
+        if (ah !== null && ah !== undefined) maxVal = Math.max(maxVal, ah);
+      });
+    });
+    divYMax[div] = maxVal > 0 ? Math.ceil(maxVal / 100) * 100 : undefined;
+  });
+
   // Draw charts after DOM update
   const compareChartInstances = {};
   availSites.forEach(site => {
@@ -2828,6 +2860,7 @@ function renderCompareCharts(prodData) {
             position: 'left',
             ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
             grid: { color: '#1e2235' }, suggestedMin: 0,
+            max: divYMax[div],
             title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
           },
         },
