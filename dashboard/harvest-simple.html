@@ -3558,13 +3558,37 @@ function analysisLinearRegression(points) {
   return { slope, intercept: meanY - slope * meanX };
 }
 
+// 自社菌床(ロットあり)は個別ロットで、それ以外は拠点で色分けする
+function analysisCorrelationColorFor(c, lotColorMap) {
+  return analysisFormatLot(c.lot) !== '—'
+    ? analysisLotColorFor(lotColorMap, c.lot)
+    : analysisPackColorFor(c.siteName).dark;
+}
+
+function analysisCorrelationLegendHtml(items) {
+  const lotColorMap = analysisBuildLotColorMap(items.filter(c => analysisFormatLot(c.lot) !== '—'));
+  const colorMap = {};
+  items.forEach(c => {
+    const label = analysisFormatLot(c.lot) !== '—' ? analysisFormatLot(c.lot) : c.siteName;
+    colorMap[label] = analysisCorrelationColorFor(c, lotColorMap);
+  });
+  const chips = Object.entries(colorMap).map(([label, color]) => `
+    <span style="display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;color:#94a3b8">
+      <span style="width:10px;height:10px;border-radius:3px;background:${color};display:inline-block"></span>${label}
+    </span>`).join('');
+  if (!chips) return '';
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#13151f;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <span style="font-size:0.75rem;color:#64748b;font-weight:600">拠点・菌床ロット(自社菌床はロット別):</span>${chips}
+  </div>`;
+}
+
 function analysisCorrelationChartConfig(items) {
   const xm = ANALYSIS_CORR_METRICS[analysisCorrX];
   const ym = ANALYSIS_CORR_METRICS[analysisCorrY];
-  // 拠点×菌床ロット有無のカテゴリで色分け(パック品収穫量グラフと同じ配色)
+  const lotColorMap = analysisBuildLotColorMap(items.filter(c => analysisFormatLot(c.lot) !== '—'));
   const points = items.map(c => ({
     x: xm.get(c), y: ym.get(c), label: `${c.siteName}${c.no}`,
-    color: analysisPackColorFor(analysisPackCategoryFor(c)).dark,
+    color: analysisCorrelationColorFor(c, lotColorMap),
   })).filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
 
   const r = analysisPearsonR(points);
@@ -3600,12 +3624,12 @@ function analysisCorrelationChartConfig(items) {
   };
 }
 
-function renderAnalysisCorrelationView() {
+function renderAnalysisCorrelationView(items) {
   const axisButtons = (current, setter) => Object.entries(ANALYSIS_CORR_METRICS).map(([key, m]) => `
     <button class="sort-btn${current === key ? ' active' : ''}" onclick="${setter}('${key}')">${m.label}</button>`).join('');
 
   return `
-    ${analysisPackLegendHtml()}
+    ${analysisCorrelationLegendHtml(items)}
     <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
       <div style="display:flex;flex-wrap:wrap;gap:16px">
         <div>
@@ -3916,7 +3940,7 @@ async function renderAnalysisTab() {
   const rightHtml = !allSelected.length
     ? `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`
     : (analysisSubTab === 'date' ? renderAnalysisDateView()
-      : analysisSubTab === 'correlation' ? renderAnalysisCorrelationView()
+      : analysisSubTab === 'correlation' ? renderAnalysisCorrelationView(allSelected)
       : renderAnalysisComparison(allSelected, lotColorMap));
 
   const subTabHtml = [
@@ -4274,7 +4298,7 @@ const ANALYSIS_CHART_CONFIGS = {
   dailysize: { title: '日別 サイズ別収穫量(kg)', build: analysisDailySizeChartConfig },
   paretocontainer: { title: '構成比パレート図(コンテナ別)', build: analysisParetoContainerChartConfig },
   paretosize: { title: '構成比パレート図(サイズ別)', build: analysisParetoSizeChartConfig },
-  correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: analysisPackLegendHtml },
+  correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: () => analysisCorrelationLegendHtml(analysisZoomState ? analysisZoomState.items : []) },
 };
 
 let analysisZoomState = null; // { items, lotColorMap, lotColors, lotTickColor }
