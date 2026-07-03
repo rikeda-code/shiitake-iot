@@ -278,9 +278,11 @@ function buildLocPanel(loc) {
     <div class="tabs-yr" data-loc="${loc}">
       <button class="tab-yr active" data-yr="2025">2025年</button>
       <button class="tab-yr"        data-yr="2026">2026年</button>
+      <button class="tab-yr"        data-yr="compare">前年比較</button>
     </div>
-    <div id="yr-${loc}-2025" class="yr-panel active">${buildYrPanel(loc, 2025)}</div>
-    <div id="yr-${loc}-2026" class="yr-panel">${buildYrPanel(loc, 2026)}</div>
+    <div id="yr-${loc}-2025"    class="yr-panel active">${buildYrPanel(loc, 2025)}</div>
+    <div id="yr-${loc}-2026"    class="yr-panel">${buildYrPanel(loc, 2026)}</div>
+    <div id="yr-${loc}-compare" class="yr-panel">${buildComparePanel(loc)}</div>
   `;
 }
 
@@ -418,6 +420,150 @@ function drawChart(loc, yr) {
   ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
 }
 
+// ── 前年比較パネル ──
+function buildComparePanel(loc) {
+  const cfg = LOC_CFG[loc];
+  const harvest25 = HARVEST[loc].slice(0, 6);
+  const harvest26 = HARVEST[loc].slice(12, 18);
+  const ship26    = SHIP[loc];
+  const months    = ['1月','2月','3月','4月','5月','6月'];
+  const canvasId  = `chart-${loc}-compare`;
+
+  const chartHTML = `<div class="chart-wrap">
+    <div class="chart-head">
+      <span class="chart-label">前年比較 (1〜6月) — ${cfg.label}</span>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-sw" style="background:${cfg.c};opacity:0.6"></div><span>2025年 収穫量</span></div>
+        <div class="leg-item"><div class="leg-sw" style="background:${cfg.cl}"></div><span>2026年 収穫量</span></div>
+        <div class="leg-item"><div class="leg-sw" style="background:${SHIP_CL}"></div><span>2026年 出荷量</span></div>
+        <div class="leg-item" style="align-items:center"><div style="width:22px;height:3px;border-radius:2px;background:#7A9A7E;opacity:0.8;margin-right:0"></div><span style="margin-left:6px">2025年 菌床数</span></div>
+        <div class="leg-item" style="align-items:center"><div style="width:22px;height:3px;border-radius:2px;background:${BED_C};margin-right:0"></div><span style="margin-left:6px">2026年 菌床数</span></div>
+      </div>
+    </div>
+    <canvas id="${canvasId}" height="380"></canvas>
+  </div>`;
+
+  let rows = '';
+  months.forEach((m, i) => {
+    const h25 = harvest25[i], h26 = harvest26[i];
+    const diff = h26 - h25;
+    const pct  = h25 > 0 ? ((diff / h25) * 100).toFixed(1) : null;
+    const diffStr = `<span style="color:${diff>=0?'#8EC496':'#E07050'}">${diff>=0?'+':''}${fmt1(diff)}</span>`;
+    const pctStr  = pct !== null ? `<span style="color:${diff>=0?'#8EC496':'#E07050'}">${diff>=0?'+':''}${pct}%</span>` : '—';
+    rows += `<tr>
+      <td>${m}</td>
+      <td class="num">${fmt1(h25)}</td>
+      <td class="num" style="color:${cfg.cl}">${fmt1(h26)}</td>
+      <td class="num" style="color:${SHIP_CL}">${fmt1(ship26[i])}</td>
+      <td class="num">${diffStr}</td>
+      <td class="num">${pctStr}</td>
+    </tr>`;
+  });
+
+  const tableHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>月</th><th class="num">2025年 収穫量</th><th class="num">2026年 収穫量</th><th class="num">2026年 出荷量</th><th class="num">収穫量 差 (kg)</th><th class="num">前年比</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+
+  return chartHTML + tableHTML;
+}
+
+function drawCompareChart(loc) {
+  const canvas = document.getElementById(`chart-${loc}-compare`);
+  if (!canvas) return;
+
+  const cfg       = LOC_CFG[loc];
+  const harvest25 = HARVEST[loc].slice(0, 6);
+  const harvest26 = HARVEST[loc].slice(12, 18);
+  const ship26    = SHIP[loc];
+  const beds25    = getBedData(loc, 2025).slice(0, 6);
+  const beds26    = getBedData(loc, 2026);
+  const months    = ['1月','2月','3月','4月','5月','6月'];
+  const n = 6;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 34;
+  const H   = 380;
+  canvas.width = W*dpr; canvas.height = H*dpr;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PL=58, PR=56, PT=10, PB=38;
+  const cW=W-PL-PR, cH=H-PT-PB;
+
+  const maxVal = Math.ceil(Math.max(...harvest25,...harvest26,...ship26) / 5000) * 5000;
+  const maxBed = Math.ceil(Math.max(...beds25,...beds26, 1000) / 5000) * 5000;
+  const GRIDS  = 5;
+
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    ctx.strokeStyle='#2D3E30'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PL,y); ctx.lineTo(PL+cW,y); ctx.stroke();
+    const val=(i/GRIDS)*maxVal;
+    ctx.fillStyle='#628066'; ctx.font=`12px 'Courier New',monospace`; ctx.textAlign='right';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL-5, y+3.5);
+  }
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    const val=(i/GRIDS)*maxBed;
+    ctx.fillStyle=BED_C+'BB'; ctx.font=`12px 'Courier New',monospace`; ctx.textAlign='left';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL+cW+5, y+3.5);
+  }
+
+  const groupW  = cW / n;
+  const GP      = groupW * 0.08;
+  const BAR_GAP = 2;
+  const barW    = (groupW - GP*2 - BAR_GAP*2) / 3;
+
+  for (let i=0; i<n; i++) {
+    const gx = PL + i*groupW + GP;
+
+    const h25H = (harvest25[i]/maxVal)*cH;
+    ctx.fillStyle = cfg.c + '66';
+    ctx.beginPath(); ctx.roundRect(gx, PT+cH-h25H, barW, h25H, [2,2,0,0]); ctx.fill();
+
+    const h26H = (harvest26[i]/maxVal)*cH;
+    const g2 = ctx.createLinearGradient(0, PT+cH-h26H, 0, PT+cH);
+    g2.addColorStop(0, cfg.cl); g2.addColorStop(1, cfg.c+'99');
+    ctx.fillStyle = g2;
+    ctx.beginPath(); ctx.roundRect(gx+barW+BAR_GAP, PT+cH-h26H, barW, h26H, [2,2,0,0]); ctx.fill();
+
+    const s26H = (ship26[i]/maxVal)*cH;
+    const g3 = ctx.createLinearGradient(0, PT+cH-s26H, 0, PT+cH);
+    g3.addColorStop(0, SHIP_CL); g3.addColorStop(1, SHIP_C+'99');
+    ctx.fillStyle = g3;
+    ctx.beginPath(); ctx.roundRect(gx+barW*2+BAR_GAP*2, PT+cH-s26H, barW, s26H, [2,2,0,0]); ctx.fill();
+
+    const midX = PL + i*groupW + groupW/2;
+    ctx.fillStyle='#5A7860'; ctx.font=`12px -apple-system,Arial,sans-serif`; ctx.textAlign='center';
+    ctx.fillText(months[i], midX, PT+cH+16);
+  }
+
+  const drawBedLine = (beds, color, dash) => {
+    if (!beds.some(v=>v>0)) return;
+    ctx.save();
+    ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.setLineDash(dash||[]);
+    ctx.beginPath();
+    beds.forEach((b,i)=>{
+      const midX=PL+(i+0.5)*groupW, y=PT+cH-(b/maxBed)*cH;
+      i===0?ctx.moveTo(midX,y):ctx.lineTo(midX,y);
+    });
+    ctx.stroke();
+    beds.forEach((b,i)=>{
+      const midX=PL+(i+0.5)*groupW, y=PT+cH-(b/maxBed)*cH;
+      ctx.fillStyle=color; ctx.beginPath(); ctx.arc(midX,y,3.5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1C2B1E'; ctx.beginPath(); ctx.arc(midX,y,1.5,0,Math.PI*2); ctx.fill();
+    });
+    ctx.restore();
+  };
+  drawBedLine(beds25, '#7A9A7E', [5,3]);
+  drawBedLine(beds26, BED_C,    []);
+
+  ctx.strokeStyle='#3A5040'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
+}
+
 // ── Tooltip ──
 const tooltip = document.createElement('div');
 tooltip.className = 'chart-tooltip';
@@ -500,7 +646,7 @@ const SHEET_JISHA = '（培）志摩工場';
 let CHIBA_2025 = {
   'いなべ': [22682, 20161,  2520, 12770,  2520,  5040,  8420,  7000, 19360, 21160, 46440, 55725],
   '群馬':   [22680, 17640,  2520, 10080, 12600, 10080, 14490, 14760, 18170, 22610, 45360, 47880],
-  '南丹':   [    0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0],
+  '南丹':   [24453, 25301,  3248, 21751, 19085, 10701, 13063, 14988, 19103, 20999, 39782, 52966],
 };
 let CHIBA_2026 = {
   'いなべ': [15120, 12960, 20160,  5040, 20160,  8820],
@@ -858,16 +1004,18 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('.tab-yr');
   if (!btn) return;
   const container = btn.closest('[data-loc]');
-  const loc = container.dataset.loc;
-  const yr  = +btn.dataset.yr;
+  const loc   = container.dataset.loc;
+  const yrRaw = btn.dataset.yr;
+  const yr    = yrRaw === 'compare' ? 'compare' : +yrRaw;
   container.querySelectorAll('.tab-yr').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById(`yr-${loc}-2025`).classList.remove('active');
-  document.getElementById(`yr-${loc}-2026`).classList.remove('active');
+  container.querySelectorAll('.yr-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById(`yr-${loc}-${yr}`).classList.add('active');
   if (loc === 'kinshō') {
-    kinshōYear = yr;
-    requestAnimationFrame(()=>{ drawKinshōChart(yr); attachKinshōTooltip(yr); });
+    kinshōYear = +yr;
+    requestAnimationFrame(()=>{ drawKinshōChart(+yr); attachKinshōTooltip(+yr); });
+  } else if (yr === 'compare') {
+    requestAnimationFrame(()=>{ drawCompareChart(loc); });
   } else {
     requestAnimationFrame(()=>{ drawChart(loc,yr); attachTooltip(loc,yr); });
   }
@@ -883,9 +1031,14 @@ function redrawActive() {
   if (loc === 'kinshō') {
     drawKinshōChart(kinshōYear); attachKinshōTooltip(kinshōYear);
   } else {
-    const yrBtn = document.querySelector(`[data-loc="${loc}"] .tab-yr.active`);
-    const yr = yrBtn ? +yrBtn.dataset.yr : 2025;
-    drawChart(loc, yr); attachTooltip(loc, yr);
+    const yrBtn  = document.querySelector(`[data-loc="${loc}"] .tab-yr.active`);
+    const yrRaw  = yrBtn ? yrBtn.dataset.yr : '2025';
+    if (yrRaw === 'compare') {
+      drawCompareChart(loc);
+    } else {
+      const yr = +yrRaw;
+      drawChart(loc, yr); attachTooltip(loc, yr);
+    }
   }
 }
 
