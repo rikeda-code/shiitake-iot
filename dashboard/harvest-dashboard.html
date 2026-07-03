@@ -979,12 +979,18 @@ async function loadSheetData() {
     const chibaData = parseChibaTable(chibaTbl);
     const jishaData = parseJishaTable(jishaTbl);
 
-    // スプレッドシートに実データがある場合のみフォールバックを上書き
-    const hasData = obj => Object.values(obj).some(arr => arr.some(v => v > 0));
-    if (hasData(chibaData[2025])) CHIBA_2025 = chibaData[2025];
-    if (hasData(chibaData[2026])) CHIBA_2026 = chibaData[2026];
-    if (hasData(jishaData[2025])) JISHA_2025 = jishaData[2025];
-    if (hasData(jishaData[2026])) JISHA_2026 = jishaData[2026];
+    // 月単位でマージ：スプレッドシートの値が0の月はフォールバック値を維持
+    const mergeYr = (fallback, sheet) => {
+      const res = {};
+      for (const loc of Object.keys(fallback)) {
+        res[loc] = fallback[loc].map((v, i) => (sheet[loc]?.[i] > 0 ? sheet[loc][i] : v));
+      }
+      return res;
+    };
+    CHIBA_2025 = mergeYr(CHIBA_2025, chibaData[2025]);
+    CHIBA_2026 = mergeYr(CHIBA_2026, chibaData[2026]);
+    JISHA_2025 = mergeYr(JISHA_2025, jishaData[2025]);
+    JISHA_2026 = mergeYr(JISHA_2026, jishaData[2026]);
 
     const now = new Date().toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
     badge.textContent = `同期済 ${now}`;
