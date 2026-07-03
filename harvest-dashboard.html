@@ -186,6 +186,9 @@ const SHIP = {
 };
 SHIP.total = SHIP.inabe.map((_,i) => SHIP.inabe[i]+SHIP.gunma[i]+SHIP.nantou[i]);
 
+// 2025年 出荷量 (kg) — 1〜6月。データが判明次第入力。
+const SHIP_2025 = null; // TODO: データ待ち
+
 const LOC_CFG = {
   inabe:  { label: 'いなべ', c: '#6B9E72', cl: '#8EC496' },
   gunma:  { label: '群馬',   c: '#5B8FA8', cl: '#7DB4CC' },
@@ -422,18 +425,24 @@ function drawChart(loc, yr) {
 
 // ── 前年比較パネル ──
 function buildComparePanel(loc) {
-  const cfg = LOC_CFG[loc];
-  const harvest25 = HARVEST[loc].slice(0, 6);
-  const harvest26 = HARVEST[loc].slice(12, 18);
-  const ship26    = SHIP[loc];
-  const months    = ['1月','2月','3月','4月','5月','6月'];
-  const canvasId  = `chart-${loc}-compare`;
+  const cfg     = LOC_CFG[loc];
+  const h25     = HARVEST[loc].slice(0, 6);
+  const h26     = HARVEST[loc].slice(12, 18);
+  const s25     = SHIP_2025 ? SHIP_2025[loc] : null;
+  const s26     = SHIP[loc];
+  const months  = ['1月','2月','3月','4月','5月','6月'];
+  const canvasId = `chart-${loc}-compare`;
+
+  const s25Legend = s25
+    ? `<div class="leg-item"><div class="leg-sw" style="background:${SHIP_C};opacity:0.6"></div><span>2025年 出荷量</span></div>`
+    : '';
 
   const chartHTML = `<div class="chart-wrap">
     <div class="chart-head">
       <span class="chart-label">前年比較 (1〜6月) — ${cfg.label}</span>
       <div class="legend">
         <div class="leg-item"><div class="leg-sw" style="background:${cfg.c};opacity:0.6"></div><span>2025年 収穫量</span></div>
+        ${s25Legend}
         <div class="leg-item"><div class="leg-sw" style="background:${cfg.cl}"></div><span>2026年 収穫量</span></div>
         <div class="leg-item"><div class="leg-sw" style="background:${SHIP_CL}"></div><span>2026年 出荷量</span></div>
         <div class="leg-item" style="align-items:center"><div style="width:22px;height:3px;border-radius:2px;background:#7A9A7E;opacity:0.8;margin-right:0"></div><span style="margin-left:6px">2025年 菌床数</span></div>
@@ -443,25 +452,28 @@ function buildComparePanel(loc) {
     <canvas id="${canvasId}" height="380"></canvas>
   </div>`;
 
+  const s25Hdr = s25 ? '<th class="num">2025年 出荷量</th>' : '';
   let rows = '';
   months.forEach((m, i) => {
-    const h25 = harvest25[i], h26 = harvest26[i];
-    const diff = h26 - h25;
-    const pct  = h25 > 0 ? ((diff / h25) * 100).toFixed(1) : null;
+    const hv25 = h25[i], hv26 = h26[i];
+    const diff = hv26 - hv25;
+    const pct  = hv25 > 0 ? ((diff / hv25) * 100).toFixed(1) : null;
     const diffStr = `<span style="color:${diff>=0?'#8EC496':'#E07050'}">${diff>=0?'+':''}${fmt1(diff)}</span>`;
     const pctStr  = pct !== null ? `<span style="color:${diff>=0?'#8EC496':'#E07050'}">${diff>=0?'+':''}${pct}%</span>` : '—';
+    const s25Td = s25 ? `<td class="num" style="color:${SHIP_C}CC">${fmt1(s25[i])}</td>` : '';
     rows += `<tr>
       <td>${m}</td>
-      <td class="num">${fmt1(h25)}</td>
-      <td class="num" style="color:${cfg.cl}">${fmt1(h26)}</td>
-      <td class="num" style="color:${SHIP_CL}">${fmt1(ship26[i])}</td>
+      <td class="num">${fmt1(hv25)}</td>
+      ${s25Td}
+      <td class="num" style="color:${cfg.cl}">${fmt1(hv26)}</td>
+      <td class="num" style="color:${SHIP_CL}">${fmt1(s26[i])}</td>
       <td class="num">${diffStr}</td>
       <td class="num">${pctStr}</td>
     </tr>`;
   });
 
   const tableHTML = `<div class="table-wrap"><table>
-    <thead><tr><th>月</th><th class="num">2025年 収穫量</th><th class="num">2026年 収穫量</th><th class="num">2026年 出荷量</th><th class="num">収穫量 差 (kg)</th><th class="num">前年比</th></tr></thead>
+    <thead><tr><th>月</th><th class="num">2025年 収穫量</th>${s25Hdr}<th class="num">2026年 収穫量</th><th class="num">2026年 出荷量</th><th class="num">収穫量 差 (kg)</th><th class="num">前年比</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
 
@@ -475,6 +487,7 @@ function drawCompareChart(loc) {
   const cfg       = LOC_CFG[loc];
   const harvest25 = HARVEST[loc].slice(0, 6);
   const harvest26 = HARVEST[loc].slice(12, 18);
+  const ship25    = SHIP_2025 ? SHIP_2025[loc] : null;
   const ship26    = SHIP[loc];
   const beds25    = getBedData(loc, 2025).slice(0, 6);
   const beds26    = getBedData(loc, 2026);
@@ -492,7 +505,8 @@ function drawCompareChart(loc) {
   const PL=58, PR=56, PT=10, PB=38;
   const cW=W-PL-PR, cH=H-PT-PB;
 
-  const maxVal = Math.ceil(Math.max(...harvest25,...harvest26,...ship26) / 5000) * 5000;
+  const allShip = ship25 ? [...ship25, ...ship26] : [...ship26];
+  const maxVal = Math.ceil(Math.max(...harvest25,...harvest26,...allShip) / 5000) * 5000;
   const maxBed = Math.ceil(Math.max(...beds25,...beds26, 1000) / 5000) * 5000;
   const GRIDS  = 5;
 
@@ -511,29 +525,42 @@ function drawCompareChart(loc) {
     ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL+cW+5, y+3.5);
   }
 
+  const numBars = ship25 ? 4 : 3;
   const groupW  = cW / n;
   const GP      = groupW * 0.08;
   const BAR_GAP = 2;
-  const barW    = (groupW - GP*2 - BAR_GAP*2) / 3;
+  const barW    = (groupW - GP*2 - BAR_GAP*(numBars-1)) / numBars;
 
   for (let i=0; i<n; i++) {
     const gx = PL + i*groupW + GP;
 
+    // 2025 収穫量（半透明）
     const h25H = (harvest25[i]/maxVal)*cH;
     ctx.fillStyle = cfg.c + '66';
     ctx.beginPath(); ctx.roundRect(gx, PT+cH-h25H, barW, h25H, [2,2,0,0]); ctx.fill();
 
+    // 2025 出荷量（ある場合）
+    if (ship25) {
+      const s25H = (ship25[i]/maxVal)*cH;
+      ctx.fillStyle = SHIP_C + '77';
+      ctx.beginPath(); ctx.roundRect(gx+barW+BAR_GAP, PT+cH-s25H, barW, s25H, [2,2,0,0]); ctx.fill();
+    }
+
+    // 2026 収穫量
+    const offset2 = ship25 ? barW*2+BAR_GAP*2 : barW+BAR_GAP;
     const h26H = (harvest26[i]/maxVal)*cH;
     const g2 = ctx.createLinearGradient(0, PT+cH-h26H, 0, PT+cH);
     g2.addColorStop(0, cfg.cl); g2.addColorStop(1, cfg.c+'99');
     ctx.fillStyle = g2;
-    ctx.beginPath(); ctx.roundRect(gx+barW+BAR_GAP, PT+cH-h26H, barW, h26H, [2,2,0,0]); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(gx+offset2, PT+cH-h26H, barW, h26H, [2,2,0,0]); ctx.fill();
 
+    // 2026 出荷量
+    const offset3 = ship25 ? barW*3+BAR_GAP*3 : barW*2+BAR_GAP*2;
     const s26H = (ship26[i]/maxVal)*cH;
     const g3 = ctx.createLinearGradient(0, PT+cH-s26H, 0, PT+cH);
     g3.addColorStop(0, SHIP_CL); g3.addColorStop(1, SHIP_C+'99');
     ctx.fillStyle = g3;
-    ctx.beginPath(); ctx.roundRect(gx+barW*2+BAR_GAP*2, PT+cH-s26H, barW, s26H, [2,2,0,0]); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(gx+offset3, PT+cH-s26H, barW, s26H, [2,2,0,0]); ctx.fill();
 
     const midX = PL + i*groupW + groupW/2;
     ctx.fillStyle='#5A7860'; ctx.font=`12px -apple-system,Arial,sans-serif`; ctx.textAlign='center';
@@ -562,6 +589,8 @@ function drawCompareChart(loc) {
 
   ctx.strokeStyle='#3A5040'; ctx.lineWidth=1;
   ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
+
+  attachCompareTooltip(loc);
 }
 
 // ── Tooltip ──
@@ -574,8 +603,10 @@ tooltip.innerHTML = `
   <div class="tt-row" id="tt-brow" style="display:none"><span class="tt-label">菌床数</span><span class="tt-val" id="tt-b" style="color:${BED_C}"></span></div>
   <div class="tt-diff" id="tt-d"></div>`;
 document.body.appendChild(tooltip);
+const TOOLTIP_BASE_HTML = tooltip.innerHTML;
 
 const attached = new Set();
+const compareAttached = new Set();
 
 function attachTooltip(loc, yr) {
   const key = `${loc}-${yr}`;
@@ -904,6 +935,66 @@ function drawKinshōChart(yr) {
 
   ctx.strokeStyle='#3A5040'; ctx.lineWidth=1;
   ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
+}
+
+// ── 前年比較 tooltip ──
+function attachCompareTooltip(loc) {
+  if (compareAttached.has(loc)) return;
+  const canvas = document.getElementById(`chart-${loc}-compare`);
+  if (!canvas) return;
+
+  const cfg       = LOC_CFG[loc];
+  const harvest25 = HARVEST[loc].slice(0, 6);
+  const harvest26 = HARVEST[loc].slice(12, 18);
+  const ship25    = SHIP_2025 ? SHIP_2025[loc] : null;
+  const ship26    = SHIP[loc];
+  const beds25    = () => getBedData(loc, 2025).slice(0, 6);
+  const beds26    = () => getBedData(loc, 2026);
+
+  canvas.addEventListener('mousemove', e => {
+    const rect   = canvas.getBoundingClientRect();
+    const scaleX = (canvas.width / (window.devicePixelRatio||1)) / rect.width;
+    const px     = (e.clientX - rect.left) * scaleX;
+    const W2     = canvas.width / (window.devicePixelRatio||1);
+    const groupW = (W2 - 58 - 56) / 6;
+
+    let found = -1;
+    for (let i=0; i<6; i++) {
+      if (px >= 58+i*groupW && px < 58+(i+1)*groupW) { found=i; break; }
+    }
+    if (found === -1) { tooltip.classList.remove('visible'); return; }
+
+    const h25 = harvest25[found], h26 = harvest26[found];
+    const s25 = ship25 ? ship25[found] : null;
+    const s26 = ship26[found];
+    const b25 = beds25()[found], b26 = beds26()[found];
+    const diff = h26 - h25;
+    const pct  = h25 > 0 ? ((diff/h25)*100).toFixed(1) : null;
+    const dc   = diff >= 0 ? '#8EC496' : '#E07050';
+    const row  = (label, val, col) =>
+      `<div class="tt-row"><span class="tt-label" style="min-width:5.5em">${label}</span><span class="tt-val" style="color:${col}">${val}</span></div>`;
+
+    tooltip.innerHTML =
+      `<div class="tt-month">${found+1}月</div>` +
+      row('25収穫量', fmt1(h25)+' kg', cfg.c+'DD') +
+      (s25 !== null ? row('25出荷量', fmt1(s25)+' kg', SHIP_C+'CC') : '') +
+      row('26収穫量', fmt1(h26)+' kg', cfg.cl) +
+      row('26出荷量', fmt1(s26)+' kg', SHIP_CL) +
+      (b25>0 ? row('25菌床数', b25.toLocaleString('ja-JP')+' 本', '#7A9A7E') : '') +
+      (b26>0 ? row('26菌床数', b26.toLocaleString('ja-JP')+' 本', BED_C) : '') +
+      `<div class="tt-diff" style="color:${dc}">収穫量前年比 ${diff>=0?'+':''}${fmt1(diff)} kg${pct?' ('+pct+'%)':''}</div>`;
+
+    tooltip.classList.add('visible');
+    tooltip.style.left = (e.clientX+14)+'px';
+    tooltip.style.top  = (e.clientY-50)+'px';
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+    tooltip.innerHTML = TOOLTIP_BASE_HTML;
+  });
+
+  compareAttached.add(loc);
 }
 
 // Attach kinshō tooltip
