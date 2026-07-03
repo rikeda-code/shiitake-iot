@@ -186,8 +186,13 @@ const SHIP = {
 };
 SHIP.total = SHIP.inabe.map((_,i) => SHIP.inabe[i]+SHIP.gunma[i]+SHIP.nantou[i]);
 
-// 2025年 出荷量 (kg) — 1〜6月。データが判明次第入力。
-const SHIP_2025 = null; // TODO: データ待ち
+// 2025年 出荷量 (kg) — 1〜6月
+const SHIP_2025 = {
+  inabe:  [11234.93, 12128.28,  9130.68, 8693.36, 11275.06, 5512.51],
+  gunma:  [ 9807.25,  7804.84,  7009.85, 7524.37,  7259.08, 5408.60],
+  nantou: [ 8618.63,  8984.10,  9033.75, 6635.26,  8567.71, 6706.20],
+};
+SHIP_2025.total = SHIP_2025.inabe.map((_,i) => SHIP_2025.inabe[i]+SHIP_2025.gunma[i]+SHIP_2025.nantou[i]);
 
 const LOC_CFG = {
   inabe:  { label: 'いなべ', c: '#6B9E72', cl: '#8EC496' },
