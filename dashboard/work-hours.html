@@ -745,6 +745,7 @@ function buildDataset(json) {
 
   const workIdx = bestIdx(workScore, 4);
   const empIdx  = bestIdx(empScore,  2);
+  const flagIdx = 1; // B列：フラグ（工数振替の氏名重複解決に使用）
 
   // 氏名: H列 (index 7) — confirmed by spreadsheet structure
   // Verify col 7 has string values; if not, scan for a column with Japanese name-like strings
@@ -791,11 +792,12 @@ function buildDataset(json) {
     const employment = String(cells[empIdx]?.v ?? '').trim();
     const workType   = String(cells[workIdx]?.v ?? '').trim();
     const empClass   = classifyEmp(employment);
+    const flag       = cells[flagIdx]?.v;
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
     if (hours.every(h => h === null)) return;
 
-    employees.push({ name, base, workType, employment, empClass, hours });
+    employees.push({ name, base, workType, employment, empClass, hours, flag });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
@@ -893,9 +895,16 @@ function computeTransferAdjustments(baseData, adjustRecords) {
     if (monthIdx === -1) return; // 対象月が現在の集計範囲に無い（対象外期間）
 
     const key = normalizeName(rec.rawName);
-    const matches = byName.get(key);
+    let matches = byName.get(key);
+
+    // 氏名が複数件ヒットする場合（拠点間の恒久異動等）は、B列フラグ＝1のレコードのみに絞り込む
+    if (matches && matches.length > 1) {
+      matches = matches.filter(e => e.flag === 1);
+    }
+
     if (!matches || matches.length !== 1) {
-      const reason = matches && matches.length > 1 ? '（複数の該当者があり特定できません）' : '';
+      const reason = matches && matches.length > 1 ? '（B列フラグ＝1のレコードが複数あり特定できません）'
+        : (byName.get(key) && byName.get(key).length > 1 ? '（B列フラグ＝1のレコードが見つかりません）' : '');
       alerts.push(`氏名不一致：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」に一致する従業員が整理済み_Mシートで見つかりません${reason}`);
       return;
     }
