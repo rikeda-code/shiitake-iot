@@ -1616,8 +1616,20 @@ function buildSiteSeriesList(site) {
 }
 
 /* ── Shared: stacked bar chart builder ─────────────────────────── */
+// 積み上げ棒の月ごとの合計（全datasetの値の和）の最大値を求め、その少し上に軸上限を丸める。
+// 固定上限だと、栽培だけで上限を超える拠点で他の業務区分が軸の外に隠れてしまうため。
+function stackedAxisMax(months, datasets, roundTo) {
+  let max = 0;
+  months.forEach((_, mi) => {
+    const total = datasets.reduce((s, ds) => s + (ds.data[mi] || 0), 0);
+    if (total > max) max = total;
+  });
+  if (max <= 0) return roundTo;
+  return Math.ceil((max * 1.1) / roundTo) * roundTo;
+}
+
 function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
-  function barOpts(yLabel, isCount) {
+  function barOpts(yLabel, isCount, dynMax) {
     return {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
@@ -1643,15 +1655,17 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
       scales: {
         x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
         y: { stacked: true, ticks: { color: '#8892a4', font: { size: 11 }, callback: v => isCount ? `${v} 名` : `${v} h` },
-          grid: { color: '#1e2235' }, suggestedMin: 0, max: isCount ? 15 : 3000,
+          grid: { color: '#1e2235' }, suggestedMin: 0, max: dynMax,
           title: { display: true, text: yLabel, color: '#8892a4', font: { size: 11 } } },
       },
     };
   }
+  const hMax = stackedAxisMax(months, datasetsH, 100);
+  const nMax = stackedAxisMax(months, datasetsN, 5);
   const hCtx = document.getElementById(containerId + '_h')?.getContext('2d');
-  if (hCtx) summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets: datasetsH }, options: barOpts('実質勤務時間 (h)', false) });
+  if (hCtx) summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets: datasetsH }, options: barOpts('実質勤務時間 (h)', false, hMax) });
   const nCtx = document.getElementById(containerId + '_n')?.getContext('2d');
-  if (nCtx) summaryChartInstances[containerId + '_n'] = new Chart(nCtx, { type: 'bar', data: { labels: months, datasets: datasetsN }, options: barOpts('人数 (名)', true) });
+  if (nCtx) summaryChartInstances[containerId + '_n'] = new Chart(nCtx, { type: 'bar', data: { labels: months, datasets: datasetsN }, options: barOpts('人数 (名)', true, nMax) });
 }
 
 /* ── Summary: 業務区分別グラフ ─────────────────────────────────── */
@@ -1661,6 +1675,16 @@ function renderSummaryWorkChart() {
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const orderedWorkTypes = getOrderedWorkTypes(employees);
   const WT_COLORS = { '栽培': '#34d399', '出荷': '#facc15', '配送': '#f87171', '拠点業務': '#fb923c' };
+  // 上記4種に完全一致しない業務区分（配送・出荷、配送・栽培等の複合区分）が
+  // 全て同じ色にならないよう、インデックスでフォールバック色を割り当てる
+  const WT_FALLBACK_COLORS = ['#60a5fa', '#c084fc', '#2dd4bf', '#f472b6', '#a3e635', '#fbbf24'];
+  let wtFallbackIdx = 0;
+  const wtColorMap = {};
+  function wtColor(wt) {
+    if (WT_COLORS[wt]) return WT_COLORS[wt];
+    if (!wtColorMap[wt]) wtColorMap[wt] = WT_FALLBACK_COLORS[wtFallbackIdx++ % WT_FALLBACK_COLORS.length];
+    return wtColorMap[wt];
+  }
 
   let html = '<div class="schart-shell">';
   activeSites.forEach((site, si) => {
@@ -1687,12 +1711,12 @@ function renderSummaryWorkChart() {
         const vals = siteEmps.filter(e => e.workType === wt).map(e => e.hours[mi]).filter(h => h !== null);
         return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)*10)/10 : null;
       }),
-      backgroundColor: WT_COLORS[wt] || '#60a5fa',
+      backgroundColor: wtColor(wt),
     }));
     const datasetsN = siteWTs.map(wt => ({
       label: wt,
       data: months.map((_, mi) => siteEmps.filter(e => e.workType === wt && e.hours[mi] !== null).length || null),
-      backgroundColor: WT_COLORS[wt] || '#60a5fa',
+      backgroundColor: wtColor(wt),
     }));
     buildStackedBarSection(cid, months, datasetsH, datasetsN);
   });
