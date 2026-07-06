@@ -75,6 +75,38 @@
     }
     .tab-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
 
+    /* Transfer mode toggle */
+    .transfer-toggle {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .transfer-toggle-btn {
+      padding: 7px 14px;
+      background: var(--surface);
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .transfer-toggle-btn + .transfer-toggle-btn { border-left: 1px solid var(--border); }
+    .transfer-toggle-btn.active { background: var(--accent-inabe); color: #06202e; font-weight: 700; }
+    .transfer-toggle-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+    /* Transfer alerts */
+    .transfer-alert-box {
+      margin: 16px 32px 0;
+      background: rgba(250,204,21,0.08);
+      border: 1px solid rgba(250,204,21,0.35);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .transfer-alert-title { font-size: 0.85rem; font-weight: 700; color: #facc15; margin-bottom: 6px; }
+    .transfer-alert-box ul { margin: 0; padding-left: 20px; }
+    .transfer-alert-box li { font-size: 0.8rem; color: var(--text); line-height: 1.6; }
 
     main {
       padding: 0 32px 32px;
@@ -522,17 +554,23 @@
     <div class="subtitle">整理済み_M ／ 個人別・月別 実質勤務時間 (h)</div>
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
+    <div class="transfer-toggle" id="transfer-toggle">
+      <button class="transfer-toggle-btn active" data-mode="off" onclick="setTransferMode(false)">振替なし</button>
+      <button class="transfer-toggle-btn" data-mode="on" onclick="setTransferMode(true)">振替あり</button>
+    </div>
     <span id="last-updated"></span>
     <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
   </div>
 </header>
 
 <div class="tabs" id="tabs"></div>
+<div id="transfer-alerts"></div>
 <main id="main"></main>
 
 <script>
 const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
+const ADJUST_SHEET_NAME = '整理済み_増減'; // 工数振替（研修・応援）レコード
 const PROD_GID = '2016642543'; // 整理済み_分析
 
 const SITES = ['いなべ', '群馬', '南丹'];
@@ -569,15 +607,25 @@ function workTypeClass(wt) {
   return '';
 }
 
-let allData = null; // { months, employees, nameLabel }
+let allData = null; // { months, monthYms, employees, nameLabel }
 let activeBase = null;
 let activeMode = null; // 'site' | 'summary'
 let chartInstance = null;
 let countChartInstance = null;
 
+let transferMode = false;          // false=振替なし(既定) / true=振替あり
+let transferAdjusted = null;       // { employees, alerts } — 振替反映後のデータ（初回ロード時に計算）
+
 /* ── Fetch & parse ─────────────────────────────────────────────── */
 async function fetchSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=2`;
+  const res = await fetch(url);
+  const text = await res.text();
+  return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+}
+
+async function fetchAdjustSheet() {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(ADJUST_SHEET_NAME)}&headers=2`;
   const res = await fetch(url);
   const text = await res.text();
   return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
@@ -619,6 +667,17 @@ function shimeToMonth(label) {
   return `${year}年${workMonth}月`;
 }
 
+// 「N/10締」列の締め日そのものの年月をYYYYMM数値で返す（表示用のshimeToMonthとは別軸。
+// 整理済み_増減シートのI列（計上年月）は締め日と同じ年月で入力されているため、
+// 突き合わせにはこちらを使う）
+function closingYearMonth(label) {
+  const m = String(label).match(/(\d+)\/\d+締/);
+  if (!m) return null;
+  const closeMonth = parseInt(m[1]);
+  const year = closeMonth <= 6 ? 2026 : 2025;
+  return year * 100 + closeMonth;
+}
+
 function buildDataset(json) {
   const cols = json.table.cols;
   const rows = json.table.rows || [];
@@ -632,7 +691,8 @@ function buildDataset(json) {
     if (label.includes('実質勤務時間')) {
       const shimeMatch = label.match(/(\d+\/\d+締)/);
       const monthLabel = shimeMatch ? shimeToMonth(shimeMatch[1]) : label;
-      jissituCols.push({ month: monthLabel, idx: i });
+      const ym = shimeMatch ? closingYearMonth(shimeMatch[1]) : null;
+      jissituCols.push({ month: monthLabel, idx: i, ym });
     }
   });
 
@@ -642,7 +702,7 @@ function buildDataset(json) {
       if (!c) return;
       const label = (c.label || '').trim();
       if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
-        jissituCols.push({ month: shimeToMonth(label), idx: i + 2 });
+        jissituCols.push({ month: shimeToMonth(label), idx: i + 2, ym: closingYearMonth(label) });
       }
     });
   }
@@ -685,6 +745,7 @@ function buildDataset(json) {
 
   const workIdx = bestIdx(workScore, 4);
   const empIdx  = bestIdx(empScore,  2);
+  const flagIdx = 1; // B列：フラグ（工数振替の氏名重複解決に使用）
 
   // 氏名: H列 (index 7) — confirmed by spreadsheet structure
   // Verify col 7 has string values; if not, scan for a column with Japanese name-like strings
@@ -715,6 +776,8 @@ function buildDataset(json) {
     if (monthCounts[month] > 1) return inferNextMonth(month, monthCounts[month]);
     return month;
   });
+  // 締め日の年月（YYYYMM）。整理済み_増減シートとの月突き合わせに使う
+  const monthYms = jissituCols.map(({ ym }) => ym);
 
   const employees = [];
 
@@ -729,15 +792,16 @@ function buildDataset(json) {
     const employment = String(cells[empIdx]?.v ?? '').trim();
     const workType   = String(cells[workIdx]?.v ?? '').trim();
     const empClass   = classifyEmp(employment);
+    const flag       = cells[flagIdx]?.v;
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
     if (hours.every(h => h === null)) return;
 
-    employees.push({ name, base, workType, employment, empClass, hours });
+    employees.push({ name, base, workType, employment, empClass, hours, flag });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
-  return { months, employees, nameLabel };
+  return { months, monthYms, employees, nameLabel };
 }
 
 function inferNextMonth(base, occurrence) {
@@ -747,6 +811,192 @@ function inferNextMonth(base, occurrence) {
   let month = parseInt(m[2]) + (occurrence - 1);
   while (month > 12) { month -= 12; year++; }
   return `${year}年${month}月`;
+}
+
+/* ── 工数振替（整理済み_増減）───────────────────────────────────── */
+
+// 「（」「(」（全角・半角）以降を除去し、空白を正規化した上で大文字化する
+function normalizeName(raw) {
+  if (!raw) return '';
+  let s = String(raw);
+  const idxFull = s.indexOf('（');
+  const idxHalf = s.indexOf('(');
+  const cut = [idxFull, idxHalf].filter(i => i >= 0).sort((a, b) => a - b)[0];
+  if (cut !== undefined) s = s.slice(0, cut);
+  s = s.replace(/[　\s]+/g, ' ').trim();
+  return s.toUpperCase();
+}
+
+// gvizの日付セル（cell.v が "Date(y,m,d)" 文字列）からYYYYMM数値を取り出す
+function parseGvizDateYm(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  if (typeof v === 'string') {
+    const m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
+    if (m) return parseInt(m[1]) * 100 + (parseInt(m[2]) + 1); // gvizの月は0始まり
+  }
+  const text = cell.f || (typeof v === 'string' ? v : '');
+  const m2 = String(text).match(/(\d{4})[\/\-](\d{1,2})/);
+  if (m2) return parseInt(m2[1]) * 100 + parseInt(m2[2]);
+  return null;
+}
+
+// 整理済み_増減シートの列位置（固定）
+const ADJ_EMP_COL = 2, ADJ_BASE_COL = 3, ADJ_PRJ_COL = 4, ADJ_ROLE_COL = 5, ADJ_NAME_COL = 7, ADJ_YM_COL = 8, ADJ_HOURS_COL = 9;
+
+function parseAdjustRecords(json) {
+  const rows = json.table.rows || [];
+  const records = [];
+  rows.forEach((row, i) => {
+    const cells = row.c || [];
+    const rawName = String(cells[ADJ_NAME_COL]?.v ?? cells[ADJ_NAME_COL]?.f ?? '').trim();
+    if (!rawName) return; // 空行はスキップ
+
+    const base = String(cells[ADJ_BASE_COL]?.v ?? '').trim();
+    const prj  = String(cells[ADJ_PRJ_COL]?.v ?? '').trim();
+    const role = String(cells[ADJ_ROLE_COL]?.v ?? '').trim();
+    const ym   = parseGvizDateYm(cells[ADJ_YM_COL]);
+    const hours = parseDuration(cells[ADJ_HOURS_COL]) || 0;
+
+    records.push({ rowNum: i + 1, rawName, base, prj, role, ym, hours });
+  });
+  return records;
+}
+
+function formatHM(hours) {
+  const sign = hours < 0 ? '▲' : '';
+  const abs = Math.abs(hours);
+  let h = Math.floor(abs);
+  let mm = Math.round((abs - h) * 60);
+  if (mm === 60) { mm = 0; h += 1; }
+  return `${sign}${h}:${String(mm).padStart(2, '0')}`;
+}
+
+// baseData（振替なしのallData）と整理済み_増減レコードから、
+// 個人単位で加減算を反映した employees 配列とアラート一覧を作る
+function computeTransferAdjustments(baseData, adjustRecords) {
+  const { months, monthYms, employees: baseEmployees } = baseData;
+
+  // 深いコピー（hours配列を独立させる）
+  const employees = baseEmployees.map(e => ({ ...e, hours: e.hours.slice() }));
+
+  const byName = new Map();
+  employees.forEach(e => {
+    const key = normalizeName(e.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(e);
+  });
+
+  const alerts = [];
+  const additions = []; // { emp, monthIdx, destBase, destRole, hours }
+
+  adjustRecords.forEach(rec => {
+    const monthIdx = monthYms.indexOf(rec.ym);
+    if (monthIdx === -1) return; // 対象月が現在の集計範囲に無い（対象外期間）
+
+    const key = normalizeName(rec.rawName);
+    let matches = byName.get(key);
+
+    // 氏名が複数件ヒットする場合（拠点間の恒久異動等）は、B列フラグ＝1のレコードのみに絞り込む
+    if (matches && matches.length > 1) {
+      matches = matches.filter(e => e.flag === 1);
+    }
+
+    if (!matches || matches.length !== 1) {
+      const reason = matches && matches.length > 1 ? '（B列フラグ＝1のレコードが複数あり特定できません）'
+        : (byName.get(key) && byName.get(key).length > 1 ? '（B列フラグ＝1のレコードが見つかりません）' : '');
+      alerts.push(`氏名不一致：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」に一致する従業員が整理済み_Mシートで見つかりません${reason}`);
+      return;
+    }
+    const emp = matches[0];
+
+    const before = emp.hours[monthIdx] ?? 0;
+    const after = before - rec.hours;
+    emp.hours[monthIdx] = after;
+    if (after < 0) {
+      alerts.push(
+        `${emp.name}さん：${months[monthIdx]}度、${rec.role || '振替'}による減算${formatHM(rec.hours)}` +
+        `に対し実質勤務時間${formatHM(before)}のため${formatHM(after)}`
+      );
+    }
+
+    if (rec.base !== rec.prj) {
+      additions.push({ emp, monthIdx, destBase: rec.prj, destRole: rec.role, hours: rec.hours });
+    }
+  });
+
+  // 応援先（拠点×担当）ごとに仮想の従業員レコードへ加算をまとめる
+  const addMap = new Map();
+  additions.forEach(a => {
+    const k = `${normalizeName(a.emp.name)}|${a.destBase}|${a.destRole}`;
+    if (!addMap.has(k)) {
+      addMap.set(k, {
+        name: `${a.emp.name}（応援）`,
+        base: a.destBase,
+        workType: a.destRole,
+        employment: a.emp.employment,
+        empClass: a.emp.empClass,
+        hours: new Array(months.length).fill(null),
+        isTransferVirtual: true,
+      });
+    }
+    const v = addMap.get(k);
+    v.hours[a.monthIdx] = (v.hours[a.monthIdx] ?? 0) + a.hours;
+  });
+
+  return { employees: employees.concat(Array.from(addMap.values())), alerts };
+}
+
+// 現在のトグル状態に応じたデータ（months/employeesは共通、employeesだけ切り替え）を返す
+function getActiveData() {
+  if (transferMode && transferAdjusted) {
+    return { ...allData, employees: transferAdjusted.employees };
+  }
+  return allData;
+}
+
+function setTransferMode(mode) {
+  if (transferMode === mode) return;
+  transferMode = mode;
+  document.querySelectorAll('.transfer-toggle-btn').forEach(b => {
+    b.classList.toggle('active', (b.dataset.mode === 'on') === mode);
+  });
+  renderTransferAlerts();
+  rerenderCurrentView();
+}
+
+function renderTransferAlerts() {
+  const el = document.getElementById('transfer-alerts');
+  if (!el) return;
+  const alerts = transferMode && transferAdjusted ? transferAdjusted.alerts : [];
+  if (!alerts.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title">⚠ 工数振替アラート（${alerts.length}件）</div>
+      <ul>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
+// トグル切替時に、現在表示中のタブ・サブタブだけを再描画する
+function rerenderCurrentView() {
+  if (activeMode === 'site') {
+    renderBasePanel();
+  } else if (activeMode === 'summary') {
+    const activeSub = document.querySelector('.summary-subtab.active');
+    const tab = activeSub ? activeSub.dataset.tab : 'table';
+    destroySummaryCharts();
+    if (tab === 'table') renderSummaryTable();
+    else if (tab === 'work-chart') renderSummaryWorkChart();
+    else if (tab === 'emptype') renderSummaryByEmpType();
+    else if (tab === 'emp-chart') renderSummaryEmpChart();
+    else if (tab === 'chart') renderSummaryChart();
+    else renderSummaryRoster();
+  } else if (activeMode === 'productivity') {
+    renderProductivityTab();
+  } else if (activeMode === 'compare') {
+    renderCompareTab();
+  }
+  // production / stdset / stdhours は整理済み_Mを参照しないため再描画不要
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
@@ -854,7 +1104,10 @@ function renderTabs(bases) {
 function renderBasePanel() {
   const main = document.getElementById('main');
   const { months, employees } = allData;
+  // 従業員数・雇用区分フィルターの人数は振替の影響を受けない（時間の移動であり人数ではないため）
   const baseEmps = employees.filter(e => e.base === activeBase && e.workType);
+  // 勤務時間の集計（月平均・個人月間最大）は振替を反映する
+  const adjBaseEmps = getActiveData().employees.filter(e => e.base === activeBase && e.workType);
   const baseColor = SITE_COLORS[activeBase] || '#38bdf8';
 
   if (!document.getElementById('site-panel')) {
@@ -879,9 +1132,9 @@ function renderBasePanel() {
   }
 
   const kpiRow = document.getElementById('kpi-row');
-  const validHours = baseEmps.flatMap(e => e.hours.filter(h => h !== null));
+  const validHours = adjBaseEmps.flatMap(e => e.hours.filter(h => h !== null));
   const avgPerMonth = months.map((_, mi) => {
-    const vals = baseEmps.map(e => e.hours[mi]).filter(h => h !== null);
+    const vals = adjBaseEmps.map(e => e.hours[mi]).filter(h => h !== null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }).filter(v => v !== null);
   const grandAvg = avgPerMonth.length ? avgPerMonth.reduce((a,b)=>a+b,0)/avgPerMonth.length : 0;
@@ -926,7 +1179,7 @@ function renderBasePanel() {
 }
 
 function getSelectedEmployees() {
-  const baseEmps = allData.employees.filter(e => e.base === activeBase && e.workType);
+  const baseEmps = getActiveData().employees.filter(e => e.base === activeBase && e.workType);
   const selectedTypes = new Set(
     [...document.querySelectorAll(`[id^="emptype-${activeBase}-"]`)]
       .filter(cb => cb.checked)
@@ -937,7 +1190,7 @@ function getSelectedEmployees() {
 
 function buildChart() {
   const { months } = allData;
-  const baseEmps = allData.employees.filter(e => e.base === activeBase && e.workType);
+  const baseEmps = getActiveData().employees.filter(e => e.base === activeBase && e.workType);
   const selected = getSelectedEmployees();
 
   const empTypes = [...new Set(baseEmps.map(e => e.employment || '（未分類）'))].sort();
@@ -1190,7 +1443,7 @@ function renderSummary() {
 
 /* ── Summary: 表タブ ───────────────────────────────────────────── */
 function renderSummaryTable() {
-  const { months, employees } = allData;
+  const { months, employees } = getActiveData();
   const content = document.getElementById('summary-content');
   const orderedWorkTypes = getOrderedWorkTypes(employees);
   const EMP_CLASSES = ['社員・技能実習生', 'パート'];
@@ -1327,7 +1580,7 @@ function renderSummaryTable() {
 
 /* ── Summary: グラフタブ ───────────────────────────────────────── */
 function buildSiteSeriesList(site) {
-  const { employees, months } = allData;
+  const { employees, months } = getActiveData();
   const orderedWorkTypes = getOrderedWorkTypes(employees);
   const EMP_CLASSES = ['社員・技能実習生', 'パート'];
   const siteEmps = employees.filter(e => e.base === site);
@@ -1403,7 +1656,7 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
 
 /* ── Summary: 業務区分別グラフ ─────────────────────────────────── */
 function renderSummaryWorkChart() {
-  const { months, employees } = allData;
+  const { months, employees } = getActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const orderedWorkTypes = getOrderedWorkTypes(employees);
@@ -1447,7 +1700,7 @@ function renderSummaryWorkChart() {
 
 /* ── Summary: 雇用形態別グラフ ─────────────────────────────────── */
 function renderSummaryEmpChart() {
-  const { months, employees } = allData;
+  const { months, employees } = getActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const EMP_TYPES = ['社員', '技能実習生', 'パート'];
@@ -1497,7 +1750,7 @@ function renderSummaryEmpChart() {
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
 function renderSummaryByEmpType() {
-  const { months, employees } = allData;
+  const { months, employees } = getActiveData();
   const content = document.getElementById('summary-content');
 
   function detailEmp(emp) {
@@ -1574,7 +1827,7 @@ function renderSummaryByEmpType() {
 
 function renderSummaryChart() {
   const content = document.getElementById('summary-content');
-  const activeSites = SITES.filter(s => allData.employees.some(e => e.base === s));
+  const activeSites = SITES.filter(s => getActiveData().employees.some(e => e.base === s));
 
   let html = '<div class="schart-shell">';
   activeSites.forEach((site, si) => {
@@ -1625,7 +1878,7 @@ function renderSummaryChart() {
     }));
     summaryChartInstances[siteId] = new Chart(ctx, {
       type: 'line',
-      data: { labels: allData.months, datasets },
+      data: { labels: getActiveData().months, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -1678,7 +1931,7 @@ let rosterFilterSites = new Set(SITES);
 let rosterFilterEmps  = null; // null = all; initialised on first render
 
 function renderSummaryRoster() {
-  const { months, employees, nameLabel } = allData;
+  const { months, employees, nameLabel } = getActiveData();
   const content = document.getElementById('summary-content');
 
   const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
@@ -1722,8 +1975,8 @@ function renderSummaryRoster() {
 
   function buildContent() {
     const sorted = rosterSorted(rosterSortCol);
-    const recentMonths = allData.months.slice(-3);
-    const recentIdxs = recentMonths.map(m => allData.months.indexOf(m));
+    const recentMonths = months.slice(-3);
+    const recentIdxs = recentMonths.map(m => months.indexOf(m));
 
     const activeSites = SITES.filter(s => employees.some(e => e.base === s));
 
@@ -2342,7 +2595,7 @@ function renderProductivityTab() {
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
 
   fetchProductionSheet().then(prodData => {
-    renderProductivityCharts(allData, prodData);
+    renderProductivityCharts(getActiveData(), prodData);
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">エラー: ${e.message}</div>`;
     console.error(e);
@@ -2625,6 +2878,16 @@ async function loadAll() {
     const json = await fetchSheet();
     allData = buildDataset(json);
 
+    try {
+      const adjJson = await fetchAdjustSheet();
+      const adjustRecords = parseAdjustRecords(adjJson);
+      transferAdjusted = computeTransferAdjustments(allData, adjustRecords);
+    } catch (adjErr) {
+      console.error(adjErr);
+      transferAdjusted = { employees: allData.employees, alerts: [`「${ADJUST_SHEET_NAME}」シートの取得に失敗したため、振替は反映されていません（${adjErr.message}）`] };
+    }
+    renderTransferAlerts();
+
     const bases = SITES.filter(s => allData.employees.some(e => e.base === s));
     if (bases.length === 0) throw new Error('拠点データが見つかりません');
 
@@ -2656,7 +2919,7 @@ function renderCompareTab() {
 
 function renderCompareCharts(prodData) {
   const main = document.getElementById('main');
-  const { months: workMonths, employees } = allData;
+  const { months: workMonths, employees } = getActiveData();
   const { months: prodMonths, records } = prodData;
   const rows = loadStdSettings();
   const conv = loadCsConv();
