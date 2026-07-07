@@ -1560,7 +1560,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
   // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
   const maxDayInData = containers.reduce((max, c) => {
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || today;
+    const cutoffDate = endD || tomorrow;
     const fromRows = c.rows.reduce((m, r) => {
       if (r.rowDate && r.rowDate >= cutoffDate) return m;
       return Math.max(m, Math.round(r.dayNum || 0));
@@ -1579,9 +1579,9 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     let cumKg = 0;
     let cutoffDay = 0;
 
-    // ended containers: use endDate as cutoff; active: use today
+    // ended containers: use endDate as cutoff; active: use tomorrow (include today's data)
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || today;
+    const cutoffDate = endD || tomorrow;
 
     c.rows.forEach(r => {
       if (r.rowDate && r.rowDate >= cutoffDate) return;
