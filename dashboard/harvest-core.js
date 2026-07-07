@@ -1604,6 +1604,15 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     }
 
+    // For active containers, extend cutoffDay to today so the line reaches the current day
+    if (!c.isEnded) {
+      const startD = parseDateStr(c.startDate);
+      if (startD) {
+        const todayDay = Math.min(Math.round((tomorrow - startD) / 86400000) - 1, MAX_DAY);
+        if (todayDay > cutoffDay) cutoffDay = todayDay;
+      }
+    }
+
     // Forward-fill only up to cutoffDay
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
