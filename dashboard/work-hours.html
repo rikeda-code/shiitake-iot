@@ -2680,6 +2680,24 @@ function normalizeMonth(m) {
   return String(m).replace(/(\d+)年(\d+)月/, (_, y, mo) => `${y}/${parseInt(mo)}`);
 }
 
+// "2026/5" のような "YYYY/M" 文字列を n ヶ月分ずらす（年をまたぐ場合も対応）
+function shiftMonthStr(m, n) {
+  const match = String(m).match(/^(\d+)\/(\d+)$/);
+  if (!match) return m;
+  let year = parseInt(match[1]);
+  let month = parseInt(match[2]) + n;
+  while (month > 12) { month -= 12; year++; }
+  while (month < 1) { month += 12; year--; }
+  return `${year}/${month}`;
+}
+
+// 整理済み_Mは10日締め（対象期間は前月11日〜当月10日）で、PR#29以降のラベルは締め日の年月
+// （例：「6/10締」→「2026年6月」）。一方、整理済み_分析（生産実績）の月はカレンダー通りの暦月
+// （例："2026/5"は5/1〜5/31）。よって「6/10締」の実質勤務時間は実態としては5月分が中心であり、
+// 生産実績の暦月と突き合わせる際は「整理済み_M側の月 = 整理済み_分析側の月 + 1」という
+// 固定オフセットが必要（表示ラベルは整理済み_分析側の値をそのまま使う）。
+const PROD_TO_WORK_MONTH_OFFSET = 1;
+
 const productivityChartInstances = {};
 
 function renderProductivityTab() {
@@ -2707,8 +2725,8 @@ function renderProductivityCharts(workData, prodData) {
   // Normalize work-hours months for matching
   const normWorkMonths = workMonths.map(normalizeMonth);
 
-  // Common months that appear in both datasets
-  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(m));
+  // Common months that appear in both datasets（整理済み_M側は+1ヶ月オフセットして突き合わせる）
+  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET)));
   if (!commonMonths.length) {
     main.innerHTML = '<div class="loading">共通月が見つかりません（月ラベル形式を確認してください）</div>';
     return;
@@ -2724,10 +2742,11 @@ function renderProductivityCharts(workData, prodData) {
   }
 
   // Helper: sum hours by workType filter for a site, indexed by common month
+  // （commonMonthsは整理済み_分析側の暦月。整理済み_M側は+1ヶ月した列を参照する）
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
     return commonMonths.map(m => {
-      const wi = normWorkMonths.indexOf(m);
+      const wi = normWorkMonths.indexOf(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET));
       if (wi < 0) return null;
       const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
       return total > 0 ? Math.round(total * 10) / 10 : null;
@@ -3070,10 +3089,11 @@ function renderCompareCharts(prodData) {
     return { h: null };
   }
 
+  // commonMonthsは整理済み_分析側の暦月。整理済み_M側は+1ヶ月した列を参照する
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
     return commonMonths.map(m => {
-      const wi = normWorkMonths.indexOf(m);
+      const wi = normWorkMonths.indexOf(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET));
       if (wi < 0) return null;
       const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
       return total > 0 ? Math.round(total * 10) / 10 : null;
