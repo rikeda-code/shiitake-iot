@@ -103,6 +103,8 @@
 
     /* Transfer alerts */
     #transfer-alerts { flex-shrink: 0; }
+    #summary-transfer-alerts { flex-shrink: 0; }
+    #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
     .transfer-alert-box {
       margin: 16px 32px 0;
       background: rgba(250,204,21,0.08);
@@ -110,7 +112,18 @@
       border-radius: 8px;
       padding: 12px 16px;
     }
-    .transfer-alert-title { font-size: 0.85rem; font-weight: 700; color: #facc15; margin-bottom: 6px; }
+    .transfer-alert-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #facc15;
+      margin-bottom: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .transfer-alert-toggle-icon { flex-shrink: 0; width: 12px; font-size: 0.7rem; text-align: center; }
     .transfer-alert-box ul { margin: 0; padding-left: 20px; }
     .transfer-alert-box li { font-size: 0.8rem; color: var(--text); line-height: 1.6; }
 
@@ -985,15 +998,38 @@ function setTransferMode(mode) {
   rerenderCurrentView();
 }
 
+let alertsCollapsed = false; // アコーディオンの開閉状態（タブ切替・再描画をまたいで保持）
+
+function toggleTransferAlerts() {
+  alertsCollapsed = !alertsCollapsed;
+  document.querySelectorAll('.transfer-alert-list').forEach(ul => {
+    ul.style.display = alertsCollapsed ? 'none' : '';
+  });
+  document.querySelectorAll('.transfer-alert-toggle-icon').forEach(icon => {
+    icon.textContent = alertsCollapsed ? '▶' : '▼';
+  });
+}
+
+// サブタブを持つタブ（サマリー）ではサブタブの下、それ以外のタブではメインタブの下に表示する
 function renderTransferAlerts() {
-  const el = document.getElementById('transfer-alerts');
-  if (!el) return;
+  const summaryEl = document.getElementById('summary-transfer-alerts');
+  const globalEl = document.getElementById('transfer-alerts');
+  const target = summaryEl || globalEl;
+  if (summaryEl && globalEl) globalEl.innerHTML = '';
+  if (!target) return;
+
   const alerts = transferMode && transferAdjusted ? transferAdjusted.alerts : [];
-  if (!alerts.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `
+  if (!alerts.length) { target.innerHTML = ''; return; }
+
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
     <div class="transfer-alert-box">
-      <div class="transfer-alert-title">⚠ 工数振替アラート（${alerts.length}件）</div>
-      <ul>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ 工数振替アラート（${alerts.length}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
     </div>`;
 }
 
@@ -1036,6 +1072,7 @@ function renderTabs(bases) {
       activeMode = 'site';
       document.getElementById('main').innerHTML = '';
       renderBasePanel();
+      renderTransferAlerts();
     };
     tabsEl.appendChild(btn);
   });
@@ -1064,6 +1101,7 @@ function renderTabs(bases) {
     activeMode = 'production';
     document.getElementById('main').innerHTML = '';
     renderProductionTab();
+    renderTransferAlerts();
   };
   tabsEl.appendChild(pBtn);
 
@@ -1077,6 +1115,7 @@ function renderTabs(bases) {
     activeMode = 'productivity';
     document.getElementById('main').innerHTML = '';
     renderProductivityTab();
+    renderTransferAlerts();
   };
   tabsEl.appendChild(prBtn);
 
@@ -1090,6 +1129,7 @@ function renderTabs(bases) {
     activeMode = 'stdset';
     document.getElementById('main').innerHTML = '';
     renderStdSetTab();
+    renderTransferAlerts();
   };
   tabsEl.appendChild(stBtn);
 
@@ -1103,6 +1143,7 @@ function renderTabs(bases) {
     activeMode = 'stdhours';
     document.getElementById('main').innerHTML = '';
     renderStdHoursTab();
+    renderTransferAlerts();
   };
   tabsEl.appendChild(shBtn);
 
@@ -1116,6 +1157,7 @@ function renderTabs(bases) {
     activeMode = 'compare';
     document.getElementById('main').innerHTML = '';
     renderCompareTab();
+    renderTransferAlerts();
   };
   tabsEl.appendChild(cmpBtn);
 }
@@ -1440,8 +1482,10 @@ function renderSummary() {
         <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
         <button class="summary-subtab" data-tab="roster">👤 名簿</button>
       </div>
+      <div id="summary-transfer-alerts"></div>
       <div id="summary-content"></div>
     </div>`;
+  renderTransferAlerts();
 
   document.querySelectorAll('.summary-subtab').forEach(btn => {
     btn.onclick = () => {
