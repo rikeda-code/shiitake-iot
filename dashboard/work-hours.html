@@ -1079,7 +1079,7 @@ function renderTabs(bases) {
 
   bases.forEach((base, i) => {
     const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
+    btn.className = 'tab-btn' + (activeMode === 'site' && activeBase === base ? ' active' : '');
     btn.textContent = base;
     btn.dataset.base = base;
     btn.onclick = () => {
@@ -1096,7 +1096,7 @@ function renderTabs(bases) {
 
   // Summary tab
   const sBtn = document.createElement('button');
-  sBtn.className = 'tab-btn summary-tab';
+  sBtn.className = 'tab-btn summary-tab' + (activeMode === 'summary' ? ' active' : '');
   sBtn.textContent = '📊 サマリー';
   sBtn.onclick = () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1110,7 +1110,7 @@ function renderTabs(bases) {
 
   // Production tab
   const pBtn = document.createElement('button');
-  pBtn.className = 'tab-btn production-tab';
+  pBtn.className = 'tab-btn production-tab' + (activeMode === 'production' ? ' active' : '');
   pBtn.textContent = '🌱 生産実績';
   pBtn.onclick = () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1124,7 +1124,7 @@ function renderTabs(bases) {
 
   // Productivity tab
   const prBtn = document.createElement('button');
-  prBtn.className = 'tab-btn productivity-tab';
+  prBtn.className = 'tab-btn productivity-tab' + (activeMode === 'productivity' ? ' active' : '');
   prBtn.textContent = '📈 生産性';
   prBtn.onclick = () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1138,7 +1138,7 @@ function renderTabs(bases) {
 
   // 標準工数設定 tab
   const stBtn = document.createElement('button');
-  stBtn.className = 'tab-btn stdset-tab';
+  stBtn.className = 'tab-btn stdset-tab' + (activeMode === 'stdset' ? ' active' : '');
   stBtn.textContent = '⚙️ 標準工数設定';
   stBtn.onclick = () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1152,7 +1152,7 @@ function renderTabs(bases) {
 
   // 標準工数(h) tab
   const shBtn = document.createElement('button');
-  shBtn.className = 'tab-btn stdhours-tab';
+  shBtn.className = 'tab-btn stdhours-tab' + (activeMode === 'stdhours' ? ' active' : '');
   shBtn.textContent = '📋 標準工数(h)';
   shBtn.onclick = () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1166,7 +1166,7 @@ function renderTabs(bases) {
 
   // 比較 tab
   const cmpBtn = document.createElement('button');
-  cmpBtn.className = 'tab-btn compare-tab';
+  cmpBtn.className = 'tab-btn compare-tab' + (activeMode === 'compare' ? ' active' : '');
   cmpBtn.textContent = '📊 比較';
   cmpBtn.onclick = () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1414,9 +1414,13 @@ function empTypeColor(type) {
   return empTypeColorMap[type] || EMP_COLORS[0];
 }
 
-function renderEmpTypeFilterUI() {
+// preserveChecked/preserveAllTypes を渡すと、更新（再読み込み）前の選択状態を維持する
+// （preserveAllTypesに無い＝新しく現れた雇用区分は、初回同様デフォルトで選択状態にする）
+function renderEmpTypeFilterUI(preserveChecked, preserveAllTypes) {
   const empTypes = [...new Set(allData.employees.filter(e => e.workType).map(e => e.employment || '（未分類）'))].sort();
-  empTypeFilter = new Set(empTypes); // デフォルトは全選択
+  empTypeFilter = new Set(empTypes.filter(t =>
+    !preserveChecked || (preserveAllTypes && !preserveAllTypes.has(t)) || preserveChecked.has(t)
+  ));
   empTypeColorMap = {};
   empTypes.forEach((t, i) => { empTypeColorMap[t] = EMP_COLORS[i % EMP_COLORS.length]; });
 
@@ -1427,7 +1431,7 @@ function renderEmpTypeFilterUI() {
     const label = document.createElement('label');
     label.className = 'emp-checkbox';
     label.innerHTML = `
-      <input type="checkbox" data-type="${type}" checked onchange="onEmpTypeFilterChange()">
+      <input type="checkbox" data-type="${type}" ${empTypeFilter.has(type) ? 'checked' : ''} onchange="onEmpTypeFilterChange()">
       <span class="color-dot" style="background:${empTypeColor(type)}"></span>
       <span>${type} <span style="color:var(--muted);font-size:0.78rem">(${count}名)</span></span>`;
     checksEl.appendChild(label);
@@ -1500,18 +1504,33 @@ function renderSummary() {
     btn.onclick = () => {
       document.querySelectorAll('.summary-subtab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      destroySummaryCharts();
-      const tab = btn.dataset.tab;
-      if (tab === 'table')         renderSummaryTable();
-      else if (tab === 'work-chart') renderSummaryWorkChart();
-      else if (tab === 'emptype')  renderSummaryByEmpType();
-      else if (tab === 'emp-chart') renderSummaryEmpChart();
-      else if (tab === 'chart')    renderSummaryChart();
-      else { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
+      renderSummarySubtab(btn.dataset.tab);
     };
   });
 
   renderSummaryTable();
+}
+
+// サマリーのサブタブ本体を描画する（renderSummary()内のクリックハンドラと、
+// リロード後・振替/雇用区分フィルター変更後の再描画から共通で呼ばれる）
+function renderSummarySubtab(tab) {
+  destroySummaryCharts();
+  if (tab === 'table')         renderSummaryTable();
+  else if (tab === 'work-chart') renderSummaryWorkChart();
+  else if (tab === 'emptype')  renderSummaryByEmpType();
+  else if (tab === 'emp-chart') renderSummaryEmpChart();
+  else if (tab === 'chart')    renderSummaryChart();
+  else if (tab === 'roster')   { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
+}
+
+// activeMode === 'summary' のとき、現在アクティブなサブタブに切り替える（無ければ tab を新たにアクティブ化）
+function switchToSummarySubtab(tab) {
+  if (!tab || tab === 'table') return; // renderSummary()が既定でtableを描画済み
+  const btn = document.querySelector(`.summary-subtab[data-tab="${tab}"]`);
+  if (!btn) return;
+  document.querySelectorAll('.summary-subtab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderSummarySubtab(tab);
 }
 
 /* ── Summary: 表タブ ───────────────────────────────────────────── */
@@ -2984,16 +3003,27 @@ window.switchProdBar = function(mode) {
 
 /* ── Main ────────────────────────────────────────────────────────── */
 async function loadAll() {
+  // 更新前のタブ状態（メインタブ・サマリーのサブタブ・雇用区分フィルター）を保持しておき、
+  // データ再取得後に同じ表示へ戻す（振替あり/なしのトグルはグローバル変数のままなので触れない）
+  const prevActiveMode = activeMode;
+  const prevActiveBase = activeBase;
+  const prevSummarySubtab = activeMode === 'summary'
+    ? (document.querySelector('.summary-subtab.active')?.dataset.tab || 'table')
+    : null;
+  const prevEmpTypeChecked = empTypeFilter ? new Set(empTypeFilter) : null;
+  const prevEmpTypeAll = empTypeFilter ? new Set(Object.keys(empTypeColorMap)) : null;
+
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('tabs').innerHTML = '';
   document.getElementById('last-updated').textContent = '';
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
+  productionData = null; // 生産実績タブ等に戻った際、更新ボタンで実際に再取得されるようキャッシュも破棄する
 
   try {
     const json = await fetchSheet();
     allData = buildDataset(json);
-    renderEmpTypeFilterUI();
+    renderEmpTypeFilterUI(prevEmpTypeChecked, prevEmpTypeAll);
 
     try {
       const adjJson = await fetchAdjustSheet();
@@ -3003,16 +3033,25 @@ async function loadAll() {
       console.error(adjErr);
       transferAdjusted = { employees: allData.employees, alerts: [`「${ADJUST_SHEET_NAME}」シートの取得に失敗したため、振替は反映されていません（${adjErr.message}）`] };
     }
-    renderTransferAlerts();
 
     const bases = SITES.filter(s => allData.employees.some(e => e.base === s));
     if (bases.length === 0) throw new Error('拠点データが見つかりません');
 
-    activeBase = bases[0];
-    activeMode = 'site';
+    // 更新前のタブ状態を復元する（拠点が無くなっていた場合のみ先頭拠点にフォールバック）
+    if (prevActiveMode === 'site' && bases.includes(prevActiveBase)) {
+      activeMode = 'site';
+      activeBase = prevActiveBase;
+    } else if (prevActiveMode && prevActiveMode !== 'site') {
+      activeMode = prevActiveMode;
+      activeBase = bases[0];
+    } else {
+      activeMode = 'site';
+      activeBase = bases[0];
+    }
+
     renderTabs(bases);
     document.getElementById('main').innerHTML = '';
-    renderBasePanel();
+    renderActiveTabContent(prevSummarySubtab);
 
     document.getElementById('last-updated').textContent =
       `最終更新: ${new Date().toLocaleString('ja-JP')}`;
@@ -3020,6 +3059,27 @@ async function loadAll() {
     document.getElementById('main').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
     console.error(e);
   }
+}
+
+// 現在の activeMode に応じたタブ内容を描画する（更新ボタン押下後、直前のタブ状態を復元するために使用）
+function renderActiveTabContent(summarySubtab) {
+  if (activeMode === 'site') {
+    renderBasePanel();
+  } else if (activeMode === 'summary') {
+    renderSummary();
+    switchToSummarySubtab(summarySubtab);
+  } else if (activeMode === 'production') {
+    renderProductionTab();
+  } else if (activeMode === 'productivity') {
+    renderProductivityTab();
+  } else if (activeMode === 'stdset') {
+    renderStdSetTab();
+  } else if (activeMode === 'stdhours') {
+    renderStdHoursTab();
+  } else if (activeMode === 'compare') {
+    renderCompareTab();
+  }
+  renderTransferAlerts();
 }
 
 /* ── 比較タブ: 標準工数 vs 実績工数 ────────────────────────────── */
