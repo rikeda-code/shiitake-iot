@@ -37,6 +37,23 @@ const SITE_WEEKLY_COLORS = {
   '南丹':   '#34d399',
 };
 
+// ── LocalStorage cache ─────────────────────────────────────────────────────────
+const LS_TTL = 60 * 60 * 1000; // 1 hour
+
+function lsGet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > LS_TTL) { localStorage.removeItem(key); return null; }
+    return data;
+  } catch { return null; }
+}
+
+function lsSet(key, data) {
+  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+
 // ── Chart.js loader ────────────────────────────────────────────────────────────
 function waitForChart(ms = 15000) {
   if (typeof Chart !== 'undefined') return Promise.resolve();
@@ -537,10 +554,25 @@ async function loadWeeklySection() {
   const section = document.getElementById('weekly-section');
   if (!section) return;
 
+  const lsKey = `harvest_weekly_${SITES.map(s => s.id).join('_')}`;
+
+  // Show cached data instantly, refresh in background
+  const lsCached = lsGet(lsKey);
+  if (lsCached) {
+    weeklyState = lsCached;
+    await waitForChart();
+    renderWeeklySection(section, weeklyState, 'week', 'desc');
+    _fetchAndCacheWeekly(section, lsKey, true);
+    return;
+  }
+
   section.innerHTML = `
     <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
     <div class="loading" style="height:60px">全拠点データを読み込み中...</div>`;
+  await _fetchAndCacheWeekly(section, lsKey, false);
+}
 
+async function _fetchAndCacheWeekly(section, lsKey, isBackground) {
   try {
     const allSummaries = (await Promise.all(SITES.map(site =>
       fetchSummaryRows(site)
@@ -574,13 +606,16 @@ async function loadWeeklySection() {
     ]);
 
     weeklyState = { containerData, targetData };
+    lsSet(lsKey, weeklyState);
     await waitForChart();
     renderWeeklySection(section, weeklyState, 'week', 'desc');
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
-    section.innerHTML = `<div class="section-title">週別 累計収穫量推移</div>
-      <div class="error-msg" style="padding:16px 0">エラー: ${e.message}</div>`;
+    if (!isBackground) {
+      section.innerHTML = `<div class="section-title">週別 累計収穫量推移</div>
+        <div class="error-msg" style="padding:16px 0">エラー: ${e.message}</div>`;
+    }
   }
 }
 
@@ -1883,16 +1918,34 @@ function renderMain(site, active, ended, containers, data) {
 
 async function loadCurrentSite(forceRefresh = false) {
   const site = SITES[currentSiteIdx];
+  const lsKey = `harvest_site_${site.id}`;
 
-  if (!forceRefresh && cache[site.id]) {
-    const { active, ended, containers, data } = cache[site.id];
-    renderMain(site, active, ended, containers, data);
-    return;
+  // Show cached data instantly, then refresh in background
+  if (!forceRefresh) {
+    const lsCached = lsGet(lsKey);
+    if (lsCached) {
+      const { active, ended, containers, data, updatedAt } = lsCached;
+      cache[site.id] = { active, ended, containers, data };
+      renderMain(site, active, ended, containers, data);
+      document.getElementById('last-updated').textContent =
+        `キャッシュ: ${new Date(updatedAt).toLocaleString('ja-JP')} ↻`;
+      // Refresh in background silently
+      _fetchAndCacheSite(site, lsKey, true);
+      return;
+    }
+    if (cache[site.id]) {
+      const { active, ended, containers, data } = cache[site.id];
+      renderMain(site, active, ended, containers, data);
+      return;
+    }
   }
 
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('last-updated').textContent = '';
+  await _fetchAndCacheSite(site, lsKey, false);
+}
 
+async function _fetchAndCacheSite(site, lsKey, isBackground) {
   let active     = [];
   let ended      = [];
   let containers = [];
@@ -1917,7 +1970,10 @@ async function loadCurrentSite(forceRefresh = false) {
     }));
   }
 
+  const updatedAt = Date.now();
   cache[site.id] = { active, ended, containers, data };
+  lsSet(lsKey, { active, ended, containers, data, updatedAt });
+
   renderMain(site, active, ended, containers, data);
 
   if (listError) {
@@ -1928,7 +1984,7 @@ async function loadCurrentSite(forceRefresh = false) {
   }
 
   document.getElementById('last-updated').textContent =
-    `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+    `最終更新: ${new Date(updatedAt).toLocaleString('ja-JP')}`;
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
