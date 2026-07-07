@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>収穫状況 - 南丹</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1a1d27">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="南丹収穫">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="harvest.css">
+  <script>
+    window.SITE_CONFIG = {
+      siteName: '南丹',
+      showLotTab: true,
+      showScatterTab: false,
+      weeklyAllSites: false,
+    };
+  </script>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🍄 収穫状況 - 南丹</h1>
+    <div class="subtitle">コンテナ別収穫可視化</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="loadCurrentSite(true);loadWeeklySection()">↻ 更新</button>
+  </div>
+</header>
+
+<div class="tabs" id="tabs"></div>
+<main id="main"></main>
+<section id="weekly-section" style="margin:0 32px 40px;"></section>
+<section id="lot-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="scatter-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="weight-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="mekaki-section" style="display:none;margin:0 32px 40px;"></section>
+
+<!-- Weekly chart zoom modal -->
+<div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:900px;padding:24px;position:relative;margin:auto">
+    <button onclick="closeWeeklyZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <div id="weekly-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:4px"></div>
+        <div id="weekly-zoom-labels" style="display:flex;flex-wrap:wrap;gap:2px"></div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="sort-btn" id="zoom-btn-cumul" onclick="weeklyZoomSetMode('cumul')" style="font-size:0.78rem">累計収穫量</button>
+        <button class="sort-btn" id="zoom-btn-daily" onclick="weeklyZoomSetMode('daily')" style="font-size:0.78rem">サイズ別日次</button>
+        <button class="sort-btn" id="zoom-btn-size-cumul" onclick="weeklyZoomSetMode('size-cumul')" style="font-size:0.78rem">サイズ別累計</button>
+        <button class="sort-btn" id="zoom-btn-weight" onclick="weeklyZoomSetMode('weight')" style="font-size:0.78rem">菌床重量</button>
+        <button class="sort-btn" id="zoom-btn-mekaki" onclick="weeklyZoomSetMode('mekaki')" style="font-size:0.78rem">芽かき量</button>
+      </div>
+    </div>
+    <div id="weekly-zoom-body"></div>
+  </div>
+</div>
+
+<div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
+    <button onclick="closeDetail()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.2rem;cursor:pointer">✕</button>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<script src="harvest-core.js"></script>
+</body>
+</html>
