@@ -681,32 +681,20 @@ function parseDuration(cell) {
   return null;
 }
 
-function shimeToMonth(label) {
-  const m = label.match(/(\d+)\/\d+締/);
-  if (!m) return label;
-  let closeMonth = parseInt(m[1]);
-  let workMonth = closeMonth - 1;
-  let year;
-  if (workMonth <= 0) {
-    workMonth += 12;
-    year = 2025; // 1月締め → 12月の仕事 → 2025年12月
-  } else if (closeMonth <= 6) {
-    year = 2026; // 2〜6月締め → 1〜5月の仕事 → 2026年
-  } else {
-    year = 2025; // 7〜12月締め → 6〜11月の仕事 → 2025年
-  }
-  return `${year}年${workMonth}月`;
-}
-
-// 「N/10締」列の締め日そのものの年月をYYYYMM数値で返す（表示用のshimeToMonthとは別軸。
-// 整理済み_増減シートのI列（計上年月）は締め日と同じ年月で入力されているため、
-// 突き合わせにはこちらを使う）
+// 「N/10締」列の締め日そのものの年月をYYYYMM数値で返す。
+// 整理済み_増減シートのI列（計上年月）もこれと同じ年月で入力されているため、突き合わせにも使う。
 function closingYearMonth(label) {
   const m = String(label).match(/(\d+)\/\d+締/);
   if (!m) return null;
   const closeMonth = parseInt(m[1]);
   const year = closeMonth <= 6 ? 2026 : 2025;
   return year * 100 + closeMonth;
+}
+
+// YYYYMM数値 → "YYYY年M月" の表示ラベル（2行目の年月と常に一致させる）
+function ymToLabel(ym) {
+  if (ym == null) return null;
+  return `${Math.floor(ym / 100)}年${ym % 100}月`;
 }
 
 function buildDataset(json) {
@@ -721,8 +709,8 @@ function buildDataset(json) {
     const label = (c.label || '').trim();
     if (label.includes('実質勤務時間')) {
       const shimeMatch = label.match(/(\d+\/\d+締)/);
-      const monthLabel = shimeMatch ? shimeToMonth(shimeMatch[1]) : label;
       const ym = shimeMatch ? closingYearMonth(shimeMatch[1]) : null;
+      const monthLabel = ym !== null ? ymToLabel(ym) : label;
       jissituCols.push({ month: monthLabel, idx: i, ym });
     }
   });
@@ -733,7 +721,8 @@ function buildDataset(json) {
       if (!c) return;
       const label = (c.label || '').trim();
       if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
-        jissituCols.push({ month: shimeToMonth(label), idx: i + 2, ym: closingYearMonth(label) });
+        const ym = closingYearMonth(label);
+        jissituCols.push({ month: ym !== null ? ymToLabel(ym) : label, idx: i + 2, ym });
       }
     });
   }
