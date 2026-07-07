@@ -1707,20 +1707,31 @@ function buildSiteSeriesList(site) {
   return series;
 }
 
-/* ── Shared: stacked bar chart builder ─────────────────────────── */
-// 積み上げ棒の月ごとの合計（全datasetの値の和）の最大値を求め、その少し上に軸上限を丸める。
-// 固定上限だと、栽培だけで上限を超える拠点で他の業務区分が軸の外に隠れてしまうため。
-function stackedAxisMax(months, datasets, roundTo) {
+/* ── Shared: 同一ページ内に並ぶ同種グラフのY軸統一（雇用区分フィルター等、絞り込み条件の
+   種類に依存しない汎用ヘルパー。フィルターが増えても、呼び出し側が「フィルター適用後の
+   軸表示値」を渡す限りこの仕組み自体は変更不要） ───────────────────────────── */
+// valueArrays: グラフごとの「軸に表示され得る値」の配列（積み上げ棒なら月ごとの合計値、
+// 折れ線なら各系列の値）を、ページ内の対象グラフの数だけ集めた配列の配列。
+// roundTo: 丸め単位。padding: 最大値に対する余裕率（積み上げ棒は上端が窮屈にならないよう1.1を指定）。
+function computeSharedAxisMax(valueArrays, roundTo = 1, padding = 1) {
   let max = 0;
-  months.forEach((_, mi) => {
-    const total = datasets.reduce((s, ds) => s + (ds.data[mi] || 0), 0);
-    if (total > max) max = total;
+  valueArrays.forEach(values => {
+    (values || []).forEach(v => {
+      if (v !== null && v !== undefined && v > max) max = v;
+    });
   });
   if (max <= 0) return roundTo;
-  return Math.ceil((max * 1.1) / roundTo) * roundTo;
+  return Math.ceil((max * padding) / roundTo) * roundTo;
 }
 
-function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
+// 積み上げ棒グラフ1本分の「月ごとの合計値」（＝軸上で実際に到達し得る高さ）を求める
+function stackedMonthlyTotals(months, datasets) {
+  return months.map((_, mi) => datasets.reduce((s, ds) => s + (ds.data[mi] || 0), 0));
+}
+
+/* ── Shared: stacked bar chart builder ─────────────────────────── */
+// hMax/nMax はページ内の同種グラフ群から computeSharedAxisMax() で算出した共通値を渡す
+function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax, nMax) {
   function barOpts(yLabel, isCount, dynMax) {
     return {
       responsive: true, maintainAspectRatio: false,
@@ -1752,8 +1763,6 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN) {
       },
     };
   }
-  const hMax = stackedAxisMax(months, datasetsH, 100);
-  const nMax = stackedAxisMax(months, datasetsN, 5);
   const hCtx = document.getElementById(containerId + '_h')?.getContext('2d');
   if (hCtx) summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets: datasetsH }, options: barOpts('実質勤務時間 (h)', false, hMax) });
   const nCtx = document.getElementById(containerId + '_n')?.getContext('2d');
@@ -1793,7 +1802,8 @@ function renderSummaryWorkChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  activeSites.forEach((site, si) => {
+  // 各拠点のデータセットを先に組み立てる（ページ内全拠点でY軸を統一するため）
+  const perSite = activeSites.map((site, si) => {
     const cid = 'wc_' + si;
     const siteEmps = employees.filter(e => e.base === site && e.workType);
     const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
@@ -1810,7 +1820,15 @@ function renderSummaryWorkChart() {
       data: months.map((_, mi) => siteEmps.filter(e => e.workType === wt && e.hours[mi] !== null).length || null),
       backgroundColor: wtColor(wt),
     }));
-    buildStackedBarSection(cid, months, datasetsH, datasetsN);
+    return { cid, datasetsH, datasetsN };
+  });
+
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフで時間・人数それぞれ共通の軸上限を算出
+  const hMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
+  const nMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
+
+  perSite.forEach(({ cid, datasetsH, datasetsN }) => {
+    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax);
   });
 }
 
@@ -1844,7 +1862,8 @@ function renderSummaryEmpChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  activeSites.forEach((site, si) => {
+  // 各拠点のデータセットを先に組み立てる（ページ内全拠点でY軸を統一するため）
+  const perSite = activeSites.map((site, si) => {
     const cid = 'ec_' + si;
     const siteEmps = employees.filter(e => e.base === site && e.workType);
     const datasetsH = EMP_TYPES.map(et => ({
@@ -1860,7 +1879,15 @@ function renderSummaryEmpChart() {
       data: months.map((_, mi) => siteEmps.filter(e => detailEmp(e.employment) === et && e.hours[mi] !== null).length || null),
       backgroundColor: EMP_COLORS_MAP[et],
     }));
-    buildStackedBarSection(cid, months, datasetsH, datasetsN);
+    return { cid, datasetsH, datasetsN };
+  });
+
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフで時間・人数それぞれ共通の軸上限を算出
+  const hMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
+  const nMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
+
+  perSite.forEach(({ cid, datasetsH, datasetsN }) => {
+    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax);
   });
 }
 
@@ -1967,13 +1994,8 @@ function renderSummaryChart() {
   html += '</div>';
   content.innerHTML = html;
 
-  // Compute shared y-axis max across all sites
-  const allSeriesData = activeSites.flatMap(site =>
-    buildSiteSeriesList(site).flatMap(s => s.data.filter(v => v !== null))
-  );
-  const summaryYMax = allSeriesData.length > 0
-    ? Math.ceil(Math.max(...allSeriesData) / 100) * 100
-    : undefined;
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフで共通の軸上限を算出
+  const summaryYMax = computeSharedAxisMax(activeSites.map(site => buildSiteSeriesList(site).flatMap(s => s.data)), 100);
 
   activeSites.forEach((site, si) => {
     const siteId = 'sc_' + si;
@@ -3205,27 +3227,21 @@ function renderCompareCharts(prodData) {
   html += `</div>`;
   main.innerHTML = html;
 
-  // Compute shared y-axis max per div across all sites
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフでdivごとに共通の軸上限を算出
   const divYMax = {};
   divs.forEach(div => {
-    let maxVal = 0;
-    availSites.forEach(site => {
-      const key = `${site}-${div}`;
-      const d = window._cmpChartData[key];
-      if (!d) return;
-      commonMonths.forEach((_, mi) => {
-        // std total for this month
+    const valueArrays = availSites.map(site => {
+      const d = window._cmpChartData[`${site}-${div}`];
+      if (!d) return [];
+      return commonMonths.flatMap((_, mi) => {
         const stdTotal = d.divRows.reduce((s, r) => {
           const res = calcRow(site, r, mi);
           return s + (res.h !== null ? res.h : 0);
         }, 0);
-        maxVal = Math.max(maxVal, stdTotal);
-        // actual hours
-        const ah = d.actualH[mi];
-        if (ah !== null && ah !== undefined) maxVal = Math.max(maxVal, ah);
+        return [stdTotal, d.actualH[mi]];
       });
     });
-    divYMax[div] = maxVal > 0 ? Math.ceil(maxVal / 100) * 100 : undefined;
+    divYMax[div] = computeSharedAxisMax(valueArrays, 100);
   });
 
   // Draw charts after DOM update
