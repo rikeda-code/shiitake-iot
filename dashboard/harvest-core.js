@@ -1958,23 +1958,11 @@ async function _fetchAndCacheSite(site, lsKey, isBackground) {
     listError = e.message || String(e);
   }
 
-  const data = {};
-  if (containers.length) {
-    await Promise.all(containers.map(async name => {
-      try {
-        const table = await fetchSheet(site.id, name);
-        data[name] = parseContainerRows(table);
-      } catch {
-        data[name] = [];
-      }
-    }));
-  }
-
   const updatedAt = Date.now();
-  cache[site.id] = { active, ended, containers, data };
-  lsSet(lsKey, { active, ended, containers, data, updatedAt });
+  cache[site.id] = { active, ended, containers, data: {} };
+  lsSet(lsKey, { active, ended, containers, data: {}, updatedAt });
 
-  renderMain(site, active, ended, containers, data);
+  renderMain(site, active, ended, containers, {});
 
   if (listError) {
     const msg = document.createElement('div');
