@@ -3923,6 +3923,7 @@ function analysisSizeStackByContainer(rows) {
         { type: 'line', label: 'パック品率(%)', data: packRates,
           borderColor: '#facc15', backgroundColor: '#facc15',
           pointBackgroundColor: '#facc15', pointBorderColor: '#facc15', pointRadius: 4, yAxisID: 'y1' },
+        analysisAvgLineDataset('パック品率 平均', analysisAvg(packRates), '#facc15', 'y1', labels.length),
       ],
     },
     options: {
