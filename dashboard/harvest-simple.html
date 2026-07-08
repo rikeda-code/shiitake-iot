@@ -3906,20 +3906,32 @@ function analysisSizeStackByContainer(rows) {
     b.m += r.m; b.l += r.l; b.xl += r.xl; b.bg += r.bg;
   });
   const labels = Object.keys(byContainer);
+  // この絞り込み範囲内でのパック品率((M+L+2L)/合計)をコンテナごとに算出
+  const packRates = labels.map(l => {
+    const b = byContainer[l];
+    const total = b.m + b.l + b.xl + b.bg;
+    return total > 0 ? +(((b.m + b.l + b.xl) / total) * 100).toFixed(1) : null;
+  });
   return {
     data: {
       labels,
-      datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
-        type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
-        data: labels.map(l => +byContainer[l][sd.key].toFixed(2)),
-      })),
+      datasets: [
+        ...ANALYSIS_SIZE_DEFS.map(sd => ({
+          type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc', order: 1,
+          data: labels.map(l => +byContainer[l][sd.key].toFixed(2)),
+        })),
+        { type: 'line', label: 'パック品率(%)', data: packRates,
+          borderColor: '#facc15', backgroundColor: '#facc15',
+          pointBackgroundColor: '#facc15', pointBorderColor: '#facc15', pointRadius: 4, yAxisID: 'y1' },
+      ],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
       scales: {
         x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y1: { position: 'right', min: 0, max: 100, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { display: false } },
       },
     },
   };
@@ -3944,30 +3956,34 @@ const ANALYSIS_DAY_BUCKETS = [
 ];
 
 // 栽培日数帯(0〜20日/21〜60日/61日〜)別のサイズ別収穫量(全選択コンテナ合計)
+const ANALYSIS_DAY_BUCKET_COLORS = ['#3b82f6', '#10b981', '#f59e0b'];
+
+// 横軸=日付、積み上げ=栽培日数帯(0〜20日/21〜60日/61日〜)
 function analysisDayBucketSizeChartConfig(items) {
   const rows = analysisDateRangeFilter(analysisBuildDailyRows(items));
-  const buckets = ANALYSIS_DAY_BUCKETS.map(() => ({ m: 0, l: 0, xl: 0, bg: 0 }));
+  const dateKeys = [...new Set(rows.map(r => r.dateKey))].sort();
+  const byDate = {};
   rows.forEach(r => {
     if (r.day == null) return;
     const idx = ANALYSIS_DAY_BUCKETS.findIndex(b => r.day >= b.min && (b.max == null || r.day <= b.max));
     if (idx < 0) return;
-    const b = buckets[idx];
-    b.m += r.m; b.l += r.l; b.xl += r.xl; b.bg += r.bg;
+    const bucketTotals = (byDate[r.dateKey] ||= ANALYSIS_DAY_BUCKETS.map(() => 0));
+    bucketTotals[idx] += r.total;
   });
-  const labels = ANALYSIS_DAY_BUCKETS.map(b => b.label);
+  const labels = dateKeys.map(k => { const [, m, d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; });
   return {
     data: {
       labels,
-      datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
-        type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
-        data: buckets.map(b => +b[sd.key].toFixed(2)),
+      datasets: ANALYSIS_DAY_BUCKETS.map((bucket, i) => ({
+        type: 'bar', label: bucket.label, stack: 's', backgroundColor: ANALYSIS_DAY_BUCKET_COLORS[i] + 'cc',
+        data: dateKeys.map(k => +(byDate[k]?.[i] || 0).toFixed(2)),
       })),
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
       scales: {
-        x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
@@ -4036,7 +4052,7 @@ function renderAnalysisDateView() {
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('secondhalf')"><canvas id="analysis-secondhalf-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">栽培日数帯別 サイズ別収穫量(kg)</div>
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 栽培日数帯別収穫量(kg)</div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('daybucket')"><canvas id="analysis-daybucket-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4461,7 +4477,7 @@ const ANALYSIS_CHART_CONFIGS = {
   datesize: { title: '日別 サイズ別収穫量(全コンテナ合計・kg)', build: analysisDateSizeStackChartConfig },
   firsthalf: { title: '収穫前半(栽培1〜20日) サイズ別収穫量(kg)', build: analysisFirstHalfSizeChartConfig },
   secondhalf: { title: '収穫後半(栽培21日〜) サイズ別収穫量(kg)', build: analysisSecondHalfSizeChartConfig },
-  daybucket: { title: '栽培日数帯別 サイズ別収穫量(kg)', build: analysisDayBucketSizeChartConfig },
+  daybucket: { title: '日別 栽培日数帯別収穫量(kg)', build: analysisDayBucketSizeChartConfig },
   correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: () => analysisCorrelationLegendHtml(analysisZoomState ? analysisZoomState.items : []) },
 };
 
