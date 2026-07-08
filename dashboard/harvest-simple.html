@@ -3835,6 +3835,34 @@ function analysisParetoSizeChartConfig(items) {
   };
 }
 
+// 対象期間内のコンテナ別・サイズ別収穫量(積み上げ棒グラフ)
+function analysisPeriodSizeChartConfig(items) {
+  const filtered = analysisDateRangeFilter(analysisBuildDailyRows(items));
+  const byContainer = {};
+  filtered.forEach(r => {
+    const b = (byContainer[r.containerLabel] ||= { m: 0, l: 0, xl: 0, bg: 0 });
+    b.m += r.m; b.l += r.l; b.xl += r.xl; b.bg += r.bg;
+  });
+  const labels = Object.keys(byContainer);
+  return {
+    data: {
+      labels,
+      datasets: ANALYSIS_SIZE_DEFS.map(sd => ({
+        type: 'bar', label: sd.label, stack: 's', backgroundColor: sd.color + 'cc',
+        data: labels.map(l => +byContainer[l][sd.key].toFixed(2)),
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
 function renderAnalysisDateView() {
   const sizeButtons = ANALYSIS_SIZE_DEFS.map(sd => `
     <button class="sort-btn${analysisDateSize === sd.key ? ' active' : ''}"
@@ -3879,6 +3907,10 @@ function renderAnalysisDateView() {
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">構成比パレート図(サイズ別)</div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretosize')"><canvas id="analysis-paretosize-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">該当期間 サイズ別収穫量(コンテナ別・kg)</div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('periodsize')"><canvas id="analysis-periodsize-canvas"></canvas></div>
       </div>
     </div>`;
 }
@@ -4298,6 +4330,7 @@ const ANALYSIS_CHART_CONFIGS = {
   dailysize: { title: '日別 サイズ別収穫量(kg)', build: analysisDailySizeChartConfig },
   paretocontainer: { title: '構成比パレート図(コンテナ別)', build: analysisParetoContainerChartConfig },
   paretosize: { title: '構成比パレート図(サイズ別)', build: analysisParetoSizeChartConfig },
+  periodsize: { title: '該当期間 サイズ別収穫量(コンテナ別・kg)', build: analysisPeriodSizeChartConfig },
   correlation: { title: '相関図', build: analysisCorrelationChartConfig, legend: () => analysisCorrelationLegendHtml(analysisZoomState ? analysisZoomState.items : []) },
 };
 
