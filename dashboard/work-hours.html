@@ -528,6 +528,35 @@
       gap: 16px;
     }
     .prod-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+
+    /* ── 比較タブ（サブタブ付き。ヘッダー行を固定し、下部のみスクロール） ── */
+    .compare-shell {
+      flex: 1;
+      min-height: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .compare-header-row {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .compare-header-row .chart-section-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .compare-header-row .transfer-toggle { flex-shrink: 0; }
+    #compare-content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
     .prod-table {
       border-collapse: collapse;
       font-size: 0.82rem;
@@ -673,6 +702,8 @@ let transferMode = true;           // false=振替なし / true=振替あり(既
 let transferAdjusted = null;       // { employees, alerts } — 振替反映後のデータ（初回ロード時に計算）
 
 let empTypeFilter = null;          // Set<string>：選択中の雇用区分（全タブ共通のグローバルな絞り込み。nullは未初期化＝絞り込み無し）
+
+let compareSubtab = 'site';        // 比較タブのサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ（更新ボタン押下後も保持）
 
 function applyEmpTypeFilter(employees) {
   if (!empTypeFilter) return employees;
@@ -3192,145 +3223,281 @@ function renderCompareCharts(prodData) {
 
   const divs = ['栽培', '出荷'];
 
-  let html = `<div class="prod-panel">
-    <div class="chart-section-label">📊 標準工数 vs 実績工数 比較
-      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 左棒(積み上げ) = 標準工数（タスク別）　右棒(赤) = 実績工数</span>
-    </div>`;
-
+  // 拠点別（①）・拠点サマリ（②）の両サブタブから共通で使うデータを先に組み立てておく
+  window._cmpChartData = {};
   availSites.forEach(site => {
-    const siteColor = SITE_COLORS[site] || '#fff';
-    html += `<div style="margin-bottom:32px">
-      <div class="schart-header" style="color:${siteColor}">${site}</div>`;
-
     divs.forEach(div => {
       const divRows = rows.filter(r => r.div === div);
       const typeFilter = div === '栽培'
         ? wt => workTypeClass(wt) === 'wt-栽培'
         : wt => workTypeClass(wt) === 'wt-出荷';
-      const actualH = workHours(site, typeFilter);
-
-      html += `<div class="schart-section">
-        <div class="schart-header">${div}
-          <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 標準 vs 実績（h）</span>
-        </div>
-        <div class="schart-wrap" style="height:320px"><canvas id="cmp-${site}-${div}"></canvas></div>
-      </div>`;
-
-      // Store for later chart draw
-      if (!window._cmpChartData) window._cmpChartData = {};
-      window._cmpChartData[`${site}-${div}`] = { divRows, actualH, div };
+      window._cmpChartData[`${site}-${div}`] = { divRows, actualH: workHours(site, typeFilter), div };
     });
-
-    html += `</div>`;
   });
 
-  html += `</div>`;
-  main.innerHTML = html;
+  let compareChartInstances = {};
+  function destroyCompareCharts() {
+    Object.values(compareChartInstances).forEach(c => c.destroy());
+    compareChartInstances = {};
+  }
 
-  // フィルター適用後のデータをもとに、ページ内の全拠点グラフでdivごとに共通の軸上限を算出
-  const divYMax = {};
-  divs.forEach(div => {
-    const valueArrays = availSites.map(site => {
-      const d = window._cmpChartData[`${site}-${div}`];
-      if (!d) return [];
-      return commonMonths.flatMap((_, mi) => {
-        const stdTotal = d.divRows.reduce((s, r) => {
+  function tooltipOpts(showStdFooter) {
+    return {
+      backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+      titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+      callbacks: {
+        label: ctx => {
+          const v = ctx.parsed.y;
+          if (v === null || v === undefined) return null;
+          return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
+        },
+        footer: showStdFooter ? items => {
+          const stdTotal = items
+            .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
+            .reduce((s, i) => s + i.parsed.y, 0);
+          if (stdTotal === 0) return;
+          return `標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
+        } : undefined,
+      },
+    };
+  }
+
+  // ① 拠点別：拠点ごとに、業務区分ごとの「標準工数(積み上げ) vs 実績工数」を1チャートで表示（従来通り）
+  function renderCompareSiteView() {
+    const content = document.getElementById('compare-content');
+    let html = '';
+    availSites.forEach(site => {
+      const siteColor = SITE_COLORS[site] || '#fff';
+      html += `<div>
+        <div class="schart-header" style="color:${siteColor}">${site}</div>`;
+      divs.forEach(div => {
+        html += `<div class="schart-section">
+          <div class="schart-header">${div}
+            <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 標準 vs 実績（h）</span>
+          </div>
+          <div class="schart-wrap" style="height:320px"><canvas id="cmp-${site}-${div}"></canvas></div>
+        </div>`;
+      });
+      html += `</div>`;
+    });
+    content.innerHTML = html;
+
+    // フィルター適用後のデータをもとに、ページ内の全拠点グラフでdivごとに共通の軸上限を算出
+    const divYMax = {};
+    divs.forEach(div => {
+      const valueArrays = availSites.map(site => {
+        const d = window._cmpChartData[`${site}-${div}`];
+        if (!d) return [];
+        return commonMonths.flatMap((_, mi) => {
+          const stdTotal = d.divRows.reduce((s, r) => {
+            const res = calcRow(site, r, mi);
+            return s + (res.h !== null ? res.h : 0);
+          }, 0);
+          return [stdTotal, d.actualH[mi]];
+        });
+      });
+      divYMax[div] = computeSharedAxisMax(valueArrays, 100);
+    });
+
+    availSites.forEach(site => {
+      divs.forEach(div => {
+        const key = `${site}-${div}`;
+        const d = window._cmpChartData[key];
+        const ctx = document.getElementById(`cmp-${key}`)?.getContext('2d');
+        if (!d || !ctx) return;
+
+        const { divRows, actualH } = d;
+        const datasets = [];
+
+        // 実績工数バー（左）
+        datasets.push({
+          type: 'bar',
+          label: '実績工数',
+          data: actualH,
+          backgroundColor: '#f8717199',
+          borderColor: '#f87171',
+          borderWidth: 1,
+          stack: 'actual',
+          yAxisID: 'y',
+          order: 1,
+        });
+
+        // 標準工数の積み上げバー（右・タスク別）
+        divRows.forEach((r, ri) => {
+          const data = commonMonths.map((_, mi) => {
+            const res = calcRow(site, r, mi);
+            return res.h !== null ? Math.round(res.h * 10) / 10 : null;
+          });
+          datasets.push({
+            type: 'bar',
+            label: r.task,
+            data,
+            backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+            borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+            borderWidth: 0,
+            stack: 'std',
+            yAxisID: 'y',
+            order: 2,
+          });
+        });
+
+        const opts = {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+            tooltip: tooltipOpts(true),
+          },
+          scales: {
+            x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+            y: {
+              stacked: true,
+              position: 'left',
+              ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+              grid: { color: '#1e2235' }, suggestedMin: 0,
+              max: divYMax[div],
+              title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+            },
+          },
+        };
+
+        compareChartInstances[key] = new Chart(ctx, { data: { labels: commonMonths, datasets }, options: opts });
+      });
+    });
+  }
+
+  // ② 拠点サマリ：業務区分ごとに「実績工数（拠点別）」と「標準工数（工程別・3拠点合計）」を並べて表示
+  function renderCompareSummaryView() {
+    const content = document.getElementById('compare-content');
+    let html = `<div class="schart-header">3拠点サマリ</div>`;
+    divs.forEach(div => {
+      html += `<div class="schart-section">
+        <div class="schart-header">${div} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数（拠点別） / 標準工数（工程別・3拠点合計）</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-actual"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準工数（工程別・3拠点合計）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-std"></canvas></div></div>
+        </div>
+      </div>`;
+    });
+    content.innerHTML = html;
+
+    divs.forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+
+      // 実績工数：拠点ごとの値
+      const actualBySite = availSites.map(site => window._cmpChartData[`${site}-${div}`]?.actualH || commonMonths.map(() => null));
+      // 標準工数：工程ごとの3拠点合計
+      const stdByTask = divRows.map(r => commonMonths.map((_, mi) => {
+        const total = availSites.reduce((s, site) => {
           const res = calcRow(site, r, mi);
           return s + (res.h !== null ? res.h : 0);
         }, 0);
-        return [stdTotal, d.actualH[mi]];
-      });
-    });
-    divYMax[div] = computeSharedAxisMax(valueArrays, 100);
-  });
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      }));
 
-  // Draw charts after DOM update
-  const compareChartInstances = {};
-  availSites.forEach(site => {
-    divs.forEach(div => {
-      const key = `${site}-${div}`;
-      const d = window._cmpChartData[key];
-      if (!d) return;
-      const ctx = document.getElementById(`cmp-${key}`)?.getContext('2d');
-      if (!ctx) return;
+      // 実績（拠点別）・標準（工程別・積み上げ合計）を、同じdiv内で比較しやすいよう軸を統一
+      const stdMonthlyTotals = commonMonths.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
+      const sharedMax = computeSharedAxisMax([...actualBySite, stdMonthlyTotals], 100);
 
-      const { divRows, actualH } = d;
-      const labels = commonMonths;
-      const datasets = [];
-
-      // Stacked bar datasets: one per task
-      divRows.forEach((r, ri) => {
-        const data = commonMonths.map((_, mi) => {
-          const res = calcRow(site, r, mi);
-          return res.h !== null ? Math.round(res.h * 10) / 10 : null;
-        });
-        datasets.push({
+      const actualCtx = document.getElementById(`cmpsum-${div}-actual`)?.getContext('2d');
+      if (actualCtx) {
+        compareChartInstances[`${div}-actual`] = new Chart(actualCtx, {
           type: 'bar',
-          label: r.task,
-          data,
-          backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
-          borderColor: TASK_COLORS[ri % TASK_COLORS.length],
-          borderWidth: 0,
-          stack: 'std',
-          yAxisID: 'y',
-          order: 2,
-        });
-      });
-
-      // Actual hours bar (separate stack so it appears side-by-side with std total)
-      datasets.push({
-        type: 'bar',
-        label: '実績工数',
-        data: actualH,
-        backgroundColor: '#f8717199',
-        borderColor: '#f87171',
-        borderWidth: 1,
-        stack: 'actual',
-        yAxisID: 'y',
-        order: 1,
-      });
-
-      const opts = {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
-          tooltip: {
-            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
-            titleColor: '#e2e8f0', bodyColor: '#a0aec0',
-            callbacks: {
-              label: ctx => {
-                const v = ctx.parsed.y;
-                if (v === null || v === undefined) return null;
-                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
-              },
-              footer: items => {
-                const stdTotal = items
-                  .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
-                  .reduce((s, i) => s + i.parsed.y, 0);
-                if (stdTotal === 0) return;
-                return `標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
+          data: {
+            labels: commonMonths,
+            datasets: availSites.map((site, si) => ({
+              label: site,
+              data: actualBySite[si],
+              backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+              borderColor: SITE_COLORS[site] || '#fff',
+              borderWidth: 1,
+            })),
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              tooltip: tooltipOpts(false),
+            },
+            scales: {
+              x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+              y: {
+                position: 'left',
+                ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+                grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
+                title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
               },
             },
           },
-        },
-        scales: {
-          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
-          y: {
-            stacked: true,
-            position: 'left',
-            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
-            grid: { color: '#1e2235' }, suggestedMin: 0,
-            max: divYMax[div],
-            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
-          },
-        },
-      };
+        });
+      }
 
-      if (compareChartInstances[key]) compareChartInstances[key].destroy();
-      compareChartInstances[key] = new Chart(ctx, { data: { labels, datasets }, options: opts });
+      const stdCtx = document.getElementById(`cmpsum-${div}-std`)?.getContext('2d');
+      if (stdCtx) {
+        compareChartInstances[`${div}-std`] = new Chart(stdCtx, {
+          type: 'bar',
+          data: {
+            labels: commonMonths,
+            datasets: divRows.map((r, ri) => ({
+              label: r.task,
+              data: stdByTask[ri],
+              backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+              borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+              borderWidth: 0,
+              stack: 'std',
+            })),
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              tooltip: tooltipOpts(true),
+            },
+            scales: {
+              x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+              y: {
+                stacked: true, position: 'left',
+                ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+                grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
+                title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+              },
+            },
+          },
+        });
+      }
     });
+  }
+
+  function renderCompareContent() {
+    destroyCompareCharts();
+    if (compareSubtab === 'summary') renderCompareSummaryView();
+    else renderCompareSiteView();
+  }
+
+  main.innerHTML = `
+    <div class="compare-shell">
+      <div class="compare-header-row">
+        <div class="chart-section-label">📊 標準工数 vs 実績工数 比較　<span style="font-size:0.72rem;font-weight:400;color:var(--muted)">※ 左棒(赤) = 実績工数　右棒(積み上げ) = 標準工数（タスク別）</span></div>
+        <div class="transfer-toggle" id="compare-subtabs">
+          <button class="transfer-toggle-btn${compareSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
+          <button class="transfer-toggle-btn${compareSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
+        </div>
+      </div>
+      <div id="compare-content"></div>
+    </div>`;
+
+  document.querySelectorAll('#compare-subtabs .transfer-toggle-btn').forEach(btn => {
+    btn.onclick = () => {
+      compareSubtab = btn.dataset.tab;
+      document.querySelectorAll('#compare-subtabs .transfer-toggle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderCompareContent();
+    };
   });
+
+  renderCompareContent();
 }
 
 loadAll();
