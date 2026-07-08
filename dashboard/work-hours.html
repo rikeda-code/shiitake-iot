@@ -611,8 +611,8 @@
       <div class="header-emp-filter-checks" id="header-emp-filter-checks"></div>
     </div>
     <div class="transfer-toggle" id="transfer-toggle">
-      <button class="transfer-toggle-btn active" data-mode="off" onclick="setTransferMode(false)">振替なし</button>
-      <button class="transfer-toggle-btn" data-mode="on" onclick="setTransferMode(true)">振替あり</button>
+      <button class="transfer-toggle-btn" data-mode="off" onclick="setTransferMode(false)">振替なし</button>
+      <button class="transfer-toggle-btn active" data-mode="on" onclick="setTransferMode(true)">振替あり</button>
     </div>
     <span id="last-updated"></span>
     <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
@@ -669,7 +669,7 @@ let activeMode = null; // 'site' | 'summary'
 let chartInstance = null;
 let countChartInstance = null;
 
-let transferMode = false;          // false=振替なし(既定) / true=振替あり
+let transferMode = true;           // false=振替なし / true=振替あり(既定)
 let transferAdjusted = null;       // { employees, alerts } — 振替反映後のデータ（初回ロード時に計算）
 
 let empTypeFilter = null;          // Set<string>：選択中の雇用区分（全タブ共通のグローバルな絞り込み。nullは未初期化＝絞り込み無し）
