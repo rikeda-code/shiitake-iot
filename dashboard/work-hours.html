@@ -3377,6 +3377,8 @@ function renderCompareCharts(prodData) {
           <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-actual"></canvas></div></div>
           <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準工数（工程別・3拠点合計）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-std"></canvas></div></div>
         </div>
+        <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準 vs 実績（統合・拠点別×工程別）</div>
+        <div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-combined"></canvas></div>
       </div>`;
     });
     content.innerHTML = html;
@@ -3448,6 +3450,57 @@ function renderCompareCharts(prodData) {
               stack: 'std',
             })),
           },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              tooltip: tooltipOpts(true),
+            },
+            scales: {
+              x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+              y: {
+                stacked: true, position: 'left',
+                ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+                grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
+                title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+              },
+            },
+          },
+        });
+      }
+
+      // 統合グラフ：①拠点別サブタブと同じ形式（左＝実績工数を拠点別に積み上げ、右＝標準工数を工程別に積み上げ）
+      const combinedCtx = document.getElementById(`cmpsum-${div}-combined`)?.getContext('2d');
+      if (combinedCtx) {
+        const datasets = [];
+        availSites.forEach((site, si) => {
+          datasets.push({
+            type: 'bar',
+            label: site,
+            data: actualBySite[si],
+            backgroundColor: (SITE_COLORS[site] || '#fff') + 'cc',
+            borderColor: SITE_COLORS[site] || '#fff',
+            borderWidth: 0,
+            stack: 'actual',
+            order: 1,
+          });
+        });
+        divRows.forEach((r, ri) => {
+          datasets.push({
+            type: 'bar',
+            label: r.task,
+            data: stdByTask[ri],
+            backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+            borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+            borderWidth: 0,
+            stack: 'std',
+            order: 2,
+          });
+        });
+
+        compareChartInstances[`${div}-combined`] = new Chart(combinedCtx, {
+          data: { labels: commonMonths, datasets },
           options: {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
