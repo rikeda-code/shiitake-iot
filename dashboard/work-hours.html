@@ -3493,12 +3493,12 @@ function renderCompareCharts(prodData) {
     divs.forEach(div => {
       html += `<div class="schart-section">
         <div class="schart-header">${div} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数（拠点別） / 標準工数（工程別・3拠点合計）</span></div>
+        <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準 vs 実績（統合・拠点別×工程別）</div>
+        <div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-combined"></canvas></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-actual"></canvas></div></div>
           <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準工数（工程別・3拠点合計）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-std"></canvas></div></div>
         </div>
-        <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準 vs 実績（統合・拠点別×工程別）</div>
-        <div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-combined"></canvas></div>
       </div>`;
     });
     content.innerHTML = html;
