@@ -3361,7 +3361,7 @@ function renderCompareCharts(prodData) {
     compareChartInstances = {};
   }
 
-  function tooltipOpts(showStdFooter, showActualFooter) {
+  function tooltipOpts(showStdFooter, showActualTotal) {
     return {
       backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
       titleColor: '#e2e8f0', bodyColor: '#a0aec0',
@@ -3371,21 +3371,23 @@ function renderCompareCharts(prodData) {
           if (v === null || v === undefined) return null;
           return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
         },
-        footer: (showStdFooter || showActualFooter) ? items => {
-          const lines = [];
-          if (showActualFooter) {
-            const actualTotal = items
-              .filter(i => i.dataset.stack === 'actual' && i.parsed.y != null)
-              .reduce((s, i) => s + i.parsed.y, 0);
-            if (actualTotal !== 0) lines.push(`実績合計: ${Math.round(actualTotal).toLocaleString('ja-JP')} h`);
-          }
-          if (showStdFooter) {
-            const stdTotal = items
-              .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
-              .reduce((s, i) => s + i.parsed.y, 0);
-            if (stdTotal !== 0) lines.push(`標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
-          }
-          return lines.length ? lines : undefined;
+        // 拠点別内訳（実績側）の直下に実績合計を差し込む。footerは常にbody全体の後に
+        // 表示されるため、統合グラフ（実績＋標準）では使えず、実績側の最後の行に付与する
+        afterLabel: showActualTotal ? function (ctx) {
+          const actualItems = (this.dataPoints || []).filter(i => i.dataset.stack === 'actual' && i.parsed.y != null);
+          if (!actualItems.length) return;
+          const last = actualItems[actualItems.length - 1];
+          if (ctx.datasetIndex !== last.datasetIndex || ctx.dataIndex !== last.dataIndex) return;
+          const actualTotal = actualItems.reduce((s, i) => s + i.parsed.y, 0);
+          if (actualTotal === 0) return;
+          return `実績合計: ${Math.round(actualTotal).toLocaleString('ja-JP')} h`;
+        } : undefined,
+        footer: showStdFooter ? items => {
+          const stdTotal = items
+            .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
+            .reduce((s, i) => s + i.parsed.y, 0);
+          if (stdTotal === 0) return;
+          return `標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
         } : undefined,
       },
     };
