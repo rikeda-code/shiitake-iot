@@ -3333,12 +3333,12 @@ function renderCompareCharts(prodData) {
     });
   }
 
-  // Task colors for stacked bar (20 distinct colors)
+  // Task colors for stacked bar（拠点色 SITE_COLORS: 青/紫/緑、および①拠点別
+  // サブタブの実績工数バー固定色 #f87171 と被らないよう、赤・橙・黄系のみで構成。
+  // validate_palette.jsで拠点色・実績色との衝突・CVD分離を確認済み
   const TASK_COLORS = [
-    '#60a5fa','#34d399','#f472b6','#fbbf24','#a78bfa',
-    '#38bdf8','#4ade80','#fb923c','#e879f9','#facc15',
-    '#93c5fd','#6ee7b7','#fca5a5','#c4b5fd','#86efac',
-    '#fdba74','#f9a8d4','#67e8f9','#bef264','#fde68a',
+    '#ef4444','#f97316','#eab308','#fb7185','#fb923c',
+    '#fde047','#fdba74','#dc2626','#fef08a','#e11d48',
   ];
 
   const divs = ['栽培', '出荷'];
