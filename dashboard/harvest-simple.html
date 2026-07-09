@@ -3366,6 +3366,8 @@ const analysisCharts = {};
 // ── 相関図タブ ──────────────────────────────────────────────────────────
 const ANALYSIS_CORR_METRICS = {
   weight:   { label: '菌床重量(g)', get: c => (c.weightBefore != null && c.weightAbsorb != null) ? +(c.weightBefore + c.weightAbsorb).toFixed(1) : null },
+  weightBefore: { label: '菌床初期重量(g)', get: c => c.weightBefore },
+  weightAbsorb: { label: '吸水量(g)', get: c => c.weightAbsorb },
   days:     { label: '栽培日数(日)', get: c => c.days },
   harvest:  { label: '収穫量(g/菌床)', get: c => c.harvest },
   packRate: { label: 'パック品率(%)', get: c => c.packRate },
