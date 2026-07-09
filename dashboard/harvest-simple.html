@@ -4111,11 +4111,17 @@ async function renderAnalysisTab() {
     </label>`;
   }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
 
+  // 相関図は「栽培日数」「栽培開始日」フィルターで栽培期間を絞れるよう、
+  // フィルターから外れた選択(hiddenSelected)は含めない(他タブは選択維持のため含める)
+  const chartItems = analysisSubTab === 'correlation' ? selected : allSelected;
+
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
   const rightHtml = !allSelected.length
     ? `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`
     : (analysisSubTab === 'date' ? renderAnalysisDateView()
-      : analysisSubTab === 'correlation' ? renderAnalysisCorrelationView(allSelected)
+      : analysisSubTab === 'correlation'
+        ? (chartItems.length ? renderAnalysisCorrelationView(chartItems)
+          : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">現在の栽培期間フィルターに一致する選択コンテナがありません</div>`)
       : renderAnalysisComparison(allSelected, lotColorMap));
 
   const subTabHtml = [
@@ -4175,7 +4181,7 @@ async function renderAnalysisTab() {
       <div>${rightHtml}</div>
     </div>`;
 
-  if (allSelected.length) drawAnalysisCharts(allSelected, lotColorMap);
+  if (chartItems.length) drawAnalysisCharts(chartItems, lotColorMap);
 }
 
 function renderAnalysisComparison(items, lotColorMap) {
