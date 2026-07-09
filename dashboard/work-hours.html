@@ -2256,7 +2256,7 @@ function renderSummaryRoster() {
 
   function buildContent() {
     const sorted = rosterSorted(rosterSortCol);
-    const recentMonths = months.slice(-3);
+    const recentMonths = months;
     const recentIdxs = recentMonths.map(m => months.indexOf(m));
 
     const activeSites = SITES.filter(s => employees.some(e => e.base === s));
