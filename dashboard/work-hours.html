@@ -3364,7 +3364,8 @@ function renderCompareCharts(prodData) {
   function tooltipOpts(showStdFooter, showActualTotal) {
     return {
       backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
-      titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+      titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+      footerColor: '#e2e8f0', footerFont: { weight: 'normal' },
       callbacks: {
         label: ctx => {
           const v = ctx.parsed.y;
