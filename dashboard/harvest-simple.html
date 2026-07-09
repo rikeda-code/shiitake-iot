@@ -3418,7 +3418,15 @@ function buildAnalysisDataset() {
     .map(c => {
       // c.sizeRows の m/l/xl/bg はコンテナ全体の日次収穫量(kg)。
       // 日付タブ(日別・パレート図)は複数コンテナを跨いで合計するためkgのまま使う。
-      const sizeRows = c.sizeRows || [];
+      // 終了済みコンテナは、詳細シートの参照式が残り栽培終了日より後の日付にも
+      // (同じ号機の次ロット分と思われる)値が残存しているケースがあるため除外する。
+      const cStartD = parseDateStr(c.startDate);
+      const cEndD = c.isEnded ? parseDateStr(c.endDate) : null;
+      const sizeRows = (c.sizeRows || []).filter(r => {
+        if (!cEndD || !cStartD) return true;
+        const d = new Date(cStartD); d.setDate(d.getDate() + (r.day - 1));
+        return d <= cEndD;
+      });
       const rawSizeTotals = sizeRows.reduce((acc, r) => {
         acc.m += r.m; acc.l += r.l; acc.xl += r.xl; acc.bg += r.bg;
         return acc;
@@ -3462,7 +3470,7 @@ function buildAnalysisDataset() {
         startDate: c.startDate, endDate: c.endDate, days: c.days,
         harvest: c.harvest, packRate: c.packRate, lot: c.lot,
         sizeTotals, sizeRatio, weightBefore, weightAbsorb, mekaki,
-        sizeRows: sizeRows, // 日別(day=栽培N日目)のサイズ内訳。日付タブで実際の日付に変換して使う
+        sizeRows: sizeRows, // 日別(day=栽培N日目)のサイズ内訳。日付タブで実際の日付に変換して使う(栽培終了日より後の残存データは除外済み)
       };
     });
 }
