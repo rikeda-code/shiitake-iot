@@ -894,11 +894,10 @@ function buildDataset(json) {
     const label = (c.label || '').trim();
     if (label.includes('総勤務時間') && i + 2 < cols.length) {
       const ym = resolveMonthYm(label);
-      // ym===null（月が特定できない列、例: 追加用テンプレート列）の場合は、実データ列
-      // （実質勤務時間列）自身のラベルを表示名とする（従来の挙動を維持）
-      const targetLabel = (cols[i + 2]?.label || '').trim() || label;
-      const monthLabel = ym !== null ? ymToLabel(ym) : targetLabel;
-      jissituCols.push({ month: monthLabel, idx: i + 2, ym });
+      // ym===null（月が特定できない列。将来の月追加用の空の予備/テンプレート列など）は
+      // 月ではないため、集計・表示対象から除外する
+      if (ym === null) return;
+      jissituCols.push({ month: ymToLabel(ym), idx: i + 2, ym });
     }
   });
 
