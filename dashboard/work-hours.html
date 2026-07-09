@@ -3374,8 +3374,10 @@ function renderCompareCharts(prodData) {
         },
         // 拠点別内訳（実績側）の直下に実績合計を差し込む。footerは常にbody全体の後に
         // 表示されるため、統合グラフ（実績＋標準）では使えず、実績側の最後の行に付与する
+        // _actualGroup/_stdGroupはツールチップ集計専用の目印（Chart.jsのstack機能とは無関係）。
+        // 実績工数（拠点別）グラフはグループ化バー表示のため、実際のstackプロパティは付与しない
         afterLabel: showActualTotal ? function (ctx) {
-          const actualItems = (this.dataPoints || []).filter(i => i.dataset.stack === 'actual' && i.parsed.y != null);
+          const actualItems = (this.dataPoints || []).filter(i => i.dataset._actualGroup && i.parsed.y != null);
           if (!actualItems.length) return;
           const last = actualItems[actualItems.length - 1];
           if (ctx.datasetIndex !== last.datasetIndex || ctx.dataIndex !== last.dataIndex) return;
@@ -3385,7 +3387,7 @@ function renderCompareCharts(prodData) {
         } : undefined,
         footer: showStdFooter ? items => {
           const stdTotal = items
-            .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
+            .filter(i => i.dataset._stdGroup && i.parsed.y != null)
             .reduce((s, i) => s + i.parsed.y, 0);
           if (stdTotal === 0) return;
           // 実績合計（body側）と左端の見た目を揃えるための全角スペース。
@@ -3548,7 +3550,7 @@ function renderCompareCharts(prodData) {
               backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
               borderColor: SITE_COLORS[site] || '#fff',
               borderWidth: 1,
-              stack: 'actual',
+              _actualGroup: true,
             })),
           },
           options: {
@@ -3584,6 +3586,7 @@ function renderCompareCharts(prodData) {
               borderColor: TASK_COLORS[ri % TASK_COLORS.length],
               borderWidth: 0,
               stack: 'std',
+              _stdGroup: true,
             })),
           },
           options: {
@@ -3620,6 +3623,7 @@ function renderCompareCharts(prodData) {
             borderWidth: 0,
             stack: 'actual',
             order: 1,
+            _actualGroup: true,
           });
         });
         divRows.forEach((r, ri) => {
@@ -3632,6 +3636,7 @@ function renderCompareCharts(prodData) {
             borderWidth: 0,
             stack: 'std',
             order: 2,
+            _stdGroup: true,
           });
         });
 
