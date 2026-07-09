@@ -3388,7 +3388,10 @@ function renderCompareCharts(prodData) {
             .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
             .reduce((s, i) => s + i.parsed.y, 0);
           if (stdTotal === 0) return;
-          return `標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
+          // 実績合計（body側）と左端の見た目を揃えるための全角スペース。
+          // 実績合計が表示されないチャートでは不要なため付けない
+          const indent = showActualTotal ? '　' : '';
+          return `${indent}標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
         } : undefined,
       },
     };
