@@ -806,7 +806,9 @@ async function fetchSheet() {
 }
 
 async function fetchAdjustSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(ADJUST_SHEET_NAME)}&headers=2`;
+  // 整理済み_増減シートも1〜2行目が空白/結合、3行目が本当の見出し行という3行構成のため、
+  // headers=2のままだと見出し行がデータの1行目として読み込まれてしまう（headers=3で修正）
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(ADJUST_SHEET_NAME)}&headers=3`;
   const res = await fetch(url);
   const text = await res.text();
   return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
@@ -849,6 +851,14 @@ function closingYearMonth(label) {
   return year * 100 + closeMonth;
 }
 
+// YYYYMM数値を1ヵ月前にずらす（年をまたぐ場合も対応）
+function monthMinusOne(ym) {
+  let year = Math.floor(ym / 100);
+  let month = (ym % 100) - 1;
+  if (month < 1) { month += 12; year -= 1; }
+  return year * 100 + month;
+}
+
 // YYYYMM数値 → "YYYY年M月" の表示ラベル（2行目の年月と常に一致させる）
 function ymToLabel(ym) {
   if (ym == null) return null;
@@ -856,14 +866,16 @@ function ymToLabel(ym) {
 }
 
 // ラベルから月キー（YYYYMM）を解決する。まず2行目の実質月を直接読み取り、
-// 想定外のヘッダー構造で読み取れない場合のみ、締め月からの計算にフォールバックする
+// 想定外のヘッダー構造で読み取れない場合のみ、締め月-1（実質月相当）にフォールバックする
 function resolveMonthYm(label) {
   const ym = realYearMonth(label);
   if (ym !== null) return ym;
   const shimeMatch = String(label).match(/(\d+\/\d+締)/);
   if (!shimeMatch) return null;
-  const fallbackYm = closingYearMonth(shimeMatch[1]);
-  console.warn('[buildDataset] 実質月をラベルから読み取れませんでした。締め月からのフォールバック計算を使用します:', label, '→', fallbackYm);
+  const closeYm = closingYearMonth(shimeMatch[1]);
+  if (closeYm === null) return null;
+  const fallbackYm = monthMinusOne(closeYm);
+  console.warn('[buildDataset] 実質月をラベルから読み取れませんでした。締め月-1のフォールバック計算を使用します:', label, '→', fallbackYm);
   return fallbackYm;
 }
 
@@ -873,30 +885,29 @@ function buildDataset(json) {
 
   const jissituCols = [];
 
-  // Step 1: detect monthly 実質勤務時間 columns from labels
+  // 月の検出は「総勤務時間」列のラベル（例:"9/10締 2025/08 総勤務時間"）からのみ行う。
+  // 実機確認により、月情報を含む結合ラベルは各月ブロックの最初の列（総勤務時間）にのみ付与され、
+  // 続く「有給取得時間」「実質勤務時間」列は単独ラベル（月情報なし）になることが判明したため、
+  // 総勤務時間列から+2列後ろを実質勤務時間の実データ列として扱う
   cols.forEach((c, i) => {
     if (!c) return;
     const label = (c.label || '').trim();
-    if (label.includes('実質勤務時間')) {
+    if (label.includes('総勤務時間') && i + 2 < cols.length) {
       const ym = resolveMonthYm(label);
-      const monthLabel = ym !== null ? ymToLabel(ym) : label;
-      jissituCols.push({ month: monthLabel, idx: i, ym });
+      // ym===null（月が特定できない列、例: 追加用テンプレート列）の場合は、実データ列
+      // （実質勤務時間列）自身のラベルを表示名とする（従来の挙動を維持）
+      const targetLabel = (cols[i + 2]?.label || '').trim() || label;
+      const monthLabel = ym !== null ? ymToLabel(ym) : targetLabel;
+      jissituCols.push({ month: monthLabel, idx: i + 2, ym });
     }
   });
 
-  // Fallback: look for 締め日 pattern in label, use +2 offset for 実質勤務時間
   if (jissituCols.length === 0) {
-    cols.forEach((c, i) => {
-      if (!c) return;
-      const label = (c.label || '').trim();
-      if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
-        const ym = resolveMonthYm(label);
-        jissituCols.push({ month: ym !== null ? ymToLabel(ym) : label, idx: i + 2, ym });
-      }
-    });
+    console.warn('[buildDataset] 「総勤務時間」列から月を1件も検出できませんでした。ヘッダー構造が想定と異なる可能性があります。cols:', JSON.stringify(cols));
+    throw new Error('勤怠データの月列を検出できませんでした（整理済み_Mシートのヘッダー構造をご確認ください）');
   }
 
-  const firstMonthIdx = jissituCols.length > 0 ? jissituCols[0].idx : cols.length;
+  const firstMonthIdx = jissituCols[0].idx;
 
   // Step 2: detect static columns by scanning data values
   const VALID_BASES   = new Set(['いなべ', '群馬', '南丹']);
