@@ -3641,7 +3641,7 @@ function analysisCorrelationChartConfig(items) {
   const points = items.map(c => ({
     x: xm.get(c), y: ym.get(c), label: `${c.siteName}${c.no}`,
     color: analysisCorrelationColorFor(c, lotColorMap),
-  })).filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y));
+  })).filter(p => p.x != null && p.y != null && !isNaN(p.x) && !isNaN(p.y) && p.x !== 0 && p.y !== 0);
   return analysisScatterChartConfig(points, xm.label, ym.label);
 }
 
@@ -3674,7 +3674,7 @@ function analysisPeriodCorrelationChartConfig(items, minDay, maxDay) {
     const periodTotals = byContainer[label];
     const x = analysisPeriodMetricValue(analysisCorrX, c, periodTotals);
     const y = analysisPeriodMetricValue(analysisCorrY, c, periodTotals);
-    if (x == null || y == null || isNaN(x) || isNaN(y)) return null;
+    if (x == null || y == null || isNaN(x) || isNaN(y) || x === 0 || y === 0) return null;
     return { x, y, label, color: analysisCorrelationColorFor(c, lotColorMap) };
   }).filter(Boolean);
   return analysisScatterChartConfig(points, ANALYSIS_CORR_METRICS[analysisCorrX].label, ANALYSIS_CORR_METRICS[analysisCorrY].label);
