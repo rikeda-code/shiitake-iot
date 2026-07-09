@@ -771,7 +771,11 @@ function applyPeriodFilter(data) {
   while (realCount > 0 && (data.monthYms[realCount - 1] === null || data.monthYms[realCount - 1] === undefined)) realCount--;
 
   const startIdx = data.months.slice(0, realCount).indexOf(periodStartMonth);
-  if (startIdx === -1) return data; // 選択中の開始月がこのデータセットに存在しない（通常は発生しない）
+  if (startIdx === -1) {
+    // 選択中の開始月がこのデータセットに存在しない（想定外のデータ欠損等）。
+    // 「フィルタが効かず全件表示になる」誤解を防ぐため、全件ではなく空データを返す
+    return { ...data, months: [], monthYms: [], employees: data.employees.map(e => ({ ...e, hours: [] })) };
+  }
   const endIdx = Math.min(realCount, startIdx + periodMonthCount);
 
   const sliceKeepTail = arr => arr ? arr.slice(startIdx, endIdx).concat(arr.slice(realCount)) : arr;
@@ -791,10 +795,14 @@ function getBaseFilteredData() {
 
 /* ── Fetch & parse ─────────────────────────────────────────────── */
 async function fetchSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=2`;
+  // 整理済み_Mシートは見出し3行構成（1行目=締め日ラベル、2行目=実質月、3行目=列種別）。
+  // headers=3でgvizに3行分をヘッダーとして結合させ、各列のlabelから実質月を直接読み取る
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=3`;
   const res = await fetch(url);
   const text = await res.text();
-  return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  console.log('[fetchSheet] cols:', JSON.stringify(json.table.cols));
+  return json;
 }
 
 async function fetchAdjustSheet() {
@@ -823,8 +831,16 @@ function parseDuration(cell) {
   return null;
 }
 
+// 2行目「実質月」（例: "2025/08"）のYYYY/M表記をラベルから直接抜き出してYYYYMM数値で返す
+function realYearMonth(label) {
+  const m = String(label).match(/(\d{4})\/(\d{1,2})(?!\d)/);
+  if (!m) return null;
+  return parseInt(m[1]) * 100 + parseInt(m[2]);
+}
+
 // 「N/10締」列の締め日そのものの年月をYYYYMM数値で返す。
-// 整理済み_増減シートのI列（計上年月）もこれと同じ年月で入力されているため、突き合わせにも使う。
+// 2行目の実質月が読み取れない想定外のヘッダー構造だった場合のフォールバック専用
+// （締め月と実質月は1ヵ月ずれているため、通常時の主ロジックには使わない）。
 function closingYearMonth(label) {
   const m = String(label).match(/(\d+)\/\d+締/);
   if (!m) return null;
@@ -839,6 +855,18 @@ function ymToLabel(ym) {
   return `${Math.floor(ym / 100)}年${ym % 100}月`;
 }
 
+// ラベルから月キー（YYYYMM）を解決する。まず2行目の実質月を直接読み取り、
+// 想定外のヘッダー構造で読み取れない場合のみ、締め月からの計算にフォールバックする
+function resolveMonthYm(label) {
+  const ym = realYearMonth(label);
+  if (ym !== null) return ym;
+  const shimeMatch = String(label).match(/(\d+\/\d+締)/);
+  if (!shimeMatch) return null;
+  const fallbackYm = closingYearMonth(shimeMatch[1]);
+  console.warn('[buildDataset] 実質月をラベルから読み取れませんでした。締め月からのフォールバック計算を使用します:', label, '→', fallbackYm);
+  return fallbackYm;
+}
+
 function buildDataset(json) {
   const cols = json.table.cols;
   const rows = json.table.rows || [];
@@ -850,8 +878,7 @@ function buildDataset(json) {
     if (!c) return;
     const label = (c.label || '').trim();
     if (label.includes('実質勤務時間')) {
-      const shimeMatch = label.match(/(\d+\/\d+締)/);
-      const ym = shimeMatch ? closingYearMonth(shimeMatch[1]) : null;
+      const ym = resolveMonthYm(label);
       const monthLabel = ym !== null ? ymToLabel(ym) : label;
       jissituCols.push({ month: monthLabel, idx: i, ym });
     }
@@ -863,7 +890,7 @@ function buildDataset(json) {
       if (!c) return;
       const label = (c.label || '').trim();
       if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
-        const ym = closingYearMonth(label);
+        const ym = resolveMonthYm(label);
         jissituCols.push({ month: ym !== null ? ymToLabel(ym) : label, idx: i + 2, ym });
       }
     });
@@ -938,7 +965,8 @@ function buildDataset(json) {
     if (monthCounts[month] > 1) return inferNextMonth(month, monthCounts[month]);
     return month;
   });
-  // 締め日の年月（YYYYMM）。整理済み_増減シートとの月突き合わせに使う
+  // 実質月（YYYYMM）。整理済み_増減シート（I列も実質月基準）・整理済み_分析（暦月）との
+  // 突き合わせに、いずれもオフセットなしの単純一致で使える
   const monthYms = jissituCols.map(({ ym }) => ym);
 
   const employees = [];
@@ -2404,13 +2432,13 @@ function renderProductionTab() {
 }
 
 // 期間フィルター（開始月・表示月数）を整理済み_分析側の月にも適用する。
-// 整理済み_M側は+1ヶ月オフセットしているため、生産性/比較タブと同じ突き合わせロジックで
+// 整理済み_M側・整理済み_分析側とも実質月（暦月）基準のため、オフセットなしの単純一致で
 // 期間フィルター後の勤怠側の月に対応する生産実績側の月だけに絞り込む
 function filterProductionByPeriod({ months, records }) {
   if (!allData || !periodStartMonth) return { months, records };
   const normWorkMonths = getActiveData().months.map(normalizeMonth);
-  const commonMonths = months.filter(m => normWorkMonths.includes(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET)));
-  if (!commonMonths.length) return { months, records };
+  const commonMonths = months.filter(m => normWorkMonths.includes(m));
+  if (!commonMonths.length) return { months: [], records: records.map(r => ({ ...r, values: [] })) };
   const idxs = commonMonths.map(m => months.indexOf(m));
   return {
     months: commonMonths,
@@ -2883,23 +2911,8 @@ function normalizeMonth(m) {
   return String(m).replace(/(\d+)年(\d+)月/, (_, y, mo) => `${y}/${parseInt(mo)}`);
 }
 
-// "2026/5" のような "YYYY/M" 文字列を n ヶ月分ずらす（年をまたぐ場合も対応）
-function shiftMonthStr(m, n) {
-  const match = String(m).match(/^(\d+)\/(\d+)$/);
-  if (!match) return m;
-  let year = parseInt(match[1]);
-  let month = parseInt(match[2]) + n;
-  while (month > 12) { month -= 12; year++; }
-  while (month < 1) { month += 12; year--; }
-  return `${year}/${month}`;
-}
-
-// 整理済み_Mは10日締め（対象期間は前月11日〜当月10日）で、PR#29以降のラベルは締め日の年月
-// （例：「6/10締」→「2026年6月」）。一方、整理済み_分析（生産実績）の月はカレンダー通りの暦月
-// （例："2026/5"は5/1〜5/31）。よって「6/10締」の実質勤務時間は実態としては5月分が中心であり、
-// 生産実績の暦月と突き合わせる際は「整理済み_M側の月 = 整理済み_分析側の月 + 1」という
-// 固定オフセットが必要（表示ラベルは整理済み_分析側の値をそのまま使う）。
-const PROD_TO_WORK_MONTH_OFFSET = 1;
+// 整理済み_Mの月キー（monthYms/months）は実質月（シート2行目を直接読み取ったもの）。
+// 整理済み_分析（生産実績）の月もカレンダー通りの暦月のため、オフセットなしの単純一致で突き合わせられる。
 
 const productivityChartInstances = {};
 
@@ -2928,8 +2941,8 @@ function renderProductivityCharts(workData, prodData) {
   // Normalize work-hours months for matching
   const normWorkMonths = workMonths.map(normalizeMonth);
 
-  // Common months that appear in both datasets（整理済み_M側は+1ヶ月オフセットして突き合わせる）
-  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET)));
+  // Common months that appear in both datasets（実質月・暦月とも同じ月キーのため単純一致）
+  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(m));
   if (!commonMonths.length) {
     main.innerHTML = '<div class="loading">共通月が見つかりません（月ラベル形式を確認してください）</div>';
     return;
@@ -2945,11 +2958,10 @@ function renderProductivityCharts(workData, prodData) {
   }
 
   // Helper: sum hours by workType filter for a site, indexed by common month
-  // （commonMonthsは整理済み_分析側の暦月。整理済み_M側は+1ヶ月した列を参照する）
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
     return commonMonths.map(m => {
-      const wi = normWorkMonths.indexOf(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET));
+      const wi = normWorkMonths.indexOf(m);
       if (wi < 0) return null;
       const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
       return total > 0 ? Math.round(total * 10) / 10 : null;
@@ -3289,8 +3301,8 @@ function renderCompareCharts(prodData) {
   const conv = loadCsConv();
 
   const normWorkMonths = workMonths.map(m => normalizeMonth(m));
-  // 整理済み_M側は+1ヶ月オフセットして突き合わせる（集計期間フィルターで絞り込まれたworkMonthsにも連動する）
-  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET)));
+  // 実質月・暦月とも同じ月キーのため単純一致（集計期間フィルターで絞り込まれたworkMonthsにも連動する）
+  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(m));
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
 
@@ -3341,11 +3353,10 @@ function renderCompareCharts(prodData) {
     return { h: null };
   }
 
-  // commonMonthsは整理済み_分析側の暦月。整理済み_M側は+1ヶ月した列を参照する
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
     return commonMonths.map(m => {
-      const wi = normWorkMonths.indexOf(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET));
+      const wi = normWorkMonths.indexOf(m);
       if (wi < 0) return null;
       const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
       return total > 0 ? Math.round(total * 10) / 10 : null;
