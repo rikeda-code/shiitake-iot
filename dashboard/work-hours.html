@@ -1178,8 +1178,12 @@ function rerenderCurrentView() {
     renderProductivityTab();
   } else if (activeMode === 'compare') {
     renderCompareTab();
+  } else if (activeMode === 'production') {
+    renderProductionTab();
+  } else if (activeMode === 'stdhours') {
+    renderStdHoursTab();
   }
-  // production / stdset / stdhours は整理済み_Mを参照しないため再描画不要
+  // stdset は整理済み_Mも整理済み_分析の期間も参照しないため再描画不要
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
