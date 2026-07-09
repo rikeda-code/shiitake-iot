@@ -2392,11 +2392,26 @@ function renderProductionTab() {
   main.innerHTML = '<div class="loading">生産データを読み込み中...</div>';
 
   fetchProductionSheet().then(data => {
-    renderProductionTable(data);
+    renderProductionTable(filterProductionByPeriod(data));
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
     console.error(e);
   });
+}
+
+// 期間フィルター（開始月・表示月数）を整理済み_分析側の月にも適用する。
+// 整理済み_M側は+1ヶ月オフセットしているため、生産性/比較タブと同じ突き合わせロジックで
+// 期間フィルター後の勤怠側の月に対応する生産実績側の月だけに絞り込む
+function filterProductionByPeriod({ months, records }) {
+  if (!allData || !periodStartMonth) return { months, records };
+  const normWorkMonths = getActiveData().months.map(normalizeMonth);
+  const commonMonths = months.filter(m => normWorkMonths.includes(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET)));
+  if (!commonMonths.length) return { months, records };
+  const idxs = commonMonths.map(m => months.indexOf(m));
+  return {
+    months: commonMonths,
+    records: records.map(r => ({ ...r, values: idxs.map(i => r.values[i]) })),
+  };
 }
 
 function renderProductionTable({ months, records }) {
@@ -2668,7 +2683,7 @@ function renderStdHoursTab() {
   main.innerHTML = '<div class="loading">標準工数を計算中...</div>';
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
   fetchProductionSheet().then(prodData => {
-    renderStdHoursTable(prodData);
+    renderStdHoursTable(filterProductionByPeriod(prodData));
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
   });
