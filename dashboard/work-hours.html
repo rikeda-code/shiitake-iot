@@ -837,6 +837,18 @@ function getExtendedBaseFilteredData() {
   return getExtendedFromData(getBaseFilteredData());
 }
 
+// 生産実績（整理済み_分析）と突き合わせる画面向けに、固定12本の表示列（開始月から12本、
+// シート実在最新月を超える分は見出しも空欄）の月ラベルだけを組み立てる軽量版。
+// employees側のhours配列は持たない（生産実績側の実データ紐付けは呼び出し側で、
+// normalizeMonth()を介して月文字列をキーに個別に行う。延長分・超過分
+// （mi >= originalCount）には生産実績データを一切載せないことで、間延び対策の
+// 表示列と「選択範囲内の実データ」を明確に分離する）
+function getExtendedDisplayMonths() {
+  const selectedMonths = getActiveData().months;
+  const extendedMonths = buildExtendedMonthList(selectedMonths, getRealMonths());
+  return { months: extendedMonths.map(e => e.month), originalCount: selectedMonths.length };
+}
+
 // months/monthYms/employees.hours を、選択中の開始月から表示月数分だけスライスする
 // （表示月数が最新月を超える場合は自動的に存在する分だけになる）。
 // 末尾の「実質勤務時間」等、月ではない疑似列（monthYms===null）はスライス対象外とし、常にそのまま残す
@@ -2660,13 +2672,26 @@ function filterProductionByPeriod({ months, records }) {
   };
 }
 
-function renderProductionTable({ months, records }) {
+function renderProductionTable({ months: filteredMonths, records }) {
   const main = document.getElementById('main');
 
   if (!records.length) {
     main.innerHTML = '<div class="loading">データが見つかりませんでした</div>';
     return;
   }
+
+  // 表示列は「開始月から固定12本（シート実在最新月を超える分は見出しも空欄）」。
+  // filterProductionByPeriod()が返す実データ（filteredMonths/records、選択範囲内のみ）は
+  // ここで表示列と月をキーに紐付ける。延長列・超過列（mi >= originalCount）には
+  // 生産実績データを一切載せない
+  const { months, originalCount } = getExtendedDisplayMonths();
+  const prodIdxByMonth = {};
+  filteredMonths.forEach((m, i) => { prodIdxByMonth[m] = i; });
+  const prodIdx = months.map((m, mi) => {
+    if (mi >= originalCount || !m) return -1;
+    const norm = normalizeMonth(m);
+    return Object.prototype.hasOwnProperty.call(prodIdxByMonth, norm) ? prodIdxByMonth[norm] : -1;
+  });
 
   // Group records by site preserving order
   const siteOrder = [];
@@ -2727,8 +2752,10 @@ function renderProductionTable({ months, records }) {
       // Metric
       html += `<td class="col-metric">${r.metric}</td>`;
 
-      // Values
-      r.values.forEach(v => {
+      // Values（延長列・超過列は空欄、選択範囲内はデータなしを「ー」で表示）
+      prodIdx.forEach((pi, mi) => {
+        if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
+        const v = pi >= 0 ? r.values[pi] : null;
         html += v !== null
           ? `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`
           : `<td class="col-num empty">—</td>`;
@@ -2938,13 +2965,26 @@ function renderStdHoursTab() {
 function renderStdHoursTable(prodData) {
   const main = document.getElementById('main');
   const rows = loadStdSettings();
-  const { months: prodMonths, records } = prodData;
+  const { months: filteredMonths, records } = prodData;
 
-  const commonMonths = prodMonths.map(m => normalizeMonth(m));
+  // 表示列は「開始月から固定12本（シート実在最新月を超える分は見出しも空欄）」。
+  // filterProductionByPeriod()が返す実データ（filteredMonths/records、選択範囲内のみ）は
+  // ここで表示列と月をキーに紐付ける。延長列・超過列（mi >= originalCount）には
+  // 生産実績データを一切載せない
+  const { months, originalCount } = getExtendedDisplayMonths();
+  const prodIdxByMonth = {};
+  filteredMonths.forEach((m, i) => { prodIdxByMonth[normalizeMonth(m)] = i; });
+  const prodIdx = months.map((m, mi) => {
+    if (mi >= originalCount || !m) return -1;
+    const norm = normalizeMonth(m);
+    return Object.prototype.hasOwnProperty.call(prodIdxByMonth, norm) ? prodIdxByMonth[norm] : -1;
+  });
 
   function getProdVal(site, metricKey, mi) {
+    const pi = prodIdx[mi];
+    if (pi < 0) return null;
     const r = records.find(r => r.site === site && r.metric === metricKey);
-    return r ? (r.values[mi] ?? null) : null;
+    return r ? (r.values[pi] ?? null) : null;
   }
 
   const conv = loadCsConv();
@@ -3009,7 +3049,7 @@ function renderStdHoursTable(prodData) {
           <th class="th-left" style="min-width:60px">業務区分</th>
           <th class="th-left" style="min-width:130px">作業区分</th>
           <th class="th-left" style="min-width:140px">計算根拠</th>
-          ${commonMonths.map(m => `<th>${m}</th>`).join('')}
+          ${months.map(m => `<th>${m}</th>`).join('')}
           <th class="th-left" style="min-width:130px">計算方法</th>
         </tr></thead><tbody>`;
 
@@ -3020,7 +3060,7 @@ function renderStdHoursTable(prodData) {
         : '';
       if (r.div !== lastDiv) lastDiv = r.div;
 
-      const monthData = commonMonths.map((_, mi) => calcRow(site, r, mi));
+      const monthData = months.map((_, mi) => calcRow(site, r, mi));
       const hasData = monthData.some(d => d.h !== null);
       // Pick latest month's containers value as sample
       const sampleD = [...monthData].reverse().find(d => d.containers !== null);
@@ -3065,7 +3105,9 @@ function renderStdHoursTable(prodData) {
           ${statusIcon} <span style="color:var(--muted)">${basisDesc}</span>
         </td>`;
 
-      monthData.forEach(d => {
+      // 延長列・超過列（mi >= originalCount）は空欄、選択範囲内はデータなしを「ー」で表示
+      monthData.forEach((d, mi) => {
+        if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
         if (d.h !== null) {
           const disp = d.h < 10 ? d.h.toFixed(1) : Math.round(d.h).toLocaleString('ja-JP');
           html += `<td class="col-num">${disp}<span style="font-size:0.68rem;color:var(--muted)"> h</span></td>`;
@@ -3080,7 +3122,7 @@ function renderStdHoursTable(prodData) {
     // Subtotals per div
     ['栽培', '出荷'].forEach(div => {
       const divRows = rows.filter(r => r.div === div);
-      const totals = commonMonths.map((_, mi) => {
+      const totals = months.map((_, mi) => {
         const vals = divRows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
         return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
       });
@@ -3089,7 +3131,8 @@ function renderStdHoursTable(prodData) {
         <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:var(--muted)">
           ${div} 小計
         </td>`;
-      totals.forEach(t => {
+      totals.forEach((t, mi) => {
+        if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
         html += t !== null
           ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
           : `<td class="col-num empty">—</td>`;
@@ -3098,13 +3141,14 @@ function renderStdHoursTable(prodData) {
     });
 
     // Grand total
-    const grandTotals = commonMonths.map((_, mi) => {
+    const grandTotals = months.map((_, mi) => {
       const vals = rows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
       return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     });
     html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
       <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
-    grandTotals.forEach(t => {
+    grandTotals.forEach((t, mi) => {
+      if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
       html += t !== null
         ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
         : `<td class="col-num empty">—</td>`;
@@ -3149,15 +3193,17 @@ function renderProductivityTab() {
 
 function renderProductivityCharts(workData, prodData) {
   const main = document.getElementById('main');
-  const { months: workMonths, employees } = workData;
+  const { employees } = workData;
   const { months: prodMonths, records } = prodData;
 
-  // Normalize work-hours months for matching
-  const normWorkMonths = workMonths.map(normalizeMonth);
+  // 表示列は「開始月から固定12本（シート実在最新月を超える分は見出しも空欄）」。
+  // 生産実績側の実データは、選択範囲内(mi < originalCount)の月だけをnormalizeMonth()で
+  // 突き合わせる。延長列・超過列には勤怠・生産実績いずれのデータも一切載せない
+  const { months, originalCount } = getExtendedDisplayMonths();
 
-  // Common months that appear in both datasets（実質月・暦月とも同じ月キーのため単純一致）
-  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(m));
-  if (!commonMonths.length) {
+  // 選択範囲内に生産実績側と共通する月が1つもなければ、以降の処理を打ち切る
+  const hasOverlap = months.slice(0, originalCount).some(m => prodMonths.includes(normalizeMonth(m)));
+  if (!hasOverlap) {
     main.innerHTML = '<div class="loading">共通月が見つかりません（月ラベル形式を確認してください）</div>';
     return;
   }
@@ -3171,23 +3217,23 @@ function renderProductivityCharts(workData, prodData) {
     return;
   }
 
-  // Helper: sum hours by workType filter for a site, indexed by common month
+  // Helper: sum hours by workType filter for a site, indexed by表示列(mi)
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
-    return commonMonths.map(m => {
-      const wi = normWorkMonths.indexOf(m);
-      if (wi < 0) return null;
-      const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
+    return months.map((_, mi) => {
+      if (mi >= originalCount) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[mi] ?? 0), 0);
       return total > 0 ? Math.round(total * 10) / 10 : null;
     });
   }
 
-  // Helper: get production metric values aligned to commonMonths
+  // Helper: get production metric values aligned to 表示列(mi)
   function prodVals(site, metric) {
     const r = records.find(x => x.site === site && x.metric === metric);
-    if (!r) return commonMonths.map(() => null);
-    return commonMonths.map(m => {
-      const pi = prodMonths.indexOf(m);
+    if (!r) return months.map(() => null);
+    return months.map((m, mi) => {
+      if (mi >= originalCount || !m) return null;
+      const pi = prodMonths.indexOf(normalizeMonth(m));
       return (pi >= 0 && r.values[pi] !== null) ? r.values[pi] : null;
     });
   }
@@ -3218,9 +3264,9 @@ function renderProductivityCharts(workData, prodData) {
     };
   });
 
-  // Build latest-month KPI values
-  const lastMonth = commonMonths[commonMonths.length - 1];
-  const lastIdx   = commonMonths.length - 1;
+  // Build latest-month KPI values（延長・超過列は対象外。選択範囲内の最新月を基準にする）
+  const lastIdx   = originalCount - 1;
+  const lastMonth = months[lastIdx];
 
   function kpiHtml(label, site, key, unit, decimals = 1) {
     const v = data[site]?.[key]?.[lastIdx];
@@ -3305,7 +3351,7 @@ function renderProductivityCharts(workData, prodData) {
         <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">${m.sub}</span>
         <span style="float:right;font-size:0.72rem;color:var(--muted)">折れ線(左軸): ${m.unit}　棒(右軸): 生産量/時間 切替</span>
       </div>
-      <div class="schart-wrap" style="height:340px"><canvas id="prd-${i}"></canvas></div>
+      ${chartWrapHtml(`prd-${i}`, months.length, { heightPx: 340, inlineHeight: true })}
     </div>`;
   });
 
@@ -3362,7 +3408,7 @@ function renderProductivityCharts(workData, prodData) {
     });
 
     productivityChartInstances[`prd-${i}`] = new Chart(ctx, {
-      data: { labels: commonMonths, datasets },
+      data: { labels: months, datasets },
       options: comboOpts(m.unit, m.decimals, barUnit),
     });
   });
@@ -3509,37 +3555,41 @@ function renderCompareTab() {
 
 function renderCompareCharts(prodData) {
   const main = document.getElementById('main');
-  const { months: workMonths, employees } = getActiveData();
+  const { employees } = getActiveData();
   const { months: prodMonths, records } = prodData;
   const rows = loadStdSettings();
   const conv = loadCsConv();
 
-  const normWorkMonths = workMonths.map(m => normalizeMonth(m));
-  // 実質月・暦月とも同じ月キーのため単純一致（集計期間フィルターで絞り込まれたworkMonthsにも連動する）
-  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(m));
+  // 表示列は「開始月から固定12本（シート実在最新月を超える分は見出しも空欄）」。
+  // 生産実績側の実データは、選択範囲内(mi < originalCount)の月だけをnormalizeMonth()で
+  // 突き合わせる。延長列・超過列には勤怠・生産実績いずれのデータも一切載せない
+  const { months: commonMonths, originalCount } = getExtendedDisplayMonths();
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
 
-  // mはcommonMonths（整理済み_分析側の暦月）の値。commonMonthsはprodMonthsの絞り込み後の
-  // 部分集合になり得るため、prodMonths内の対応位置をここで都度引き直す
-  function getProdVal(site, metricKey, m) {
+  // miはcommonMonths（表示列。work-hours表記＋延長分の空欄を含む固定12本）のインデックス。
+  // 選択範囲内(mi < originalCount)の月だけをnormalizeMonth()でprodMonths側と突き合わせる
+  function getProdVal(site, metricKey, mi) {
+    if (mi >= originalCount) return null;
+    const m = commonMonths[mi];
+    if (!m) return null;
     const r = records.find(r => r.site === site && r.metric === metricKey);
     if (!r) return null;
-    const pi = prodMonths.indexOf(m);
+    const pi = prodMonths.indexOf(normalizeMonth(m));
     return pi >= 0 ? (r.values[pi] ?? null) : null;
   }
 
-  function calcRow(site, r, m) {
+  function calcRow(site, r, mi) {
     const v = r.val;
     if (v === null || v === undefined) return { h: null };
     const mkey = r.metricKey || null;
     if (r.col === 'kgPerH' && v > 0) {
-      const kg = getProdVal(site, mkey || '収穫量(kg)', m);
+      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
       return { h: kg !== null ? kg / v : null };
     }
     if (r.col === 'fixedH') return { h: v };
     if (r.col === 'perContainer') {
-      const containers = getProdVal(site, mkey || '稼働コンテナ数', m);
+      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
       if (containers !== null) {
         const hPer = r.unit === 'h' ? v : v / 60;
         return { h: containers * hPer };
@@ -3547,7 +3597,7 @@ function renderCompareCharts(prodData) {
       return { h: null };
     }
     if (r.col === 'perPiece') {
-      const pcs = getProdVal(site, mkey || '合計(点数)', m);
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
       if (pcs !== null) {
         const secPer = r.unit === '秒' ? v : v * 60;
         return { h: pcs * secPer / 3600 };
@@ -3555,8 +3605,8 @@ function renderCompareCharts(prodData) {
       return { h: null };
     }
     if (r.col === 'perCs') {
-      const pcs  = getProdVal(site, mkey || '合計(点数)', m);
-      const bara = getProdVal(site, conv.baraMetric || 'バラ数', m) || 0;
+      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
+      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
       if (pcs !== null) {
         const cs = calcCs(pcs, bara, conv);
         const secPer = r.unit === '秒' ? v : v * 60;
@@ -3569,10 +3619,9 @@ function renderCompareCharts(prodData) {
 
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
-    return commonMonths.map(m => {
-      const wi = normWorkMonths.indexOf(m);
-      if (wi < 0) return null;
-      const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
+    return commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[mi] ?? 0), 0);
       return total > 0 ? Math.round(total * 10) / 10 : null;
     });
   }
@@ -3656,7 +3705,7 @@ function renderCompareCharts(prodData) {
           <div class="schart-header">${div}
             <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 標準 vs 実績（h）</span>
           </div>
-          <div class="schart-wrap" style="height:320px"><canvas id="cmp-${site}-${div}"></canvas></div>
+          ${chartWrapHtml(`cmp-${site}-${div}`, commonMonths.length, { heightPx: 320, inlineHeight: true })}
         </div>`;
       });
       html += `</div>`;
@@ -3671,7 +3720,7 @@ function renderCompareCharts(prodData) {
         if (!d) return [];
         return commonMonths.flatMap((m, mi) => {
           const stdTotal = d.divRows.reduce((s, r) => {
-            const res = calcRow(site, r, m);
+            const res = calcRow(site, r, mi);
             return s + (res.h !== null ? res.h : 0);
           }, 0);
           return [stdTotal, d.actualH[mi]];
@@ -3705,8 +3754,8 @@ function renderCompareCharts(prodData) {
 
         // 標準工数の積み上げバー（右・タスク別）
         divRows.forEach((r, ri) => {
-          const data = commonMonths.map(m => {
-            const res = calcRow(site, r, m);
+          const data = commonMonths.map((m, mi) => {
+            const res = calcRow(site, r, mi);
             return res.h !== null ? Math.round(res.h * 10) / 10 : null;
           });
           datasets.push({
@@ -3756,10 +3805,10 @@ function renderCompareCharts(prodData) {
       html += `<div class="schart-section">
         <div class="schart-header">${div} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数（拠点別） / 標準工数（工程別・3拠点合計）</span></div>
         <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準 vs 実績（統合・拠点別×工程別）</div>
-        <div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-combined"></canvas></div>
+        ${chartWrapHtml(`cmpsum-${div}-combined`, commonMonths.length, { heightPx: 320, inlineHeight: true })}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-actual"></canvas></div></div>
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準工数（工程別・3拠点合計）</div><div class="schart-wrap" style="height:320px"><canvas id="cmpsum-${div}-std"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div>${chartWrapHtml(`cmpsum-${div}-actual`, commonMonths.length, { heightPx: 320, inlineHeight: true })}</div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">標準工数（工程別・3拠点合計）</div>${chartWrapHtml(`cmpsum-${div}-std`, commonMonths.length, { heightPx: 320, inlineHeight: true })}</div>
         </div>
       </div>`;
     });
@@ -3771,9 +3820,9 @@ function renderCompareCharts(prodData) {
       // 実績工数：拠点ごとの値
       const actualBySite = availSites.map(site => window._cmpChartData[`${site}-${div}`]?.actualH || commonMonths.map(() => null));
       // 標準工数：工程ごとの3拠点合計
-      const stdByTask = divRows.map(r => commonMonths.map(m => {
+      const stdByTask = divRows.map(r => commonMonths.map((m, mi) => {
         const total = availSites.reduce((s, site) => {
-          const res = calcRow(site, r, m);
+          const res = calcRow(site, r, mi);
           return s + (res.h !== null ? res.h : 0);
         }, 0);
         return total > 0 ? Math.round(total * 10) / 10 : null;
