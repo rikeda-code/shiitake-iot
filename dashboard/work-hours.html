@@ -2873,8 +2873,11 @@ function parseStdSettingsSheet(json) {
   }
   const pcsPerCsRaw = findLabelValue('パック・袋P/cs') ?? findLabelValue('パック・袋');
   const baraMetricRaw = findLabelValue('バラのメトリック名') ?? findLabelValue('メトリック名');
+  // gvizはセルの書式設定によって、数値であっても文字列型("10"等)でレスポンスを返すことが
+  // あるため、typeofによる厳格な型チェックではなくNumber()で解釈できるかどうかで判定する
+  const pcsPerCsNum = Number(pcsPerCsRaw);
   const conv = {
-    pcsPerCs: (typeof pcsPerCsRaw === 'number' && pcsPerCsRaw > 0) ? pcsPerCsRaw : STD_CS_DEFAULT.pcsPerCs,
+    pcsPerCs: (pcsPerCsRaw !== null && pcsPerCsRaw !== '' && !isNaN(pcsPerCsNum) && pcsPerCsNum > 0) ? pcsPerCsNum : STD_CS_DEFAULT.pcsPerCs,
     baraMetric: (typeof baraMetricRaw === 'string' && baraMetricRaw.trim()) ? baraMetricRaw.trim() : STD_CS_DEFAULT.baraMetric,
   };
   console.log('[標準工数設定] cs換算設定 パース結果:', JSON.stringify(conv), 'raw:', JSON.stringify({ pcsPerCsRaw, baraMetricRaw }), 'types:', typeof pcsPerCsRaw, typeof baraMetricRaw);
