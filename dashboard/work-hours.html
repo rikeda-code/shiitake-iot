@@ -755,6 +755,42 @@ let empChartSubtab = 'site';       // サマリー「雇用形態別（グラフ
 let periodStartMonth = null;       // 集計期間フィルターの開始月（allData.monthsの値と同じ文字列。全タブ共通のグローバルな絞り込み）
 let periodMonthCount = 12;         // 集計期間フィルターの表示月数（1〜12）
 
+// ページリロード（F5・Ctrl+Shift+R等）時に直前の表示状態を復元するための保持。
+// タブ・ウィンドウを閉じると消えるsessionStorageを使う（複数人で共有する業務データではなく、
+// あくまで個人のその場の操作状態のため）。既存の「更新ボタン押下時の状態保持」
+// （loadAll()内のprevActiveBase等、タブを閉じなくても効く別の仕組み）とは役割が異なり、
+// 競合しないよう、ここでは「ページ読み込み時に一度だけグローバル変数へ反映する」ことのみ
+// 行う。反映後の実際のタブ内容の復元処理自体は、既存のloadAll()の仕組みにそのまま乗せる
+const SESSION_STATE_KEY = 'shiitake_wh_session_state';
+
+function saveSessionState() {
+  try {
+    sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify({
+      activeBase,
+      activeMode,
+      compareSubtab,
+      empChartSubtab,
+      summarySubtab: document.querySelector('.summary-subtab.active')?.dataset.tab || null,
+      periodStartMonth,
+      periodMonthCount,
+      empTypeFilter: empTypeFilter ? [...empTypeFilter] : null,
+      // renderEmpTypeFilterUI()が「保存時点で存在した全雇用区分」と「新しく現れた雇用区分」を
+      // 区別するために使う一覧。これが無いと、復元直後の初回loadAll()実行時点では
+      // empTypeColorMapがまだ空のため、全区分が「新しく現れた区分」と誤認され、
+      // チェックを外していた区分まで復元時に再度チェックされてしまう
+      empTypeAllKnown: empTypeFilter ? Object.keys(empTypeColorMap) : null,
+      transferMode,
+    }));
+  } catch (e) { /* sessionStorageが使えない環境等は無視して継続 */ }
+}
+
+function loadSessionState() {
+  try {
+    const s = sessionStorage.getItem(SESSION_STATE_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch (e) { return null; }
+}
+
 function applyEmpTypeFilter(employees) {
   if (!empTypeFilter) return employees;
   return employees.filter(e => empTypeFilter.has(e.employment || '（未分類）'));
@@ -1247,6 +1283,7 @@ function setTransferMode(mode) {
   document.querySelectorAll('.transfer-toggle-btn').forEach(b => {
     b.classList.toggle('active', (b.dataset.mode === 'on') === mode);
   });
+  saveSessionState();
   renderTransferAlerts();
   rerenderCurrentView();
 }
@@ -1327,6 +1364,7 @@ function renderTabs(bases) {
       btn.classList.add('active');
       activeBase = base;
       activeMode = 'site';
+      saveSessionState();
       document.getElementById('main').innerHTML = '';
       renderBasePanel();
       renderTransferAlerts();
@@ -1342,6 +1380,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     sBtn.classList.add('active');
     activeMode = 'summary';
+    saveSessionState();
     if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
     document.getElementById('main').innerHTML = '';
     renderSummary();
@@ -1356,6 +1395,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     pBtn.classList.add('active');
     activeMode = 'production';
+    saveSessionState();
     document.getElementById('main').innerHTML = '';
     renderProductionTab();
     renderTransferAlerts();
@@ -1370,6 +1410,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     prBtn.classList.add('active');
     activeMode = 'productivity';
+    saveSessionState();
     document.getElementById('main').innerHTML = '';
     renderProductivityTab();
     renderTransferAlerts();
@@ -1384,6 +1425,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     stBtn.classList.add('active');
     activeMode = 'stdset';
+    saveSessionState();
     document.getElementById('main').innerHTML = '';
     renderStdSetTab();
     renderTransferAlerts();
@@ -1398,6 +1440,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     shBtn.classList.add('active');
     activeMode = 'stdhours';
+    saveSessionState();
     document.getElementById('main').innerHTML = '';
     renderStdHoursTab();
     renderTransferAlerts();
@@ -1412,6 +1455,7 @@ function renderTabs(bases) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     cmpBtn.classList.add('active');
     activeMode = 'compare';
+    saveSessionState();
     document.getElementById('main').innerHTML = '';
     renderCompareTab();
     renderTransferAlerts();
@@ -1683,6 +1727,7 @@ function renderPeriodFilterUI(preserveStart, preserveCount) {
 function onPeriodFilterChange() {
   periodStartMonth = document.getElementById('period-start-select').value;
   periodMonthCount = parseInt(document.getElementById('period-count-select').value, 10);
+  saveSessionState();
   rerenderCurrentView();
 }
 
@@ -1723,6 +1768,7 @@ function onEmpTypeFilterChange() {
       .filter(cb => cb.checked)
       .map(cb => cb.dataset.type)
   );
+  saveSessionState();
   rerenderCurrentView();
 }
 
@@ -1784,6 +1830,7 @@ function renderSummary() {
       document.querySelectorAll('.summary-subtab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       renderSummarySubtab(btn.dataset.tab);
+      saveSessionState();
     };
   });
 
@@ -2153,6 +2200,7 @@ function renderSummaryEmpChart() {
       document.querySelectorAll('#empchart-subtabs .transfer-toggle-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       renderEmpChartContent();
+      saveSessionState();
     };
   });
 
@@ -3553,8 +3601,10 @@ async function loadAll() {
   // データ再取得後に同じ表示へ戻す（振替あり/なしのトグルはグローバル変数のままなので触れない）
   const prevActiveMode = activeMode;
   const prevActiveBase = activeBase;
+  // ページ読み込み直後（まだ.summary-subtab要素が存在しない）はDOMから読めないため、
+  // restoreSessionStateBeforeFirstLoad()が設定したrestoredSummarySubtabにフォールバックする
   const prevSummarySubtab = activeMode === 'summary'
-    ? (document.querySelector('.summary-subtab.active')?.dataset.tab || 'table')
+    ? (document.querySelector('.summary-subtab.active')?.dataset.tab || restoredSummarySubtab || 'table')
     : null;
   const prevEmpTypeChecked = empTypeFilter ? new Set(empTypeFilter) : null;
   const prevEmpTypeAll = empTypeFilter ? new Set(Object.keys(empTypeColorMap)) : null;
@@ -4074,11 +4124,43 @@ function renderCompareCharts(prodData) {
       document.querySelectorAll('#compare-subtabs .transfer-toggle-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       renderCompareContent();
+      saveSessionState();
     };
   });
 
   renderCompareContent();
 }
+
+// ページ読み込み時（F5・Ctrl+Shift+R含む）に一度だけ、sessionStorageから直前の表示状態を
+// グローバル変数へ反映する。以降の実際のタブ復元処理は、既存のloadAll()内の
+// 「更新ボタン押下時の状態保持」ロジック（prevActiveBase等）にそのまま乗せる。
+// summarySubtabだけは対応するグローバル変数が無く、loadAll()側もDOM（.summary-subtab.active）
+// から読むため、まだ何も描画されていない初回だけ使うフォールバック値として保持しておく
+let restoredSummarySubtab = null;
+(function restoreSessionStateBeforeFirstLoad() {
+  const s = loadSessionState();
+  if (!s) return;
+  if (s.activeBase) activeBase = s.activeBase;
+  if (s.activeMode) activeMode = s.activeMode;
+  if (s.compareSubtab) compareSubtab = s.compareSubtab;
+  if (s.empChartSubtab) empChartSubtab = s.empChartSubtab;
+  if (s.summarySubtab) restoredSummarySubtab = s.summarySubtab;
+  if (s.periodStartMonth) periodStartMonth = s.periodStartMonth;
+  if (typeof s.periodMonthCount === 'number') periodMonthCount = s.periodMonthCount;
+  if (Array.isArray(s.empTypeFilter)) empTypeFilter = new Set(s.empTypeFilter);
+  // renderEmpTypeFilterUI()が初回loadAll()実行時に「保存時点で存在した雇用区分」を
+  // 正しく認識できるよう、empTypeColorMapのキーだけ先に復元しておく（値はダミーでよく、
+  // renderEmpTypeFilterUI()自身が実データをもとに正しい色へ上書きする）
+  if (Array.isArray(s.empTypeAllKnown)) {
+    s.empTypeAllKnown.forEach(t => { empTypeColorMap[t] = null; });
+  }
+  if (typeof s.transferMode === 'boolean') {
+    transferMode = s.transferMode;
+    document.querySelectorAll('.transfer-toggle-btn').forEach(b => {
+      b.classList.toggle('active', (b.dataset.mode === 'on') === transferMode);
+    });
+  }
+})();
 
 loadAll();
 // 「標準工数設定」シートはページ読み込み時に一度だけ取得する（更新ボタンでは再取得しない）
