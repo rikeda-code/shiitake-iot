@@ -799,19 +799,23 @@ function buildExtendedMonthList(selectedMonths, allRealMonths) {
 
 // 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための
 // キャンバスラッパーHTMLを返す（列/棒の最小幅を確保し、超過分は横スクロール）
-function chartWrapHtml(canvasId, monthCount) {
+function chartWrapHtml(canvasId, monthCount, opts) {
   const PX_PER_MONTH = 70;
+  const wrapClass = (opts && opts.wrapClass) || 'schart-wrap';
+  const heightPx = (opts && opts.heightPx) || 300;
   if (monthCount <= MONTH_COLUMN_TARGET) {
-    return `<div class="schart-wrap"><canvas id="${canvasId}"></canvas></div>`;
+    const style = (opts && opts.inlineHeight) ? ` style="height:${heightPx}px"` : '';
+    return `<div class="${wrapClass}"${style}><canvas id="${canvasId}"></canvas></div>`;
   }
-  return `<div class="schart-wrap" style="overflow-x:auto"><div style="position:relative;height:300px;min-width:${monthCount * PX_PER_MONTH}px"><canvas id="${canvasId}"></canvas></div></div>`;
+  return `<div class="${wrapClass}" style="overflow-x:auto"><div style="position:relative;height:${heightPx}px;min-width:${monthCount * PX_PER_MONTH}px"><canvas id="${canvasId}"></canvas></div></div>`;
 }
 
-// getActiveData()にbuildExtendedMonthList()を適用した「拡張済み」データを返す便利関数。
-// 延長分の月はemployees[].hoursがnullになる（グラフは自然に棒なしになる。表側は
-// originalCountを使って呼び出し側でinRange判定し、空欄表示にする）
-function getExtendedActiveData() {
-  const { months: selectedMonths, employees: selectedEmployees } = getActiveData();
+// 指定のフィルター済みデータ（months/employees）にbuildExtendedMonthList()を適用した
+// 「拡張済み」データを返す共通ヘルパー。延長分の月はemployees[].hoursがnullになる
+// （グラフは自然に棒なしになる。表側はoriginalCountを使って呼び出し側でinRange判定し、
+// 空欄表示にする）
+function getExtendedFromData(data) {
+  const { months: selectedMonths, employees: selectedEmployees } = data;
   const extendedMonths = buildExtendedMonthList(selectedMonths, getRealMonths());
   const months = extendedMonths.map(e => e.month);
   const originalCount = selectedMonths.length;
@@ -819,7 +823,18 @@ function getExtendedActiveData() {
     ...e,
     hours: extendedMonths.map((_, mi) => mi < originalCount ? e.hours[mi] : null),
   }));
-  return { months, employees, originalCount, extendedMonths };
+  return { ...data, months, employees, originalCount, extendedMonths };
+}
+
+// getActiveData()を拡張済みにしたもの（振替の影響を受ける画面で使用）
+function getExtendedActiveData() {
+  return getExtendedFromData(getActiveData());
+}
+
+// getBaseFilteredData()を拡張済みにしたもの（従業員数・人数グラフ等、振替の影響を
+// 受けない箇所で使用）
+function getExtendedBaseFilteredData() {
+  return getExtendedFromData(getBaseFilteredData());
 }
 
 // months/monthYms/employees.hours を、選択中の開始月から表示月数分だけスライスする
@@ -1398,9 +1413,9 @@ function renderBasePanel() {
   const baseFiltered = getBaseFilteredData();
   const baseEmps = baseFiltered.employees.filter(e => e.base === activeBase && e.workType);
   // 勤務時間の集計（月平均・個人月間最大）は振替・雇用区分・集計期間フィルターすべてを反映する
-  const { months, monthYms, employees: activeEmployees } = getActiveData();
+  const { months, employees: activeEmployees, originalCount } = getExtendedActiveData();
   const adjBaseEmps = activeEmployees.filter(e => e.base === activeBase && e.workType);
-  const realMonthCount = monthYms.filter(ym => ym !== null && ym !== undefined).length;
+  const realMonthCount = originalCount;
   const baseColor = SITE_COLORS[activeBase] || '#38bdf8';
 
   if (!document.getElementById('site-panel')) {
@@ -1408,11 +1423,17 @@ function renderBasePanel() {
       <div class="site-panel" id="site-panel">
         <div class="kpi-row" id="kpi-row"></div>
         <div class="chart-section-label">勤務時間グラフ</div>
-        <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+        <div id="main-chart-wrap"></div>
         <div class="chart-section-label">人数グラフ（栽培 / 出荷 / 配送 ／ 社員 / パート / 技能実習生）</div>
-        <div class="chart-wrap" style="height:260px"><canvas id="count-chart"></canvas></div>
+        <div id="count-chart-wrap"></div>
       </div>`;
   }
+  // 月数が12本を超える場合に横スクロール構造へ切り替える必要があるため、
+  // 集計期間の変更等でsite-panel自体は再利用される場合でもラッパーは毎回組み直す
+  document.getElementById('main-chart-wrap').innerHTML =
+    chartWrapHtml('main-chart', months.length, { wrapClass: 'chart-wrap', heightPx: 380 });
+  document.getElementById('count-chart-wrap').innerHTML =
+    chartWrapHtml('count-chart', months.length, { wrapClass: 'chart-wrap', heightPx: 260, inlineHeight: true });
 
   const kpiRow = document.getElementById('kpi-row');
   const validHours = adjBaseEmps.flatMap(e => e.hours.filter(h => h !== null));
@@ -1446,7 +1467,7 @@ function renderBasePanel() {
 }
 
 function buildChart() {
-  const { months, employees } = getActiveData();
+  const { months, employees } = getExtendedActiveData();
   const baseEmps = employees.filter(e => e.base === activeBase && e.workType);
 
   const datasets = baseEmps.map(emp => {
@@ -1527,7 +1548,7 @@ function buildChart() {
 }
 
 function buildCountChart() {
-  const { months, employees } = getBaseFilteredData();
+  const { months, employees } = getExtendedBaseFilteredData();
   const baseEmps = employees.filter(e => e.base === activeBase && e.workType);
 
   const WT_SERIES = [
@@ -1926,7 +1947,7 @@ function renderSummaryTable() {
 
 /* ── Summary: グラフタブ ───────────────────────────────────────── */
 function buildSiteSeriesList(site) {
-  const { employees, months } = getActiveData();
+  const { employees, months } = getExtendedActiveData();
   const orderedWorkTypes = getOrderedWorkTypes(employees);
   const EMP_CLASSES = ['社員・技能実習生', 'パート'];
   const siteEmps = employees.filter(e => e.base === site);
@@ -2025,7 +2046,7 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax,
 
 /* ── Summary: 業務区分別グラフ ─────────────────────────────────── */
 function renderSummaryWorkChart() {
-  const { months, employees } = getActiveData();
+  const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const orderedWorkTypes = getOrderedWorkTypes(employees);
@@ -2048,8 +2069,8 @@ function renderSummaryWorkChart() {
       <div class="schart-section">
         <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="${cid}_h"></canvas></div></div>
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="${cid}_n"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div>${chartWrapHtml(cid + '_h', months.length)}</div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div>${chartWrapHtml(cid + '_n', months.length)}</div>
         </div>
       </div>`;
   });
@@ -2251,8 +2272,16 @@ function renderEmpChartSummaryView() {
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
 function renderSummaryByEmpType() {
-  const { months, employees } = getActiveData();
+  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
+  const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
+
+  // 延長分（inRange:false）は表では完全な空欄にする（在範囲内の0/データなしは既存通り「—」のまま）
+  function cellText(v, mi, isCount) {
+    if (mi >= originalCount) return '';
+    return isCount ? (v !== null ? v + ' 名' : '—') : fmtH(v);
+  }
 
   function detailEmp(emp) {
     if (!emp) return 'パート';
@@ -2295,7 +2324,7 @@ function renderSummaryByEmpType() {
       }
       html += `<td class="col-work" rowspan="2" style="color:${color}">${et}</td>`;
       html += `<td class="col-emp">時間</td>`;
-      hourVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+      hourVals.forEach((v, mi) => { html += `<td class="num">${cellText(v, mi, false)}</td>`; });
       html += '</tr>';
 
       const countVals = months.map((_, mi) => {
@@ -2304,7 +2333,7 @@ function renderSummaryByEmpType() {
       });
       html += '<tr>';
       html += `<td class="col-emp">人数</td>`;
-      countVals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+      countVals.forEach((v, mi) => { html += `<td class="num">${cellText(v, mi, true)}</td>`; });
       html += '</tr>';
     });
 
@@ -2313,12 +2342,12 @@ function renderSummaryByEmpType() {
       return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     });
     html += '<tr class="site-total-last"><td class="col-emp" colspan="2" style="font-weight:800">合計／時間</td>';
-    totalHours.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    totalHours.forEach((v, mi) => { html += `<td class="num">${cellText(v, mi, false)}</td>`; });
     html += '</tr>';
 
     const totalCount = months.map((_, mi) => siteEmps.filter(e => e.hours[mi] !== null).length || null);
     html += '<tr class="site-total-last"><td class="col-emp" colspan="2" style="font-weight:800">合計／人数</td>';
-    totalCount.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+    totalCount.forEach((v, mi) => { html += `<td class="num">${cellText(v, mi, true)}</td>`; });
     html += '</tr>';
   });
 
@@ -2328,7 +2357,8 @@ function renderSummaryByEmpType() {
 
 function renderSummaryChart() {
   const content = document.getElementById('summary-content');
-  const activeSites = SITES.filter(s => getActiveData().employees.some(e => e.base === s));
+  const { months, employees } = getExtendedActiveData();
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
 
   let html = '<div class="schart-shell">';
   activeSites.forEach((site, si) => {
@@ -2346,7 +2376,7 @@ function renderSummaryChart() {
               ${s.label}
             </label>`).join('')}
         </div>
-        <div class="schart-wrap"><canvas id="${siteId}"></canvas></div>
+        ${chartWrapHtml(siteId, months.length)}
       </div>`;
   });
   html += '</div>';
@@ -2374,7 +2404,7 @@ function renderSummaryChart() {
     }));
     summaryChartInstances[siteId] = new Chart(ctx, {
       type: 'line',
-      data: { labels: getActiveData().months, datasets },
+      data: { labels: months, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -2427,7 +2457,9 @@ let rosterFilterSites = new Set(SITES);
 let rosterFilterEmps  = null; // null = all; initialised on first render
 
 function renderSummaryRoster() {
-  const { months, employees, nameLabel } = getActiveData();
+  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
+  const { months, employees, originalCount, nameLabel } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
 
   const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
@@ -2471,9 +2503,6 @@ function renderSummaryRoster() {
 
   function buildContent() {
     const sorted = rosterSorted(rosterSortCol);
-    const recentMonths = months;
-    const recentIdxs = recentMonths.map(m => months.indexOf(m));
-
     const activeSites = SITES.filter(s => employees.some(e => e.base === s));
 
     // Filter bar
@@ -2504,11 +2533,11 @@ function renderSummaryRoster() {
       const sortCls = rosterSortCol === c.key ? (rosterSortAsc ? ' sort-asc' : ' sort-desc') : '';
       tableHtml += `<th class="${cls}${sortCls}" onclick="rosterSort('${c.key}')">${c.label}</th>`;
     });
-    recentMonths.forEach(m => { tableHtml += `<th>${m}</th>`; });
+    months.forEach(m => { tableHtml += `<th>${m}</th>`; });
     tableHtml += '</tr></thead><tbody>';
 
     if (sorted.length === 0) {
-      tableHtml += `<tr><td colspan="${tableCols.length + recentMonths.length}" style="text-align:center;color:var(--muted);padding:24px">該当する従業員がいません</td></tr>`;
+      tableHtml += `<tr><td colspan="${tableCols.length + months.length}" style="text-align:center;color:var(--muted);padding:24px">該当する従業員がいません</td></tr>`;
     } else {
       sorted.forEach(e => {
         tableHtml += `<tr>
@@ -2516,7 +2545,9 @@ function renderSummaryRoster() {
           <td>${e.workType || '—'}</td>
           <td>${e.employment || '—'}</td>
           <td>${e.name}</td>`;
-        recentIdxs.forEach(mi => {
+        months.forEach((_, mi) => {
+          // 延長分（表示月数の範囲外）は空欄、範囲内はデータなしを「—」で表示
+          if (mi >= originalCount) { tableHtml += '<td class="num"></td>'; return; }
           const h = e.hours[mi];
           tableHtml += `<td class="num">${h !== null ? h.toFixed(1) + ' h' : '—'}</td>`;
         });
