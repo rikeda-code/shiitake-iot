@@ -702,6 +702,7 @@ const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
 const ADJUST_SHEET_NAME = '整理済み_増減'; // 工数振替（研修・応援）レコード
 const PROD_GID = '2016642543'; // 整理済み_分析
+const STD_SETTINGS_SHEET_NAME = '標準工数設定';
 
 const SITES = ['いなべ', '群馬', '南丹'];
 const SITE_COLORS = {
@@ -2773,76 +2774,164 @@ function renderProductionTable({ months: filteredMonths, records }) {
 
 /* ── 標準工数設定 ───────────────────────────────────────────────────── */
 
-const STD_STORAGE_KEY = 'shiitake_std_settings';
-
-// cs conversion params stored separately
-const STD_CS_KEY = 'shiitake_std_cs';
 // pcsPerCs: パック・袋ともに30P/cs。バラ(バラ数メトリック)は1個=1cs
+// （「標準工数設定」シートの取得に失敗した場合のフォールバック値としてのみ使用）
 const STD_CS_DEFAULT = { pcsPerCs: 30, baraMetric: 'バラ数' };
-function loadCsConv() {
-  try { const s = localStorage.getItem(STD_CS_KEY); if (s) {
-    const saved = JSON.parse(s);
-    // migrate old format
-    if (saved.packPcsPerCs !== undefined) return { pcsPerCs: saved.packPcsPerCs || 30, baraMetric: saved.baraMetric || 'バラ数' };
-    return { ...STD_CS_DEFAULT, ...saved };
-  }} catch(e) {}
-  return { ...STD_CS_DEFAULT };
-}
-function saveCsConv(c) { localStorage.setItem(STD_CS_KEY, JSON.stringify(c)); }
+
+// 生産実績シートの対応メトリック名（作業区分名をキーに突き合わせる）。
+// 「標準工数設定」シート側にはmetricKey専用の列が無いため、この対応表はコード側に残す
+const TASK_METRIC_KEYS = {
+  '菌床入れ': '菌床入れ',
+  '芽かき': '芽かき',
+  '収穫': '収穫量(kg)',
+  '注水': '注水',
+  '散水': '散水',
+  '廃棄': '廃棄',
+  '計量時間': '収穫',
+  'コンテナ移動時間': '稼働コンテナ数',
+  'コンテナ点検時間': '稼働コンテナ数',
+  'その他間接業': null,
+  'パック並べる': 'パック数',
+  '袋入れ・閉じ': '袋数',
+  '段ボール詰める': '合計(点数)',
+  '段ボール作成': '合計(点数)',
+  '計量': '合計(点数)',
+  '納品書・伝票作成': null,
+  '椎茸運搬(生在庫)': '合計(点数)',
+  '椎茸運搬(製品)': '合計(点数)',
+};
+
 // cs数 = (合計点数 - バラ数) / pcsPerCs + バラ数
 function calcCs(pcs, bara, conv) {
   const nonBara = Math.max(0, pcs - bara);
   return nonBara / conv.pcsPerCs + bara;
 }
 
-const STD_DEFAULT = [
-  // metricKey: 生産実績シートの対応メトリック名（perContainerはタスク別、その他は固定）
-  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    metricKey: '菌床入れ',     note: '菌床入れコンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    metricKey: '芽かき',       note: '芽かきコンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', metricKey: '収穫量(kg)',   note: '収穫量(kg) ÷ kg/h' },
-  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    metricKey: '注水',         note: '注水コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   metricKey: '散水',         note: '散水コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    metricKey: '廃棄',         note: '廃棄コンテナ数 × h/コンテナ' },
-  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   metricKey: '収穫',           note: '収穫コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
-  { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    metricKey: null,           note: '毎月固定時間' },
-  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   metricKey: 'パック数',     note: 'パック数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   metricKey: '袋数',         note: '袋数 × 秒/個 ÷ 3600' },
-  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
-  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
-  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
-  { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    metricKey: null,          note: '毎月固定時間' },
-  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
-  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
-];
+// stdSettingsSheetData: 「標準工数設定」シートから読み取った値そのもの（リセット時の復元元）。
+// currentStdRows/currentStdConv: 画面編集を反映する実行時の状態（保存はせず、リセットで
+// stdSettingsSheetDataの値に戻す）。ページ読み込み時に一度だけ取得し、以降は
+// 「更新」ボタンを押しても再取得しない（loadAll()とは独立したPromiseで管理する）
+let stdSettingsSheetData = null;
+let currentStdRows = null;
+let currentStdConv = null;
+let stdSettingsPromise = null;
+
+function loadStdSettingsSheetOnce() {
+  if (!stdSettingsPromise) {
+    stdSettingsPromise = fetchStdSettingsSheet().then(data => {
+      stdSettingsSheetData = data;
+      currentStdRows = JSON.parse(JSON.stringify(data.rows));
+      currentStdConv = { ...data.conv };
+      return data;
+    }).catch(e => {
+      console.error('[標準工数設定] シート取得エラー:', e);
+      stdSettingsSheetData = { conv: { ...STD_CS_DEFAULT }, rows: [], error: e.message };
+      currentStdRows = [];
+      currentStdConv = { ...STD_CS_DEFAULT };
+      throw e;
+    });
+  }
+  return stdSettingsPromise;
+}
+
+async function fetchStdSettingsSheet() {
+  // headers=0：見出し行の結合をgvizに任せず、1行目から全行を生データのまま受け取る
+  // （1〜3行目のcs換算設定はセル単位の値を個別に読む必要があるため）
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(STD_SETTINGS_SHEET_NAME)}&headers=0`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  return parseStdSettingsSheet(json);
+}
+
+function parseStdSettingsSheet(json) {
+  const rows = json.table.rows || [];
+  const cellAt = (rIdx, cIdx) => {
+    const row = rows[rIdx];
+    const c = row && row.c && row.c[cIdx];
+    return c ? (c.v !== undefined ? c.v : null) : null;
+  };
+
+  // 出荷cs換算設定（1〜3行目）：ラベル文字列を含むセルを探し、同じ列の直下のセルを値として読む。
+  // 実際の列位置に依存しない作りにすることで、シート側の細かいレイアウト差異を吸収する
+  function findLabelValue(labelSubstr, searchRows = 4) {
+    for (let r = 0; r < Math.min(searchRows, rows.length); r++) {
+      const row = rows[r];
+      if (!row || !row.c) continue;
+      for (let c = 0; c < row.c.length; c++) {
+        const cell = row.c[c];
+        const text = cell ? String(cell.v ?? cell.f ?? '') : '';
+        if (text.includes(labelSubstr)) {
+          return cellAt(r + 1, c);
+        }
+      }
+    }
+    return null;
+  }
+  const pcsPerCsRaw = findLabelValue('P/cs') ?? findLabelValue('パック');
+  const baraMetricRaw = findLabelValue('バラのメトリック名') ?? findLabelValue('メトリック名');
+  const conv = {
+    pcsPerCs: (typeof pcsPerCsRaw === 'number' && pcsPerCsRaw > 0) ? pcsPerCsRaw : STD_CS_DEFAULT.pcsPerCs,
+    baraMetric: (typeof baraMetricRaw === 'string' && baraMetricRaw.trim()) ? baraMetricRaw.trim() : STD_CS_DEFAULT.baraMetric,
+  };
+
+  // 4行目：列見出し（固定で分かっているためスキップ）。5行目以降が各作業のデータ行
+  // A=業務区分, B=作業区分, C=1コンテナ当たり, D=時間当たり(kg/h), E=1cs当たり,
+  // F=1個当たり, G=固定時間(h), H=単位, I=考え方
+  const COL = { div: 0, task: 1, perContainer: 2, kgPerH: 3, perCs: 4, perPiece: 5, fixedH: 6, unit: 7, note: 8 };
+  const COEF_COLS = ['perContainer', 'kgPerH', 'perCs', 'perPiece', 'fixedH'];
+  const stdRows = [];
+  let currentDiv = '';
+  for (let r = 4; r < rows.length; r++) {
+    const divVal = cellAt(r, COL.div);
+    if (divVal) currentDiv = String(divVal).trim();
+    const taskVal = cellAt(r, COL.task);
+    if (!taskVal) continue; // 業務区分(A列結合)の見出し行・空行はスキップ
+    const task = String(taskVal).trim();
+
+    let col = null, val = null;
+    for (const c of COEF_COLS) {
+      const v = cellAt(r, COL[c]);
+      if (v !== null && v !== '') { col = c; val = typeof v === 'number' ? v : parseFloat(v); break; }
+    }
+    if (val !== null && isNaN(val)) val = null;
+
+    const unitVal = cellAt(r, COL.unit);
+    const noteVal = cellAt(r, COL.note);
+
+    stdRows.push({
+      div: currentDiv,
+      task,
+      col,
+      val,
+      unit: unitVal ? String(unitVal).trim() : '',
+      metricKey: Object.prototype.hasOwnProperty.call(TASK_METRIC_KEYS, task) ? TASK_METRIC_KEYS[task] : null,
+      note: noteVal ? String(noteVal).trim() : '',
+    });
+  }
+
+  return { conv, rows: stdRows };
+}
 
 function loadStdSettings() {
-  try {
-    const s = localStorage.getItem(STD_STORAGE_KEY);
-    if (s) {
-      const saved = JSON.parse(s);
-      // Merge: fill missing metricKey from STD_DEFAULT by task name
-      const defaultByTask = {};
-      STD_DEFAULT.forEach(r => { defaultByTask[r.task] = r; });
-      return saved.map(r => {
-        const def = defaultByTask[r.task];
-        // Only take user-editable fields (val, metricKey) from saved — col/unit/note always come from STD_DEFAULT
-        return def ? {
-          ...def,
-          val: r.val !== undefined ? r.val : def.val,
-          metricKey: r.metricKey !== undefined ? r.metricKey : def.metricKey,
-        } : r;
-      });
-    }
-  } catch(e) {}
-  return JSON.parse(JSON.stringify(STD_DEFAULT));
+  return currentStdRows || [];
 }
-function saveStdSettings(rows) { localStorage.setItem(STD_STORAGE_KEY, JSON.stringify(rows)); }
+function loadCsConv() {
+  return currentStdConv || { ...STD_CS_DEFAULT };
+}
 
 function renderStdSetTab() {
   const main = document.getElementById('main');
-  const rows = loadStdSettings();
+
+  if (!stdSettingsSheetData) {
+    main.innerHTML = '<div class="loading">標準工数設定を読み込み中...</div>';
+    loadStdSettingsSheetOnce().then(() => renderStdSetTab()).catch(e => {
+      main.innerHTML = `<div class="error-msg">「${STD_SETTINGS_SHEET_NAME}」シートの取得エラー: ${e.message}</div>`;
+    });
+    return;
+  }
+
+  const rows = currentStdRows;
   window._stdRows = rows;
 
   const colLabel = { perContainer: '1コンテナ当たり', kgPerH: '時間当たり(kg/h)', perCs: '1cs当たり', perPiece: '1個当たり', fixedH: '固定時間(h)' };
@@ -2852,17 +2941,16 @@ function renderStdSetTab() {
   const divCount = {};
   rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
 
-  const conv = loadCsConv();
+  const conv = currentStdConv;
   window._stdConv = conv;
 
   let html = `<div class="prod-panel">
     <div class="chart-section-label">⚙️ 標準工数設定
       <span style="float:right;display:flex;gap:8px;align-items:center">
         <button class="select-btn" style="padding:3px 14px" onclick="resetStdSettings()">リセット</button>
-        <button class="select-btn" style="padding:3px 14px;background:var(--accent-inabe);color:#000;border-color:var(--accent-inabe)" onclick="saveStdSettingsUI()">保存</button>
       </span>
     </div>
-    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値を編集後「保存」ボタンを押すと標準工数(h)タブに反映されます。単位は各セルの下に表示。</p>
+    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値は「${STD_SETTINGS_SHEET_NAME}」シートから読み込んでいます（画面読み込み時のみ取得）。ここでの編集は一時的な上書きで、保存はされません。単位は各セルの下に表示。</p>
     <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
       <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">
         📦 出荷cs換算設定　<span style="font-weight:400;font-size:0.72rem">cs数 = (合計点数 − バラ数) ÷ P/cs + バラ数</span>
@@ -2933,19 +3021,12 @@ function renderStdSetTab() {
   });
 }
 
-window.saveStdSettingsUI = function() {
-  saveStdSettings(window._stdRows);
-  if (window._stdConv) saveCsConv(window._stdConv);
-  const btn = document.querySelector('.prod-panel .select-btn:last-child');
-  if (btn) { const orig = btn.textContent; btn.textContent = '保存済み ✓'; setTimeout(() => { btn.textContent = orig; }, 1500); }
-};
-
 window.resetStdSettings = function() {
-  if (!confirm('デフォルト値にリセットしますか？')) return;
-  window._stdRows = JSON.parse(JSON.stringify(STD_DEFAULT));
-  window._stdConv = { ...STD_CS_DEFAULT }; // pcsPerCs:30, baraMetric:'バラ数'
-  saveStdSettings(window._stdRows);
-  saveCsConv(window._stdConv);
+  if (!confirm('シート読み込み時の値にリセットしますか？（編集内容は破棄されます）')) return;
+  currentStdRows = JSON.parse(JSON.stringify(stdSettingsSheetData.rows));
+  currentStdConv = { ...stdSettingsSheetData.conv };
+  window._stdRows = currentStdRows;
+  window._stdConv = currentStdConv;
   renderStdSetTab();
 };
 
@@ -2955,10 +3036,10 @@ function renderStdHoursTab() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">標準工数を計算中...</div>';
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
-  fetchProductionSheet().then(prodData => {
+  Promise.all([fetchProductionSheet(), loadStdSettingsSheetOnce()]).then(([prodData]) => {
     renderStdHoursTable(filterProductionByPeriod(prodData));
   }).catch(e => {
-    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+    main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
   });
 }
 
@@ -3548,10 +3629,10 @@ function renderCompareTab() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">比較データを計算中...</div>';
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
-  fetchProductionSheet().then(prodData => {
+  Promise.all([fetchProductionSheet(), loadStdSettingsSheetOnce()]).then(([prodData]) => {
     renderCompareCharts(prodData);
   }).catch(e => {
-    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+    main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
   });
 }
 
@@ -3993,6 +4074,8 @@ function renderCompareCharts(prodData) {
 }
 
 loadAll();
+// 「標準工数設定」シートはページ読み込み時に一度だけ取得する（更新ボタンでは再取得しない）
+loadStdSettingsSheetOnce().catch(e => console.error('[標準工数設定] 初回取得エラー:', e));
 </script>
 </body>
 </html>
