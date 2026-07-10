@@ -3000,7 +3000,9 @@ function renderStdHoursTable(prodData) {
       return { h: kg !== null ? kg / v : null,
                containers: kg };
     }
-    if (r.col === 'fixedH') return { h: v, containers: null };
+    // 毎月固定時間の項目は実データを参照しないため、他の項目のように「実データなし=null」が
+    // 自然には効かない。延長列・超過列（mi >= originalCount）では明示的に空欄にする
+    if (r.col === 'fixedH') return { h: mi < originalCount ? v : null, containers: null };
 
     if (r.col === 'perContainer') {
       const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
@@ -3587,7 +3589,9 @@ function renderCompareCharts(prodData) {
       const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
       return { h: kg !== null ? kg / v : null };
     }
-    if (r.col === 'fixedH') return { h: v };
+    // 毎月固定時間の項目は実データを参照しないため、他の項目のように「実データなし=null」が
+    // 自然には効かない。延長列・超過列（mi >= originalCount）では明示的に空欄にする
+    if (r.col === 'fixedH') return { h: mi < originalCount ? v : null };
     if (r.col === 'perContainer') {
       const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
       if (containers !== null) {
