@@ -2853,9 +2853,12 @@ function parseStdSettingsSheet(json) {
   };
 
   // 出荷cs換算設定（1〜3行目）：ラベル文字列を含むセルを探し、同じ列の直下のセルを値として読む。
-  // 実際の列位置に依存しない作りにすることで、シート側の細かいレイアウト差異を吸収する
-  function findLabelValue(labelSubstr, searchRows = 4) {
-    for (let r = 0; r < Math.min(searchRows, rows.length); r++) {
+  // 実際の列位置に依存しない作りにすることで、シート側の細かいレイアウト差異を吸収する。
+  // 1行目はタイトル行（例:「cs数=(合計点数-バラ数)÷P/cs+バラ数」）で"P/cs"のような
+  // 短い文字列を含むことがあるため、検索は2行目以降に限定し、かつラベルは見出しに
+  // 実際に入っている文言そのもの（十分に長い・特定的な文字列）で照合する
+  function findLabelValue(labelSubstr, startRow = 1, endRow = 4) {
+    for (let r = startRow; r < Math.min(endRow, rows.length); r++) {
       const row = rows[r];
       if (!row || !row.c) continue;
       for (let c = 0; c < row.c.length; c++) {
@@ -2868,12 +2871,13 @@ function parseStdSettingsSheet(json) {
     }
     return null;
   }
-  const pcsPerCsRaw = findLabelValue('P/cs') ?? findLabelValue('パック');
+  const pcsPerCsRaw = findLabelValue('パック・袋P/cs') ?? findLabelValue('パック・袋');
   const baraMetricRaw = findLabelValue('バラのメトリック名') ?? findLabelValue('メトリック名');
   const conv = {
     pcsPerCs: (typeof pcsPerCsRaw === 'number' && pcsPerCsRaw > 0) ? pcsPerCsRaw : STD_CS_DEFAULT.pcsPerCs,
     baraMetric: (typeof baraMetricRaw === 'string' && baraMetricRaw.trim()) ? baraMetricRaw.trim() : STD_CS_DEFAULT.baraMetric,
   };
+  console.log('[標準工数設定] cs換算設定 パース結果:', JSON.stringify(conv), 'raw:', JSON.stringify({ pcsPerCsRaw, baraMetricRaw }), 'types:', typeof pcsPerCsRaw, typeof baraMetricRaw);
 
   // 4行目：列見出し（固定で分かっているためスキップ）。5行目以降が各作業のデータ行
   // A=業務区分, B=作業区分, C=1コンテナ当たり, D=時間当たり(kg/h), E=1cs当たり,
