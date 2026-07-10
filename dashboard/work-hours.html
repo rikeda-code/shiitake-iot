@@ -764,21 +764,47 @@ function getRealMonths() {
   return allData.months.filter((m, i) => allData.monthYms[i] !== null && allData.monthYms[i] !== undefined);
 }
 
-// 表示月数が少ないときの「間延び」対策：選択中の表示範囲（selectedMonths）の右側に、
-// シートに存在する最新月（allRealMonthsの末尾）までの見出し列を追加した拡張月リストを返す。
-// 追加分は見出しのみでinRange:falseとなり、呼び出し側はグラフ・表でデータ部分を空欄にする。
+// 表示月数が少ないときの「間延び」対策：開始月から常にMONTH_COLUMN_TARGET本の列/棒に
+// 揃えた拡張月リストを返す（開始月〜シート実在最新月がこれを超える場合は、その本数
+// そのまま・縮小せず全て表示する。超過分は呼び出し側で横スクロール対応する）。
+// 3段階の区分：
+//   1. 選択中の表示月数の範囲内（inRange:true, hasData:true）→ 実データ
+//   2. 表示月数の範囲外だが、シートに実在する月の範囲内 → 見出しのみ、データは空欄
+//   3. シートの実在最新月を超えた埋め合わせ分 → 見出し自体も空欄（month: ''）
 // 既存の月リスト生成処理（applyPeriodFilter等）を置き換えるものではなく、
 // 呼び出し側で選択的に利用する追加のラップ関数
+const MONTH_COLUMN_TARGET = 12;
+
 function buildExtendedMonthList(selectedMonths, allRealMonths) {
-  const extended = selectedMonths.map(m => ({ month: m, inRange: true, hasData: true }));
-  if (!selectedMonths.length) return extended;
-  const lastSelected = selectedMonths[selectedMonths.length - 1];
-  const lastIdx = allRealMonths.indexOf(lastSelected);
-  if (lastIdx === -1) return extended;
-  for (let i = lastIdx + 1; i < allRealMonths.length; i++) {
-    extended.push({ month: allRealMonths[i], inRange: false, hasData: false });
+  if (!selectedMonths.length) return [];
+  const startIdx = allRealMonths.indexOf(selectedMonths[0]);
+  if (startIdx === -1) return selectedMonths.map(m => ({ month: m, inRange: true, hasData: true }));
+
+  const realCountFromStart = allRealMonths.length - startIdx;
+  const totalColumns = Math.max(MONTH_COLUMN_TARGET, realCountFromStart);
+  const selectedCount = selectedMonths.length;
+
+  const extended = [];
+  for (let i = 0; i < totalColumns; i++) {
+    if (i < selectedCount) {
+      extended.push({ month: selectedMonths[i], inRange: true, hasData: true });
+    } else if (i < realCountFromStart) {
+      extended.push({ month: allRealMonths[startIdx + i], inRange: false, hasData: false });
+    } else {
+      extended.push({ month: '', inRange: false, hasData: false });
+    }
   }
   return extended;
+}
+
+// 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための
+// キャンバスラッパーHTMLを返す（列/棒の最小幅を確保し、超過分は横スクロール）
+function chartWrapHtml(canvasId, monthCount) {
+  const PX_PER_MONTH = 70;
+  if (monthCount <= MONTH_COLUMN_TARGET) {
+    return `<div class="schart-wrap"><canvas id="${canvasId}"></canvas></div>`;
+  }
+  return `<div class="schart-wrap" style="overflow-x:auto"><div style="position:relative;height:300px;min-width:${monthCount * PX_PER_MONTH}px"><canvas id="${canvasId}"></canvas></div></div>`;
 }
 
 // getActiveData()にbuildExtendedMonthList()を適用した「拡張済み」データを返す便利関数。
@@ -1754,8 +1780,8 @@ function switchToSummarySubtab(tab) {
 
 /* ── Summary: 表タブ ───────────────────────────────────────────── */
 function renderSummaryTable() {
-  // 表示月数が少ないときの間延び対策：選択範囲の右側に、シートの最新月までの
-  // 見出し列を追加する（実データはそのまま、追加分は見出しのみ・空欄）
+  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
   const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
 
@@ -2107,8 +2133,8 @@ function renderEmpChartContent() {
 
 // ①拠点別：拠点ごとに、雇用形態別（社員／技能実習生／パート）の時間・人数を表示（従来通り）
 function renderEmpChartSiteView() {
-  // 表示月数が少ないときの間延び対策：選択範囲の右側に、シートの最新月までの
-  // 見出し列を追加する（延長分はhoursがnullになりChart.js側で自然に棒なしになる）
+  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // （延長分はhoursがnullになりChart.js側で自然に棒なしになる）
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('empchart-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
@@ -2120,8 +2146,8 @@ function renderEmpChartSiteView() {
       <div class="schart-section">
         <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="${cid}_h"></canvas></div></div>
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="${cid}_n"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div>${chartWrapHtml(cid + '_h', months.length)}</div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div>${chartWrapHtml(cid + '_n', months.length)}</div>
         </div>
       </div>`;
   });
@@ -2159,8 +2185,8 @@ function renderEmpChartSiteView() {
 
 // ②拠点サマリ：3拠点合算の同じ総量を、上段は雇用形態軸、下段は拠点軸で切り口を変えて表示
 function renderEmpChartSummaryView() {
-  // 表示月数が少ないときの間延び対策：選択範囲の右側に、シートの最新月までの
-  // 見出し列を追加する（延長分はhoursがnullになりChart.js側で自然に棒なしになる）
+  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // （延長分はhoursがnullになりChart.js側で自然に棒なしになる）
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('empchart-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
@@ -2202,15 +2228,15 @@ function renderEmpChartSummaryView() {
     <div class="schart-section">
       <div class="schart-header">雇用形態別 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">3拠点サマリ</span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="ecsum_emp_h"></canvas></div></div>
-        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="ecsum_emp_n"></canvas></div></div>
+        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div>${chartWrapHtml('ecsum_emp_h', months.length)}</div>
+        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div>${chartWrapHtml('ecsum_emp_n', months.length)}</div>
       </div>
     </div>
     <div class="schart-section">
       <div class="schart-header">拠点別 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">3拠点サマリ</span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="ecsum_site_h"></canvas></div></div>
-        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="ecsum_site_n"></canvas></div></div>
+        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div>${chartWrapHtml('ecsum_site_h', months.length)}</div>
+        <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div>${chartWrapHtml('ecsum_site_n', months.length)}</div>
       </div>
     </div>
   </div>`;
