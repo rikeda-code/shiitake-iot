@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>社用車管理アプリ</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -76,6 +77,8 @@
     .mono { font-variant-numeric: tabular-nums; }
     .loading, .error-msg, .empty-msg { color: var(--muted); font-size: 0.9rem; padding: 8px 0; }
     .error-msg { color: var(--danger); }
+    .section-title { font-size: 0.95rem; font-weight: 600; margin: 24px 0 12px; }
+    .chart-wrap { height: 320px; position: relative; margin-bottom: 8px; }
 
     .top-tabs-bar {
       background: var(--surface);
@@ -196,9 +199,17 @@ const TIRE_INTERVAL_KM = 30000;
 const TIRE_INTERVAL_DAYS = 1460;
 
 let logRowsByVehicle = {};
+let logRawRows = [];
 let masterByVehicle = {};
 let vehicleOrder = [];
 let activeTab = 'summary';
+
+const VEHICLE_COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#f97316', '#f472b6', '#fbbf24', '#60a5fa', '#4ade80', '#f87171', '#c084fc'];
+function colorForVehicle(id) {
+  const idx = vehicleOrder.indexOf(id);
+  return VEHICLE_COLORS[(idx >= 0 ? idx : 0) % VEHICLE_COLORS.length];
+}
+const MONTH_COLORS = ['#38bdf8', '#f97316', '#a78bfa', '#34d399', '#f472b6'];
 
 async function fetchSheet(sheetName) {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
@@ -263,15 +274,18 @@ async function loadLogSheet() {
     site: ['拠点'],
     kind: ['区分'],
     odo: ['走行距離'],
+    increment: ['増分'],
   });
 
   const latest = {};
+  const rows = [];
   (table.rows || []).forEach(row => {
     const cells = row.c || [];
     const vehicleId = colMap.vehicleId != null ? cellText(cells[colMap.vehicleId]).trim() : '';
     if (!vehicleId) return;
     const reportedAt = colMap.reportedAt != null ? cellDate(cells[colMap.reportedAt]) : null;
     const odo = colMap.odo != null ? cellNumber(cells[colMap.odo]) : null;
+    const increment = colMap.increment != null ? cellNumber(cells[colMap.increment]) : null;
     const record = {
       vehicleId,
       plate: colMap.plate != null ? cellText(cells[colMap.plate]).trim() : '',
@@ -285,8 +299,9 @@ async function loadLogSheet() {
     if (!prev || (reportedAt && (!prev.reportedAt || reportedAt > prev.reportedAt))) {
       latest[vehicleId] = record;
     }
+    rows.push({ vehicleId, reportedAt, increment });
   });
-  return latest;
+  return { latest, rows };
 }
 
 async function loadMasterSheet() {
@@ -343,6 +358,61 @@ function daysBetween(a, b) {
   return Math.round((a - b) / 86400000);
 }
 
+function dateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function dateLabel(key) {
+  const [, m, d] = key.split('-');
+  return `${Number(m)}/${Number(d)}`;
+}
+function monthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function monthLabel(key) {
+  const [y, m] = key.split('-');
+  return `${y}年${Number(m)}月`;
+}
+
+function computeDailyDistances(rows, vehicles, days) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dateList = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    dateList.push(dateKey(d));
+  }
+  const byVehicle = {};
+  vehicles.forEach(id => {
+    byVehicle[id] = {};
+    dateList.forEach(dk => { byVehicle[id][dk] = 0; });
+  });
+  rows.forEach(r => {
+    if (!r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
+    const dk = dateKey(r.reportedAt);
+    if (!(dk in byVehicle[r.vehicleId])) return;
+    byVehicle[r.vehicleId][dk] += Math.max(r.increment, 0);
+  });
+  return { dateList, byVehicle };
+}
+
+function computeMonthlyDistances(rows, vehicles) {
+  const byVehicle = {};
+  vehicles.forEach(id => { byVehicle[id] = {}; });
+  const monthsSet = new Set();
+  rows.forEach(r => {
+    if (!r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
+    const mk = monthKey(r.reportedAt);
+    monthsSet.add(mk);
+    byVehicle[r.vehicleId][mk] = (byVehicle[r.vehicleId][mk] || 0) + Math.max(r.increment, 0);
+  });
+  const months = Array.from(monthsSet).sort();
+  return { months, byVehicle };
+}
+
 function renderSummaryContent() {
   const container = document.getElementById('content-body');
   document.getElementById('vehicle-meta').textContent = '';
@@ -377,7 +447,91 @@ function renderSummaryContent() {
         </thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>`;
+    </div>
+    <h3 class="section-title">直近1ヶ月の日別走行距離(km)</h3>
+    <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+    <h3 class="section-title">月別走行距離(車両別・km)</h3>
+    <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
+  `;
+
+  renderDailyChart();
+  renderMonthlyChart();
+}
+
+let dailyChartInstance = null;
+let monthlyChartInstance = null;
+
+function renderDailyChart() {
+  const { dateList, byVehicle } = computeDailyDistances(logRawRows, vehicleOrder, 30);
+  const datasets = vehicleOrder.map(id => {
+    const v = logRowsByVehicle[id];
+    return {
+      label: v.name ? `${id}(${v.name})` : id,
+      data: dateList.map(dk => byVehicle[id][dk]),
+      backgroundColor: colorForVehicle(id),
+      borderRadius: 3,
+    };
+  });
+
+  if (dailyChartInstance) dailyChartInstance.destroy();
+  const ctx = document.getElementById('chart-daily').getContext('2d');
+  dailyChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: dateList.map(dateLabel), datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString()} km` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} km` }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
+
+function renderMonthlyChart() {
+  const { months, byVehicle } = computeMonthlyDistances(logRawRows, vehicleOrder);
+  const labels = vehicleOrder.map(id => {
+    const v = logRowsByVehicle[id];
+    return v.name ? `${id}(${v.name})` : id;
+  });
+  const datasets = months.map((mk, i) => ({
+    label: monthLabel(mk),
+    data: vehicleOrder.map(id => byVehicle[id][mk] || 0),
+    backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length],
+    borderRadius: 3,
+  }));
+
+  if (monthlyChartInstance) monthlyChartInstance.destroy();
+  const ctx = document.getElementById('chart-monthly').getContext('2d');
+  monthlyChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString()} km` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} km` }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
 }
 
 function badge(daysLeft, kind) {
@@ -558,8 +712,9 @@ async function loadAll() {
   document.getElementById('last-updated').textContent = '';
   document.getElementById('content-body').innerHTML = '<div class="loading">データを読み込み中...</div>';
   try {
-    const [logMap, masterMap] = await Promise.all([loadLogSheet(), loadMasterSheet()]);
-    logRowsByVehicle = logMap;
+    const [logResult, masterMap] = await Promise.all([loadLogSheet(), loadMasterSheet()]);
+    logRowsByVehicle = logResult.latest;
+    logRawRows = logResult.rows;
     masterByVehicle = masterMap;
     vehicleOrder = Object.keys(logRowsByVehicle).sort();
     if (activeTab !== 'summary' && !logRowsByVehicle[activeTab]) {
