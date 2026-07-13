@@ -77,19 +77,26 @@
     .loading, .error-msg, .empty-msg { color: var(--muted); font-size: 0.9rem; padding: 8px 0; }
     .error-msg { color: var(--danger); }
 
-    .tabs { display: flex; gap: 8px; padding: 16px 24px 0; flex-wrap: wrap; }
+    .top-tabs-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      overflow-x: auto;
+    }
+    .tabs { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
     .tab-btn {
       background: var(--surface);
       border: 1px solid var(--border);
       color: var(--muted);
       padding: 8px 14px;
-      border-radius: 8px 8px 0 0;
+      border-radius: 8px;
       cursor: pointer;
       font-size: 0.85rem;
       font-weight: 600;
+      white-space: nowrap;
     }
-    .tab-btn.active { color: var(--text); background: #23273a; border-bottom-color: #23273a; }
-    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: #0f1117; background: var(--accent); border-color: var(--accent); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
 
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
     .card {
@@ -143,7 +150,8 @@
     }
     @media (max-width: 640px) {
       header, main { padding: 16px; }
-      .panel-body, .panel-header, .tabs, .save-row, .vehicle-meta { padding-left: 16px; padding-right: 16px; }
+      .top-tabs-bar { padding: 0 16px; }
+      .panel-body, .panel-header, .save-row, .vehicle-meta { padding-left: 16px; padding-right: 16px; }
     }
   </style>
 </head>
@@ -158,30 +166,14 @@
     <button class="btn" onclick="loadAll()">↻ 更新</button>
   </div>
 </header>
+<div class="top-tabs-bar">
+  <div class="tabs" id="top-tabs"></div>
+</div>
 <main id="main">
   <section class="panel">
-    <div class="panel-header"><h2>車両別の走行距離</h2></div>
-    <div class="panel-body">
-      <div id="summary-status" class="loading">データを読み込み中...</div>
-      <div class="table-wrap">
-        <table id="summary-table" style="display:none">
-          <thead>
-            <tr>
-              <th>管理番号</th><th>車名</th><th>登録番号</th><th>拠点</th>
-              <th>走行距離(km)</th><th>最終報告日時</th><th>最終区分</th>
-            </tr>
-          </thead>
-          <tbody id="summary-body"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-header"><h2>車両別詳細(車検・オイル交換・タイヤ交換)</h2></div>
+    <div class="panel-header"><h2 id="panel-title">車両別の走行距離</h2></div>
     <div class="vehicle-meta" id="vehicle-meta"></div>
-    <div class="tabs" id="vehicle-tabs"></div>
-    <div class="panel-body" id="vehicle-detail">
+    <div class="panel-body" id="content-body">
       <div class="loading">データを読み込み中...</div>
     </div>
   </section>
@@ -206,7 +198,7 @@ const TIRE_INTERVAL_DAYS = 1460;
 let logRowsByVehicle = {};
 let masterByVehicle = {};
 let vehicleOrder = [];
-let activeVehicle = null;
+let activeTab = 'summary';
 
 async function fetchSheet(sheetName) {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
@@ -351,19 +343,17 @@ function daysBetween(a, b) {
   return Math.round((a - b) / 86400000);
 }
 
-function renderSummary() {
-  const status = document.getElementById('summary-status');
-  const table = document.getElementById('summary-table');
-  const body = document.getElementById('summary-body');
+function renderSummaryContent() {
+  const container = document.getElementById('content-body');
+  document.getElementById('vehicle-meta').textContent = '';
+  document.getElementById('panel-title').textContent = '車両別の走行距離';
+
   if (!vehicleOrder.length) {
-    status.textContent = 'データがありません';
-    status.style.display = '';
-    table.style.display = 'none';
+    container.innerHTML = '<div class="empty-msg">データがありません</div>';
     return;
   }
-  status.style.display = 'none';
-  table.style.display = '';
-  body.innerHTML = vehicleOrder.map(id => {
+
+  const rows = vehicleOrder.map(id => {
     const v = logRowsByVehicle[id];
     return `<tr>
       <td>${id}</td>
@@ -375,6 +365,19 @@ function renderSummary() {
       <td>${v.kind || '-'}</td>
     </tr>`;
   }).join('');
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>管理番号</th><th>車名</th><th>登録番号</th><th>拠点</th>
+            <th>走行距離(km)</th><th>最終報告日時</th><th>最終区分</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function badge(daysLeft, kind) {
@@ -389,29 +392,42 @@ function badge(daysLeft, kind) {
 }
 
 function renderTabs() {
-  const tabs = document.getElementById('vehicle-tabs');
-  tabs.innerHTML = vehicleOrder.map(id => {
+  const tabs = document.getElementById('top-tabs');
+  const summaryTab = `<button class="tab-btn ${activeTab === 'summary' ? 'active' : ''}" data-id="summary">📋 サマリー</button>`;
+  const vehicleTabs = vehicleOrder.map(id => {
     const v = logRowsByVehicle[id];
     const label = v.name ? `${id}(${v.name})` : id;
-    return `<button class="tab-btn ${id === activeVehicle ? 'active' : ''}" data-id="${id}">${label}</button>`;
+    return `<button class="tab-btn ${id === activeTab ? 'active' : ''}" data-id="${id}">${label}</button>`;
   }).join('');
+  tabs.innerHTML = summaryTab + vehicleTabs;
   tabs.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      activeVehicle = btn.dataset.id;
+      activeTab = btn.dataset.id;
       renderTabs();
-      renderDetail();
+      renderContent();
     });
   });
 }
 
-function renderDetail() {
-  const container = document.getElementById('vehicle-detail');
+function renderContent() {
+  if (activeTab === 'summary') {
+    renderSummaryContent();
+  } else {
+    renderVehicleDetail();
+  }
+}
+
+function renderVehicleDetail() {
+  const container = document.getElementById('content-body');
   const meta = document.getElementById('vehicle-meta');
-  if (!activeVehicle || !logRowsByVehicle[activeVehicle]) {
+  const panelTitle = document.getElementById('panel-title');
+  if (!activeTab || !logRowsByVehicle[activeTab]) {
     container.innerHTML = '<div class="empty-msg">車両を選択してください</div>';
     meta.textContent = '';
     return;
   }
+  const activeVehicle = activeTab;
+  panelTitle.textContent = `${activeVehicle} 詳細(車検・オイル交換・タイヤ交換)`;
   const v = logRowsByVehicle[activeVehicle];
   const m = masterByVehicle[activeVehicle] || {};
   meta.innerHTML = `<strong>${activeVehicle} ${v.name || ''}</strong> / 登録番号: ${v.plate || '-'} / 拠点: ${v.site || '-'} / 現在の走行距離: <strong>${v.odo != null ? v.odo.toLocaleString() + ' km' : '-'}</strong>(${formatDateTime(v.reportedAt)}時点)`;
@@ -484,7 +500,7 @@ function renderDetail() {
 }
 
 async function saveMaintenance() {
-  const vehicleId = activeVehicle;
+  const vehicleId = activeTab;
   const v = logRowsByVehicle[vehicleId];
   const updatedBy = document.getElementById('input-updated-by').value.trim();
   const status = document.getElementById('save-status');
@@ -529,7 +545,7 @@ async function saveMaintenance() {
     };
     status.style.color = 'var(--ok)';
     status.textContent = '保存しました(反映まで数十秒かかる場合があります)';
-    renderDetail();
+    renderVehicleDetail();
   } catch (e) {
     status.style.color = 'var(--danger)';
     status.textContent = `保存エラー: ${e.message || e}`;
@@ -540,24 +556,20 @@ async function saveMaintenance() {
 
 async function loadAll() {
   document.getElementById('last-updated').textContent = '';
-  document.getElementById('summary-status').textContent = 'データを読み込み中...';
-  document.getElementById('summary-status').style.display = '';
-  document.getElementById('summary-table').style.display = 'none';
+  document.getElementById('content-body').innerHTML = '<div class="loading">データを読み込み中...</div>';
   try {
     const [logMap, masterMap] = await Promise.all([loadLogSheet(), loadMasterSheet()]);
     logRowsByVehicle = logMap;
     masterByVehicle = masterMap;
     vehicleOrder = Object.keys(logRowsByVehicle).sort();
-    if (!activeVehicle || !logRowsByVehicle[activeVehicle]) {
-      activeVehicle = vehicleOrder[0] || null;
+    if (activeTab !== 'summary' && !logRowsByVehicle[activeTab]) {
+      activeTab = 'summary';
     }
-    renderSummary();
     renderTabs();
-    renderDetail();
+    renderContent();
     document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
   } catch (e) {
-    document.getElementById('summary-status').textContent = `データ取得エラー: ${e.message || e}`;
-    document.getElementById('vehicle-detail').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message || e}</div>`;
+    document.getElementById('content-body').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message || e}</div>`;
   }
 }
 
