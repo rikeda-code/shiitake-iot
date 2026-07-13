@@ -126,6 +126,10 @@
     .badge-muted { background: rgba(136,146,164,0.15); color: var(--muted); }
     .metric-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
     .metric-row .label { color: var(--muted); }
+    .metric-row.highlight { font-size: 0.95rem; font-weight: 700; padding: 6px 0; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); margin: 4px 0; }
+    .metric-row.highlight .label { color: var(--text); font-weight: 600; }
+    .forecast-note { font-size: 0.78rem; color: var(--muted); margin: 6px 0; }
+    .forecast-chart { height: 200px; position: relative; margin-top: 12px; }
     .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; }
     .field label { color: var(--muted); }
     .field input {
@@ -193,10 +197,11 @@ const MASTER_SHEET_NAME = '車両マスタ';
 const MAINTENANCE_API_URL = 'https://script.google.com/a/macros/10-ff.com/s/AKfycbxdwrV7GTD8E8qoZaaLcqstRDB6w5dGZLf2R56CGEwBr_8t1vtOJ0Vik4IfT2FzZKD4zw/exec';
 
 // 交換目安(参考値・必要に応じて変更してください)
-const OIL_INTERVAL_KM = 5000;
-const OIL_INTERVAL_DAYS = 180;
+const OIL_INTERVAL_KM = 10000;
+const OIL_INTERVAL_DAYS = 365;
 const TIRE_INTERVAL_KM = 30000;
 const TIRE_INTERVAL_DAYS = 1460;
+const FORECAST_WINDOW_DAYS = 30;
 
 let logRowsByVehicle = {};
 let logRawRows = [];
@@ -414,6 +419,20 @@ function computeMonthlyDistances(rows, vehicles) {
   return { months, byVehicle };
 }
 
+function computeVehicleDailyStats(vehicleId, days) {
+  const { dateList, byVehicle } = computeDailyDistances(logRawRows, [vehicleId], days);
+  const values = dateList.map(dk => byVehicle[vehicleId][dk]);
+  const total = values.reduce((a, b) => a + b, 0);
+  const avg = total / dateList.length;
+  return { dateList, values, total, avg };
+}
+
+function addDays(d, n) {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
 function renderSummaryContent() {
   const container = document.getElementById('content-body');
   document.getElementById('vehicle-meta').textContent = '';
@@ -461,6 +480,42 @@ function renderSummaryContent() {
 
 let dailyChartInstance = null;
 let monthlyChartInstance = null;
+let vehicleDailyChartInstance = null;
+
+function renderVehicleDailyChart(vehicleId, dailyStats) {
+  const canvas = document.getElementById('chart-vehicle-daily');
+  if (!canvas) return;
+  if (vehicleDailyChartInstance) vehicleDailyChartInstance.destroy();
+  const ctx = canvas.getContext('2d');
+  vehicleDailyChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dailyStats.dateList.map(dateLabel),
+      datasets: [{
+        label: '走行距離(km)',
+        data: dailyStats.values,
+        backgroundColor: colorForVehicle(vehicleId),
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: (c) => `${c.parsed.y.toLocaleString()} km` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} km` }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
 
 function renderDailyChart() {
   const { dateList, byVehicle } = computeDailyDistances(logRawRows, vehicleOrder, 30);
@@ -594,6 +649,17 @@ function renderVehicleDetail() {
   const oilKmSince = (m.oilOdo != null && v.odo != null) ? (v.odo - m.oilOdo) : null;
   const oilDue = (oilDaysSince != null && oilDaysSince >= OIL_INTERVAL_DAYS) || (oilKmSince != null && oilKmSince >= OIL_INTERVAL_KM);
 
+  const dailyStats = computeVehicleDailyStats(activeVehicle, FORECAST_WINDOW_DAYS);
+  const dateBasedOilDue = m.oilDate ? addDays(m.oilDate, OIL_INTERVAL_DAYS) : null;
+  let distanceBasedOilDue = null;
+  let oilKmRemaining = null;
+  if (oilKmSince != null) {
+    oilKmRemaining = OIL_INTERVAL_KM - oilKmSince;
+    if (dailyStats.avg > 0) {
+      distanceBasedOilDue = addDays(today, oilKmRemaining / dailyStats.avg);
+    }
+  }
+
   const tireDaysSince = m.tireDate ? daysBetween(today, m.tireDate) : null;
   const tireKmSince = (m.tireOdo != null && v.odo != null) ? (v.odo - m.tireOdo) : null;
   const tireDue = (tireDaysSince != null && tireDaysSince >= TIRE_INTERVAL_DAYS) || (tireKmSince != null && tireKmSince >= TIRE_INTERVAL_KM);
@@ -624,6 +690,20 @@ function renderVehicleDetail() {
           <input type="number" id="input-oil-odo" value="${m.oilOdo != null ? m.oilOdo : ''}" />
         </div>
       </div>
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>📈 オイル交換目安の予測(直近${FORECAST_WINDOW_DAYS}日の走行実績から算出)</h3>
+        ${(m.oilDate == null || m.oilOdo == null) ? `
+          <div class="forecast-note">前回のオイル交換日・走行距離が未登録のため予測できません。</div>
+        ` : `
+          <div class="metric-row"><span class="label">直近${FORECAST_WINDOW_DAYS}日間の合計走行距離</span><span>${dailyStats.total.toLocaleString()} km</span></div>
+          <div class="metric-row"><span class="label">1日の平均走行距離(直近${FORECAST_WINDOW_DAYS}日)</span><span>${dailyStats.avg.toFixed(1)} km/日</span></div>
+          <div class="metric-row"><span class="label">交換目安(10,000km)まで残り</span><span>${oilKmRemaining != null ? oilKmRemaining.toLocaleString() + ' km' : '-'}</span></div>
+          <div class="metric-row highlight"><span class="label">交換目安予測日(走行距離ベース)</span><span>${distanceBasedOilDue ? formatDate(distanceBasedOilDue) : (dailyStats.avg > 0 ? '-' : '走行データ不足')}</span></div>
+          <div class="metric-row"><span class="label">参考: 前回交換から1年後</span><span>${formatDate(dateBasedOilDue)}</span></div>
+          <div class="forecast-note">※ 交換目安は「10,000km」または「前回交換から1年」のいずれか早い方。予測日は直近${FORECAST_WINDOW_DAYS}日の平均走行距離をもとに算出した参考値です。</div>
+        `}
+        <div class="forecast-chart"><canvas id="chart-vehicle-daily"></canvas></div>
+      </div>
       <div class="card">
         <h3>🛞 タイヤ交換 ${tireDue ? '<span class="badge badge-warn">交換目安超過</span>' : (m.tireDate ? '<span class="badge badge-ok">良好</span>' : '<span class="badge badge-muted">未登録</span>')}</h3>
         <div class="metric-row"><span class="label">前回交換日</span><span>${formatDate(m.tireDate)}</span></div>
@@ -652,6 +732,7 @@ function renderVehicleDetail() {
   `;
 
   document.getElementById('save-btn').addEventListener('click', saveMaintenance);
+  renderVehicleDailyChart(activeVehicle, dailyStats);
 }
 
 async function saveMaintenance() {
