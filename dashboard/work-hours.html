@@ -2855,6 +2855,74 @@ function calcCs(pcs, bara, conv) {
   return nonBara / conv.pcsPerCs + bara;
 }
 
+// 標準工数(h)の計算エンジン（標準工数(h)タブ・比較タブ・要員計画タブで共通）。
+// 「標準工数設定」の係数行(r: {col,val,unit,metricKey})を、生産量の実データ(records)と
+// 突き合わせて工数(h)に変換する。records/prodMonthsを実績側（整理済み_分析）にすれば
+// 従来通りの実績ベースの計算、予定側（要員計画で組み立てたrecords）にすれば計画ベースの
+// 計算になり、ロジック自体は完全に共通。
+//
+// records: [{ site, metric, values: number[] }]（実データ本体。metricは'収穫量(kg)'
+//   '稼働コンテナ数'等、TASK_METRIC_KEYSのmetricKeyと同じ語彙で揃えること）
+// prodMonths: recordsのvaluesと対応する月ラベル配列（生産実績表記、例:"2025/10"）
+// displayMonths: 表示列（work-hours表記、固定12本ルール適用後。延長列は実在月ラベル、
+//   超過列は空文字）
+// originalCount: displayMonthsのうち選択範囲内（実データを載せてよい）の本数
+// conv: { pcsPerCs, baraMetric }（出荷cs換算設定）
+function createStdHoursEngine(records, prodMonths, displayMonths, originalCount, conv) {
+  function getProdVal(site, metricKey, mi) {
+    if (mi >= originalCount) return null;
+    const m = displayMonths[mi];
+    if (!m) return null;
+    const r = records.find(rr => rr.site === site && rr.metric === metricKey);
+    if (!r) return null;
+    const pi = prodMonths.indexOf(normalizeMonth(m));
+    return pi >= 0 ? (r.values[pi] ?? null) : null;
+  }
+
+  function calcRow(site, r, mi) {
+    const v = r.val;
+    if (v === null || v === undefined) return { h: null, containers: null };
+    const mkey = r.metricKey || null;
+
+    if (r.col === 'kgPerH' && v > 0) {
+      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
+      return { h: kg !== null ? kg / v : null, containers: kg };
+    }
+    // 毎月固定時間の項目は実データを参照しないため、他の項目のように「実データなし=null」が
+    // 自然には効かない。延長列・超過列（mi >= originalCount）では明示的に空欄にする
+    if (r.col === 'fixedH') return { h: mi < originalCount ? v : null, containers: null };
+    if (r.col === 'perContainer') {
+      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
+      if (containers !== null) {
+        const hPer = r.unit === 'h' ? v : v / 60;
+        return { h: containers * hPer, containers };
+      }
+      return { h: null, containers: null };
+    }
+    if (r.col === 'perPiece') {
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
+      if (pcs !== null) {
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: pcs * secPer / 3600, containers: pcs };
+      }
+      return { h: null, containers: null };
+    }
+    if (r.col === 'perCs') {
+      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
+      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
+      if (pcs !== null) {
+        const cs = calcCs(pcs, bara, conv);
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: cs * secPer / 3600, containers: Math.round(cs) };
+      }
+      return { h: null, containers: null };
+    }
+    return { h: null, containers: null };
+  }
+
+  return { getProdVal, calcRow };
+}
+
 // stdSettingsSheetData: 「標準工数設定」シートから読み取った値そのもの（リセット時の復元元）。
 // currentStdRows/currentStdConv: 画面編集を反映する実行時の状態（保存はせず、リセットで
 // stdSettingsSheetDataの値に戻す）。ページ読み込み時に一度だけ取得し、以降は
@@ -3108,66 +3176,8 @@ function renderStdHoursTable(prodData) {
   // ここで表示列と月をキーに紐付ける。延長列・超過列（mi >= originalCount）には
   // 生産実績データを一切載せない
   const { months, originalCount } = getExtendedDisplayMonths();
-  const prodIdxByMonth = {};
-  filteredMonths.forEach((m, i) => { prodIdxByMonth[normalizeMonth(m)] = i; });
-  const prodIdx = months.map((m, mi) => {
-    if (mi >= originalCount || !m) return -1;
-    const norm = normalizeMonth(m);
-    return Object.prototype.hasOwnProperty.call(prodIdxByMonth, norm) ? prodIdxByMonth[norm] : -1;
-  });
-
-  function getProdVal(site, metricKey, mi) {
-    const pi = prodIdx[mi];
-    if (pi < 0) return null;
-    const r = records.find(r => r.site === site && r.metric === metricKey);
-    return r ? (r.values[pi] ?? null) : null;
-  }
-
   const conv = loadCsConv();
-
-  function calcRow(site, r, mi) {
-    const v = r.val;
-    if (v === null || v === undefined) return { h: null, basis: '—' };
-
-    const mkey = r.metricKey || null;
-
-    if (r.col === 'kgPerH' && v > 0) {
-      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
-      return { h: kg !== null ? kg / v : null,
-               containers: kg };
-    }
-    // 毎月固定時間の項目は実データを参照しないため、他の項目のように「実データなし=null」が
-    // 自然には効かない。延長列・超過列（mi >= originalCount）では明示的に空欄にする
-    if (r.col === 'fixedH') return { h: mi < originalCount ? v : null, containers: null };
-
-    if (r.col === 'perContainer') {
-      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
-      if (containers !== null) {
-        const hPer = r.unit === 'h' ? v : v / 60;
-        return { h: containers * hPer, containers };
-      }
-      return { h: null, containers: null };
-    }
-    if (r.col === 'perPiece') {
-      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
-      if (pcs !== null) {
-        const secPer = r.unit === '秒' ? v : v * 60;
-        return { h: pcs * secPer / 3600, containers: pcs };
-      }
-      return { h: null, containers: null };
-    }
-    if (r.col === 'perCs') {
-      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
-      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
-      if (pcs !== null) {
-        const cs = calcCs(pcs, bara, conv);
-        const secPer = r.unit === '秒' ? v : v * 60;
-        return { h: cs * secPer / 3600, containers: Math.round(cs) };
-      }
-      return { h: null, containers: null };
-    }
-    return { h: null, containers: null };
-  }
+  const { calcRow } = createStdHoursEngine(records, filteredMonths, months, originalCount, conv);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
   const divCount = {};
@@ -3704,60 +3714,9 @@ function renderCompareCharts(prodData) {
   // 生産実績側の実データは、選択範囲内(mi < originalCount)の月だけをnormalizeMonth()で
   // 突き合わせる。延長列・超過列には勤怠・生産実績いずれのデータも一切載せない
   const { months: commonMonths, originalCount } = getExtendedDisplayMonths();
+  const { calcRow } = createStdHoursEngine(records, prodMonths, commonMonths, originalCount, conv);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
-
-  // miはcommonMonths（表示列。work-hours表記＋延長分の空欄を含む固定12本）のインデックス。
-  // 選択範囲内(mi < originalCount)の月だけをnormalizeMonth()でprodMonths側と突き合わせる
-  function getProdVal(site, metricKey, mi) {
-    if (mi >= originalCount) return null;
-    const m = commonMonths[mi];
-    if (!m) return null;
-    const r = records.find(r => r.site === site && r.metric === metricKey);
-    if (!r) return null;
-    const pi = prodMonths.indexOf(normalizeMonth(m));
-    return pi >= 0 ? (r.values[pi] ?? null) : null;
-  }
-
-  function calcRow(site, r, mi) {
-    const v = r.val;
-    if (v === null || v === undefined) return { h: null };
-    const mkey = r.metricKey || null;
-    if (r.col === 'kgPerH' && v > 0) {
-      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
-      return { h: kg !== null ? kg / v : null };
-    }
-    // 毎月固定時間の項目は実データを参照しないため、他の項目のように「実データなし=null」が
-    // 自然には効かない。延長列・超過列（mi >= originalCount）では明示的に空欄にする
-    if (r.col === 'fixedH') return { h: mi < originalCount ? v : null };
-    if (r.col === 'perContainer') {
-      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
-      if (containers !== null) {
-        const hPer = r.unit === 'h' ? v : v / 60;
-        return { h: containers * hPer };
-      }
-      return { h: null };
-    }
-    if (r.col === 'perPiece') {
-      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
-      if (pcs !== null) {
-        const secPer = r.unit === '秒' ? v : v * 60;
-        return { h: pcs * secPer / 3600 };
-      }
-      return { h: null };
-    }
-    if (r.col === 'perCs') {
-      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
-      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
-      if (pcs !== null) {
-        const cs = calcCs(pcs, bara, conv);
-        const secPer = r.unit === '秒' ? v : v * 60;
-        return { h: cs * secPer / 3600 };
-      }
-      return { h: null };
-    }
-    return { h: null };
-  }
 
   function workHours(site, typeFilter) {
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
