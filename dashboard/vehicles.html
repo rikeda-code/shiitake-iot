@@ -286,12 +286,13 @@ async function loadLogSheet() {
     const reportedAt = colMap.reportedAt != null ? cellDate(cells[colMap.reportedAt]) : null;
     const odo = colMap.odo != null ? cellNumber(cells[colMap.odo]) : null;
     const increment = colMap.increment != null ? cellNumber(cells[colMap.increment]) : null;
+    const kind = colMap.kind != null ? cellText(cells[colMap.kind]).trim() : '';
     const record = {
       vehicleId,
       plate: colMap.plate != null ? cellText(cells[colMap.plate]).trim() : '',
       name: colMap.name != null ? cellText(cells[colMap.name]).trim() : '',
       site: colMap.site != null ? cellText(cells[colMap.site]).trim() : '',
-      kind: colMap.kind != null ? cellText(cells[colMap.kind]).trim() : '',
+      kind,
       odo,
       reportedAt,
     };
@@ -299,7 +300,7 @@ async function loadLogSheet() {
     if (!prev || (reportedAt && (!prev.reportedAt || reportedAt > prev.reportedAt))) {
       latest[vehicleId] = record;
     }
-    rows.push({ vehicleId, reportedAt, increment });
+    rows.push({ vehicleId, reportedAt, increment, kind });
   });
   return { latest, rows };
 }
@@ -391,7 +392,7 @@ function computeDailyDistances(rows, vehicles, days) {
     dateList.forEach(dk => { byVehicle[id][dk] = 0; });
   });
   rows.forEach(r => {
-    if (!r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
+    if (r.kind !== '帰社' || !r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
     const dk = dateKey(r.reportedAt);
     if (!(dk in byVehicle[r.vehicleId])) return;
     byVehicle[r.vehicleId][dk] += Math.max(r.increment, 0);
@@ -404,7 +405,7 @@ function computeMonthlyDistances(rows, vehicles) {
   vehicles.forEach(id => { byVehicle[id] = {}; });
   const monthsSet = new Set();
   rows.forEach(r => {
-    if (!r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
+    if (r.kind !== '帰社' || !r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
     const mk = monthKey(r.reportedAt);
     monthsSet.add(mk);
     byVehicle[r.vehicleId][mk] = (byVehicle[r.vehicleId][mk] || 0) + Math.max(r.increment, 0);
