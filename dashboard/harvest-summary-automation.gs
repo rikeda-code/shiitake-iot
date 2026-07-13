@@ -15,7 +15,13 @@ const NEW_ROW = TEMPLATE_ROW + 1;  // 追加される行(4行目)
 const LAST_COL = 17;               // A~Q列
 const LOT_NAME_COL = 6;            // F列(号機)
 
-// 新規ロットタブとして扱わないシート名(必要に応じて追記してください)
+// ロットタブと判定する命名パターン(例:「16(7/13)L3」「32(6/29)6志摩L3」)。
+// 号機番号 + (月/日) + 任意の文字列 + L数字 の形式のみを対象にする。
+// これ以外の名前のタブ(管理用タブ、個人名タブ、テストタブなど)は
+// EXCLUDED_SHEET_NAMES に列挙しなくても自動的に対象外になる。
+const LOT_NAME_PATTERN = /^\d+\(\d{1,2}\/\d{1,2}\).*L\d+$/;
+
+// 上記パターンに一致してしまうが除外したいシート名がある場合はここに追記する
 const EXCLUDED_SHEET_NAMES = [
   SUMMARY_SHEET_NAME,
   'ファーム号機別収穫実績',
@@ -46,6 +52,7 @@ function onChangeInstalled(e) {
     const existingNames = getExistingLotNames_(summary);
     ss.getSheets().forEach(function (sheet) {
       const name = sheet.getName();
+      if (!LOT_NAME_PATTERN.test(name)) return;
       if (EXCLUDED_SHEET_NAMES.indexOf(name) !== -1) return;
       if (TEMP_NAME_PATTERNS.some(function (re) { return re.test(name); })) return;
       if (existingNames.indexOf(name) !== -1) return;
