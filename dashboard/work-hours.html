@@ -2741,9 +2741,10 @@ function parsePlanMonthLabel(label) {
 }
 
 // gid（シートタブのID）が渡されればそちらを優先し、無ければシート名(encodeURIComponent済み)を使う
-function gvizTqUrl(sheetId, { gid, sheetName, headers }) {
+function gvizTqUrl(sheetId, { gid, sheetName, headers, range }) {
   const src = gid ? `&gid=${gid}` : `&sheet=${encodeURIComponent(sheetName)}`;
-  return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${src}&headers=${headers}`;
+  const rangeParam = range ? `&range=${encodeURIComponent(range)}` : '';
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${src}&headers=${headers}${rangeParam}`;
 }
 
 // gvizのtqエンドポイントを叩き、実際のURL・HTTPステータス・生レスポンスをコンソールに出力した上で
@@ -2782,8 +2783,10 @@ async function fetchPlanSummarySheet() {
   if (planSummaryData) return planSummaryData;
   // gvizのheaders=1による自動ヘッダー推測は、実シートの1行目がほぼ空欄＋ノイズ的な
   // 数値1個という装飾行であるため誤動作する（本来のヘッダーは3行目）。headers=0で
-  // 生データを取得し、内容をスキャンして実際のヘッダー行を自前で探す方式にする
-  const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 0 });
+  // 生データを取得し、内容をスキャンして実際のヘッダー行を自前で探す方式にする。
+  // rangeを明示指定し、gviz側の「使用範囲」自動判定（結合セル等をきっかけに行が
+  // 間引かれる可能性）に影響されず、指定範囲を欠けなくそのまま返させるようにする
+  const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 0, range: 'A1:Z50' });
   const json = await fetchGvizJson(url, '生産計画サマリー');
   // [DEBUG] 非表示列がgvizレスポンスから省略されていないかの確認用。原因特定後は削除予定。
   // 省略されていなければcols.lengthは実際のシートの最終列（A列=0始まりで数えた列数）と一致するはず
@@ -2807,27 +2810,33 @@ function colIndexToLetter(idx) {
 
 function findPlanSummaryHeaderRow(rows) {
   let bestRow = -1, bestScore = 0;
-  const scoreLog = [];
+  // [DEBUG] 巨大な1行のJSONに全行分をまとめると目視での突き合わせが困難なため、
+  // 1行ずつ個別のconsole.logに分けて出力する（実シートの行番号と直接見比べやすくするため）。
+  // 原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:生産計画サマリー] rows.length=${rows.length}（gvizが返した行の総数。以降sheetRowNumber=1〜${Math.min(rows.length, 10)}を1行ずつログ出力する）`);
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const row = rows[r];
     // rはrows配列の0始まりindex。rows自体はheaders=0で取得した生データで行の間引きは
     // 無いため、r=0がシートの1行目、r=1が2行目、r=2が3行目...に対応する(sheetRowNumber=r+1)
     const sheetRowNumber = r + 1;
-    if (!row || !row.c) { scoreLog.push({ r, sheetRowNumber, score: null, note: '空行' }); continue; }
+    if (!row || !row.c) {
+      console.log(`[要員計画:DEBUG:生産計画サマリー] sheetRowNumber=${sheetRowNumber}（配列index r=${r}）: 行自体がnullまたはcが無い（空行）`);
+      continue;
+    }
     const texts = row.c.map(c => String(c?.f ?? c?.v ?? '').trim());
     // 「拠点」「項目」は完全一致ではなく部分一致で見る（"拠点名"等の表記ゆれに強くする）
     const hasSiteAndItemLabel = texts.some(t => t.includes('拠点')) && texts.some(t => t.includes('項目'));
     const monthCellCount = row.c.filter(c => planMonthLabelFromCell(c)).length;
     const score = monthCellCount + (hasSiteAndItemLabel ? 1 : 0);
     // 配列indexがそのまま列位置(0=A列,1=B列,...)に対応する。colLetterで列名も併記し、
-    // 生のf/v両方を残す（textsだけだと全角空白等の見えない差異が分からないため）
-    const rawCells = row.c.map((c, colIndex) => ({ colIndex, colLetter: colIndexToLetter(colIndex), f: c?.f ?? null, v: c?.v ?? null }));
-    scoreLog.push({ r, sheetRowNumber, score, hasSiteAndItemLabel, monthCellCount, colCount: row.c.length, rawCells });
+    // 生のf/v両方を残す（textsだけだと全角空白等の見えない差異が分からないため）。
+    // 空欄セル(f・vともnull)は省いて、値があるセルだけを列名付きで表示する（可読性のため）
+    const nonBlankCells = row.c
+      .map((c, colIndex) => ({ colIndex, colLetter: colIndexToLetter(colIndex), f: c?.f ?? null, v: c?.v ?? null }))
+      .filter(c => c.f !== null || c.v !== null);
+    console.log(`[要員計画:DEBUG:生産計画サマリー] sheetRowNumber=${sheetRowNumber}（配列index r=${r}, colCount=${row.c.length}）: スコア=${score}（拠点/項目あり=${hasSiteAndItemLabel}, 月セル数=${monthCellCount}） 値のあるセル=${JSON.stringify(nonBlankCells)}`);
     if (score > bestScore) { bestScore = score; bestRow = r; }
   }
-  // [DEBUG] 全候補行のスコア一覧（0始まりindex r・実際のシート行番号sheetRowNumber・
-  // 列位置colIndex/colLetter付きの生セル値を含む）。原因特定後は削除予定
-  console.log('[要員計画:DEBUG:生産計画サマリー] 全行のスコア一覧(r=0始まり配列index, sheetRowNumber=実際のシート行番号):', JSON.stringify(scoreLog));
   if (bestRow !== -1) {
     console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行として r=${bestRow}（実際のシート${bestRow + 1}行目）を採用（スコア=${bestScore}）`);
   }
