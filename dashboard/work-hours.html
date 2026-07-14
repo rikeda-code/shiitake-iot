@@ -2731,12 +2731,27 @@ function parseProductionData(json) {
 
 // 令和表記("R8.7")・西暦表記("2026/7")のどちらでも月ラベルを"YYYY/M"形式に正規化する
 // （生産計画サマリーシートの見出し表記が実データで未確認のため、両対応にしておく）
+// 令和年数(Rの後の数字)から西暦年を求める（令和1年=2019年、つまり2018+令和年数）
+function reiwaToSeireki(reiwaYear) { return 2018 + reiwaYear; }
+
+// 実シート調査で、生産計画サマリーの月見出しセルは「手入力のR8.5（直近実績月、ASCII"R"）」
+// と「自動入力・カスタム書式による他の月セル」が混在しており、後者は書式次第で
+// ASCII"R"ではなく日本語の元号表記（例:「令5.7」「令和5.7」「令和5年7月」）で
+// 表示されている可能性がある。全角数字の正規化もあわせて行い、幅広い表記に対応する
 function parsePlanMonthLabel(label) {
-  const s = String(label).trim();
+  let s = String(label).trim();
+  // 全角数字を半角に正規化（表示形式によっては全角で来る可能性があるため）
+  s = s.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
   const g = s.match(/^(\d{4})\/(\d{1,2})$/);
   if (g) return `${g[1]}/${parseInt(g[2], 10)}`;
-  const r = s.match(/^R(\d{1,2})\.(\d{1,2})$/);
-  if (r) return `${2018 + parseInt(r[1], 10)}/${parseInt(r[2], 10)}`;
+  const r = s.match(/^R(\d{1,2})\.(\d{1,2})$/i);
+  if (r) return `${reiwaToSeireki(parseInt(r[1], 10))}/${parseInt(r[2], 10)}`;
+  // 令和表記(漢字・ドット区切り)："令5.7" "令和5.7"
+  const reiwaDot = s.match(/^令(?:和)?(\d{1,2})\.(\d{1,2})$/);
+  if (reiwaDot) return `${reiwaToSeireki(parseInt(reiwaDot[1], 10))}/${parseInt(reiwaDot[2], 10)}`;
+  // 令和表記(漢字・年月形式)："令和5年7月" "令5年7月"
+  const reiwaYm = s.match(/^令(?:和)?(\d{1,2})年(\d{1,2})月$/);
+  if (reiwaYm) return `${reiwaToSeireki(parseInt(reiwaYm[1], 10))}/${parseInt(reiwaYm[2], 10)}`;
   return null;
 }
 
@@ -2830,10 +2845,21 @@ function findPlanSummaryHeaderRow(rows) {
     const score = monthCellCount + (hasSiteAndItemLabel ? 1 : 0);
     // 配列indexがそのまま列位置(0=A列,1=B列,...)に対応する。colLetterで列名も併記し、
     // 生のf/v両方を残す（textsだけだと全角空白等の見えない差異が分からないため）。
+    // matched=月パターンとして認識できたか、fCharCodes=.fの各文字コード（全角/異体字/
+    // 制御文字など目視で気付きにくい違いを機械的に確認できるようにする）も併記する。
     // 空欄セル(f・vともnull)は省いて、値があるセルだけを列名付きで表示する（可読性のため）
     const nonBlankCells = row.c
-      .map((c, colIndex) => ({ colIndex, colLetter: colIndexToLetter(colIndex), f: c?.f ?? null, v: c?.v ?? null }))
-      .filter(c => c.f !== null || c.v !== null);
+      .map((c, colIndex) => {
+        if (c === null || c === undefined) return null;
+        const f = c.f ?? null, v = c.v ?? null;
+        if (f === null && v === null) return null;
+        return {
+          colIndex, colLetter: colIndexToLetter(colIndex), f, v,
+          matched: planMonthLabelFromCell(c),
+          fCharCodes: f !== null ? Array.from(String(f)).map(ch => ch.charCodeAt(0)) : null,
+        };
+      })
+      .filter(Boolean);
     console.log(`[要員計画:DEBUG:生産計画サマリー] sheetRowNumber=${sheetRowNumber}（配列index r=${r}, colCount=${row.c.length}）: スコア=${score}（拠点/項目あり=${hasSiteAndItemLabel}, 月セル数=${monthCellCount}） 値のあるセル=${JSON.stringify(nonBlankCells)}`);
     if (score > bestScore) { bestScore = score; bestRow = r; }
   }
