@@ -263,6 +263,15 @@
   </div>
 </div>
 
+<!-- Temperature chart zoom modal -->
+<div id="temp-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)tempCloseZoom()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:1100px;padding:24px;position:relative;margin:auto">
+    <button onclick="tempCloseZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
+    <div id="temp-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:12px"></div>
+    <div style="position:relative;height:min(70vh,600px)"><canvas id="temp-zoom-canvas"></canvas></div>
+  </div>
+</div>
+
 <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
     <button onclick="closeDetail()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.2rem;cursor:pointer">✕</button>
@@ -298,12 +307,6 @@ let currentSiteIdx = 0;
 const cache     = {}; // { [siteId]: { summary: [], containers: [], data: {} } }
 let chartCumul = null;
 let weeklyCharts = [];
-
-const SITE_WEEKLY_COLORS = {
-  'いなべ': '#3b82f6',
-  '群馬':   '#f97316',
-  '南丹':   '#34d399',
-};
 
 // ── Chart.js loader ────────────────────────────────────────────────────────────
 function waitForChart(ms = 15000) {
@@ -934,8 +937,8 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
     if (sortOrder === 'desc') groupKeys.reverse();
   }
 
-  const legendHtml = Object.entries(SITE_WEEKLY_COLORS).map(([name, color]) =>
-    `<div class="weekly-legend-item"><span class="weekly-legend-dot" style="background:${color}"></span>${name}</div>`
+  const legendHtml = Object.entries(ANALYSIS_PACK_CATEGORY_COLORS).map(([name, { dark }]) =>
+    `<div class="weekly-legend-item"><span class="weekly-legend-dot" style="background:${dark}"></span>${name}</div>`
   ).join('');
 
   const sortBar = `
@@ -957,7 +960,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <div class="weekly-chart-title">${groups[k].label}</div>
       <div style="display:none">${
         groups[k].containers.map(c => {
-          const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
+          const color = analysisPackColorFor(analysisPackCategoryFor(c)).dark;
           const sd = parseDateStr(c.startDate);
           const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
           const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
@@ -1813,7 +1816,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
   const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
 
   const datasets = containers.map(c => {
-    const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
+    const color = analysisPackColorFor(analysisPackCategoryFor(c)).dark;
     const cumArr = new Array(MAX_DAY + 1).fill(null);
     const bedCount = c.bedCount > 0 ? c.bedCount : null;
     let cumKg = 0;
@@ -4752,11 +4755,13 @@ function tempFilterPoints(points) {
   });
 }
 
-function tempContainerColor(idx) {
-  return ANALYSIS_LOT_PALETTE[idx % ANALYSIS_LOT_PALETTE.length];
+// 収穫グラフと同じ拠点別配色(いなべ/南丹は自社菌床のみ蛍光色で区別)
+function tempColorFor(c) {
+  return analysisPackColorFor(analysisPackCategoryFor(c)).dark;
 }
 
-function tempLineDataset(c, color) {
+function tempLineDataset(c) {
+  const color = tempColorFor(c);
   return {
     type: 'line', label: `${c.siteName}${c.no}`,
     data: tempFilterPoints(c.points).map(p => ({ x: p.x, y: p.temp })),
@@ -4765,7 +4770,7 @@ function tempLineDataset(c, color) {
 }
 
 function tempChartConfig(items) {
-  const datasets = items.map((c, i) => tempLineDataset(c, tempContainerColor(i))).filter(d => d.data.length);
+  const datasets = items.map(c => tempLineDataset(c)).filter(d => d.data.length);
   return {
     type: 'line',
     data: { datasets },
@@ -4898,16 +4903,17 @@ async function renderTempTab() {
   let bodyHtml;
   if (tempViewMode === 'group') {
     const groups = tempBuildWeekGroups(candidates);
+    tempCurrentGroups = groups;
     bodyHtml = groups.length
       ? `<div class="weekly-grid">${groups.map((g, idx) => `
-        <div class="weekly-chart-card">
+        <div class="weekly-chart-card" style="cursor:zoom-in" onclick="tempOpenZoomGroup(${idx})">
           <div class="weekly-chart-title">${g.label}<span class="sub">(${g.items.length}コンテナ)</span></div>
           <div class="chart-wrap" style="height:260px"><canvas id="temp-group-${idx}"></canvas></div>
         </div>`).join('')}</div>`
       : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
     section.innerHTML = `
       <div class="section-title" style="margin-bottom:12px">温度分析<span class="sub">コンテナ別温度推移(栽培日数ベース)</span></div>
-      ${filterHtml}${bodyHtml}`;
+      ${filterHtml}${analysisPackLegendHtml()}${bodyHtml}`;
     groups.forEach((g, idx) => {
       const canvas = document.getElementById(`temp-group-${idx}`);
       if (canvas) tempCharts.push(new Chart(canvas, tempChartConfig(g.items)));
@@ -4925,6 +4931,7 @@ async function renderTempTab() {
     }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
 
     const selected = candidates.filter(c => tempSelected.has(c.key));
+    tempCurrentSelected = selected;
 
     section.innerHTML = `
       <div class="section-title" style="margin-bottom:12px">温度分析<span class="sub">コンテナ別温度推移(栽培日数ベース)</span></div>
@@ -4946,8 +4953,9 @@ async function renderTempTab() {
           ${tempSelected.size ? `<button class="sort-btn" onclick="tempClearSelection()" style="margin-bottom:10px">選択解除 (${tempSelected.size})</button>` : ''}
           <div style="background:#13151f;border-radius:12px;padding:16px">
             <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">温度推移</div>
+            ${analysisPackLegendHtml()}
             ${selected.length
-              ? `<div style="position:relative;height:480px"><canvas id="temp-container-canvas"></canvas></div>`
+              ? `<div style="position:relative;height:480px;cursor:zoom-in" onclick="tempOpenZoomContainer()"><canvas id="temp-container-canvas"></canvas></div>`
               : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを左のリストから選択してください</div>`}
           </div>
         </div>
@@ -4958,6 +4966,32 @@ async function renderTempTab() {
       if (canvas) tempCharts.push(new Chart(canvas, tempChartConfig(selected)));
     }
   }
+}
+
+let tempCurrentGroups = null;
+let tempCurrentSelected = null;
+let tempZoomChartInstance = null;
+
+function tempOpenZoomGroup(idx) {
+  if (!tempCurrentGroups || !tempCurrentGroups[idx]) return;
+  tempOpenZoom(tempCurrentGroups[idx].label, tempCurrentGroups[idx].items);
+}
+
+function tempOpenZoomContainer() {
+  if (!tempCurrentSelected || !tempCurrentSelected.length) return;
+  tempOpenZoom('コンテナ指定比較', tempCurrentSelected);
+}
+
+function tempOpenZoom(title, items) {
+  document.getElementById('temp-zoom-title').textContent = title;
+  document.getElementById('temp-zoom-modal').style.display = 'flex';
+  if (tempZoomChartInstance) { tempZoomChartInstance.destroy(); tempZoomChartInstance = null; }
+  tempZoomChartInstance = new Chart(document.getElementById('temp-zoom-canvas'), tempChartConfig(items));
+}
+
+function tempCloseZoom() {
+  document.getElementById('temp-zoom-modal').style.display = 'none';
+  if (tempZoomChartInstance) { tempZoomChartInstance.destroy(); tempZoomChartInstance = null; }
 }
 
 window.addEventListener('error', e => {
