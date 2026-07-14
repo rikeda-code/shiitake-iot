@@ -2799,10 +2799,30 @@ function findPlanSummaryHeaderRow(rows) {
     if (!row || !row.c) continue;
     const texts = row.c.map(c => String(c?.f ?? c?.v ?? '').trim());
     const hasSiteAndItemLabel = texts.includes('拠点') && texts.includes('項目');
-    const monthCellCount = texts.filter(t => parsePlanMonthLabel(t)).length;
+    const monthCellCount = row.c.filter(c => planMonthLabelFromCell(c)).length;
+    // [DEBUG] 月ラベル検出の切り分け用。原因特定後は削除予定
+    console.log(`[要員計画:DEBUG:生産計画サマリー] 行${r}走査: 拠点/項目あり=${hasSiteAndItemLabel} 月セル数=${monthCellCount} 内容=${JSON.stringify(texts)}`);
     if (hasSiteAndItemLabel || monthCellCount >= 2) return r;
   }
   return -1;
+}
+
+// gvizの日付セル（v:"Date(y,m,d)"形式、月は0始まり）をYYYY/M形式に変換する。
+// シート側で月見出しセルが「表示形式だけR8.7等に見える日付型セル」の場合、
+// .f(表示文字列)がロケール依存の別形式になっていることがあるため、
+// .v(生の日付値)からも直接変換できるようにしておく
+function gvizDateCellToYearMonth(cell) {
+  if (!cell || typeof cell.v !== 'string') return null;
+  const m = cell.v.match(/^Date\((\d+),(\d+),(\d+)\)/);
+  if (!m) return null;
+  return `${m[1]}/${parseInt(m[2], 10) + 1}`;
+}
+
+// ヘッダーセル1つから月ラベル("YYYY/M")を判定する。テキストラベル("R8.7"/"2026/7")・
+// 日付型セル（表示上はR8.7等に見えても実体はDate値）のどちらでも認識できるようにする
+function planMonthLabelFromCell(cell) {
+  if (!cell) return null;
+  return parsePlanMonthLabel(cell.f ?? '') || parsePlanMonthLabel(String(cell.v ?? '')) || gvizDateCellToYearMonth(cell);
 }
 
 // 整理済み_分析と同じ「拠点（A列・結合セルで先頭行にのみ値）×項目×月別数値」の構成を
@@ -2818,14 +2838,17 @@ function parsePlanSummarySheet(json) {
     return { months: [], records: [] };
   }
 
-  const headerTexts = rows[headerRowIdx].c.map(c => String(c?.f ?? c?.v ?? '').trim());
+  const headerCells = rows[headerRowIdx].c;
   const monthCols = [];
-  headerTexts.forEach((t, i) => {
-    const ym = parsePlanMonthLabel(t);
+  headerCells.forEach((cell, i) => {
+    const ym = planMonthLabelFromCell(cell);
     if (ym) monthCols.push({ idx: i, ym });
   });
+  // [DEBUG] 検出したヘッダー行・月列の内訳。原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行=${headerRowIdx} 検出月列=${JSON.stringify(monthCols)}`);
   if (!monthCols.length) {
-    console.warn('[要員計画:生産計画サマリー] ヘッダー行は検出できましたが月列が1つも見つかりませんでした。ヘッダー行の内容:', headerTexts);
+    console.warn('[要員計画:生産計画サマリー] ヘッダー行は検出できましたが月列が1つも見つかりませんでした。ヘッダー行の内容:',
+      headerCells.map(c => ({ f: c?.f, v: c?.v })));
     return { months: [], records: [] };
   }
   const labelColCount = Math.min(...monthCols.map(m => m.idx));
@@ -2855,6 +2878,8 @@ function parsePlanSummarySheet(json) {
     });
     records.push({ site: currentSite, metric, values });
   }
+  // [DEBUG] 生産計画サマリーの最終パース結果。原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:生産計画サマリー] パース結果 months=${JSON.stringify(months)} records=${JSON.stringify(records)}`);
   return { months, records };
 }
 
@@ -2872,7 +2897,10 @@ function buildShippingPlanRecords(actualProdData, planSummaryData) {
 
   availSites.forEach(site => {
     const shipmentPlanRow = planRecords.find(r => r.site === site && (r.metric === '出荷量' || r.metric === '出荷量(kg)'));
-    if (!shipmentPlanRow) return;
+    if (!shipmentPlanRow) {
+      console.log(`[要員計画:DEBUG:出荷] ${site}: 生産計画サマリーに「出荷量」行が見つからずスキップ`);
+      return;
+    }
 
     const findActual = metric => actualRecords.find(r => r.site === site && r.metric === metric);
     const shipKgRow = findActual('出荷量(kg)');
@@ -2880,18 +2908,27 @@ function buildShippingPlanRecords(actualProdData, planSummaryData) {
     const packRow   = findActual('パック数');
     const bagRow    = findActual('袋数');
     const looseRow  = findActual('バラ数');
-    if (!shipKgRow || !pcsRow) return;
+    if (!shipKgRow || !pcsRow) {
+      console.log(`[要員計画:DEBUG:出荷] ${site}: 実績側(整理済み_分析)に出荷量(kg)またはは合計(点数)が見つからずスキップ shipKgRow=${!!shipKgRow} pcsRow=${!!pcsRow}`);
+      return;
+    }
 
     // 直近実績月：出荷量(kg)・合計(点数)の両方に実データが入っている最後の月
     let latestIdx = -1;
     for (let i = shipKgRow.values.length - 1; i >= 0; i--) {
       if (shipKgRow.values[i] !== null && pcsRow.values[i] !== null) { latestIdx = i; break; }
     }
-    if (latestIdx === -1) return;
+    if (latestIdx === -1) {
+      console.log(`[要員計画:DEBUG:出荷] ${site}: 出荷量(kg)・合計(点数)がともに揃っている実績月が1つも無くスキップ`);
+      return;
+    }
 
     const latestShipKg = shipKgRow.values[latestIdx];
     const latestPcs = pcsRow.values[latestIdx];
-    if (!latestShipKg || latestShipKg <= 0) return;
+    if (!latestShipKg || latestShipKg <= 0) {
+      console.log(`[要員計画:DEBUG:出荷] ${site}: 直近実績月の出荷量(kg)が0以下のためスキップ (latestIdx=${latestIdx}, latestShipKg=${latestShipKg})`);
+      return;
+    }
     const pcsPerKg = latestPcs / latestShipKg;
     const packRatio  = packRow  ? (packRow.values[latestIdx]  ?? 0) / latestPcs : 0;
     const bagRatio   = bagRow   ? (bagRow.values[latestIdx]   ?? 0) / latestPcs : 0;
@@ -2902,12 +2939,16 @@ function buildShippingPlanRecords(actualProdData, planSummaryData) {
     const bagPlanned   = pcsPlanned.map(p => p !== null ? p * bagRatio : null);
     const loosePlanned = pcsPlanned.map(p => p !== null ? p * looseRatio : null);
 
+    // [DEBUG] 出荷側の各拠点の算出結果。原因特定後は削除予定
+    console.log(`[要員計画:DEBUG:出荷] ${site}: latestIdx=${latestIdx} pcsPerKg=${pcsPerKg.toFixed(3)} 出荷量計画=${JSON.stringify(shipmentPlanRow.values)} 合計(点数)予定=${JSON.stringify(pcsPlanned)}`);
+
     outRecords.push({ site, metric: '合計(点数)', values: pcsPlanned });
     outRecords.push({ site, metric: 'パック数', values: packPlanned });
     outRecords.push({ site, metric: '袋数', values: bagPlanned });
     outRecords.push({ site, metric: 'バラ数', values: loosePlanned });
   });
 
+  console.log(`[要員計画:DEBUG:出荷] buildShippingPlanRecords結果 months=${JSON.stringify(planMonths)} records件数=${outRecords.length}`);
   return { months: planMonths, records: outRecords };
 }
 
@@ -3076,6 +3117,8 @@ async function fetchCultivationPlanBySite() {
     try {
       const json = await fetchPlanGanttSheet(sheetName, PLAN_GANTT_SHEET_GIDS[site]);
       out[site] = parseCultivationGanttSheet(json);
+      // [DEBUG] 拠点ごとの60日サイクル月次集計結果。原因特定後は削除予定
+      console.log(`[要員計画:DEBUG:栽培] ${site}(${sheetName}) 月次集計結果=${JSON.stringify(out[site])}`);
     } catch (e) {
       // 1拠点の取得失敗で他拠点まで巻き込まないよう、ここでは握りつぶして空扱いにする。
       // ただしfetchGvizJson側で詳細（URL・HTTPステータス・生レスポンス・gvizエラー内容）は
@@ -3111,6 +3154,8 @@ function buildCultivationPlanRecords(monthlyBySite) {
       records.push({ site, metric, values });
     });
   });
+  // [DEBUG] 栽培側の最終パース結果。原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:栽培] buildCultivationPlanRecords結果 months=${JSON.stringify(months)} records件数=${records.length}`);
   return { months, records };
 }
 
@@ -4595,6 +4640,9 @@ function renderStaffingPlanTable(shippingPlan, cultivationPlan) {
   const availSites = SITES.filter(s =>
     shippingPlan.records.some(r => r.site === s) || cultivationPlan.records.some(r => r.site === s));
   const currentHeadcount = computeCurrentHeadcountBySiteDiv();
+
+  // [DEBUG] 表示列・対象拠点の最終決定内容。原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:表示] allMonths=${JSON.stringify(allMonths)} shippingPlan.months=${JSON.stringify(shippingPlan.months)} cultivationPlan.months=${JSON.stringify(cultivationPlan.months)} availSites=${JSON.stringify(availSites)}`);
 
   let html = `<div class="prod-panel">
     <div class="chart-section-label">👷 要員計画 ／ 生産計画（26/生産計画）× 標準工数設定
