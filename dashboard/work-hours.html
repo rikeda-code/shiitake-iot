@@ -1882,6 +1882,12 @@ function switchToSummarySubtab(tab) {
 }
 
 /* ── Summary: 表タブ ───────────────────────────────────────────── */
+// 期間内に在籍している（当該月にhoursがnullでない）人数を数える。
+// サマリータブの業務区分別集計・要員計画タブの在籍人数比較の両方から共通で呼び出す
+function countActiveEmployees(emps, mi) {
+  return emps.filter(e => e.hours[mi] !== null).length;
+}
+
 function renderSummaryTable() {
   // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
   // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
@@ -1935,12 +1941,12 @@ function renderSummaryTable() {
         { label: '計／人数', sub: EMP_CLASSES.map(ec => ({
             label: ec,
             vals: months.map((_, mi) => {
-              const n = wtEmps.filter(e => e.empClass === ec && e.hours[mi] !== null).length;
+              const n = countActiveEmployees(wtEmps.filter(e => e.empClass === ec), mi);
               return n || null;
             }),
           })),
           total: months.map((_, mi) => {
-            const n = wtEmps.filter(e => e.hours[mi] !== null).length;
+            const n = countActiveEmployees(wtEmps, mi);
             return n || null;
           }),
           isCount: true,
@@ -2838,7 +2844,8 @@ function buildShippingPlanRecords(actualProdData, planSummaryData) {
 /* ── 要員計画：栽培側（ガントシート・投入日+固定60日サイクル） ──────────── */
 
 const BASE_BEDS = 2520; // 基準床数（この床数の時に作業量係数1.0）
-const PLAN_GANTT_LABEL_COLS = { plantMonth: 0, no: 1, plantDate: 2, beds: 3 }; // A/B/C/D列（0始まり）
+// A列(投入月)・D列(床数)のみ使用。C列「投入日」は実データでは空欄のため使用しない
+const PLAN_GANTT_LABEL_COLS = { plantMonth: 0, beds: 3 };
 const PLAN_GANTT_DATA_START_COL = 4; // E列以降が日ごとの列
 
 async function fetchPlanGanttSheet(sheetName) {
@@ -2849,31 +2856,47 @@ async function fetchPlanGanttSheet(sheetName) {
   return json;
 }
 
-// gvizの日付セル（v: "Date(y,m,d)"形式）をJS Dateに変換する
-function parseGvizDateCell(cell) {
+// 日にち行の値（1〜31の整数）をパースする。実データでは行3・4のヘッダーが
+// 月ブロックごとに1〜30/31へリセットされる「その月の日にち」表示のため、
+// 通し日数（サイクル日数）としては使えない点に注意（▼マーカーの列位置と併用する）
+function parseDayOfMonthCell(cell) {
   if (!cell) return null;
-  if (cell.v instanceof Date) return cell.v;
-  if (typeof cell.v === 'string') {
-    const m = cell.v.match(/^Date\((\d+),(\d+),(\d+)\)/);
-    if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
-  }
-  return null;
+  const n = typeof cell.v === 'number' ? cell.v : parseInt(cell.v, 10);
+  return (Number.isFinite(n) && n >= 1 && n <= 31) ? n : null;
 }
 
-// 日ごとの列が並ぶヘッダー行（行3・4想定）を自動検出する。どちらの行が実際の日付行かは
-// シートによって差異がありうるため、E列以降にDate型セルが最も多く並ぶ行を採用する
-function detectGanttHeaderRow(rows) {
+// 日にち行（行3・4想定）を自動検出する。E列以降に1〜31の整数セルが
+// 最も多く並ぶ行を採用する
+function detectGanttDayRow(rows) {
   let bestRow = -1, bestCount = -1;
   for (let r = 0; r < Math.min(rows.length, 6); r++) {
     const row = rows[r];
     if (!row || !row.c) continue;
     let count = 0;
     for (let c = PLAN_GANTT_DATA_START_COL; c < row.c.length; c++) {
-      if (parseGvizDateCell(row.c[c])) count++;
+      if (parseDayOfMonthCell(row.c[c]) !== null) count++;
     }
     if (count > bestCount) { bestCount = count; bestRow = r; }
   }
   return bestRow;
+}
+
+// コンテナ行のE列以降を走査し、最初に「▼」が立っている列（絶対列位置）を
+// サイクル1日目として検出する。日にち行の値は月ブロックごとにリセットされ
+// 通し日数として使えないため、この▼マーカーの列位置を絶対列オフセットの
+// 起点とする（月をまたいで投入されたコンテナでも列位置はズレないため正しく判定できる）
+function findPlantCol(cells) {
+  for (let c = PLAN_GANTT_DATA_START_COL; c < cells.length; c++) {
+    const cell = cells[c];
+    if (cell && typeof cell.v === 'string' && cell.v.trim() === '▼') return c;
+  }
+  return -1;
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
 }
 
 // 投入日を起点とした固定60日サイクルでの工程判定（確定仕様）。
@@ -2893,6 +2916,9 @@ function processForDayOffset(dayOffset) {
   return null; // 2日目・4日目、および範囲外（投入前・廃棄後）
 }
 
+// 散水は社員の管理工数に該当する別項目として、将来的に計上が必要になる見込み。
+// 固定値で持つか、実績連動の変動項目で持つかは未決着の懸案事項。
+// 今回の要員計画タブでは対象外とした（そのため散水はここに含めていない）。
 const CULTIVATION_PLAN_METRICS = ['菌床入れ', '芽かき', '収穫', '収穫量(kg)', '注水', '廃棄', '稼働コンテナ数'];
 
 function emptyMonthlyTally() {
@@ -2901,20 +2927,23 @@ function emptyMonthlyTally() {
   return t;
 }
 
-// 1コンテナ行（1バッチ）を投入日+固定60日サイクルで解析し、月次（暦月・月末締め）の
-// 工程別集計（重み付き）を返す。収穫は日数レンジに関わらず、実際に収穫量(kg)の数値が
+// 1コンテナ行（1バッチ）を「▼列（サイクル1日目）+ 絶対列オフセット」で解析し、
+// 月次（暦月・月末締め）の工程別集計（重み付き）を返す。各日の暦日はplantDate
+// （▼列から復元した投入日）に列オフセット分の日数を加算して求めるため、月をまたぐ
+// コンテナでも正しく計算できる。収穫は日数レンジに関わらず、実際に収穫量(kg)の数値が
 // 入っている日を優先して収穫日とする（ただし15・40日目は注水を優先し収穫としない）
-function aggregateCultivationRow(plantDate, cells, dateCols, weight) {
+function aggregateCultivationRow(plantDate, cells, plantCol, weight) {
   const monthly = {};
   function addTo(ym, key, amount) {
     if (!monthly[ym]) monthly[ym] = emptyMonthlyTally();
     monthly[ym][key] += amount;
   }
 
-  dateCols.forEach(({ col, date }) => {
-    const dayOffset = Math.round((date - plantDate) / 86400000) + 1;
-    if (dayOffset < 1 || dayOffset > 60) return; // 投入前・廃棄後は非稼働
+  for (let dayOffset = 1; dayOffset <= 60; dayOffset++) {
+    const col = plantCol + dayOffset - 1;
+    if (col >= cells.length) break; // シート上のデータ列範囲を超えた
 
+    const date = addDays(plantDate, dayOffset - 1);
     const ym = `${date.getFullYear()}/${date.getMonth() + 1}`;
     addTo(ym, '稼働コンテナ数', weight);
 
@@ -2930,23 +2959,16 @@ function aggregateCultivationRow(plantDate, cells, dateCols, weight) {
       addTo(ym, process, weight);
     }
     // '培養'・null（2,4日目・範囲外）は稼働コンテナ数のみ計上済み
-  });
+  }
   return monthly;
 }
 
 // 1拠点分のガントシート（いなべ(700g)等）を解析し、月次集計（{ym: {...}}）を返す
 function parseCultivationGanttSheet(json) {
   const rows = json.table.rows || [];
-  const headerRowIdx = detectGanttHeaderRow(rows);
-  if (headerRowIdx === -1) return {};
-
-  const headerRow = rows[headerRowIdx];
-  const dateCols = [];
-  for (let c = PLAN_GANTT_DATA_START_COL; c < headerRow.c.length; c++) {
-    const d = parseGvizDateCell(headerRow.c[c]);
-    if (d) dateCols.push({ col: c, date: d });
-  }
-  if (!dateCols.length) return {};
+  const dayRowIdx = detectGanttDayRow(rows);
+  if (dayRowIdx === -1) return {};
+  const dayRow = rows[dayRowIdx];
 
   const monthlyTotal = {};
   function mergeInto(monthly) {
@@ -2956,15 +2978,24 @@ function parseCultivationGanttSheet(json) {
     });
   }
 
-  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+  for (let r = dayRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || !row.c) continue;
-    const plantDate = parseGvizDateCell(row.c[PLAN_GANTT_LABEL_COLS.plantDate]);
+
+    const plantCol = findPlantCol(row.c);
+    if (plantCol === -1) continue; // ▼マーカーが無い行はデータ行ではない（見出し・空行等）
+
+    const plantMonthCell = row.c[PLAN_GANTT_LABEL_COLS.plantMonth];
+    const plantYm = parsePlanMonthLabel(plantMonthCell?.v ?? '');
+    const dayOfMonth = parseDayOfMonthCell(dayRow.c[plantCol]);
     const bedsCell = row.c[PLAN_GANTT_LABEL_COLS.beds];
     const beds = bedsCell && typeof bedsCell.v === 'number' ? bedsCell.v : null;
-    if (!plantDate || !beds) continue; // 投入日・床数が無い行はデータ行ではない（見出し・空行等）
+    if (!plantYm || !dayOfMonth || !beds) continue; // 投入月・日にち・床数のいずれかが読み取れない行は除外
+
+    const [plantYear, plantMonth] = plantYm.split('/').map(Number);
+    const plantDate = new Date(plantYear, plantMonth - 1, dayOfMonth); // 投入月(A列)+▼列の日にちから投入日を復元
     const weight = beds / BASE_BEDS;
-    mergeInto(aggregateCultivationRow(plantDate, row.c, dateCols, weight));
+    mergeInto(aggregateCultivationRow(plantDate, row.c, plantCol, weight));
   }
 
   return monthlyTotal;
@@ -4425,6 +4456,9 @@ function daysInMonth(ym) {
 // 「現在の在籍人数」（参考値）：サマリー画面の人数カウントと同じ考え方
 // （拠点×業務区分ごとに、選択中の集計期間の最新月に実績時間が入っている従業員数）で算出する。
 // 雇用区分別の内訳は今回対象外のため、業務区分（栽培/出荷）ごとの合算のみ
+// サマリータブ（renderSummaryTable）と同じ「当該月にhoursがnullでない人数」の
+// 数え方（countActiveEmployees）を使い、業務区分（栽培/出荷）×拠点で集計する。
+// 独自の在籍人数ロジックを新設せず、サマリータブと同じ数え方を共有する
 function computeCurrentHeadcountBySiteDiv() {
   const { employees, months } = getActiveData();
   const lastIdx = months.length - 1;
@@ -4434,7 +4468,7 @@ function computeCurrentHeadcountBySiteDiv() {
     ['栽培', '出荷'].forEach(div => {
       const cls = div === '栽培' ? 'wt-栽培' : 'wt-出荷';
       const emps = employees.filter(e => e.base === site && e.workType && workTypeClass(e.workType) === cls);
-      result[site][div] = lastIdx >= 0 ? emps.filter(e => e.hours[lastIdx] !== null).length : 0;
+      result[site][div] = lastIdx >= 0 ? countActiveEmployees(emps, lastIdx) : 0;
     });
   });
   return result;
