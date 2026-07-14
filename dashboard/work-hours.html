@@ -2796,19 +2796,24 @@ async function fetchPlanSummarySheet() {
 // 月らしきセルが紛れ込んでいても、本来のヘッダー行（複数の月列が並ぶ）に負けるようにする
 function findPlanSummaryHeaderRow(rows) {
   let bestRow = -1, bestScore = 0;
+  const scoreLog = [];
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const row = rows[r];
-    if (!row || !row.c) continue;
+    if (!row || !row.c) { scoreLog.push({ r, score: null, note: '空行' }); continue; }
     const texts = row.c.map(c => String(c?.f ?? c?.v ?? '').trim());
-    const hasSiteAndItemLabel = texts.includes('拠点') && texts.includes('項目');
+    // 「拠点」「項目」は完全一致ではなく部分一致で見る（"拠点名"等の表記ゆれに強くする）
+    const hasSiteAndItemLabel = texts.some(t => t.includes('拠点')) && texts.some(t => t.includes('項目'));
     const monthCellCount = row.c.filter(c => planMonthLabelFromCell(c)).length;
     const score = monthCellCount + (hasSiteAndItemLabel ? 1 : 0);
-    // [DEBUG] 月ラベル検出の切り分け用。原因特定後は削除予定
-    console.log(`[要員計画:DEBUG:生産計画サマリー] 行${r}走査: 拠点/項目あり=${hasSiteAndItemLabel} 月セル数=${monthCellCount} スコア=${score} 内容=${JSON.stringify(texts)}`);
+    // 生のf/v両方を残す（textsだけだと全角空白等の見えない差異が分からないため）
+    const rawCells = row.c.map(c => ({ f: c?.f ?? null, v: c?.v ?? null }));
+    scoreLog.push({ r, score, hasSiteAndItemLabel, monthCellCount, rawCells });
     if (score > bestScore) { bestScore = score; bestRow = r; }
   }
+  // [DEBUG] 全候補行のスコア一覧（生セル値f/v込み）。原因特定後は削除予定
+  console.log('[要員計画:DEBUG:生産計画サマリー] 全行のスコア一覧:', JSON.stringify(scoreLog));
   if (bestRow !== -1) {
-    console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行として行${bestRow}を採用（スコア=${bestScore}、全${Math.min(rows.length, 10)}行中の最高スコア）`);
+    console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行として行${bestRow}を採用（スコア=${bestScore}）`);
   }
   return bestRow;
 }
@@ -2999,10 +3004,15 @@ function detectGanttDayRow(rows) {
 // サイクル1日目として検出する。日にち行の値は月ブロックごとにリセットされ
 // 通し日数として使えないため、この▼マーカーの列位置を絶対列オフセットの
 // 起点とする（月をまたいで投入されたコンテナでも列位置はズレないため正しく判定できる）
+// ▼マーカーはセルの表示形式によっては生の値(.v)ではなく表示文字列(.f)側に現れる
+// ことがある（例：数値を「▼」と表示するカスタム書式等）。生産計画サマリーの月見出し・
+// 投入月セルで判明したのと同じ「表示と実体のズレ」パターンのため、.fも確認する
 function findPlantCol(cells) {
   for (let c = PLAN_GANTT_DATA_START_COL; c < cells.length; c++) {
     const cell = cells[c];
-    if (cell && typeof cell.v === 'string' && cell.v.trim() === '▼') return c;
+    if (!cell) continue;
+    const text = String(cell.f ?? cell.v ?? '').trim();
+    if (text === '▼') return c;
   }
   return -1;
 }
@@ -3045,7 +3055,9 @@ function emptyMonthlyTally() {
 // 月次（暦月・月末締め）の工程別集計（重み付き）を返す。各日の暦日はplantDate
 // （▼列から復元した投入日）に列オフセット分の日数を加算して求めるため、月をまたぐ
 // コンテナでも正しく計算できる。収穫は日数レンジに関わらず、実際に収穫量(kg)の数値が
-// 入っている日を優先して収穫日とする（ただし15・40日目は注水を優先し収穫としない）
+// 入っている日を優先して収穫日とする（ただし1・15・40日目は注水/菌床入れを優先し
+// 収穫としない。1日目＝▼マーカー自身のセルはカスタム書式で数値を持つ場合があるため、
+// それを誤って収穫kgと解釈しないよう明示的に除外する）
 function aggregateCultivationRow(plantDate, cells, plantCol, weight) {
   const monthly = {};
   function addTo(ym, key, amount) {
@@ -3062,7 +3074,7 @@ function aggregateCultivationRow(plantDate, cells, plantCol, weight) {
     addTo(ym, '稼働コンテナ数', weight);
 
     const cell = cells[col];
-    const kgVal = (cell && typeof cell.v === 'number') ? cell.v : null;
+    const kgVal = (dayOffset !== 1 && cell && typeof cell.v === 'number') ? cell.v : null;
     let process = processForDayOffset(dayOffset);
     if (kgVal !== null && dayOffset !== 15 && dayOffset !== 40) process = '収穫';
 
@@ -3085,6 +3097,8 @@ function parseCultivationGanttSheet(json) {
     console.warn('[要員計画:栽培] 日にち行（E列以降に1〜31の整数が並ぶ行）が検出できませんでした');
     return {};
   }
+  // [DEBUG] 採用した日にち行のindex。原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:栽培] 日にち行として行${dayRowIdx}を採用`);
   const dayRow = rows[dayRowIdx];
 
   const monthlyTotal = {};
@@ -3097,13 +3111,24 @@ function parseCultivationGanttSheet(json) {
 
   // [DEBUG] パイプライン各ステップの通過件数。原因特定後は削除予定
   let plantColFound = 0, plantYmResolved = 0, dayOfMonthResolved = 0, bedsResolved = 0, aggregated = 0;
+  let dataRowsScanned = 0;
 
   for (let r = dayRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || !row.c) continue;
+    dataRowsScanned++;
 
     const plantCol = findPlantCol(row.c);
-    if (plantCol === -1) continue; // ▼マーカーが無い行はデータ行ではない（見出し・空行等）
+    if (plantCol === -1) {
+      // [DEBUG] ▼マーカーが見つからない行は、最初の数件だけE列以降の生セル内容をダンプする。
+      // 原因特定後は削除予定（実際のマーカー表現がここから確認できる）
+      if (dataRowsScanned <= 5) {
+        const sample = row.c.slice(PLAN_GANTT_DATA_START_COL, PLAN_GANTT_DATA_START_COL + 15)
+          .map(c => ({ f: c?.f ?? null, v: c?.v ?? null }));
+        console.log(`[要員計画:DEBUG:栽培] 行${r}: ▼マーカーが見つからない。E列〜T列の生セル内容(先頭15列)=${JSON.stringify(sample)}`);
+      }
+      continue; // ▼マーカーが無い行はデータ行ではない（見出し・空行等）
+    }
     plantColFound++;
 
     const plantMonthCell = row.c[PLAN_GANTT_LABEL_COLS.plantMonth];
