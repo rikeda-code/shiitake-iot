@@ -2785,6 +2785,10 @@ async function fetchPlanSummarySheet() {
   // 生データを取得し、内容をスキャンして実際のヘッダー行を自前で探す方式にする
   const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 0 });
   const json = await fetchGvizJson(url, '生産計画サマリー');
+  // [DEBUG] 非表示列がgvizレスポンスから省略されていないかの確認用。原因特定後は削除予定。
+  // 省略されていなければcols.lengthは実際のシートの最終列（A列=0始まりで数えた列数）と一致するはず
+  console.log(`[要員計画:DEBUG:生産計画サマリー] json.table.cols.length=${json.table.cols?.length ?? 'undefined'} rows.length=${json.table.rows?.length ?? 'undefined'}`);
+  console.log('[要員計画:DEBUG:生産計画サマリー] cols内容(id/label/type):', JSON.stringify(json.table.cols));
   planSummaryData = parsePlanSummarySheet(json);
   return planSummaryData;
 }
@@ -2794,26 +2798,38 @@ async function fetchPlanSummarySheet() {
 // ではなく、全候補行をスコアリング（月パターンにマッチした列数＋『拠点』『項目』を
 // 併せ持つボーナス）した上で、最もスコアが高い行を採用する。装飾行にたまたま1件だけ
 // 月らしきセルが紛れ込んでいても、本来のヘッダー行（複数の月列が並ぶ）に負けるようにする
+// 列インデックスから列名(A,B,...,Z,AA,...)を求める（デバッグ表示用）
+function colIndexToLetter(idx) {
+  let n = idx, s = '';
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
 function findPlanSummaryHeaderRow(rows) {
   let bestRow = -1, bestScore = 0;
   const scoreLog = [];
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const row = rows[r];
-    if (!row || !row.c) { scoreLog.push({ r, score: null, note: '空行' }); continue; }
+    // rはrows配列の0始まりindex。rows自体はheaders=0で取得した生データで行の間引きは
+    // 無いため、r=0がシートの1行目、r=1が2行目、r=2が3行目...に対応する(sheetRowNumber=r+1)
+    const sheetRowNumber = r + 1;
+    if (!row || !row.c) { scoreLog.push({ r, sheetRowNumber, score: null, note: '空行' }); continue; }
     const texts = row.c.map(c => String(c?.f ?? c?.v ?? '').trim());
     // 「拠点」「項目」は完全一致ではなく部分一致で見る（"拠点名"等の表記ゆれに強くする）
     const hasSiteAndItemLabel = texts.some(t => t.includes('拠点')) && texts.some(t => t.includes('項目'));
     const monthCellCount = row.c.filter(c => planMonthLabelFromCell(c)).length;
     const score = monthCellCount + (hasSiteAndItemLabel ? 1 : 0);
+    // 配列indexがそのまま列位置(0=A列,1=B列,...)に対応する。colLetterで列名も併記し、
     // 生のf/v両方を残す（textsだけだと全角空白等の見えない差異が分からないため）
-    const rawCells = row.c.map(c => ({ f: c?.f ?? null, v: c?.v ?? null }));
-    scoreLog.push({ r, score, hasSiteAndItemLabel, monthCellCount, rawCells });
+    const rawCells = row.c.map((c, colIndex) => ({ colIndex, colLetter: colIndexToLetter(colIndex), f: c?.f ?? null, v: c?.v ?? null }));
+    scoreLog.push({ r, sheetRowNumber, score, hasSiteAndItemLabel, monthCellCount, colCount: row.c.length, rawCells });
     if (score > bestScore) { bestScore = score; bestRow = r; }
   }
-  // [DEBUG] 全候補行のスコア一覧（生セル値f/v込み）。原因特定後は削除予定
-  console.log('[要員計画:DEBUG:生産計画サマリー] 全行のスコア一覧:', JSON.stringify(scoreLog));
+  // [DEBUG] 全候補行のスコア一覧（0始まりindex r・実際のシート行番号sheetRowNumber・
+  // 列位置colIndex/colLetter付きの生セル値を含む）。原因特定後は削除予定
+  console.log('[要員計画:DEBUG:生産計画サマリー] 全行のスコア一覧(r=0始まり配列index, sheetRowNumber=実際のシート行番号):', JSON.stringify(scoreLog));
   if (bestRow !== -1) {
-    console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行として行${bestRow}を採用（スコア=${bestScore}）`);
+    console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行として r=${bestRow}（実際のシート${bestRow + 1}行目）を採用（スコア=${bestScore}）`);
   }
   return bestRow;
 }
