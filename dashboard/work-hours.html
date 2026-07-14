@@ -2790,21 +2790,27 @@ async function fetchPlanSummarySheet() {
 }
 
 // gvizの自動ヘッダー推測（行位置決め打ち）には頼らず、rows(生データ)を上から数行
-// スキャンして実際のヘッダー行を検出する。「拠点」「項目」という文字列、または
-// R\d+\.\d+(令和表記月)・YYYY/M(西暦表記月)のパターンが複数セルに並ぶ行を
-// ヘッダー行とみなす（装飾行がたまたま1行目に来ても影響を受けない）
+// スキャンして実際のヘッダー行を検出する。「1件でも月パターンが見つかったら即確定」
+// ではなく、全候補行をスコアリング（月パターンにマッチした列数＋『拠点』『項目』を
+// 併せ持つボーナス）した上で、最もスコアが高い行を採用する。装飾行にたまたま1件だけ
+// 月らしきセルが紛れ込んでいても、本来のヘッダー行（複数の月列が並ぶ）に負けるようにする
 function findPlanSummaryHeaderRow(rows) {
+  let bestRow = -1, bestScore = 0;
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
     const row = rows[r];
     if (!row || !row.c) continue;
     const texts = row.c.map(c => String(c?.f ?? c?.v ?? '').trim());
     const hasSiteAndItemLabel = texts.includes('拠点') && texts.includes('項目');
     const monthCellCount = row.c.filter(c => planMonthLabelFromCell(c)).length;
+    const score = monthCellCount + (hasSiteAndItemLabel ? 1 : 0);
     // [DEBUG] 月ラベル検出の切り分け用。原因特定後は削除予定
-    console.log(`[要員計画:DEBUG:生産計画サマリー] 行${r}走査: 拠点/項目あり=${hasSiteAndItemLabel} 月セル数=${monthCellCount} 内容=${JSON.stringify(texts)}`);
-    if (hasSiteAndItemLabel || monthCellCount >= 2) return r;
+    console.log(`[要員計画:DEBUG:生産計画サマリー] 行${r}走査: 拠点/項目あり=${hasSiteAndItemLabel} 月セル数=${monthCellCount} スコア=${score} 内容=${JSON.stringify(texts)}`);
+    if (score > bestScore) { bestScore = score; bestRow = r; }
   }
-  return -1;
+  if (bestRow !== -1) {
+    console.log(`[要員計画:DEBUG:生産計画サマリー] ヘッダー行として行${bestRow}を採用（スコア=${bestScore}、全${Math.min(rows.length, 10)}行中の最高スコア）`);
+  }
+  return bestRow;
 }
 
 // gvizの日付セル（v:"Date(y,m,d)"形式、月は0始まり）をYYYY/M形式に変換する。
@@ -3075,7 +3081,10 @@ function aggregateCultivationRow(plantDate, cells, plantCol, weight) {
 function parseCultivationGanttSheet(json) {
   const rows = json.table.rows || [];
   const dayRowIdx = detectGanttDayRow(rows);
-  if (dayRowIdx === -1) return {};
+  if (dayRowIdx === -1) {
+    console.warn('[要員計画:栽培] 日にち行（E列以降に1〜31の整数が並ぶ行）が検出できませんでした');
+    return {};
+  }
   const dayRow = rows[dayRowIdx];
 
   const monthlyTotal = {};
@@ -3086,25 +3095,41 @@ function parseCultivationGanttSheet(json) {
     });
   }
 
+  // [DEBUG] パイプライン各ステップの通過件数。原因特定後は削除予定
+  let plantColFound = 0, plantYmResolved = 0, dayOfMonthResolved = 0, bedsResolved = 0, aggregated = 0;
+
   for (let r = dayRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || !row.c) continue;
 
     const plantCol = findPlantCol(row.c);
     if (plantCol === -1) continue; // ▼マーカーが無い行はデータ行ではない（見出し・空行等）
+    plantColFound++;
 
     const plantMonthCell = row.c[PLAN_GANTT_LABEL_COLS.plantMonth];
-    const plantYm = parsePlanMonthLabel(plantMonthCell?.v ?? '');
+    // 投入月セルは表示上"R8.7"等のテキストに見えても実体は日付型セルの場合があるため、
+    // 生産計画サマリーの月見出しと同じplanMonthLabelFromCell()（.f→.v→Date値の順にフォールバック）で判定する
+    const plantYm = planMonthLabelFromCell(plantMonthCell);
+    if (plantYm) plantYmResolved++;
     const dayOfMonth = parseDayOfMonthCell(dayRow.c[plantCol]);
+    if (dayOfMonth !== null) dayOfMonthResolved++;
     const bedsCell = row.c[PLAN_GANTT_LABEL_COLS.beds];
     const beds = bedsCell && typeof bedsCell.v === 'number' ? bedsCell.v : null;
-    if (!plantYm || !dayOfMonth || !beds) continue; // 投入月・日にち・床数のいずれかが読み取れない行は除外
+    if (beds !== null) bedsResolved++;
+    if (!plantYm || !dayOfMonth || !beds) {
+      console.log(`[要員計画:DEBUG:栽培] 行${r}をスキップ: ▼列=${plantCol} 投入月セル=${JSON.stringify({ f: plantMonthCell?.f, v: plantMonthCell?.v })}→plantYm=${plantYm} 日にち=${dayOfMonth} 床数=${beds}`);
+      continue;
+    }
 
     const [plantYear, plantMonth] = plantYm.split('/').map(Number);
     const plantDate = new Date(plantYear, plantMonth - 1, dayOfMonth); // 投入月(A列)+▼列の日にちから投入日を復元
     const weight = beds / BASE_BEDS;
     mergeInto(aggregateCultivationRow(plantDate, row.c, plantCol, weight));
+    aggregated++;
   }
+
+  // [DEBUG] 栽培側パイプラインの各ステップの通過件数サマリー。原因特定後は削除予定
+  console.log(`[要員計画:DEBUG:栽培] ▼列検出=${plantColFound}件 → 投入月復元成功=${plantYmResolved}件 → 日にち取得成功=${dayOfMonthResolved}件 → 床数取得成功=${bedsResolved}件 → 集計実行=${aggregated}件`);
 
   return monthlyTotal;
 }
