@@ -4522,19 +4522,26 @@ function renderStaffingPlanTab() {
   main.innerHTML = '<div class="loading">要員計画を計算中...</div>';
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
 
-  Promise.all([
-    fetchProductionSheet(),
-    fetchPlanSummarySheet(),
-    fetchCultivationPlanBySite(),
-    loadStdSettingsSheetOnce(),
-  ]).then(([prodData, planSummary, cultivationBySite]) => {
-    const shippingPlan = buildShippingPlanRecords(prodData, planSummary);
-    const cultivationPlan = buildCultivationPlanRecords(cultivationBySite);
-    renderStaffingPlanTable(shippingPlan, cultivationPlan);
-  }).catch(e => {
+  // Promise.all以降の非同期例外は.catch()で捕捉されるが、念のため呼び出し自体が
+  // 同期的に例外を投げるケース（想定外の状態等）も取りこぼさないようtry/catchで囲む
+  try {
+    Promise.all([
+      fetchProductionSheet(),
+      fetchPlanSummarySheet(),
+      fetchCultivationPlanBySite(),
+      loadStdSettingsSheetOnce(),
+    ]).then(([prodData, planSummary, cultivationBySite]) => {
+      const shippingPlan = buildShippingPlanRecords(prodData, planSummary);
+      const cultivationPlan = buildCultivationPlanRecords(cultivationBySite);
+      renderStaffingPlanTable(shippingPlan, cultivationPlan);
+    }).catch(e => {
+      main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
+      console.error('[要員計画] データ取得・計算処理でエラー:', e);
+    });
+  } catch (e) {
     main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
-    console.error(e);
-  });
+    console.error('[要員計画] renderStaffingPlanTab()の呼び出し自体でエラー:', e);
+  }
 }
 
 function renderStaffingPlanTable(shippingPlan, cultivationPlan) {
