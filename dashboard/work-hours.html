@@ -708,6 +708,11 @@ const STD_SETTINGS_SHEET_NAME = '標準工数設定';
 const PLAN_SHEET_ID = '1WSCF2cXJsMRW5Y007SbhaLhimE3p8tYgAqcoJcfR_W4'; // 「26/生産計画」
 const PLAN_SUMMARY_SHEET_NAME = '📊 生産計画サマリー(FIX6/9)';
 const PLAN_GANTT_SHEET_NAMES = { 'いなべ': 'いなべ(700g)', '群馬': '群馬(700g)', '南丹': '南丹(700g)' };
+// シート名は絵文字・括弧・スラッシュを含み、gviz側の名前解決に失敗するリスクがある。
+// gid（シートタブのURLの#gid=以降の数字）が判明していれば、こちらを優先して使う
+// （PROD_GIDと同じ考え方）。判明するまではnullのままシート名でアクセスする
+const PLAN_SUMMARY_SHEET_GID = null;
+const PLAN_GANTT_SHEET_GIDS = { 'いなべ': null, '群馬': null, '南丹': null };
 
 const SITES = ['いなべ', '群馬', '南丹'];
 const SITE_COLORS = {
@@ -2735,13 +2740,48 @@ function parsePlanMonthLabel(label) {
   return null;
 }
 
+// gid（シートタブのID）が渡されればそちらを優先し、無ければシート名(encodeURIComponent済み)を使う
+function gvizTqUrl(sheetId, { gid, sheetName, headers }) {
+  const src = gid ? `&gid=${gid}` : `&sheet=${encodeURIComponent(sheetName)}`;
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${src}&headers=${headers}`;
+}
+
+// gvizのtqエンドポイントを叩き、実際のURL・HTTPステータス・生レスポンスをコンソールに出力した上で
+// パースする。fetch自体は200を返してもgviz側でエラー(status:'error')やtable無しを返すことがあり、
+// それを「データが0件」として黙って握りつぶすと本当の失敗原因が分からなくなるため、
+// ここで検知して分かりやすいメッセージ付きの例外にする
+async function fetchGvizJson(url, label) {
+  console.log(`[要員計画:${label}] リクエストURL: ${url}`);
+  const res = await fetch(url);
+  const text = await res.text();
+  console.log(`[要員計画:${label}] HTTPステータス: ${res.status}${res.ok ? '' : '（異常）'}`);
+  console.log(`[要員計画:${label}] 生レスポンス(先頭500文字): ${text.slice(0, 500)}`);
+  if (!res.ok) throw new Error(`「${label}」の取得に失敗しました（HTTP ${res.status}）`);
+
+  let json;
+  try {
+    json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  } catch (e) {
+    console.error(`[要員計画:${label}] レスポンスのJSON解析に失敗:`, e);
+    throw new Error(`「${label}」のレスポンス形式が想定と異なります（JSON解析失敗）`);
+  }
+  if (json.status === 'error') {
+    console.error(`[要員計画:${label}] gvizがエラーを返却:`, json.errors);
+    const reason = json.errors?.[0]?.detailed_message || json.errors?.[0]?.message || '不明なエラー';
+    throw new Error(`「${label}」の取得でエラー: ${reason}`);
+  }
+  if (!json.table) {
+    console.error(`[要員計画:${label}] レスポンスにtableが含まれていません:`, json);
+    throw new Error(`「${label}」のレスポンスに表データが含まれていません`);
+  }
+  return json;
+}
+
 let planSummaryData = null;
 async function fetchPlanSummarySheet() {
   if (planSummaryData) return planSummaryData;
-  const url = `https://docs.google.com/spreadsheets/d/${PLAN_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(PLAN_SUMMARY_SHEET_NAME)}&headers=1`;
-  const res = await fetch(url);
-  const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 1 });
+  const json = await fetchGvizJson(url, '生産計画サマリー');
   planSummaryData = parsePlanSummarySheet(json);
   return planSummaryData;
 }
@@ -2758,7 +2798,10 @@ function parsePlanSummarySheet(json) {
     const ym = parsePlanMonthLabel(cols[i]?.label || '');
     if (ym) monthCols.push({ idx: i, ym });
   }
-  if (!monthCols.length) return { months: [], records: [] };
+  if (!monthCols.length) {
+    console.warn('[要員計画:生産計画サマリー] 月列が1つも検出できませんでした。実際の列ラベル:', cols.map(c => c?.label));
+    return { months: [], records: [] };
+  }
   const labelColCount = Math.min(...monthCols.map(m => m.idx));
   const months = monthCols.map(m => m.ym);
 
@@ -2848,12 +2891,9 @@ const BASE_BEDS = 2520; // 基準床数（この床数の時に作業量係数1.
 const PLAN_GANTT_LABEL_COLS = { plantMonth: 0, beds: 3 };
 const PLAN_GANTT_DATA_START_COL = 4; // E列以降が日ごとの列
 
-async function fetchPlanGanttSheet(sheetName) {
-  const url = `https://docs.google.com/spreadsheets/d/${PLAN_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
-  const res = await fetch(url);
-  const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
-  return json;
+async function fetchPlanGanttSheet(sheetName, gid) {
+  const url = gvizTqUrl(PLAN_SHEET_ID, { gid, sheetName, headers: 0 });
+  return fetchGvizJson(url, `ガント(${sheetName})`);
 }
 
 // 日にち行の値（1〜31の整数）をパースする。実データでは行3・4のヘッダーが
@@ -3007,9 +3047,12 @@ async function fetchCultivationPlanBySite() {
     const sheetName = PLAN_GANTT_SHEET_NAMES[site];
     if (!sheetName) continue;
     try {
-      const json = await fetchPlanGanttSheet(sheetName);
+      const json = await fetchPlanGanttSheet(sheetName, PLAN_GANTT_SHEET_GIDS[site]);
       out[site] = parseCultivationGanttSheet(json);
     } catch (e) {
+      // 1拠点の取得失敗で他拠点まで巻き込まないよう、ここでは握りつぶして空扱いにする。
+      // ただしfetchGvizJson側で詳細（URL・HTTPステータス・生レスポンス・gvizエラー内容）は
+      // 既にコンソールに出力済みなので、原因調査はコンソールログから追える
       console.error(`[要員計画] 「${sheetName}」シート取得エラー:`, e);
       out[site] = {};
     }
@@ -4507,7 +4550,7 @@ function renderStaffingPlanTable(shippingPlan, cultivationPlan) {
     return (ay * 100 + am) - (by * 100 + bm);
   });
   if (!allMonths.length) {
-    main.innerHTML = '<div class="loading">生産計画データが見つかりませんでした</div>';
+    main.innerHTML = '<div class="loading">生産計画データが見つかりませんでした（詳細はブラウザのコンソールログをご確認ください）</div>';
     return;
   }
   const originalCount = allMonths.length; // 予定データに延長列の概念は無く、全列を「実データ」として扱う
