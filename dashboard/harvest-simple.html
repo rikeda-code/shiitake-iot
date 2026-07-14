@@ -230,6 +230,7 @@
 <section id="weight-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="mekaki-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="temp-section" style="display:none;margin:0 32px 40px;"></section>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -2213,6 +2214,7 @@ let scatterTabActive = false;
 let weightTabActive = false;
 let mekakiTabActive = false;
 let analysisTabActive = false;
+let tempTabActive = false;
 let scatterEndedData = null; // { siteName, no, name, startDate, endDate, days, harvest }[]
 const scatterMonthCharts = {};
 
@@ -2221,15 +2223,17 @@ function refreshActiveTab() {
   weightData = null;
   mekakiRows = null;
   analysisDataset = null;
+  tempDataset = null;
   loadWeeklySection().catch(() => {});
   if (scatterTabActive) renderScatterTab();
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
   if (analysisTabActive) renderAnalysisTab();
+  if (tempTabActive) renderTempTab();
 }
 
 function updateTabVisibility() {
-  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive;
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive;
   document.getElementById('main').style.display = anyAlt ? 'none' : '';
   document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
   document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
@@ -2237,9 +2241,11 @@ function updateTabVisibility() {
   document.getElementById('weight-section').style.display = weightTabActive ? '' : 'none';
   document.getElementById('mekaki-section').style.display = mekakiTabActive ? '' : 'none';
   document.getElementById('analysis-section').style.display = analysisTabActive ? '' : 'none';
+  document.getElementById('temp-section').style.display = tempTabActive ? '' : 'none';
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
   if (analysisTabActive) renderAnalysisTab();
+  if (tempTabActive) renderTempTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
@@ -2554,6 +2560,7 @@ function initTabs() {
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = false;
+    tempTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2578,6 +2585,7 @@ function initTabs() {
     weightTabActive = true;
     mekakiTabActive = false;
     analysisTabActive = false;
+    tempTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2597,7 +2605,7 @@ function initTabs() {
   mekakiBtn.addEventListener('click', () => {
     if (mekakiTabActive) return;
     weeklyTabActive = false; lotTabActive = false; scatterTabActive = false;
-    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false;
+    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false; tempTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = ''; b.style.borderBottomColor = ''; });
     mekakiBtn.classList.add('active');
     mekakiBtn.style.color = '#a78bfa';
@@ -2619,6 +2627,7 @@ function initTabs() {
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = false;
+    tempTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2644,6 +2653,7 @@ function initTabs() {
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = true;
+    tempTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2656,6 +2666,32 @@ function initTabs() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(analysisBtn);
+
+  // 温度分析 tab
+  const tempBtn = document.createElement('button');
+  tempBtn.className = 'tab-btn';
+  tempBtn.textContent = '温度分析';
+  tempBtn.addEventListener('click', () => {
+    if (tempTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = false;
+    mekakiTabActive = false;
+    analysisTabActive = false;
+    tempTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = '';
+      b.style.borderBottomColor = '';
+    });
+    tempBtn.classList.add('active');
+    tempBtn.style.color = '#fb923c';
+    tempBtn.style.borderBottomColor = '#fb923c';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(tempBtn);
 }
 
 function closeDetail() {
@@ -4598,6 +4634,330 @@ function analysisOpenZoom(key) {
 function analysisCloseZoom() {
   document.getElementById('analysis-zoom-modal').style.display = 'none';
   if (analysisZoomChartInstance) { analysisZoomChartInstance.destroy(); analysisZoomChartInstance = null; }
+}
+
+// ── 温度分析タブ ──────────────────────────────────────────────────────────────
+
+const TEMP_SHEET_ID = '13-pcuNp-QHVz4RlwpdzagoC_ComuZHl5uonBBX9KvYY';
+// シート名が拠点名と一致しない場合(例: 郡馬)があるため個別にマッピングする
+const TEMP_SITE_SHEET_NAMES = { 'いなべ': 'いなべ', '群馬': '郡馬', '南丹': '南丹' };
+
+let tempDataset = null; // [{ key, siteName, no, name, startDate, lot, points: [{day, hour, x, dateObj, temp}] }]
+let tempFilters = { sites: new Set(SITES.map(s => s.name)), dayFrom: '', dayTo: '', dateFrom: '', dateTo: '' };
+let tempSelected = new Set();
+let tempViewMode = 'group'; // 'group'(週別グループ) | 'container'(コンテナ指定)
+let tempCharts = [];
+
+// 温度集計表(1行=栽培日数×時間、列=コンテナ)を1拠点分パースする
+async function fetchTempSheetForSite(site) {
+  const sheetName = TEMP_SITE_SHEET_NAMES[site.name];
+  if (!sheetName) return [];
+  const table = await fetchSheet(TEMP_SHEET_ID, sheetName, 1);
+  const cols = table.cols || [];
+  const containerCols = [];
+  for (let ci = 2; ci < cols.length; ci++) {
+    const label = (cols[ci]?.label || '').trim();
+    if (label) containerCols.push({ ci, name: label });
+  }
+  if (!containerCols.length) return [];
+  const byContainer = containerCols.map(cc => ({ name: cc.name, ci: cc.ci, points: [] }));
+
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const dayCell = cells[0]?.v;
+    const dm = dayCell != null ? String(dayCell).match(/(\d+)/) : null;
+    if (!dm) return;
+    const day = parseInt(dm[1]);
+
+    // 時間セル: gvizのTIMEOFDAY型は表現が揺れるため複数パターンに対応する
+    const tCell = cells[1];
+    let hour = null;
+    if (typeof tCell?.f === 'string') {
+      const tm = tCell.f.match(/^(\d{1,2}):(\d{2})/);
+      if (tm) hour = parseInt(tm[1]) + parseInt(tm[2]) / 60;
+    }
+    if (hour == null) {
+      const tv = tCell?.v;
+      if (Array.isArray(tv)) hour = (tv[0] || 0) + (tv[1] || 0) / 60;
+      else if (typeof tv === 'number') hour = tv * 24;
+      else if (typeof tv === 'string') {
+        const tm2 = tv.match(/^(\d{1,2}):(\d{2})/);
+        if (tm2) hour = parseInt(tm2[1]) + parseInt(tm2[2]) / 60;
+      }
+    }
+    if (hour == null) return;
+
+    byContainer.forEach(bc => {
+      const v = cells[bc.ci]?.v;
+      const temp = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? parseFloat(v) : null);
+      if (temp == null || isNaN(temp)) return;
+      bc.points.push({ day, hour, temp });
+    });
+  });
+
+  return byContainer.filter(bc => bc.points.length > 0);
+}
+
+async function ensureTempDataset() {
+  if (tempDataset) return tempDataset;
+  if (!weeklyState) await loadWeeklySection();
+  const perSite = await Promise.all(SITES.map(site =>
+    fetchTempSheetForSite(site).then(list => ({ site, list })).catch(() => ({ site, list: [] }))));
+
+  const items = [];
+  perSite.forEach(({ site, list }) => {
+    list.forEach(bc => {
+      const no = extractContainerNo(bc.name);
+      // 号機の栽培開始日・菌床ロットは収穫実績側のコンテナ一覧から突き合わせる
+      const match = (weeklyState?.containerData || []).find(c => c.siteName === site.name && c.name === bc.name);
+      const startDate = match?.startDate || '';
+      const startD = parseDateStr(startDate);
+      const points = bc.points.map(p => {
+        let dateObj = null;
+        if (startD) {
+          dateObj = new Date(startD);
+          dateObj.setDate(dateObj.getDate() + (p.day - 1));
+          dateObj.setHours(Math.floor(p.hour), Math.round((p.hour % 1) * 60), 0, 0);
+        }
+        return { ...p, x: +(p.day + p.hour / 24).toFixed(4), dateObj };
+      }).sort((a, b) => a.x - b.x);
+      items.push({
+        key: `${site.name}|${no}|${bc.name}`, siteName: site.name, no, name: bc.name,
+        startDate, lot: match?.lot || '', points,
+      });
+    });
+  });
+  tempDataset = items;
+  return items;
+}
+
+function tempFilteredCandidates() {
+  return (tempDataset || []).filter(c => tempFilters.sites.has(c.siteName))
+    .sort((a, b) => (parseDateStr(b.startDate) || 0) - (parseDateStr(a.startDate) || 0));
+}
+
+// 栽培日数・対象日付フィルターを個々の温度ポイントに適用する
+function tempFilterPoints(points) {
+  const dayFrom = tempFilters.dayFrom !== '' ? parseFloat(tempFilters.dayFrom) : null;
+  const dayTo = tempFilters.dayTo !== '' ? parseFloat(tempFilters.dayTo) : null;
+  const dateFrom = tempFilters.dateFrom ? new Date(tempFilters.dateFrom) : null;
+  const dateTo = tempFilters.dateTo ? new Date(tempFilters.dateTo) : null;
+  if (dateTo) dateTo.setHours(23, 59, 59, 999);
+  return points.filter(p => {
+    if (dayFrom != null && p.day < dayFrom) return false;
+    if (dayTo != null && p.day > dayTo) return false;
+    if (dateFrom && (!p.dateObj || p.dateObj < dateFrom)) return false;
+    if (dateTo && (!p.dateObj || p.dateObj > dateTo)) return false;
+    return true;
+  });
+}
+
+function tempContainerColor(idx) {
+  return ANALYSIS_LOT_PALETTE[idx % ANALYSIS_LOT_PALETTE.length];
+}
+
+function tempLineDataset(c, color) {
+  return {
+    type: 'line', label: `${c.siteName}${c.no}`,
+    data: tempFilterPoints(c.points).map(p => ({ x: p.x, y: p.temp })),
+    borderColor: color, backgroundColor: color, pointRadius: 0, borderWidth: 1.5, tension: 0.15,
+  };
+}
+
+function tempChartConfig(items) {
+  const datasets = items.map((c, i) => tempLineDataset(c, tempContainerColor(i))).filter(d => d.data.length);
+  return {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12 } },
+        tooltip: { ...tooltipDefaults, callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}℃ (${ctx.parsed.x.toFixed(2)}日)` } },
+      },
+      scales: {
+        x: { type: 'linear', title: { display: true, text: '栽培日数(日)', color: '#8892a4', font: { size: 11 } }, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { min: 0, max: 30, title: { display: true, text: '温度(℃)', color: '#8892a4', font: { size: 11 } }, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+// 「週別累計」タブと同じ栽培開始週(日〜土)でグルーピングする
+function tempBuildWeekGroups(items) {
+  const groups = {};
+  items.forEach(c => {
+    const week = c.startDate ? getSunSatWeek(c.startDate) : null;
+    if (!week) return;
+    (groups[week.key] ||= { label: week.label, items: [] }).items.push(c);
+  });
+  return Object.keys(groups).sort().reverse().map(k => groups[k]);
+}
+
+function tempToggleSite(name) {
+  if (tempFilters.sites.has(name)) tempFilters.sites.delete(name);
+  else tempFilters.sites.add(name);
+  renderTempTab();
+}
+
+function tempSetFilter(key, value) {
+  tempFilters[key] = value;
+  renderTempTab();
+}
+
+function tempSetMode(mode) {
+  tempViewMode = mode;
+  renderTempTab();
+}
+
+function tempToggleSelect(key) {
+  if (tempSelected.has(key)) tempSelected.delete(key);
+  else tempSelected.add(key);
+  renderTempTab();
+}
+
+function tempClearSelection() {
+  tempSelected.clear();
+  renderTempTab();
+}
+
+function tempBulkAction(selectEl, action) {
+  const candidates = tempFilteredCandidates();
+  if (action === 'selectAll') candidates.forEach(c => tempSelected.add(c.key));
+  else if (action === 'deselectAll') candidates.forEach(c => tempSelected.delete(c.key));
+  selectEl.value = '';
+  renderTempTab();
+}
+
+async function renderTempTab() {
+  const section = document.getElementById('temp-section');
+  if (!section) return;
+
+  if (!tempDataset) {
+    section.innerHTML = `<div class="section-title">温度分析<span class="sub">コンテナ別温度推移</span></div>
+      <div class="loading">温度データを読み込み中...</div>`;
+    try {
+      await ensureTempDataset();
+    } catch (e) {
+      section.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
+      return;
+    }
+    if (!tempTabActive) return; // タブ切替後に非同期処理が終わった場合は描画しない
+  }
+
+  const candidates = tempFilteredCandidates();
+
+  const siteFilterHtml = SITES.map(s => `
+    <button class="sort-btn${tempFilters.sites.has(s.name) ? ' active' : ''}"
+      style="${tempFilters.sites.has(s.name) ? `color:${s.color};border-color:${s.color}` : ''}"
+      onclick="tempToggleSite('${s.name}')">${s.name}</button>`).join('');
+
+  const modeButtons = [
+    { key: 'group', label: '① 週別グループ' },
+    { key: 'container', label: '② コンテナ指定' },
+  ].map(m => `<button class="sort-btn${tempViewMode === m.key ? ' active' : ''}" onclick="tempSetMode('${m.key}')">${m.label}</button>`).join('');
+
+  const filterHtml = `
+    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end">
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">拠点</div>
+          <div style="display:flex;gap:6px">${siteFilterHtml}</div>
+        </div>
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">表示方法</div>
+          <div style="display:flex;gap:6px">${modeButtons}</div>
+        </div>
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">栽培日数</div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <input type="number" placeholder="下限" value="${tempFilters.dayFrom}" oninput="tempSetFilter('dayFrom', this.value)"
+              style="width:64px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+            <span style="color:#64748b">〜</span>
+            <input type="number" placeholder="上限" value="${tempFilters.dayTo}" oninput="tempSetFilter('dayTo', this.value)"
+              style="width:64px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+            <span style="color:#64748b;font-size:0.78rem">日</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">対象日付</div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <input type="date" value="${tempFilters.dateFrom}" oninput="tempSetFilter('dateFrom', this.value)"
+              style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+            <span style="color:#64748b">〜</span>
+            <input type="date" value="${tempFilters.dateTo}" oninput="tempSetFilter('dateTo', this.value)"
+              style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  tempCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+  tempCharts = [];
+
+  let bodyHtml;
+  if (tempViewMode === 'group') {
+    const groups = tempBuildWeekGroups(candidates);
+    bodyHtml = groups.length
+      ? `<div class="weekly-grid">${groups.map((g, idx) => `
+        <div class="weekly-chart-card">
+          <div class="weekly-chart-title">${g.label}<span class="sub">(${g.items.length}コンテナ)</span></div>
+          <div class="chart-wrap" style="height:260px"><canvas id="temp-group-${idx}"></canvas></div>
+        </div>`).join('')}</div>`
+      : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">温度分析<span class="sub">コンテナ別温度推移(栽培日数ベース)</span></div>
+      ${filterHtml}${bodyHtml}`;
+    groups.forEach((g, idx) => {
+      const canvas = document.getElementById(`temp-group-${idx}`);
+      if (canvas) tempCharts.push(new Chart(canvas, tempChartConfig(g.items)));
+    });
+  } else {
+    const candidateListHtml = candidates.length ? candidates.map(c => {
+      const checked = tempSelected.has(c.key);
+      const safeKey = c.key.replace(/'/g, "\\'");
+      return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;${checked ? 'background:#22d3ee1a' : ''}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="tempToggleSelect('${safeKey}')">
+        <span style="color:${SITES.find(s => s.name === c.siteName)?.color || '#94a3b8'};font-weight:700;font-size:0.82rem">${c.siteName}</span>
+        <span style="font-size:0.85rem;color:#e2e8f0">${c.no}号機</span>
+        <span style="font-size:0.75rem;color:#64748b">${c.startDate || '—'} 開始</span>
+      </label>`;
+    }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
+
+    const selected = candidates.filter(c => tempSelected.has(c.key));
+
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">温度分析<span class="sub">コンテナ別温度推移(栽培日数ベース)</span></div>
+      ${filterHtml}
+      <div style="display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;align-items:start">
+        <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:8px;max-height:560px;overflow-y:auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 8px;position:sticky;top:0;background:#1a1d27;z-index:1">
+            <span style="font-size:0.75rem;color:#64748b">候補 ${candidates.length}件</span>
+            <select onchange="tempBulkAction(this, this.value)"
+              style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:4px 6px;font-size:0.78rem">
+              <option value="" selected>一括操作...</option>
+              <option value="selectAll">表示中を全選択</option>
+              <option value="deselectAll">表示中を全解除</option>
+            </select>
+          </div>
+          ${candidateListHtml}
+        </div>
+        <div>
+          ${tempSelected.size ? `<button class="sort-btn" onclick="tempClearSelection()" style="margin-bottom:10px">選択解除 (${tempSelected.size})</button>` : ''}
+          <div style="background:#13151f;border-radius:12px;padding:16px">
+            <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">温度推移</div>
+            ${selected.length
+              ? `<div style="position:relative;height:480px"><canvas id="temp-container-canvas"></canvas></div>`
+              : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを左のリストから選択してください</div>`}
+          </div>
+        </div>
+      </div>`;
+
+    if (selected.length) {
+      const canvas = document.getElementById('temp-container-canvas');
+      if (canvas) tempCharts.push(new Chart(canvas, tempChartConfig(selected)));
+    }
+  }
 }
 
 window.addEventListener('error', e => {
