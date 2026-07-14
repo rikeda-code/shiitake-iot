@@ -2780,10 +2780,29 @@ async function fetchGvizJson(url, label) {
 let planSummaryData = null;
 async function fetchPlanSummarySheet() {
   if (planSummaryData) return planSummaryData;
-  const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 1 });
+  // gvizのheaders=1による自動ヘッダー推測は、実シートの1行目がほぼ空欄＋ノイズ的な
+  // 数値1個という装飾行であるため誤動作する（本来のヘッダーは3行目）。headers=0で
+  // 生データを取得し、内容をスキャンして実際のヘッダー行を自前で探す方式にする
+  const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 0 });
   const json = await fetchGvizJson(url, '生産計画サマリー');
   planSummaryData = parsePlanSummarySheet(json);
   return planSummaryData;
+}
+
+// gvizの自動ヘッダー推測（行位置決め打ち）には頼らず、rows(生データ)を上から数行
+// スキャンして実際のヘッダー行を検出する。「拠点」「項目」という文字列、または
+// R\d+\.\d+(令和表記月)・YYYY/M(西暦表記月)のパターンが複数セルに並ぶ行を
+// ヘッダー行とみなす（装飾行がたまたま1行目に来ても影響を受けない）
+function findPlanSummaryHeaderRow(rows) {
+  for (let r = 0; r < Math.min(rows.length, 10); r++) {
+    const row = rows[r];
+    if (!row || !row.c) continue;
+    const texts = row.c.map(c => String(c?.f ?? c?.v ?? '').trim());
+    const hasSiteAndItemLabel = texts.includes('拠点') && texts.includes('項目');
+    const monthCellCount = texts.filter(t => parsePlanMonthLabel(t)).length;
+    if (hasSiteAndItemLabel || monthCellCount >= 2) return r;
+  }
+  return -1;
 }
 
 // 整理済み_分析と同じ「拠点（A列・結合セルで先頭行にのみ値）×項目×月別数値」の構成を
@@ -2791,15 +2810,22 @@ async function fetchPlanSummarySheet() {
 // 月列が始まる直前までの列を全てラベル列とみなし、各行でその中の最後の非空欄セルを
 // 項目名として使う（実際の列構成が確認できていないため、多少のレイアウト差異を吸収する）
 function parsePlanSummarySheet(json) {
-  const cols = json.table.cols;
   const rows = json.table.rows || [];
-  const monthCols = [];
-  for (let i = 0; i < cols.length; i++) {
-    const ym = parsePlanMonthLabel(cols[i]?.label || '');
-    if (ym) monthCols.push({ idx: i, ym });
+  const headerRowIdx = findPlanSummaryHeaderRow(rows);
+  if (headerRowIdx === -1) {
+    console.warn('[要員計画:生産計画サマリー] ヘッダー行（拠点/項目/月ラベル）が検出できませんでした。先頭10行:',
+      rows.slice(0, 10).map(r => r?.c?.map(c => c?.f ?? c?.v) ?? null));
+    return { months: [], records: [] };
   }
+
+  const headerTexts = rows[headerRowIdx].c.map(c => String(c?.f ?? c?.v ?? '').trim());
+  const monthCols = [];
+  headerTexts.forEach((t, i) => {
+    const ym = parsePlanMonthLabel(t);
+    if (ym) monthCols.push({ idx: i, ym });
+  });
   if (!monthCols.length) {
-    console.warn('[要員計画:生産計画サマリー] 月列が1つも検出できませんでした。実際の列ラベル:', cols.map(c => c?.label));
+    console.warn('[要員計画:生産計画サマリー] ヘッダー行は検出できましたが月列が1つも見つかりませんでした。ヘッダー行の内容:', headerTexts);
     return { months: [], records: [] };
   }
   const labelColCount = Math.min(...monthCols.map(m => m.idx));
@@ -2807,8 +2833,9 @@ function parsePlanSummarySheet(json) {
 
   const records = [];
   let currentSite = '';
-  rows.forEach(row => {
-    if (!row || !row.c) return;
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row.c) continue;
     const cells = row.c;
     const raw = v => { const c = cells[v]; return c ? (c.f || c.v || '') : ''; };
     const siteVal = String(raw(0)).trim();
@@ -2819,7 +2846,7 @@ function parsePlanSummarySheet(json) {
       const v = String(raw(c)).trim();
       if (v) { metric = v; break; }
     }
-    if (!metric || metric === 'null') return;
+    if (!metric || metric === 'null') continue;
 
     const values = monthCols.map(m => {
       const c = cells[m.idx];
@@ -2827,7 +2854,7 @@ function parsePlanSummarySheet(json) {
       return typeof c.v === 'number' ? c.v : null;
     });
     records.push({ site: currentSite, metric, values });
-  });
+  }
   return { months, records };
 }
 
