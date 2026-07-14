@@ -2793,6 +2793,22 @@ async function fetchGvizJson(url, label) {
   return json;
 }
 
+// headers=0を明示指定していても、gvizが独自の判断でヘッダー行をcols[].labelへ
+// 畳み込んでいる可能性を念のため防御する。cols[].labelに何か値が入っている列が
+// 1件でもあれば、それを「本来rowsの先頭にあったはずの行」として復元し、rowsの
+// 先頭に挿入した上でパース対象に含める（labelが全て空文字ならno-opで無害）
+function recoverHeaderRowFromColsLabelIfNeeded(json, label) {
+  const cols = json.table.cols || [];
+  console.log(`[要員計画:DEBUG:${label}] json.table.cols.length=${cols.length} rows.length=${json.table.rows?.length ?? 'undefined'}`);
+  console.log(`[要員計画:DEBUG:${label}] cols内容(id/label/type):`, JSON.stringify(cols));
+  const hasAnyLabel = cols.some(c => c && c.label);
+  if (!hasAnyLabel) return json;
+  console.warn(`[要員計画:${label}] headers=0指定にも関わらずcols[].labelに値が入っています。` +
+    'gvizが自動的にヘッダー行を切り離した可能性があるため、その行をrowsの先頭に復元します:', JSON.stringify(cols.map(c => c?.label)));
+  const virtualRow = { c: cols.map(c => (c && c.label) ? { v: c.label, f: c.label } : null) };
+  return { ...json, table: { ...json.table, rows: [virtualRow, ...(json.table.rows || [])] } };
+}
+
 let planSummaryData = null;
 async function fetchPlanSummarySheet() {
   if (planSummaryData) return planSummaryData;
@@ -2802,11 +2818,8 @@ async function fetchPlanSummarySheet() {
   // rangeを明示指定し、gviz側の「使用範囲」自動判定（結合セル等をきっかけに行が
   // 間引かれる可能性）に影響されず、指定範囲を欠けなくそのまま返させるようにする
   const url = gvizTqUrl(PLAN_SHEET_ID, { gid: PLAN_SUMMARY_SHEET_GID, sheetName: PLAN_SUMMARY_SHEET_NAME, headers: 0, range: 'A1:Z50' });
-  const json = await fetchGvizJson(url, '生産計画サマリー');
-  // [DEBUG] 非表示列がgvizレスポンスから省略されていないかの確認用。原因特定後は削除予定。
-  // 省略されていなければcols.lengthは実際のシートの最終列（A列=0始まりで数えた列数）と一致するはず
-  console.log(`[要員計画:DEBUG:生産計画サマリー] json.table.cols.length=${json.table.cols?.length ?? 'undefined'} rows.length=${json.table.rows?.length ?? 'undefined'}`);
-  console.log('[要員計画:DEBUG:生産計画サマリー] cols内容(id/label/type):', JSON.stringify(json.table.cols));
+  let json = await fetchGvizJson(url, '生産計画サマリー');
+  json = recoverHeaderRowFromColsLabelIfNeeded(json, '生産計画サマリー');
   planSummaryData = parsePlanSummarySheet(json);
   return planSummaryData;
 }
@@ -3023,7 +3036,8 @@ const PLAN_GANTT_DATA_START_COL = 4; // E列以降が日ごとの列
 
 async function fetchPlanGanttSheet(sheetName, gid) {
   const url = gvizTqUrl(PLAN_SHEET_ID, { gid, sheetName, headers: 0 });
-  return fetchGvizJson(url, `ガント(${sheetName})`);
+  const json = await fetchGvizJson(url, `ガント(${sheetName})`);
+  return recoverHeaderRowFromColsLabelIfNeeded(json, `ガント(${sheetName})`);
 }
 
 // 日にち行の値（1〜31の整数）をパースする。実データでは行3・4のヘッダーが
