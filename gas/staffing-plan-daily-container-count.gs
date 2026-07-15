@@ -785,3 +785,119 @@ function writeInabeDailyCounts_Month_2026_09() { stage2b_writeInabeAndSeiriForMo
 function writeInabeDailyCounts_Month_2026_10() { stage2b_writeInabeAndSeiriForMonthFast(2026, 10); }
 function writeInabeDailyCounts_Month_2026_11() { stage2b_writeInabeAndSeiriForMonthFast(2026, 11); }
 function writeInabeDailyCounts_Month_2026_12() { stage2b_writeInabeAndSeiriForMonthFast(2026, 12); }
+
+// dateにn日加えた日付を返す(コンポーネント単位。タイムゾーンの影響を受けない)
+function stage2b_addDays(date, n) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + n);
+}
+
+/**
+ * 「いなべ(700g)」の全コンテナ行の投入日を一覧化する(依頼#1)。
+ * stage2b_readContainers()が読み取れた投入日に加え、パースに失敗して除外された行も
+ * 警告として併せて表示する（除外されたコンテナがあると、その投入日の菌床入れ・芽かき
+ * (該当コンテナ単独でしか値が立たないことが多い)が0のまま欠落する一方、収穫・稼働
+ * コンテナ数は他の同時期のコンテナに埋もれて見た目上は目立ちにくい、という非対称な
+ * 見え方になりうる）。
+ */
+function stage2b_listInabeContainers() {
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+
+  const { containers, warnings } = stage2b_readContainers(sheet, tz);
+  Logger.log('=== いなべ(700g) 全コンテナ一覧（' + containers.length + '件、正常に読み取れたもののみ）===');
+  containers.forEach(function (c) {
+    Logger.log('行' + c.rowNum + ': 投入日=' + stage2b_fmtDate(c.plantDate) + ' 床数=' + c.beds
+      + '（菌床入れ日=' + stage2b_fmtDate(c.plantDate)
+      + ' / 芽かき日=' + stage2b_fmtDate(stage2b_addDays(c.plantDate, 2)) + ',' + stage2b_fmtDate(stage2b_addDays(c.plantDate, 4)) + '）');
+  });
+
+  if (warnings.length > 0) {
+    Logger.log('=== 読み取り中の警告・除外された行（' + warnings.length + '件）===');
+    Logger.log('⚠ これらの行のコンテナは集計から完全に除外されている点に注意（菌床入れ・芽かきが');
+    Logger.log('⚠ 単独でしか値が立たない日付の場合、その日の値が0になって欠落して見える原因になりうる）');
+    warnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+  } else {
+    Logger.log('✅ 読み取り警告なし（全コンテナ行が正常にパースできた）');
+  }
+}
+
+/**
+ * 依頼#2〜#4：投入日を起点に、菌床入れ(投入日当日)・芽かき(投入日+2日/+4日)が
+ * 実際にいなべ(700g)シートの140・141行目に正しく反映されているかを、コンテナごとに
+ * 機械的に検証する。startDate〜endDateの範囲内にある投入日・芽かき日のみを対象とする。
+ *
+ * 菌床入れは基本的にその投入日のコンテナ単独でしか値が立たない前提で、
+ * シート実値が「そのコンテナの重み(床数/2520)」と一致するかを厳密にチェックする。
+ * 芽かきは近接する投入日のコンテナ同士で日付が重なることがありうる（例：2日おきに
+ * 投入されるコンテナが多いと、あるコンテナの芽かき(day5)と別コンテナの菌床入れ/芽かき(day1,3)が
+ * 同じ日になるケースがある）ため、厳密な一致は求めず、実値とログを両方出力するに留める。
+ */
+function stage2b_verifyKikodoMekaki(startYear, startMonth, startDay, endYear, endMonth, endDay) {
+  const rangeStart = new Date(startYear, startMonth - 1, startDay);
+  const rangeEnd = new Date(endYear, endMonth - 1, endDay);
+
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+
+  const { containers, warnings: readWarnings } = stage2b_readContainers(sheet, tz);
+  Logger.log('=== 菌床入れ・芽かき検証: ' + stage2b_fmtDate(rangeStart) + ' 〜 ' + stage2b_fmtDate(rangeEnd)
+    + '（コンテナ' + containers.length + '件） ===');
+  if (readWarnings.length > 0) {
+    Logger.log('⚠ コンテナ読み取り時の警告（' + readWarnings.length + '件。以下の行は集計から除外されている）:');
+    readWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+  }
+
+  const { dateMap, warnings: mapWarnings } = stage2b_buildColumnDateMap(sheet, tz);
+  mapWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  const mismatches = [];
+  containers.forEach(function (c) {
+    if (c.plantDate < rangeStart || c.plantDate > rangeEnd) return; // 範囲外の投入日は対象外
+    const weight = stage2b_round1(c.beds / STAGE2B_BASE_BEDS);
+
+    // 菌床入れ(投入日当日) : 基本的にこのコンテナ単独の値のはずなので厳密に照合する
+    const kikodoCol = stage2b_findColumnForDate(dateMap, c.plantDate);
+    if (kikodoCol == null) {
+      mismatches.push('行' + c.rowNum + '（投入日' + stage2b_fmtDate(c.plantDate) + '）: 菌床入れ日の列が見つかりません');
+    } else {
+      const actual = sheet.getRange(STAGE2B_SUMMARY_ROWS.kikodo, kikodoCol).getValue();
+      const line = '行' + c.rowNum + ' 菌床入れ(' + stage2b_fmtDate(c.plantDate) + '/列' + stage2b_colLabel(kikodoCol) + '): シート実値=' + actual + ' 期待値(単独なら)=' + weight;
+      Logger.log(line);
+      if (actual !== weight) mismatches.push('❌ ' + line);
+    }
+
+    // 芽かき(投入日+2日, +4日) : 他コンテナと重なりうるため実値のログのみ(厳密な不一致判定はしない)
+    [2, 4].forEach(function (offset) {
+      const mekakiDate = stage2b_addDays(c.plantDate, offset);
+      if (mekakiDate < rangeStart || mekakiDate > rangeEnd) return;
+      const col = stage2b_findColumnForDate(dateMap, mekakiDate);
+      if (col == null) {
+        mismatches.push('行' + c.rowNum + '（投入日' + stage2b_fmtDate(c.plantDate) + '）: 芽かき日(+' + offset + '日/' + stage2b_fmtDate(mekakiDate) + ')の列が見つかりません');
+        return;
+      }
+      const actual = sheet.getRange(STAGE2B_SUMMARY_ROWS.mekaki, col).getValue();
+      Logger.log('行' + c.rowNum + ' 芽かき(+' + offset + '日=' + stage2b_fmtDate(mekakiDate) + '/列' + stage2b_colLabel(col) + '): シート実値=' + actual
+        + '（このコンテナの寄与分=' + weight + '。他コンテナと重複している場合はこれより大きい値になりうる）');
+      if (actual === 0 || actual === '') mismatches.push('❌ 行' + c.rowNum + ' 芽かき(+' + offset + '日=' + stage2b_fmtDate(mekakiDate) + '/列' + stage2b_colLabel(col) + ')が0または空欄（このコンテナの寄与分が反映されていない可能性）');
+    });
+  });
+
+  Logger.log('=== 検証結果: 不一致・要確認 ' + mismatches.length + '件 ===');
+  mismatches.forEach(function (m) { Logger.log(m); });
+  if (mismatches.length === 0) Logger.log('✅ 範囲内のコンテナについて、菌床入れ・芽かきの疑わしい不一致は見つかりませんでした');
+}
+
+// 8月・9月分の菌床入れ・芽かき検証（今回の報告範囲）
+function verifyKikodoMekaki_Aug_Sep_test() {
+  stage2b_verifyKikodoMekaki(2026, 8, 1, 2026, 9, 30);
+}
