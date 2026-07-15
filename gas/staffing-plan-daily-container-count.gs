@@ -7,20 +7,32 @@
  * このファイルは「いなべ(700g)」シートへの書き込みの検証（Step 1: 7/1分のみ→Step 2: 7/2分を追加）を行う。
  * 月次集計して「整理済み_計画_更新」シートへ書き込む処理は後続で実装する。
  *
- * ── シート構造（今回ユーザーが実データを直接確認した内容）─────────────
- * A列：投入月（月初の行にのみラベルあり。例：2026/6/1、2026/7/1。日付型セル or 文字列の場合がある）
- * B列：No.（コンテナ通し番号。全コンテナ行で連続して埋まっている前提でコンテナ行範囲を検出する）
- * C列：投入日。型が不統一で、6月分は日付型(Date)、7月分は文字列「7/1」形式（年なし）。
- *       文字列の場合は直近のA列ラベルから年を補完する
- * D列：床数（基準2520。異なる場合は係数=床数/2520で重み付け）
- * E列以降：既存の収穫量ガント（今回の日次集計では読まない。投入日からのサイクル日数計算のみで判定する）
+ * ── シート構造（ユーザーが添付画像で実データを確認した内容。旧想定から修正）─────
+ * 行1：タイトル
+ * 行2：投入月の色凡例（"7月投入","8月投入"等の帯）
+ * 行3：列ヘッダー（A〜D列に"投入月","No.","投入日","床数"）＋ 月ラベル（"2026/7"等、
+ *      各月ブロックの最初の列にのみ記載。Date型ではなく文字列の場合がある）
+ * 行4：その月の日にち（27,28,29,30,1,2,3,...という、月ブロックごとに1〜31へリセットされる
+ *      単純な整数。Date型ではない）
+ * 行5以降：コンテナ行
+ *   A列：投入月（月初の行にのみラベルあり。日付型セル or 文字列の場合がある）
+ *   B列：No.（コンテナ通し番号。全コンテナ行で連続して埋まっている前提でコンテナ行範囲を検出する）
+ *   C列：投入日。型が不統一で、6月分は日付型(Date)、7月分は文字列「7/1」形式（年なし）。
+ *        文字列の場合は直近のA列ラベルから年を補完する
+ *   D列：床数（基準2520。異なる場合は係数=床数/2520で重み付け）
+ *   E列以降：既存の収穫量ガント（今回の日次集計では読まない。投入日からのサイクル日数計算のみで判定する）
+ *
+ * 列→実際の日付の復元方法：行3の月ラベル（各月ブロック先頭列にのみ存在）を「現在の年月」として
+ * 保持しながら列を左から右へ走査し、行4の日にち(整数)と組み合わせて各列の実際の日付を復元する
+ * （Date型セルの有無で日付ヘッダー行を検出する方式は、生産計画サマリーシート調査の教訓と同じ
+ * 「見た目だけで型を推測する」誤りだったため廃止した）。
  *
  * 140〜146行目：工程別の日次集計の書き込み先（B列に工程名ラベルが既に入力済み）
  *   140:菌床入れ 141:芽かき 142:収穫 143:注水 144:散水(対象外・書き込まない) 145:廃棄 146:稼働コンテナ数
- *   C列以降が日次データの書き込み列。どの列がどの日付に対応するかは、シート内の日付ヘッダー行
- *   （実際の日付型セルが横に並んでいる行）を自動検出して判定する（行番号をハードコードしない）。
- *   既存の実績側GAS（工程カウント.gs）と同様、日付ヘッダー行に応じて右方向に自動展開する設計とし、
- *   対象日の列が無い場合は「直前の日付列の翌日」であることを確認した上で新しい列を追加する。
+ *   書き込み列は、上記で復元した列→日付マップから対象日に一致する列を探して決定する
+ *   （行3・行4と同じ絶対列位置を使う）。対象日の列が既存データに無い場合、今回は自動追加を
+ *   行わずエラーとして中断する（月境界での日にちリセット・月ラベル追加を伴う自動展開は複雑なため、
+ *   誤った書き込みを避ける目的で今回のStepでは未実装。既存の列に対する書き込みのみ対応）。
  *
  * ── 60日サイクルモデル（確定済み仕様）─────────────────────────
  * サイクル日目 = (対象日 − 投入日).days + 1。1〜60の範囲内のみ「稼働中」として扱う。
@@ -36,7 +48,9 @@ const STAGE2B_PLAN_SHEET_ID = '1WSCF2cXJsMRW5Y007SbhaLhimE3p8tYgAqcoJcfR_W4'; //
 const STAGE2B_INABE_SHEET_NAME = 'いなべ(700g)';
 const STAGE2B_BASE_BEDS = 2520;
 
-const STAGE2B_CONTAINER_DATA_START_ROW = 4; // 行4以降がコンテナ行
+const STAGE2B_HEADER_LABEL_ROW = 3; // 投入月/No./投入日/床数の列ヘッダー ＋ 月ラベル(各月ブロック先頭列のみ)
+const STAGE2B_DAY_NUMBER_ROW = 4;   // その月の日にち(1〜31、月ブロックごとにリセットされる整数。Date型ではない)
+const STAGE2B_CONTAINER_DATA_START_ROW = 5; // 行5以降がコンテナ行(添付画像確認により4→5に修正)
 const STAGE2B_CONTAINER_MAX_SCAN_ROW = 139;  // 140行目(集計行)の手前まで
 const STAGE2B_COL_A_PLANT_MONTH = 1; // A列
 const STAGE2B_COL_B_NO = 2;          // B列
@@ -52,10 +66,7 @@ const STAGE2B_SUMMARY_ROWS = {
   haiki: 145,   // 廃棄
   active: 146,  // 稼働コンテナ数
 };
-const STAGE2B_DATE_HEADER_SEARCH_MIN_ROW = 1;
-const STAGE2B_DATE_HEADER_SEARCH_MAX_ROW = 139; // 集計行より上を探索
-const STAGE2B_DATE_HEADER_SEARCH_MIN_COL = 3;   // C列以降を探索
-const STAGE2B_DATE_HEADER_MIN_DATE_CELLS = 20;  // これ未満のDateセル数の行は日付ヘッダーとみなさない
+const STAGE2B_HEADER_SCAN_MIN_COL = 3; // C列から探索(A-D列の固定ラベルは正規表現・整数判定で自然に除外される)
 
 // サイクル日目(1-60)から工程キーを返す。null=工程なし(稼働のみ)
 function stage2b_processForCycleDay(cycleDay) {
@@ -73,8 +84,9 @@ function stage2b_daysDiff(from, to) {
   return Math.round((b - a) / 86400000);
 }
 
-// A列(投入月)セルから年(・可能なら月)を抽出する。Date型 or "yyyy/M/d","yyyy/M"文字列を許容
-function stage2b_parsePlantMonthLabel(cellValue) {
+// 年月を表すセルから年・月を抽出する。Date型 or "yyyy/M/d","yyyy/M"文字列を許容。
+// コンテナ行のA列(投入月)、行3の月ラベルの両方で使う共通処理
+function stage2b_parseYearMonthCell(cellValue) {
   if (cellValue instanceof Date && !isNaN(cellValue.getTime())) {
     return { year: cellValue.getFullYear(), month: cellValue.getMonth() + 1 };
   }
@@ -102,7 +114,7 @@ function stage2b_parsePlantDate(cellValue, carriedYear) {
   return { date: null, warning: '投入日(C列)を日付として解釈できません(値=' + cellValue + ')' };
 }
 
-// コンテナ行(4行目〜)を読み取り、{plantDate, beds, rowNum}の配列を返す。
+// コンテナ行(5行目〜)を読み取り、{plantDate, beds, rowNum}の配列を返す。
 // B列(No.)が連続して埋まっている範囲をコンテナ行とみなし、空白で打ち切る
 function stage2b_readContainers(sheet) {
   const lastCol = Math.max(sheet.getLastColumn(), STAGE2B_COL_D_BEDS);
@@ -129,7 +141,7 @@ function stage2b_readContainers(sheet) {
       break; // No.が空白＝コンテナ行の終端
     }
 
-    const monthLabel = stage2b_parsePlantMonthLabel(aVal);
+    const monthLabel = stage2b_parseYearMonthCell(aVal);
     if (monthLabel) carriedYear = monthLabel.year;
 
     const beds = typeof dVal === 'number' ? dVal : Number(dVal);
@@ -170,66 +182,61 @@ function stage2b_computeDailyCounts(containers, targetDate) {
   return { totals: result, detail: detail };
 }
 
-// 日付ヘッダー行を自動検出する（Date型セルが最も多く並んでいる行を採用）
-function stage2b_findDateHeaderRow(sheet) {
-  const lastCol = sheet.getLastColumn();
-  const numCols = lastCol - STAGE2B_DATE_HEADER_SEARCH_MIN_COL + 1;
-  if (numCols <= 0) return null;
-
-  const numRows = STAGE2B_DATE_HEADER_SEARCH_MAX_ROW - STAGE2B_DATE_HEADER_SEARCH_MIN_ROW + 1;
-  const values = sheet.getRange(STAGE2B_DATE_HEADER_SEARCH_MIN_ROW, STAGE2B_DATE_HEADER_SEARCH_MIN_COL, numRows, numCols).getValues();
-
-  let bestRow = -1, bestCount = 0;
-  const candidates = [];
-  for (let i = 0; i < values.length; i++) {
-    const count = values[i].filter(function (v) { return v instanceof Date && !isNaN(v.getTime()); }).length;
-    if (count > 0) candidates.push({ row: STAGE2B_DATE_HEADER_SEARCH_MIN_ROW + i, count: count });
-    if (count > bestCount) { bestCount = count; bestRow = STAGE2B_DATE_HEADER_SEARCH_MIN_ROW + i; }
-  }
-
-  Logger.log('日付ヘッダー行の候補: ' + JSON.stringify(candidates));
-  if (bestCount < STAGE2B_DATE_HEADER_MIN_DATE_CELLS) {
-    Logger.log('❌ 日付ヘッダー行を確定できませんでした(最大候補: 行' + bestRow + ' Date型セル数=' + bestCount + ')');
-    return null;
-  }
-  Logger.log('✅ 日付ヘッダー行を検出: 行' + bestRow + '（Date型セル数=' + bestCount + '）');
-  return bestRow;
+// 行4(日にち)セルが1〜31の整数として解釈できるか判定する
+function stage2b_isDayNumberCell(cellValue) {
+  const n = typeof cellValue === 'number' ? cellValue
+    : (typeof cellValue === 'string' && cellValue.trim() !== '' ? Number(cellValue) : NaN);
+  return Number.isInteger(n) && n >= 1 && n <= 31;
 }
 
-// 日付ヘッダー行の中からtargetDateに一致する列を探す。無ければ「直前列の翌日」である場合のみ
-// 新しい列を1つ追加する（自動展開）。それ以外は例外を投げて処理を中断する（安全のため推測はしない）
-function stage2b_findOrAppendDateColumn(sheet, dateHeaderRow, targetDate) {
+// 行3(月ラベル)・行4(日にち)を左から右へ走査し、列→実際の日付のマップを構築する。
+// 月ラベルは各月ブロックの先頭列にのみ存在するため、直近に見つかったラベルを
+// 「現在の年月」として保持しながら、行4の日にち(整数)と組み合わせて日付を復元する
+function stage2b_buildColumnDateMap(sheet) {
   const lastCol = sheet.getLastColumn();
-  const numCols = lastCol - STAGE2B_DATE_HEADER_SEARCH_MIN_COL + 1;
-  const rowRange = sheet.getRange(dateHeaderRow, STAGE2B_DATE_HEADER_SEARCH_MIN_COL, 1, numCols);
-  const values = rowRange.getValues()[0];
+  const width = lastCol - STAGE2B_HEADER_SCAN_MIN_COL + 1;
+  if (width <= 0) return { dateMap: {}, warnings: ['列範囲が不正です(lastCol=' + lastCol + ')'] };
 
-  let lastDateCol = -1, lastDateVal = null;
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    if (!(v instanceof Date) || isNaN(v.getTime())) continue;
-    const col = STAGE2B_DATE_HEADER_SEARCH_MIN_COL + i;
-    if (stage2b_sameDate(v, targetDate)) {
-      Logger.log('対象日(' + stage2b_fmtDate(targetDate) + ')の列を発見: 列' + col);
-      return col;
+  const monthLabels = sheet.getRange(STAGE2B_HEADER_LABEL_ROW, STAGE2B_HEADER_SCAN_MIN_COL, 1, width).getValues()[0];
+  const dayNumbers = sheet.getRange(STAGE2B_DAY_NUMBER_ROW, STAGE2B_HEADER_SCAN_MIN_COL, 1, width).getValues()[0];
+
+  const dateMap = {};
+  const warnings = [];
+  let currentYear = null, currentMonth = null;
+  let monthLabelCount = 0, dayNumberCount = 0;
+  const monthLabelHits = [];
+
+  for (let i = 0; i < width; i++) {
+    const col = STAGE2B_HEADER_SCAN_MIN_COL + i;
+    const label = stage2b_parseYearMonthCell(monthLabels[i]);
+    if (label) {
+      currentYear = label.year; currentMonth = label.month; monthLabelCount++;
+      monthLabelHits.push('列' + col + '=' + label.year + '/' + label.month);
     }
-    lastDateCol = col;
-    lastDateVal = v;
+
+    if (!stage2b_isDayNumberCell(dayNumbers[i])) continue;
+    const day = typeof dayNumbers[i] === 'number' ? dayNumbers[i] : Number(dayNumbers[i]);
+    dayNumberCount++;
+    if (currentYear == null) {
+      warnings.push('列' + col + ': 日にち(' + day + ')はあるが、月ラベルがまだ現れていないため年月を特定できません');
+      continue;
+    }
+    dateMap[col] = new Date(currentYear, currentMonth - 1, day);
   }
 
-  if (lastDateCol === -1) {
-    throw new Error('日付ヘッダー行(行' + dateHeaderRow + ')にDate型セルが1つも見つかりませんでした');
-  }
-  if (stage2b_daysDiff(lastDateVal, targetDate) !== 1) {
-    throw new Error('対象日(' + stage2b_fmtDate(targetDate) + ')の列が見つからず、また既存の最終日付列(' + stage2b_fmtDate(lastDateVal)
-      + ' / 列' + lastDateCol + ')の翌日でもないため、自動追加を中断しました（想定外のギャップの可能性）');
-  }
+  Logger.log('行' + STAGE2B_HEADER_LABEL_ROW + '(月ラベル)検出: ' + monthLabelCount + '件 ' + JSON.stringify(monthLabelHits));
+  Logger.log('行' + STAGE2B_DAY_NUMBER_ROW + '(日にち)整数セル検出: ' + dayNumberCount + '件 / 復元できた日付列数: ' + Object.keys(dateMap).length);
 
-  const newCol = lastDateCol + 1;
-  const newDateCell = sheet.getRange(dateHeaderRow, newCol);
-  newDateCell.setValue(targetDate).setNumberFormat('yyyy/MM/dd');
-  Logger.log('日付ヘッダー行に新しい列を追加: 列' + newCol + ' = ' + stage2b_fmtDate(targetDate));
-  return newCol;
+  return { dateMap: dateMap, warnings: warnings };
+}
+
+// dateMapからtargetDateに一致する列を探す。見つからなければnull(このStepでは自動追加しない)
+function stage2b_findColumnForDate(dateMap, targetDate) {
+  const cols = Object.keys(dateMap).map(Number).sort(function (a, b) { return a - b; });
+  for (let i = 0; i < cols.length; i++) {
+    if (stage2b_sameDate(dateMap[cols[i]], targetDate)) return cols[i];
+  }
+  return null;
 }
 
 function stage2b_sameDate(a, b) {
@@ -263,19 +270,22 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
     + ' 注水=' + totals.chusui + ' 廃棄=' + totals.haiki + ' 稼働コンテナ数=' + totals.active);
   Logger.log('対象日に稼働中のコンテナ内訳(' + detail.length + '件): ' + JSON.stringify(detail));
 
-  const dateHeaderRow = stage2b_findDateHeaderRow(sheet);
-  if (!dateHeaderRow) {
-    Logger.log('❌ 日付ヘッダー行が特定できなかったため、書き込みを中断しました');
-    return;
+  const { dateMap, warnings: mapWarnings } = stage2b_buildColumnDateMap(sheet);
+  mapWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  const resolvedDates = Object.keys(dateMap).map(function (c) { return dateMap[c]; });
+  if (resolvedDates.length > 0) {
+    const sorted = resolvedDates.slice().sort(function (a, b) { return a - b; });
+    Logger.log('復元できた日付の範囲: ' + stage2b_fmtDate(sorted[0]) + ' 〜 ' + stage2b_fmtDate(sorted[sorted.length - 1]));
   }
 
-  let targetCol;
-  try {
-    targetCol = stage2b_findOrAppendDateColumn(sheet, dateHeaderRow, targetDate);
-  } catch (e) {
-    Logger.log('❌ 書き込み列の特定に失敗したため中断しました: ' + e.message);
+  const targetCol = stage2b_findColumnForDate(dateMap, targetDate);
+  if (!targetCol) {
+    Logger.log('❌ 対象日(' + stage2b_fmtDate(targetDate) + ')に対応する列が見つかりませんでした。書き込みを中断しました'
+      + '（今回のStepでは列の自動追加は行いません）');
     return;
   }
+  Logger.log('対象日(' + stage2b_fmtDate(targetDate) + ')の列を検出: 列' + targetCol);
 
   sheet.getRange(STAGE2B_SUMMARY_ROWS.kikodo, targetCol).setValue(totals.kikodo);
   sheet.getRange(STAGE2B_SUMMARY_ROWS.mekaki, targetCol).setValue(totals.mekaki);
