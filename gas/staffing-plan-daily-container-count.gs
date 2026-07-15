@@ -637,3 +637,151 @@ function writeInabeDailyCounts_Range_test() {
   const dates = stage2b_writeInabeDailyCountsRange(2026, 6, 30, 2026, 8, 1);
   stage2b_writeSeiriAggregate(dates);
 }
+
+/**
+ * 高速一括版：開始日〜終了日(両端含む)の範囲について、コンテナ行・日付ヘッダーの読み込みを
+ * それぞれ1回だけ行い、全対象日の集計をメモリ上で計算した上で、いなべ(700g)への書き込みも
+ * 行ごとに1回の setValues() へまとめて実行する。
+ *
+ * stage2b_writeInabeDailyCountsRange()（1日ずつ読み書きを繰り返す方式）は、対象日数が
+ * 増えるとシートAPI呼び出し回数が日数に比例して増大し(214日分だと読み込み約428回＋
+ * 書き込み約1284回)、GASの実行時間制限(6分程度)に抵触するおそれがある。
+ * この関数はシートへのアクセスを合計でも十数回程度に抑えることで、数百日規模でも
+ * 現実的な時間で完走できるようにしたもの。
+ *
+ * 「整理済み_計画_更新」への月次振り分けも、いなべ(700g)から読み戻すのではなく、
+ * ここで計算済みのメモリ上の値をそのまま使って行う(stage2b_writeSeiriAggregateFromTotals参照)。
+ */
+function stage2b_writeInabeAndSeiriRangeFast(startYear, startMonth, startDay, endYear, endMonth, endDay) {
+  const startTime = new Date().getTime();
+  const dates = stage2b_dateRange(startYear, startMonth, startDay, endYear, endMonth, endDay);
+  Logger.log('=== いなべ(700g) 高速一括書き込み: ' + stage2b_fmtDate(new Date(startYear, startMonth - 1, startDay))
+    + ' 〜 ' + stage2b_fmtDate(new Date(endYear, endMonth - 1, endDay)) + '（' + dates.length + '日分） ===');
+
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+
+  // 1. コンテナ行・日付ヘッダーは、対象日数に関わらずそれぞれ1回だけ読み込む
+  const { containers, warnings: readWarnings } = stage2b_readContainers(sheet, tz);
+  Logger.log('コンテナ行読み取り件数: ' + containers.length + '件');
+  readWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  const { dateMap, warnings: mapWarnings } = stage2b_buildColumnDateMap(sheet, tz);
+  mapWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  // 2. 対象日ごとに書き込み列を特定する(見つからない日はスキップし、まとめて警告する)
+  const resolved = []; // { d:{year,month,day}, col, totals }
+  const missingDates = [];
+  dates.forEach(function (d) {
+    const targetDate = new Date(d.year, d.month - 1, d.day);
+    const col = stage2b_findColumnForDate(dateMap, targetDate);
+    if (col == null) { missingDates.push(d); return; }
+    const { totals } = stage2b_computeDailyCounts(containers, targetDate);
+    const roundedTotals = {
+      kikodo: stage2b_round1(totals.kikodo),
+      mekaki: stage2b_round1(totals.mekaki),
+      harvest: stage2b_round1(totals.harvest),
+      chusui: stage2b_round1(totals.chusui),
+      haiki: stage2b_round1(totals.haiki),
+      active: stage2b_round1(totals.active),
+    };
+    resolved.push({ d: d, col: col, totals: roundedTotals });
+  });
+  if (missingDates.length > 0) {
+    Logger.log('⚠ 列が見つからず書き込みをスキップした日付: ' + missingDates.length + '件（先頭10件: '
+      + JSON.stringify(missingDates.slice(0, 10).map(function (d) { return d.year + '/' + d.month + '/' + d.day; })) + '）');
+  }
+  if (resolved.length === 0) {
+    Logger.log('❌ 書き込み対象の列が1つも見つかりませんでした');
+    return;
+  }
+
+  // 3. 140〜143行目・145〜146行目(散水=144行目は触らない)を、それぞれ1回の
+  //    getValues()/setValues()にまとめて書き込む。範囲内に対象外の列(月ラベル専用の
+  //    スペーサー列等)が含まれていても、既存値をそのまま読み戻して書き戻すため上書きされない
+  const cols = resolved.map(function (r) { return r.col; });
+  const minCol = Math.min.apply(null, cols);
+  const maxCol = Math.max.apply(null, cols);
+  const numCols = maxCol - minCol + 1;
+  const totalsByCol = {};
+  resolved.forEach(function (r) { totalsByCol[r.col] = r.totals; });
+
+  const rowGroups = [
+    { rows: [STAGE2B_SUMMARY_ROWS.kikodo, STAGE2B_SUMMARY_ROWS.mekaki, STAGE2B_SUMMARY_ROWS.harvest, STAGE2B_SUMMARY_ROWS.chusui], keys: ['kikodo', 'mekaki', 'harvest', 'chusui'] },
+    { rows: [STAGE2B_SUMMARY_ROWS.haiki, STAGE2B_SUMMARY_ROWS.active], keys: ['haiki', 'active'] },
+  ];
+  rowGroups.forEach(function (group) {
+    const range = sheet.getRange(group.rows[0], minCol, group.rows.length, numCols);
+    const existing = range.getValues();
+    for (let c = 0; c < numCols; c++) {
+      const dayTotals = totalsByCol[minCol + c];
+      if (!dayTotals) continue; // 対象外の列は既存値のまま変更しない
+      for (let r = 0; r < group.rows.length; r++) {
+        existing[r][c] = dayTotals[group.keys[r]];
+      }
+    }
+    range.setValues(existing);
+  });
+
+  const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+  Logger.log('✅ いなべ(700g)への一括書き込み完了（' + resolved.length + '日分 / 列'
+    + stage2b_colLabel(minCol) + '〜' + stage2b_colLabel(maxCol) + ' / 所要時間 約' + elapsedSec + '秒）');
+
+  // 4. 「整理済み_計画_更新」への月次振り分けも、いなべ(700g)から読み戻さず、
+  //    ここで計算済みのメモリ上の値をそのまま使って行う
+  stage2b_writeSeiriAggregateFromTotals(resolved.map(function (r) { return { d: r.d, totals: r.totals }; }));
+}
+
+// メモリ上の日次集計値(dateEntries: [{d:{year,month,day}, totals}])を暦月ごとに合算し、
+// 「整理済み_計画_更新」の対応列(2026/6→L, 2026/7→M, ...)へ書き込む。
+// stage2b_writeSeiriAggregate()と異なり、いなべ(700g)への読み戻しを行わない高速版
+function stage2b_writeSeiriAggregateFromTotals(dateEntries) {
+  const groups = {}; // "year-month" -> { year, month, list: [totals,...] }
+  const order = [];
+  dateEntries.forEach(function (e) {
+    const key = e.d.year + '-' + e.d.month;
+    if (!groups[key]) { groups[key] = { year: e.d.year, month: e.d.month, list: [] }; order.push(key); }
+    groups[key].list.push(e.totals);
+  });
+
+  order.forEach(function (key) {
+    const group = groups[key];
+    const sum = stage2b_sumDayTotals(group.list);
+    const roundedSum = {
+      kikodo: stage2b_round1(sum.kikodo),
+      mekaki: stage2b_round1(sum.mekaki),
+      harvest: stage2b_round1(sum.harvest),
+      chusui: stage2b_round1(sum.chusui),
+      haiki: stage2b_round1(sum.haiki),
+      active: stage2b_round1(sum.active),
+    };
+    const seiriCol = stage2b_seiriColumnForMonth(group.year, group.month);
+    Logger.log(group.year + '/' + group.month + '分(' + group.list.length + '日分)の合計(丸め後): ' + JSON.stringify(roundedSum));
+    stage2b_writeToSeiriSheet(roundedSum, group.list.length + '日分の合計(' + group.year + '/' + group.month + ')', seiriCol);
+  });
+}
+
+// 指定した年月(1ヶ月分)を高速一括版で処理する便利関数
+function stage2b_writeInabeAndSeiriForMonthFast(year, month) {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  stage2b_writeInabeAndSeiriRangeFast(year, month, 1, year, month, daysInMonth);
+}
+
+// 6/1〜12/31を一括実行するエントリーポイント(高速一括版)。まずはこちらを試す
+function writeInabeDailyCounts_FullRange_2026H2_fast() {
+  stage2b_writeInabeAndSeiriRangeFast(2026, 6, 1, 2026, 12, 31);
+}
+
+// 上記が実行時間制限等で完走しない場合の代替：月ごとに手動実行するためのエントリーポイント群
+function writeInabeDailyCounts_Month_2026_06() { stage2b_writeInabeAndSeiriForMonthFast(2026, 6); }
+function writeInabeDailyCounts_Month_2026_07() { stage2b_writeInabeAndSeiriForMonthFast(2026, 7); }
+function writeInabeDailyCounts_Month_2026_08() { stage2b_writeInabeAndSeiriForMonthFast(2026, 8); }
+function writeInabeDailyCounts_Month_2026_09() { stage2b_writeInabeAndSeiriForMonthFast(2026, 9); }
+function writeInabeDailyCounts_Month_2026_10() { stage2b_writeInabeAndSeiriForMonthFast(2026, 10); }
+function writeInabeDailyCounts_Month_2026_11() { stage2b_writeInabeAndSeiriForMonthFast(2026, 11); }
+function writeInabeDailyCounts_Month_2026_12() { stage2b_writeInabeAndSeiriForMonthFast(2026, 12); }
