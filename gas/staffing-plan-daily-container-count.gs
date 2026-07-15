@@ -4,8 +4,11 @@
  * 【方針転換の背景】
  * ダッシュボードJS側でのgviz直読み＋ブラウザ内計算をやめ、GAS側で
  * 「26/生産計画」ファイルの各拠点ガントシートに日次の工程別コンテナ数を直接書き込む方式に変更した。
- * このファイルは「いなべ(700g)」シートへの書き込みの検証（Step 1: 7/1分のみ→Step 2: 7/2分を追加）を行う。
- * 月次集計して「整理済み_計画_更新」シートへ書き込む処理は後続で実装する。
+ * このファイルは「いなべ(700g)」シートへの書き込みの検証（Step 1: 7/1分のみ→Step 2: 7/2分を追加）に加え、
+ * 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートへの書き込みテストも行う。
+ * ただし月次集計（月末締めでの合算）のロジックはまだ実装しておらず、今回はテストとして
+ * 対象日（7/1 or 7/2）1日分の値だけをM列（2026/7）に書き込む。本来は7/1〜7/31の合計が入るべき列。
+ * 月次集計ロジックの実装は後続のStepで行う。
  *
  * ── シート構造（ユーザーが添付画像で実データを確認した内容。旧想定から修正）─────
  * 行1：タイトル
@@ -67,6 +70,22 @@ const STAGE2B_SUMMARY_ROWS = {
   active: 146,  // 稼働コンテナ数
 };
 const STAGE2B_HEADER_SCAN_MIN_COL = 3; // C列から探索(A-D列の固定ラベルは正規表現・整数判定で自然に除外される)
+
+// 「ファーム勤務時間」ファイル内「整理済み_計画_更新」シートへの書き込み先
+// (今回はテストのためM列=2026/7に固定。将来、月次集計ロジックを実装する際に対象月の列を
+// 動的に決定する仕組みに置き換える必要がある)
+const STAGE2B_FARM_HOURS_FILE_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0'; // ファーム勤務時間
+const STAGE2B_SEIRI_SHEET_NAME = '整理済み_計画_更新';
+const STAGE2B_SEIRI_TARGET_COL = 13; // M列(2026/7)
+const STAGE2B_SEIRI_ROWS = {
+  kikodo: 5,   // 菌床入れ
+  mekaki: 6,   // 芽かき
+  harvest: 7,  // 収穫
+  chusui: 8,   // 注水
+  // 9: 散水は対象外のため書き込まない
+  haiki: 10,   // 廃棄
+  active: 11,  // 稼働コンテナ数
+};
 
 // サイクル日目(1-60)から工程キーを返す。null=工程なし(稼働のみ)
 function stage2b_processForCycleDay(cycleDay) {
@@ -274,6 +293,35 @@ function stage2b_fmtDate(d, tz) {
   return Utilities.formatDate(d, tz, 'yyyy/MM/dd');
 }
 
+// 小数点1桁に丸める(実績側の既存GAS「工程カウント.gs」のround1()と同じ考え方)
+function stage2b_round1(value) {
+  return Math.round(value * 10) / 10;
+}
+
+// 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートM列(2026/7)の5〜11行目に、
+// いなべ(700g)で計算した1日分の値を書き込む(テスト用。月次集計ロジックは未実装のため、
+// 本来は7/1〜7/31の合計が入るべき列に、対象日1日分の値だけが入る)
+function stage2b_writeToSeiriSheet(roundedTotals, targetDate, tz) {
+  const ss2 = SpreadsheetApp.openById(STAGE2B_FARM_HOURS_FILE_ID);
+  const sheet2 = ss2.getSheetByName(STAGE2B_SEIRI_SHEET_NAME);
+  if (!sheet2) {
+    Logger.log('❌ 「ファーム勤務時間」ファイル内にシートが見つかりません: ' + STAGE2B_SEIRI_SHEET_NAME);
+    return;
+  }
+
+  sheet2.getRange(STAGE2B_SEIRI_ROWS.kikodo, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.kikodo);
+  sheet2.getRange(STAGE2B_SEIRI_ROWS.mekaki, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.mekaki);
+  sheet2.getRange(STAGE2B_SEIRI_ROWS.harvest, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.harvest);
+  sheet2.getRange(STAGE2B_SEIRI_ROWS.chusui, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.chusui);
+  // 9行目(散水)は対象外のため書き込まない
+  sheet2.getRange(STAGE2B_SEIRI_ROWS.haiki, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.haiki);
+  sheet2.getRange(STAGE2B_SEIRI_ROWS.active, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.active);
+
+  Logger.log('✅ 「整理済み_計画_更新」M列(2026/7)の5〜11行目に書き込み完了'
+    + '（いなべ(700g) ' + stage2b_fmtDate(targetDate, tz) + '分のみ。月次集計ロジック未実装のため、'
+    + '本来は7/1〜7/31の合計が入るべき列にテストとして1日分のみ書き込んでいる点に注意）');
+}
+
 /**
  * targetDateの工程別集計を計算し、140〜146行目の該当列に書き込む。
  * 散水(144行目)は対象外のため書き込まない。
@@ -319,15 +367,30 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
   }
   Logger.log('対象日(' + stage2b_fmtDate(targetDate, tz) + ')の列を検出: 列' + targetCol);
 
-  sheet.getRange(STAGE2B_SUMMARY_ROWS.kikodo, targetCol).setValue(totals.kikodo);
-  sheet.getRange(STAGE2B_SUMMARY_ROWS.mekaki, targetCol).setValue(totals.mekaki);
-  sheet.getRange(STAGE2B_SUMMARY_ROWS.harvest, targetCol).setValue(totals.harvest);
-  sheet.getRange(STAGE2B_SUMMARY_ROWS.chusui, targetCol).setValue(totals.chusui);
+  // 書き込み時は小数点1桁に丸める(実績側の既存GASのround1()と同じ考え方)
+  const roundedTotals = {
+    kikodo: stage2b_round1(totals.kikodo),
+    mekaki: stage2b_round1(totals.mekaki),
+    harvest: stage2b_round1(totals.harvest),
+    chusui: stage2b_round1(totals.chusui),
+    haiki: stage2b_round1(totals.haiki),
+    active: stage2b_round1(totals.active),
+  };
+  Logger.log('丸め後(小数点1桁): 菌床入れ=' + roundedTotals.kikodo + ' 芽かき=' + roundedTotals.mekaki + ' 収穫=' + roundedTotals.harvest
+    + ' 注水=' + roundedTotals.chusui + ' 廃棄=' + roundedTotals.haiki + ' 稼働コンテナ数=' + roundedTotals.active);
+
+  sheet.getRange(STAGE2B_SUMMARY_ROWS.kikodo, targetCol).setValue(roundedTotals.kikodo);
+  sheet.getRange(STAGE2B_SUMMARY_ROWS.mekaki, targetCol).setValue(roundedTotals.mekaki);
+  sheet.getRange(STAGE2B_SUMMARY_ROWS.harvest, targetCol).setValue(roundedTotals.harvest);
+  sheet.getRange(STAGE2B_SUMMARY_ROWS.chusui, targetCol).setValue(roundedTotals.chusui);
   // 144行目(散水)は対象外のため書き込まない
-  sheet.getRange(STAGE2B_SUMMARY_ROWS.haiki, targetCol).setValue(totals.haiki);
-  sheet.getRange(STAGE2B_SUMMARY_ROWS.active, targetCol).setValue(totals.active);
+  sheet.getRange(STAGE2B_SUMMARY_ROWS.haiki, targetCol).setValue(roundedTotals.haiki);
+  sheet.getRange(STAGE2B_SUMMARY_ROWS.active, targetCol).setValue(roundedTotals.active);
 
   Logger.log('✅ 列' + targetCol + '（' + stage2b_fmtDate(targetDate, tz) + '）に書き込み完了');
+
+  // 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートへも同じ値を書き込む(テスト)
+  stage2b_writeToSeiriSheet(roundedTotals, targetDate, tz);
 }
 
 // Step 1: 7/1分のみを書き込む
