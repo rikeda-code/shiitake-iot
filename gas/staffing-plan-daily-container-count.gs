@@ -258,7 +258,7 @@ function stage2b_buildColumnDateMap(sheet) {
     const label = stage2b_parseYearMonthCell(monthLabels[i]);
     if (label) {
       currentYear = label.year; currentMonth = label.month; monthLabelCount++;
-      monthLabelHits.push('列' + col + '=' + label.year + '/' + label.month);
+      monthLabelHits.push('列' + stage2b_colLabel(col) + '=' + label.year + '/' + label.month);
     }
 
     if (!stage2b_isDayNumberCell(dayNumbers[i])) continue;
@@ -288,6 +288,22 @@ function stage2b_findColumnForDate(dateMap, targetDate) {
 
 function stage2b_sameDate(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// 列番号(1始まり) → A1記法の列文字(A, B, ..., Z, AA, ...)。ログでスプレッドシート上の
+// 実際の列と目視で突き合わせやすくするために使う
+function stage2b_columnToLetter(col) {
+  let result = '';
+  let n = col;
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    result = String.fromCharCode(65 + r) + result;
+    n = Math.floor((n - 1) / 26);
+  }
+  return result;
+}
+function stage2b_colLabel(col) {
+  return col + '(' + stage2b_columnToLetter(col) + ')';
 }
 // ログ表示用の日付フォーマット。スプレッドシートのタイムゾーン(呼び出し側から明示的に渡す)を使う。
 // Session.getScriptTimeZone()(スクリプト側の既定タイムゾーン)とスプレッドシートのタイムゾームが
@@ -378,7 +394,7 @@ function stage2b_writeSeiriAggregate(targetDates) {
       return;
     }
     const dayTotals = stage2b_readInabeSummaryColumn(sheet, col);
-    Logger.log(stage2b_fmtDate(targetDate, tz) + '(列' + col + ')の値: ' + JSON.stringify(dayTotals));
+    Logger.log(stage2b_fmtDate(targetDate, tz) + '(列' + stage2b_colLabel(col) + ')の値: ' + JSON.stringify(dayTotals));
     dayTotalsList.push(dayTotals);
     dayLabels.push(d.month + '/' + d.day);
   }
@@ -402,6 +418,9 @@ function stage2b_writeSeiriAggregate(targetDates) {
  * 散水(144行目)は対象外のため書き込まない。
  */
 function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
+  // 呼び出し時の生の引数をそのままログに残す。ここが意図した値(例:2026,7,2)になっているかを
+  // まず確認できるようにする(デプロイされたコードが最新かどうかの切り分けにも使う)
+  Logger.log('[入力パラメータ] targetYear=' + targetYear + ' targetMonth=' + targetMonth + ' targetDay=' + targetDay);
   const targetDate = new Date(targetYear, targetMonth - 1, targetDay);
   const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
   const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
@@ -440,7 +459,15 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
       + '（今回のStepでは列の自動追加は行いません）');
     return;
   }
-  Logger.log('対象日(' + stage2b_fmtDate(targetDate, tz) + ')の列を検出: 列' + targetCol);
+  Logger.log('対象日(' + stage2b_fmtDate(targetDate, tz) + ')の列を検出: 列' + stage2b_colLabel(targetCol));
+
+  // 安全のための二重チェック：dateMap[targetCol]がtargetDateと本当に一致しているかを
+  // 書き込み直前に再確認する。一致しなければ内部矛盾なので書き込まずに中断する
+  if (!stage2b_sameDate(dateMap[targetCol], targetDate)) {
+    Logger.log('❌ 内部矛盾を検出したため書き込みを中断しました: dateMap[列' + stage2b_colLabel(targetCol) + ']='
+      + stage2b_fmtDate(dateMap[targetCol], tz) + ' だが対象日は' + stage2b_fmtDate(targetDate, tz) + 'です');
+    return;
+  }
 
   // 書き込み時は小数点1桁に丸める(実績側の既存GASのround1()と同じ考え方)
   const roundedTotals = {
@@ -462,7 +489,47 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
   sheet.getRange(STAGE2B_SUMMARY_ROWS.haiki, targetCol).setValue(roundedTotals.haiki);
   sheet.getRange(STAGE2B_SUMMARY_ROWS.active, targetCol).setValue(roundedTotals.active);
 
-  Logger.log('✅ 列' + targetCol + '（' + stage2b_fmtDate(targetDate, tz) + '）に書き込み完了');
+  Logger.log('✅ 列' + stage2b_colLabel(targetCol) + '（' + stage2b_fmtDate(targetDate, tz) + '）に書き込み完了');
+}
+
+/**
+ * 誤って別の日付の列に書き込んでしまった値を取り消すための汎用関数。
+ * targetDateに対応する列を(いなべ(700g)への書き込み時と同じ列→日付マップ検索ロジックで)
+ * 動的に特定し、140〜146行目(散水を除く)を空欄に戻す。列番号を直接指定するのではなく、
+ * 必ずこの検索ロジック経由にすることで、書き込み時と全く同じ基準で対象列を特定する。
+ */
+function stage2b_clearInabeColumnForDate(targetYear, targetMonth, targetDay) {
+  const targetDate = new Date(targetYear, targetMonth - 1, targetDay);
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+
+  const { dateMap, warnings: mapWarnings } = stage2b_buildColumnDateMap(sheet);
+  mapWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  const col = stage2b_findColumnForDate(dateMap, targetDate);
+  if (!col) {
+    Logger.log('❌ ' + stage2b_fmtDate(targetDate, tz) + 'の列が見つからないため、クリアできませんでした');
+    return;
+  }
+
+  const before = stage2b_readInabeSummaryColumn(sheet, col);
+  Logger.log('クリア前の値(列' + stage2b_colLabel(col) + '=' + stage2b_fmtDate(targetDate, tz) + '): ' + JSON.stringify(before));
+
+  [STAGE2B_SUMMARY_ROWS.kikodo, STAGE2B_SUMMARY_ROWS.mekaki, STAGE2B_SUMMARY_ROWS.harvest,
+    STAGE2B_SUMMARY_ROWS.chusui, STAGE2B_SUMMARY_ROWS.haiki, STAGE2B_SUMMARY_ROWS.active]
+    .forEach(function (row) { sheet.getRange(row, col).clearContent(); });
+
+  Logger.log('✅ 列' + stage2b_colLabel(col) + '（' + stage2b_fmtDate(targetDate, tz) + '）の140〜146行目をクリアしました');
+}
+
+// 今回の不具合報告で、誤って2026/6/30の列に書き込まれてしまった値を取り消す
+function clearMistakenWrite_20260630() {
+  stage2b_clearInabeColumnForDate(2026, 6, 30);
 }
 
 // Step 1: 7/1分をいなべ(700g)に書き込む
