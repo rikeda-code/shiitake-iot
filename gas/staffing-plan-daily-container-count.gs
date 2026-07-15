@@ -84,10 +84,23 @@ function stage2b_daysDiff(from, to) {
   return Math.round((b - a) / 86400000);
 }
 
-// 年月を表すセルから年・月を抽出する。Date型 or "yyyy/M/d","yyyy/M"文字列を許容。
-// コンテナ行のA列(投入月)、行3の月ラベルの両方で使う共通処理
+// value(セルの値)が日付として扱えるかをinstanceof Dateではなくダックタイピングで判定する。
+// Apps Scriptでは、getValues()で返るDateオブジェクトが実行コンテキストによって
+// 別レルム(realm)由来になり、instanceof Dateがfalseを返すことがある既知の問題があるため、
+// getFullYear/getMonth/getDate/getTimeが関数として存在するかで判定する
+function stage2b_isDateLike(value) {
+  if (value === null || typeof value !== 'object') return false;
+  if (typeof value.getFullYear !== 'function' || typeof value.getMonth !== 'function'
+    || typeof value.getDate !== 'function' || typeof value.getTime !== 'function') return false;
+  const t = value.getTime();
+  return typeof t === 'number' && !isNaN(t);
+}
+
+// 年月を表すセルから年・月を抽出する。Date型(実体はダックタイピングで判定) or
+// "yyyy/M/d","yyyy/M"文字列を許容。コンテナ行のA列(投入月)、行3の月ラベルの両方で使う共通処理
 function stage2b_parseYearMonthCell(cellValue) {
-  if (cellValue instanceof Date && !isNaN(cellValue.getTime())) {
+  if (stage2b_isDateLike(cellValue)) {
+    // タイムゾーンによるズレを避けるため、toString()等を経由せずgetFullYear()/getMonth()を直接使う
     return { year: cellValue.getFullYear(), month: cellValue.getMonth() + 1 };
   }
   if (typeof cellValue === 'string') {
@@ -97,10 +110,11 @@ function stage2b_parseYearMonthCell(cellValue) {
   return null;
 }
 
-// C列(投入日)セルを解析する。Date型はそのまま使用。"M/D"形式の文字列は年なしのため
-// carriedYear(直近のA列ラベルから引き継いだ年)で補完する
+// C列(投入日)セルを解析する。Date型(ダックタイピングで判定)はそのまま使用。
+// "M/D"形式の文字列は年なしのためcarriedYear(直近のA列ラベルから引き継いだ年)で補完する
 function stage2b_parsePlantDate(cellValue, carriedYear) {
-  if (cellValue instanceof Date && !isNaN(cellValue.getTime())) {
+  if (stage2b_isDateLike(cellValue)) {
+    // タイムゾーンによるズレを避けるため、getFullYear()/getMonth()/getDate()を直接使う
     return { date: new Date(cellValue.getFullYear(), cellValue.getMonth(), cellValue.getDate()), warning: null };
   }
   if (typeof cellValue === 'string') {
@@ -111,7 +125,17 @@ function stage2b_parsePlantDate(cellValue, carriedYear) {
       return { date: new Date(carriedYear, month - 1, day), warning: null };
     }
   }
-  return { date: null, warning: '投入日(C列)を日付として解釈できません(値=' + cellValue + ')' };
+  return { date: null, warning: '投入日(C列)を日付として解釈できません(値=' + stage2b_debugValue(cellValue) + ')' };
+}
+
+// 警告ログ用に、値をタイムゾーンの誤解を招かない形で文字列化する。
+// Dateらしき値をそのまま文字列連結するとtoString()が実行環境既定のタイムゾーンで
+// 展開され紛らわしいため、ここで明示的に型情報を添えて表示する
+function stage2b_debugValue(value) {
+  if (stage2b_isDateLike(value)) {
+    return 'Date(' + value.getFullYear() + '/' + (value.getMonth() + 1) + '/' + value.getDate() + ')';
+  }
+  return String(value);
 }
 
 // コンテナ行(5行目〜)を読み取り、{plantDate, beds, rowNum}の配列を返す。
@@ -166,8 +190,9 @@ function stage2b_readContainers(sheet) {
   return { containers: containers, warnings: warnings };
 }
 
-// targetDateにおける工程別集計を計算する（純粋関数。シートを読まない）
-function stage2b_computeDailyCounts(containers, targetDate) {
+// targetDateにおける工程別集計を計算する（tzはログ表示専用。日付の比較自体は
+// getFullYear/getMonth/getDateのコンポーネント単位で行うためタイムゾーンの影響を受けない）
+function stage2b_computeDailyCounts(containers, targetDate, tz) {
   const result = { kikodo: 0, mekaki: 0, harvest: 0, chusui: 0, haiki: 0, active: 0 };
   const detail = [];
   containers.forEach(function (c) {
@@ -177,7 +202,7 @@ function stage2b_computeDailyCounts(containers, targetDate) {
     result.active += weight;
     const process = stage2b_processForCycleDay(cycleDay);
     if (process) result[process] += weight;
-    detail.push({ rowNum: c.rowNum, plantDate: Utilities.formatDate(c.plantDate, Session.getScriptTimeZone(), 'yyyy/MM/dd'), cycleDay: cycleDay, process: process || '(稼働のみ)' });
+    detail.push({ rowNum: c.rowNum, plantDate: stage2b_fmtDate(c.plantDate, tz), cycleDay: cycleDay, process: process || '(稼働のみ)' });
   });
   return { totals: result, detail: detail };
 }
@@ -242,8 +267,11 @@ function stage2b_findColumnForDate(dateMap, targetDate) {
 function stage2b_sameDate(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
-function stage2b_fmtDate(d) {
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+// ログ表示用の日付フォーマット。スプレッドシートのタイムゾーン(呼び出し側から明示的に渡す)を使う。
+// Session.getScriptTimeZone()(スクリプト側の既定タイムゾーン)とスプレッドシートのタイムゾームが
+// 食い違っていると表示がずれるため、必ずss.getSpreadsheetTimeZone()の値を渡すこと
+function stage2b_fmtDate(d, tz) {
+  return Utilities.formatDate(d, tz, 'yyyy/MM/dd');
 }
 
 /**
@@ -258,14 +286,18 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
     Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
     return;
   }
+  // ログ表示専用。Session.getScriptTimeZone()(標準スタンドアロンプロジェクトでは既定でUTC等になり
+  // うる)ではなく、必ずこのスプレッドシート自体のタイムゾーンを使う(日付の比較ロジック自体には
+  // 影響しない。getFullYear/getMonth/getDateのコンポーネント単位で判定しているため)
+  const tz = ss.getSpreadsheetTimeZone();
 
-  Logger.log('=== いなべ(700g) ' + stage2b_fmtDate(targetDate) + ' 日次コンテナ数書き込み ===');
+  Logger.log('=== いなべ(700g) ' + stage2b_fmtDate(targetDate, tz) + ' 日次コンテナ数書き込み ===');
 
   const { containers, warnings: readWarnings } = stage2b_readContainers(sheet);
   Logger.log('コンテナ行読み取り件数: ' + containers.length + '件');
   readWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
 
-  const { totals, detail } = stage2b_computeDailyCounts(containers, targetDate);
+  const { totals, detail } = stage2b_computeDailyCounts(containers, targetDate, tz);
   Logger.log('計算結果: 菌床入れ=' + totals.kikodo + ' 芽かき=' + totals.mekaki + ' 収穫=' + totals.harvest
     + ' 注水=' + totals.chusui + ' 廃棄=' + totals.haiki + ' 稼働コンテナ数=' + totals.active);
   Logger.log('対象日に稼働中のコンテナ内訳(' + detail.length + '件): ' + JSON.stringify(detail));
@@ -276,16 +308,16 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
   const resolvedDates = Object.keys(dateMap).map(function (c) { return dateMap[c]; });
   if (resolvedDates.length > 0) {
     const sorted = resolvedDates.slice().sort(function (a, b) { return a - b; });
-    Logger.log('復元できた日付の範囲: ' + stage2b_fmtDate(sorted[0]) + ' 〜 ' + stage2b_fmtDate(sorted[sorted.length - 1]));
+    Logger.log('復元できた日付の範囲: ' + stage2b_fmtDate(sorted[0], tz) + ' 〜 ' + stage2b_fmtDate(sorted[sorted.length - 1], tz));
   }
 
   const targetCol = stage2b_findColumnForDate(dateMap, targetDate);
   if (!targetCol) {
-    Logger.log('❌ 対象日(' + stage2b_fmtDate(targetDate) + ')に対応する列が見つかりませんでした。書き込みを中断しました'
+    Logger.log('❌ 対象日(' + stage2b_fmtDate(targetDate, tz) + ')に対応する列が見つかりませんでした。書き込みを中断しました'
       + '（今回のStepでは列の自動追加は行いません）');
     return;
   }
-  Logger.log('対象日(' + stage2b_fmtDate(targetDate) + ')の列を検出: 列' + targetCol);
+  Logger.log('対象日(' + stage2b_fmtDate(targetDate, tz) + ')の列を検出: 列' + targetCol);
 
   sheet.getRange(STAGE2B_SUMMARY_ROWS.kikodo, targetCol).setValue(totals.kikodo);
   sheet.getRange(STAGE2B_SUMMARY_ROWS.mekaki, targetCol).setValue(totals.mekaki);
@@ -295,7 +327,7 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
   sheet.getRange(STAGE2B_SUMMARY_ROWS.haiki, targetCol).setValue(totals.haiki);
   sheet.getRange(STAGE2B_SUMMARY_ROWS.active, targetCol).setValue(totals.active);
 
-  Logger.log('✅ 列' + targetCol + '（' + stage2b_fmtDate(targetDate) + '）に書き込み完了');
+  Logger.log('✅ 列' + targetCol + '（' + stage2b_fmtDate(targetDate, tz) + '）に書き込み完了');
 }
 
 // Step 1: 7/1分のみを書き込む
