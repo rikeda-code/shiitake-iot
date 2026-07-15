@@ -4149,9 +4149,15 @@ function renderCompareCharts(prodData) {
 // コンテナ数を算出し、ファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む新方式に移行することになったため、旧・ダッシュボード側でgvizから
 // 「26/生産計画」を直接読み込んで計算する実装は廃止した。
-// データ取得・GAS呼び出し・実データ表示は後続のStageで実装する
+// 実データ取得（「整理済み_計画_更新」シートの読み込み）は後続のStageで実装する
 
 let staffplanGranularity = 'monthly'; // 'monthly' | 'daily'（Stage 7で実装予定。Stage 0時点では見た目のみ）
+
+// Stage 1：GAS Webアプリ（疎通確認用）のURL。「26/生産計画」「ファーム勤務時間」どちらの
+// スプレッドシートにも紐づかない、新規のスタンドアロンGASプロジェクトとしてデプロイする想定。
+// デプロイ手順はgas/staffing-plan-webapp.gs冒頭のコメントを参照。
+// デプロイ後に発行される実際のURLをここに設定する（開発段階ではユーザーが手動でデプロイする）
+const STAFFING_PLAN_GAS_URL = "ここにデプロイ後のURLを設定";
 
 function renderStaffingPlanTab() {
   const main = document.getElementById('main');
@@ -4170,11 +4176,11 @@ function renderStaffingPlanTab() {
             <button class="transfer-toggle-btn${staffplanGranularity === 'monthly' ? ' active' : ''}" data-mode="monthly">月次</button>
             <button class="transfer-toggle-btn${staffplanGranularity === 'daily' ? ' active' : ''}" data-mode="daily">日次</button>
           </div>
-          <button id="staffplan-refresh-btn" class="staffplan-refresh-btn" disabled title="Stage 1以降で実装予定">↻ 更新</button>
+          <button id="staffplan-refresh-btn" class="staffplan-refresh-btn">↻ 更新</button>
         </div>
       </div>
       <div id="staffplan-content">
-        <div class="loading">Stage 0：表示レイアウトのみです（データ取得・計算は未実装）</div>
+        <div class="loading">「更新」を押すとGAS Webアプリとの疎通確認を行います（Stage 1：実データ表示は未実装）</div>
       </div>
     </div>`;
 
@@ -4186,6 +4192,31 @@ function renderStaffingPlanTab() {
       // Stage 0時点では月次/日次で表示内容を切り替える実装は無い（Stage 7で実装予定）
     };
   });
+
+  document.getElementById('staffplan-refresh-btn').onclick = runStaffingPlanGasPing;
+}
+
+// Stage 1：GAS Webアプリとの疎通確認のみ。コンテナ数の計算・シートへの書き込み・
+// 実データ表示は行わない（後続のStageで実装）。ボタン押下→ローディング表示→
+// GASからの応答待ち（同期的）→結果表示、という一連の流れが動くことを確認する
+async function runStaffingPlanGasPing() {
+  const content = document.getElementById('staffplan-content');
+  const btn = document.getElementById('staffplan-refresh-btn');
+  btn.disabled = true;
+  content.innerHTML = '<div class="loading">GAS Webアプリと通信中...</div>';
+
+  try {
+    const res = await fetch(STAFFING_PLAN_GAS_URL, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    content.innerHTML = `<div class="loading">${data.message ?? '(messageフィールドがありません)'}</div>`;
+    console.log('[要員計画] GAS疎通確認レスポンス:', data);
+  } catch (e) {
+    content.innerHTML = `<div class="error-msg">GAS Webアプリとの通信に失敗しました: ${e.message}</div>`;
+    console.error('[要員計画] GAS疎通確認エラー:', e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ページ読み込み時（F5・Ctrl+Shift+R含む）に一度だけ、sessionStorageから直前の表示状態を
