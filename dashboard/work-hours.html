@@ -4154,10 +4154,10 @@ function renderCompareCharts(prodData) {
 let staffplanGranularity = 'monthly'; // 'monthly' | 'daily'（Stage 7で実装予定。Stage 0時点では見た目のみ）
 
 // Stage 1：GAS Webアプリ（疎通確認用）のURL。「26/生産計画」「ファーム勤務時間」どちらの
-// スプレッドシートにも紐づかない、新規のスタンドアロンGASプロジェクトとしてデプロイする想定。
+// スプレッドシートにも紐づかない、新規のスタンドアロンGASプロジェクトとしてデプロイ済み。
 // デプロイ手順はgas/staffing-plan-webapp.gs冒頭のコメントを参照。
-// デプロイ後に発行される実際のURLをここに設定する（開発段階ではユーザーが手動でデプロイする）
-const STAFFING_PLAN_GAS_URL = "ここにデプロイ後のURLを設定";
+// コードを更新した場合は「デプロイを管理」から再デプロイしないと反映されない点に注意
+const STAFFING_PLAN_GAS_URL = "https://script.google.com/macros/s/AKfycbxL1bHNItonq6l0L6JQ-wkQfPv3hwtKNVqzxKqNS1TzaGTf2e_aJKsjcEIiiJ-Src3h/exec";
 
 function renderStaffingPlanTab() {
   const main = document.getElementById('main');
