@@ -4,11 +4,14 @@
  * 【方針転換の背景】
  * ダッシュボードJS側でのgviz直読み＋ブラウザ内計算をやめ、GAS側で
  * 「26/生産計画」ファイルの各拠点ガントシートに日次の工程別コンテナ数を直接書き込む方式に変更した。
- * このファイルは「いなべ(700g)」シートへの書き込みの検証（Step 1: 7/1分のみ→Step 2: 7/2分を追加）に加え、
+ * このファイルは「いなべ(700g)」シートへの書き込みの検証（Step 1: 7/1分→Step 2: 7/2分を追加）に加え、
  * 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートへの書き込みテストも行う。
+ * Step 1はいなべ(700g)への書き込みのみ。Step 2はいなべ(700g)に7/2分を追記した後、
+ * いなべ(700g)の140〜146行目から7/1・7/2の値を読み戻して合算し、その合計値で
+ * 「整理済み_計画_更新」M列(2026/7)の5〜11行目を上書きする。
  * ただし月次集計（月末締めでの合算）のロジックはまだ実装しておらず、今回はテストとして
- * 対象日（7/1 or 7/2）1日分の値だけをM列（2026/7）に書き込む。本来は7/1〜7/31の合計が入るべき列。
- * 月次集計ロジックの実装は後続のStepで行う。
+ * 明示的に指定した日数分（現状は7/1+7/2の2日分）の合計をM列に書き込む。
+ * 本来は7/1〜7/31の合計が入るべき列であり、月次集計ロジックの実装は後続のStepで行う。
  *
  * ── シート構造（ユーザーが添付画像で実データを確認した内容。旧想定から修正）─────
  * 行1：タイトル
@@ -299,9 +302,10 @@ function stage2b_round1(value) {
 }
 
 // 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートM列(2026/7)の5〜11行目に、
-// いなべ(700g)で計算した1日分の値を書き込む(テスト用。月次集計ロジックは未実装のため、
-// 本来は7/1〜7/31の合計が入るべき列に、対象日1日分の値だけが入る)
-function stage2b_writeToSeiriSheet(roundedTotals, targetDate, tz) {
+// いなべ(700g)から読み戻して合算した値を書き込む(テスト用。月次集計ロジックは未実装のため、
+// 本来は7/1〜7/31の合計が入るべき列に、明示的に指定した日数分の合計だけが入る)。
+// labelはログ表示用(例:"7/1+7/2の合計(2日分)")
+function stage2b_writeToSeiriSheet(roundedTotals, label) {
   const ss2 = SpreadsheetApp.openById(STAGE2B_FARM_HOURS_FILE_ID);
   const sheet2 = ss2.getSheetByName(STAGE2B_SEIRI_SHEET_NAME);
   if (!sheet2) {
@@ -317,9 +321,80 @@ function stage2b_writeToSeiriSheet(roundedTotals, targetDate, tz) {
   sheet2.getRange(STAGE2B_SEIRI_ROWS.haiki, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.haiki);
   sheet2.getRange(STAGE2B_SEIRI_ROWS.active, STAGE2B_SEIRI_TARGET_COL).setValue(roundedTotals.active);
 
-  Logger.log('✅ 「整理済み_計画_更新」M列(2026/7)の5〜11行目に書き込み完了'
-    + '（いなべ(700g) ' + stage2b_fmtDate(targetDate, tz) + '分のみ。月次集計ロジック未実装のため、'
-    + '本来は7/1〜7/31の合計が入るべき列にテストとして1日分のみ書き込んでいる点に注意）');
+  Logger.log('✅ 「整理済み_計画_更新」M列(2026/7)の5〜11行目を上書き完了'
+    + '（いなべ(700g) ' + label + '。月次集計ロジック未実装のため、'
+    + '本来は7/1〜7/31の合計が入るべき列にテストとして一部日数分のみ書き込んでいる点に注意）');
+}
+
+// いなべ(700g)の140〜146行目(指定列)から、丸め済みの値をそのまま読み戻す
+function stage2b_readInabeSummaryColumn(sheet, col) {
+  return {
+    kikodo: sheet.getRange(STAGE2B_SUMMARY_ROWS.kikodo, col).getValue(),
+    mekaki: sheet.getRange(STAGE2B_SUMMARY_ROWS.mekaki, col).getValue(),
+    harvest: sheet.getRange(STAGE2B_SUMMARY_ROWS.harvest, col).getValue(),
+    chusui: sheet.getRange(STAGE2B_SUMMARY_ROWS.chusui, col).getValue(),
+    haiki: sheet.getRange(STAGE2B_SUMMARY_ROWS.haiki, col).getValue(),
+    active: sheet.getRange(STAGE2B_SUMMARY_ROWS.active, col).getValue(),
+  };
+}
+
+// 複数日分の集計値(オブジェクトの配列)を項目ごとに合算する
+function stage2b_sumDayTotals(dayTotalsList) {
+  const sum = { kikodo: 0, mekaki: 0, harvest: 0, chusui: 0, haiki: 0, active: 0 };
+  dayTotalsList.forEach(function (t) {
+    Object.keys(sum).forEach(function (k) {
+      sum[k] += (typeof t[k] === 'number' ? t[k] : 0);
+    });
+  });
+  return sum;
+}
+
+/**
+ * いなべ(700g)の140〜146行目から、targetDates(複数日、それぞれ{year,month,day})の値を
+ * 読み戻して合算し、「整理済み_計画_更新」M列(2026/7)の5〜11行目を上書きする(累積テスト用)。
+ * 各日の値は事前にstage2b_writeInabeDailyCounts()でいなべ(700g)に書き込み済みである必要がある。
+ */
+function stage2b_writeSeiriAggregate(targetDates) {
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+
+  const { dateMap, warnings: mapWarnings } = stage2b_buildColumnDateMap(sheet);
+  mapWarnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  const dayTotalsList = [];
+  const dayLabels = [];
+  for (let i = 0; i < targetDates.length; i++) {
+    const d = targetDates[i];
+    const targetDate = new Date(d.year, d.month - 1, d.day);
+    const col = stage2b_findColumnForDate(dateMap, targetDate);
+    if (!col) {
+      Logger.log('❌ ' + stage2b_fmtDate(targetDate, tz) + 'の列が見つからないため、集計を中断しました'
+        + '(先にstage2b_writeInabeDailyCounts()でこの日をいなべ(700g)に書き込んでください)');
+      return;
+    }
+    const dayTotals = stage2b_readInabeSummaryColumn(sheet, col);
+    Logger.log(stage2b_fmtDate(targetDate, tz) + '(列' + col + ')の値: ' + JSON.stringify(dayTotals));
+    dayTotalsList.push(dayTotals);
+    dayLabels.push(d.month + '/' + d.day);
+  }
+
+  const sum = stage2b_sumDayTotals(dayTotalsList);
+  const roundedSum = {
+    kikodo: stage2b_round1(sum.kikodo),
+    mekaki: stage2b_round1(sum.mekaki),
+    harvest: stage2b_round1(sum.harvest),
+    chusui: stage2b_round1(sum.chusui),
+    haiki: stage2b_round1(sum.haiki),
+    active: stage2b_round1(sum.active),
+  };
+  Logger.log(targetDates.length + '日分(' + dayLabels.join('+') + ')の合計(丸め後): ' + JSON.stringify(roundedSum));
+
+  stage2b_writeToSeiriSheet(roundedSum, dayLabels.join('+') + 'の合計(' + targetDates.length + '日分)');
 }
 
 /**
@@ -388,17 +463,19 @@ function stage2b_writeInabeDailyCounts(targetYear, targetMonth, targetDay) {
   sheet.getRange(STAGE2B_SUMMARY_ROWS.active, targetCol).setValue(roundedTotals.active);
 
   Logger.log('✅ 列' + targetCol + '（' + stage2b_fmtDate(targetDate, tz) + '）に書き込み完了');
-
-  // 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートへも同じ値を書き込む(テスト)
-  stage2b_writeToSeiriSheet(roundedTotals, targetDate, tz);
 }
 
-// Step 1: 7/1分のみを書き込む
+// Step 1: 7/1分をいなべ(700g)に書き込む
 function writeInabeDailyCounts_Step1() {
   stage2b_writeInabeDailyCounts(2026, 7, 1);
 }
 
-// Step 2: 7/1の書き込みが期待値と一致した後、7/2分を追加で書き込む
+// Step 2: 7/2分をいなべ(700g)に追記し(7/1列はそのまま残る)、7/1+7/2の2日分を合算して
+// 「整理済み_計画_更新」M列(2026/7)を上書きする
 function writeInabeDailyCounts_Step2() {
   stage2b_writeInabeDailyCounts(2026, 7, 2);
+  stage2b_writeSeiriAggregate([
+    { year: 2026, month: 7, day: 1 },
+    { year: 2026, month: 7, day: 2 },
+  ]);
 }
