@@ -7,6 +7,14 @@
  * 書き込みは後続のStageで実装する。Stage 1では、ダッシュボードの更新ボタン→
  * このWebアプリ→固定の応答が返る、という一連の流れが技術的に動くことのみを確認する。
  *
+ * ── リクエストの受け取り方（CORSプリフライト回避のため）──────────────
+ * ダッシュボード側はContent-Type: text/plain;charset=utf-8でPOSTする
+ * （Content-Type: application/jsonだとブラウザがCORSプリフライト(OPTIONS)を送るが、
+ * GAS WebアプリはOPTIONSに応答できずCORSエラーになるため）。
+ * ボディの中身自体はJSON文字列なので、このdoPost側でe.postData.contentsを
+ * JSON.parse()して読み取る。Stage 1時点ではボディの中身は使わないが、
+ * 今後のStageで実データを送る前提として、正しく受け取れる形にしてある。
+ *
  * ── デプロイ手順（Apps Scriptエディタで実施）──────────────────────
  * 1. 新規スタンドアロンのApps Scriptプロジェクトを作成し、このファイルの内容を貼り付ける
  * 2. 「デプロイ」→「新しいデプロイ」を選択
@@ -22,6 +30,10 @@
  */
 
 function doPost(e) {
+  // ボディはtext/plainで届くため、テキストとして読み取ってからJSON.parse()する
+  // （Stage 1時点ではrequestDataの中身は未使用。今後のStageで利用する）
+  const requestData = JSON.parse(e.postData.contents);
+
   const response = {
     status: "ok",
     message: "GAS Webアプリ疎通確認：テスト応答です",

@@ -4206,7 +4206,16 @@ async function runStaffingPlanGasPing() {
   content.innerHTML = '<div class="loading">GAS Webアプリと通信中...</div>';
 
   try {
-    const res = await fetch(STAFFING_PLAN_GAS_URL, { method: 'POST' });
+    // Content-Type: application/jsonを指定するとブラウザがプリフライト(OPTIONS)を送るが、
+    // GAS Webアプリはそれに応答できずCORSエラーになる。text/plain;charset=utf-8を指定すると
+    // 「シンプルリクエスト」扱いになりプリフライトが発生しないため、これを使う
+    // （ボディの中身自体はこれまで通りJSON文字列。GAS側でJSON.parse()して受け取る）。
+    // Stage 1時点ではボディの中身はまだ使わないが、今後のStageで実データを送る前提を整えておく
+    const res = await fetch(STAFFING_PLAN_GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({}),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     content.innerHTML = `<div class="loading">${data.message ?? '(messageフィールドがありません)'}</div>`;
