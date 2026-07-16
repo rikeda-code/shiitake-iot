@@ -789,6 +789,23 @@ function stage2b_writeSeiriAggregateFromTotals(dateEntries) {
     };
     const seiriCol = stage2b_seiriColumnForMonth(group.year, group.month);
     Logger.log(group.year + '/' + group.month + '分(' + group.list.length + '日分)の合計(丸め後): ' + JSON.stringify(roundedSum));
+
+    // 診断用: 菌床入れ・芽かきが0件になる不具合の切り分けのため、この月の対象日のうち
+    // 菌床入れ・芽かきが非ゼロだった日を個別に列挙する。合計が0なのに他の指標は非ゼロという
+    // 矛盾が起きた場合、ここで「非ゼロの日が実際に何件あるか」が直接分かる
+    const nonZeroKikodo = group.list.filter(function (t) { return typeof t.kikodo === 'number' && t.kikodo !== 0; });
+    const nonZeroMekaki = group.list.filter(function (t) { return typeof t.mekaki === 'number' && t.mekaki !== 0; });
+    Logger.log(group.year + '/' + group.month + '分: 菌床入れが非ゼロの日=' + nonZeroKikodo.length + '件, 芽かきが非ゼロの日=' + nonZeroMekaki.length + '件'
+      + '（合計が0なのにこれらが1件以上ある場合、集計ロジックに矛盾があります）');
+    if (roundedSum.kikodo === 0 && nonZeroKikodo.length > 0) {
+      Logger.log('❌❌❌ 矛盾検出: ' + group.year + '/' + group.month + 'の菌床入れ合計は0だが、非ゼロの日が' + nonZeroKikodo.length
+        + '件存在します。個別の値: ' + JSON.stringify(nonZeroKikodo.map(function (t) { return t.kikodo; })));
+    }
+    if (roundedSum.mekaki === 0 && nonZeroMekaki.length > 0) {
+      Logger.log('❌❌❌ 矛盾検出: ' + group.year + '/' + group.month + 'の芽かき合計は0だが、非ゼロの日が' + nonZeroMekaki.length
+        + '件存在します。個別の値: ' + JSON.stringify(nonZeroMekaki.map(function (t) { return t.mekaki; })));
+    }
+
     stage2b_writeToSeiriSheet(roundedSum, group.list.length + '日分の合計(' + group.year + '/' + group.month + ')', seiriCol);
   });
 }
@@ -841,6 +858,18 @@ function stage2b_listInabeContainers() {
     Logger.log('行' + c.rowNum + ': 投入日=' + stage2b_fmtDate(c.plantDate) + ' 床数=' + c.beds
       + '（菌床入れ日=' + stage2b_fmtDate(c.plantDate)
       + ' / 芽かき日=' + stage2b_fmtDate(stage2b_addDays(c.plantDate, 2)) + ',' + stage2b_fmtDate(stage2b_addDays(c.plantDate, 4)) + '）');
+  });
+
+  // 投入月ごとの件数サマリー（9〜12月等、特定の月の投入コンテナがそもそも存在するかを
+  // 一目で確認できるようにするため）
+  const countByMonth = {};
+  containers.forEach(function (c) {
+    const key = c.plantDate.getFullYear() + '/' + (c.plantDate.getMonth() + 1);
+    countByMonth[key] = (countByMonth[key] || 0) + 1;
+  });
+  Logger.log('=== 投入月ごとの件数サマリー ===');
+  Object.keys(countByMonth).sort().forEach(function (key) {
+    Logger.log(key + ': ' + countByMonth[key] + '件');
   });
 
   if (warnings.length > 0) {
