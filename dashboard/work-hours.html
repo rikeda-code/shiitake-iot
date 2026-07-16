@@ -4650,14 +4650,14 @@ function renderPlanCompareCharts(planData, prodData) {
           type: 'line', label: `${et.label}人数（実績）`, data: sl(allActualCountData[et.label]),
           borderColor: et.color, backgroundColor: 'transparent',
           borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
         },
         {
           type: 'line', label: `${et.label}人数（予想）`, data: sl(allForecastCountData[et.label]),
           borderColor: et.color, backgroundColor: 'transparent',
           borderWidth: 2, borderDash: [5, 4],
           pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
         },
       ]);
       const countScale = {
@@ -4747,14 +4747,14 @@ function renderPlanCompareCharts(planData, prodData) {
           type: 'line', label: `${et.label}人数（実績）`, data: sl(actualCountData[et.label]),
           borderColor: et.color, backgroundColor: 'transparent',
           borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
         },
         {
           type: 'line', label: `${et.label}人数（予想）`, data: sl(forecastCountData[et.label]),
           borderColor: et.color, backgroundColor: 'transparent',
           borderWidth: 2, borderDash: [5, 4],
           pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
         },
       ]);
       const siteCountScale = {
