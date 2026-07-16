@@ -1416,7 +1416,7 @@ function rerenderCurrentView() {
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
 let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu'
-const YOJITSU_MODES = ['staffplan', 'plan', 'planstdhours', 'plancompare'];
+const YOJITSU_MODES = ['staffplan', 'plan', 'planstdhours', 'plancompare', 'yojitsustdset'];
 
 function renderTabs(bases) {
   // Determine active group from current mode
@@ -1582,6 +1582,10 @@ function renderSubTabs(bases) {
       {
         cls: 'plancompare-tab', text: '📊 比較', mode: 'plancompare',
         render: () => { renderPlanCompareTab(); },
+      },
+      {
+        cls: 'yojitsu-stdset-tab', text: '⚙️ 標準工数設定', mode: 'yojitsustdset',
+        render: () => { renderYojitsuStdSetTab(); },
       },
     ];
 
@@ -2963,8 +2967,8 @@ function renderPlanStdHoursTab() {
 
 function renderPlanStdHoursTable({ months: planMonths, records }) {
   const main = document.getElementById('main');
-  const rows = loadStdSettings();
-  const conv = loadCsConv();
+  const rows = loadYojitsuStdSettings();
+  const conv = loadYojitsuCsConv();
 
   const originalCount = planMonths.length;
   const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
@@ -2980,7 +2984,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
 
   let html = `<div class="prod-panel">
     <div class="chart-section-label">📋 予定標準工数(h) ／ 生産計画 × 標準工数設定
-      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 整理済み_計画_更新シートの計画値 × 標準工数設定で算出　cs換算設定は⚙️タブで変更可</span>
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 整理済み_計画_更新シートの計画値 × 標準工数設定で算出　係数は⚙️標準工数設定タブで変更可</span>
     </div>`;
 
   availSites.forEach(site => {
@@ -3316,18 +3320,28 @@ let currentStdRows = null;
 let currentStdConv = null;
 let stdSettingsPromise = null;
 
+// 予実グループ用の独立した標準工数設定（勤務実績タブとは別管理）
+let yojitsuStdRows = null;
+let yojitsuStdConv = null;
+
 function loadStdSettingsSheetOnce() {
   if (!stdSettingsPromise) {
     stdSettingsPromise = fetchStdSettingsSheet().then(data => {
       stdSettingsSheetData = data;
       currentStdRows = JSON.parse(JSON.stringify(data.rows));
       currentStdConv = { ...data.conv };
+      // 予実タブ用（初回読み込み時のみ初期化。以降は独立して編集可能）
+      if (!yojitsuStdRows) {
+        yojitsuStdRows = JSON.parse(JSON.stringify(data.rows));
+        yojitsuStdConv = { ...data.conv };
+      }
       return data;
     }).catch(e => {
       console.error('[標準工数設定] シート取得エラー:', e);
       stdSettingsSheetData = { conv: { ...STD_CS_DEFAULT }, rows: [], error: e.message };
       currentStdRows = [];
       currentStdConv = { ...STD_CS_DEFAULT };
+      if (!yojitsuStdRows) { yojitsuStdRows = []; yojitsuStdConv = { ...STD_CS_DEFAULT }; }
       throw e;
     });
   }
@@ -3535,6 +3549,123 @@ window.resetStdSettings = function() {
   window._stdRows = currentStdRows;
   window._stdConv = currentStdConv;
   renderStdSetTab();
+};
+
+/* ── 予実タブ用 標準工数設定（独立） ──────────────────────────────── */
+function loadYojitsuStdSettings() {
+  return yojitsuStdRows || [];
+}
+function loadYojitsuCsConv() {
+  return yojitsuStdConv || { ...STD_CS_DEFAULT };
+}
+
+function renderYojitsuStdSetTab() {
+  const main = document.getElementById('main');
+
+  if (!stdSettingsSheetData) {
+    main.innerHTML = '<div class="loading">標準工数設定を読み込み中...</div>';
+    loadStdSettingsSheetOnce().then(() => renderYojitsuStdSetTab()).catch(e => {
+      main.innerHTML = `<div class="error-msg">「${STD_SETTINGS_SHEET_NAME}」シートの取得エラー: ${e.message}</div>`;
+    });
+    return;
+  }
+
+  const rows = yojitsuStdRows;
+  window._yojitsuStdRows = rows;
+
+  const colLabel = { perContainer: '1コンテナ当たり', kgPerH: '時間当たり(kg/h)', perCs: '1cs当たり', perPiece: '1個当たり', fixedH: '固定時間(h)' };
+  const allCols  = ['perContainer', 'kgPerH', 'perCs', 'perPiece', 'fixedH'];
+
+  const divCount = {};
+  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+
+  const conv = yojitsuStdConv;
+  window._yojitsuStdConv = conv;
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">⚙️ 標準工数設定（予実）
+      <span style="float:right;display:flex;gap:8px;align-items:center">
+        <button class="select-btn" style="padding:3px 14px" onclick="resetYojitsuStdSettings()">リセット</button>
+      </span>
+    </div>
+    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値は「${STD_SETTINGS_SHEET_NAME}」シートから読み込んでいます（画面読み込み時のみ取得）。ここでの編集は予実タブにのみ反映され、勤務実績タブの設定とは独立しています。</p>
+    <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
+      <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">
+        📦 出荷cs換算設定　<span style="font-weight:400;font-size:0.72rem">cs数 = (合計点数 − バラ数) ÷ P/cs + バラ数</span>
+      </div>
+      <label style="font-size:0.78rem;color:var(--muted)">パック・袋 P/cs
+        <div><input type="number" id="yj-cs-pcs" value="${conv.pcsPerCs || 30}" min="1"
+          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
+      </label>
+      <label style="font-size:0.78rem;color:var(--muted)">バラのメトリック名
+        <div><input type="text" id="yj-cs-bara" value="${conv.baraMetric || 'バラ数'}"
+          style="width:90px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> (計画シートのメトリック名)</span></div>
+      </label>
+      <div style="font-size:0.72rem;color:var(--muted)">バラ→1cs、パック・袋→${conv.pcsPerCs || 30}P/cs</div>
+    </div>
+    <div class="prod-table-wrap">
+    <table class="prod-table std-set-table">
+      <thead><tr>
+        <th class="th-left" style="min-width:60px">業務区分</th>
+        <th class="th-left" style="min-width:130px">作業区分</th>
+        ${allCols.map(c => `<th style="min-width:110px">${colLabel[c]}</th>`).join('')}
+        <th class="th-left" style="min-width:180px">考え方</th>
+      </tr></thead>
+      <tbody>`;
+
+  let lastDiv = '';
+  rows.forEach((r, i) => {
+    const divCell = r.div !== lastDiv
+      ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
+      : '';
+    if (r.div !== lastDiv) lastDiv = r.div;
+
+    html += `<tr>${divCell}<td class="col-metric" style="font-size:0.82rem">${r.task}</td>`;
+    allCols.forEach(col => {
+      if (r.col === col) {
+        const v = (r.val !== null && r.val !== undefined) ? r.val : '';
+        html += `<td class="col-num" style="padding:2px 4px">
+          <input type="number" class="yj-std-input" data-idx="${i}"
+            value="${v}" placeholder="—"
+            style="width:80px;text-align:right;background:#1a1f35;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+          <div style="font-size:0.68rem;color:var(--muted);text-align:right">${r.unit}</div>
+        </td>`;
+      } else {
+        html += `<td class="col-num empty" style="color:var(--muted)">—</td>`;
+      }
+    });
+    html += `<td class="col-metric" style="font-size:0.75rem;color:var(--muted)">${r.note}</td></tr>`;
+  });
+
+  html += `</tbody></table></div></div>`;
+  main.innerHTML = html;
+
+  main.querySelectorAll('.yj-std-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.dataset.idx);
+      window._yojitsuStdRows[idx].val = inp.value === '' ? null : parseFloat(inp.value);
+    });
+  });
+
+  ['yj-cs-pcs', 'yj-cs-bara'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      window._yojitsuStdConv.pcsPerCs   = parseFloat(document.getElementById('yj-cs-pcs').value) || 30;
+      window._yojitsuStdConv.baraMetric = document.getElementById('yj-cs-bara').value.trim() || 'バラ数';
+    });
+  });
+}
+
+window.resetYojitsuStdSettings = function() {
+  if (!confirm('シート読み込み時の値にリセットしますか？（編集内容は破棄されます）')) return;
+  yojitsuStdRows = JSON.parse(JSON.stringify(stdSettingsSheetData.rows));
+  yojitsuStdConv = { ...stdSettingsSheetData.conv };
+  window._yojitsuStdRows = yojitsuStdRows;
+  window._yojitsuStdConv = yojitsuStdConv;
+  renderYojitsuStdSetTab();
 };
 
 /* ── 標準工数(h) ────────────────────────────────────────────────────── */
@@ -4094,8 +4225,8 @@ function renderPlanCompareTab() {
 function renderPlanCompareCharts(planData) {
   const main = document.getElementById('main');
   const { months: planMonths, records } = planData;
-  const rows = loadStdSettings();
-  const conv = loadCsConv();
+  const rows = loadYojitsuStdSettings();
+  const conv = loadYojitsuCsConv();
   const originalCount = planMonths.length;
   const { calcRow, getProdVal } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
 
