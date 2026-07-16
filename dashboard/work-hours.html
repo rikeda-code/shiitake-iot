@@ -4382,6 +4382,25 @@ function renderPlanCompareCharts(planData, prodData) {
     };
   }
 
+  // 雇用区分シリーズ定義（社員・パート・技能実習生）
+  const EMP_SERIES = [
+    { label: '社員',       match: e => (e.employment||'').includes('社員') && !(e.employment||'').includes('技能'), color: '#60a5fa' },
+    { label: 'パート',     match: e => ['パート','アルバイト'].some(k => (e.employment||'').includes(k)),          color: '#fb923c' },
+    { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
+  ];
+
+  // 計画月ごとの実績工数を雇用区分でフィルタして返す
+  function workHoursByEmpForPlanMonths(site, empMatcher) {
+    const { employees, months: activeMonths } = getActiveData();
+    const emps = employees.filter(e => e.base === site && e.workType && empMatcher(e));
+    return planMonths.map(planMonth => {
+      const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+      if (ami < 0) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  }
+
   // ① 拠点別
   function renderSiteView() {
     const content = document.getElementById('compare-content');
@@ -4398,6 +4417,12 @@ function renderPlanCompareCharts(planData, prodData) {
           ${chartWrapHtml(`plancmp-${site}-${div}`, visMonths().length, { heightPx: 320, inlineHeight: true })}
         </div>`;
       });
+      html += `<div class="schart-section">
+        <div class="schart-header">標準工数合計 vs 勤務時間合計
+          <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準（栽培+出荷） vs 実勤務（雇用区分別積み上げ）</span>
+        </div>
+        ${chartWrapHtml(`plancmp-${site}-total`, visMonths().length, { heightPx: 280, inlineHeight: true })}
+      </div>`;
       html += `</div>`;
     });
     content.innerHTML = html;
@@ -4473,6 +4498,86 @@ function renderPlanCompareCharts(planData, prodData) {
           },
         });
       });
+
+      // 標準工数合計 vs 勤務時間合計（雇用区分別積み上げ）
+      const totalCtx = document.getElementById(`plancmp-${site}-total`)?.getContext('2d');
+      if (totalCtx) {
+        // 標準工数合計（栽培 + 出荷）
+        const stdTotalData = sl(planMonths.map((_, mi) =>
+          divs.reduce((sum, div) => {
+            const d = window._planCmpChartData[`${site}-${div}`];
+            if (!d) return sum;
+            const v = d.divRows.reduce((s, r) => {
+              const res = calcRow(site, r, mi);
+              return s + (res.h !== null ? res.h : 0);
+            }, 0);
+            return sum + v;
+          }, 0) || null
+        ));
+
+        // 雇用区分別勤務時間
+        const empHoursMap = EMP_SERIES.map(et => ({
+          ...et,
+          data: sl(workHoursByEmpForPlanMonths(site, et.match)),
+        }));
+
+        const allVals = [
+          ...stdTotalData.filter(v => v !== null),
+          ...empHoursMap.flatMap(et => et.data.filter(v => v !== null)),
+        ];
+        const totalYMax = computeSharedAxisMax([allVals], 100) || undefined;
+
+        const totalDatasets = [
+          {
+            type: 'bar', label: '予定標準工数合計', data: stdTotalData,
+            backgroundColor: '#38bdf866', borderColor: '#38bdf8', borderWidth: 1,
+            stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
+          },
+          ...empHoursMap.map(et => ({
+            type: 'bar', label: et.label, data: et.data,
+            backgroundColor: et.color + '99', borderColor: et.color, borderWidth: 0,
+            stack: 'actual', yAxisID: 'y', order: 1,
+          })),
+        ];
+
+        planCmpChartInstances[`${site}-total`] = new Chart(totalCtx, {
+          data: { labels: visMonths(), datasets: totalDatasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    if (ctx.parsed.y == null) return null;
+                    return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString('ja-JP')} h`;
+                  },
+                  footer: items => {
+                    const actTotal = items.filter(i => i.dataset.stack === 'actual' && i.parsed.y != null)
+                      .reduce((s, i) => s + i.parsed.y, 0);
+                    const stdTotal = items.filter(i => i.dataset._stdGroup && i.parsed.y != null)
+                      .reduce((s, i) => s + i.parsed.y, 0);
+                    const lines = [];
+                    if (actTotal > 0) lines.push(`勤務時間合計: ${Math.round(actTotal).toLocaleString('ja-JP')} h`);
+                    if (stdTotal > 0) lines.push(`予定標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
+                    return lines;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+              y: {
+                stacked: true, position: 'left',
+                ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+                grid: { color: '#1e2235' }, suggestedMin: 0, max: totalYMax,
+                title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+              },
+            },
+          },
+        });
+      }
     });
   }
 
