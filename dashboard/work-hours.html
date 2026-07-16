@@ -760,6 +760,7 @@ const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const SHEET_NAME = '整理済み_M';
 const ADJUST_SHEET_NAME = '整理済み_増減'; // 工数振替（研修・応援）レコード
 const PROD_GID = '2016642543'; // 整理済み_分析
+const PLAN_GID = '530402103';  // 整理済み_計画_更新
 const STD_SETTINGS_SHEET_NAME = '標準工数設定';
 
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
@@ -1415,7 +1416,7 @@ function rerenderCurrentView() {
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
 let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu'
-const YOJITSU_MODES = ['staffplan'];
+const YOJITSU_MODES = ['staffplan', 'plan'];
 
 function renderTabs(bases) {
   // Determine active group from current mode
@@ -1565,22 +1566,34 @@ function renderSubTabs(bases) {
   } // end jisseki group
 
   if (activeGroup === 'yojitsu') {
-    const spBtn = document.createElement('button');
-    spBtn.className = 'tab-btn staffplan-tab' + (activeMode === 'staffplan' ? ' active' : '');
-    spBtn.textContent = '👷 要員計画';
-    spBtn.onclick = () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      spBtn.classList.add('active');
-      activeMode = 'staffplan';
-      saveSessionState();
-      document.getElementById('main').innerHTML = '';
-      renderStaffingPlanTab();
-      renderTransferAlerts();
-    };
-    tabsEl.appendChild(spBtn);
+    const yojitsuTabs = [
+      {
+        cls: 'staffplan-tab', text: '👷 要員計画', mode: 'staffplan',
+        render: () => { renderStaffingPlanTab(); renderTransferAlerts(); },
+      },
+      {
+        cls: 'plan-tab', text: '🌱 生産計画', mode: 'plan',
+        render: () => { renderPlanTab(); },
+      },
+    ];
 
-    // 要員計画がデフォルトでアクティブ
-    if (!['staffplan'].includes(activeMode)) {
+    yojitsuTabs.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'tab-btn ' + t.cls + (activeMode === t.mode ? ' active' : '');
+      btn.textContent = t.text;
+      btn.onclick = () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeMode = t.mode;
+        saveSessionState();
+        document.getElementById('main').innerHTML = '';
+        t.render();
+      };
+      tabsEl.appendChild(btn);
+    });
+
+    // 予実グループの初期表示
+    if (!YOJITSU_MODES.includes(activeMode)) {
       activeMode = 'staffplan';
     }
   }
@@ -2781,6 +2794,18 @@ async function fetchProductionSheet() {
   return productionData;
 }
 
+let planData = null;
+
+async function fetchPlanSheet() {
+  if (planData) return planData;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${PLAN_GID}&headers=1`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  planData = parseProductionData(json);
+  return planData;
+}
+
 function parseProductionData(json) {
   const cols = json.table.cols;
   const rows = json.table.rows;
@@ -2834,6 +2859,85 @@ function renderProductionTab() {
     main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
     console.error(e);
   });
+}
+
+function renderPlanTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">生産計画データを読み込み中...</div>';
+  fetchPlanSheet().then(data => {
+    renderPlanTable(data);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産計画データ取得エラー: ${e.message}</div>`;
+    console.error(e);
+  });
+}
+
+function renderPlanTable({ months: planMonths, records }) {
+  const main = document.getElementById('main');
+
+  if (!records.length) {
+    main.innerHTML = '<div class="loading">データが見つかりませんでした</div>';
+    return;
+  }
+
+  // Group records by site
+  const siteOrder = [];
+  const bySite = {};
+  records.forEach(r => {
+    if (!bySite[r.site]) { bySite[r.site] = []; siteOrder.push(r.site); }
+    bySite[r.site].push(r);
+  });
+
+  function rowClass(r) {
+    const classes = [];
+    if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
+    if (r.metric === '合計(点数)') classes.push('metric-goukei');
+    const cat = r.cat;
+    if (cat.includes('生産実績') || cat.includes('生産計画')) classes.push('cat-seisan');
+    else if (cat.includes('栽培')) classes.push('cat-saibai');
+    else if (cat.includes('出荷')) classes.push('cat-syukka');
+    return classes.join(' ');
+  }
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📅 生産計画 ／ 整理済み_計画_更新</div>
+    <div class="prod-table-wrap">
+    <table class="prod-table">
+      <thead><tr>
+        <th class="th-left" style="min-width:70px">拠点</th>
+        <th class="th-left" style="min-width:120px">カテゴリ</th>
+        <th class="th-left" style="min-width:130px">指標</th>
+        ${planMonths.map(m => `<th>${m}</th>`).join('')}
+      </tr></thead>
+      <tbody>`;
+
+  siteOrder.forEach((site, si) => {
+    const siteRecs = bySite[site];
+    const siteColor = SITE_COLORS[site] || '#e2e8f0';
+    let prevCat = '';
+
+    siteRecs.forEach((r, ri) => {
+      const isFirstSite = ri === 0;
+      const isNewCat = r.cat !== prevCat;
+      prevCat = r.cat;
+
+      const siteCell = isFirstSite
+        ? `<td rowspan="${siteRecs.length}" style="color:${siteColor};font-weight:600;vertical-align:top;padding-top:10px">${site}</td>`
+        : '';
+      const catCell = isNewCat
+        ? `<td style="color:var(--muted);font-size:0.78rem;vertical-align:top;padding-top:6px">${r.cat}</td>`
+        : '<td></td>';
+
+      const cls = rowClass(r);
+      html += `<tr class="${cls}">${siteCell}${catCell}
+        <td style="font-size:0.82rem">${r.metric}</td>
+        ${r.values.map(v => `<td>${v !== null ? (Number.isInteger(v) ? v.toLocaleString('ja-JP') : v.toLocaleString('ja-JP', { maximumFractionDigits: 1 })) : ''}</td>`).join('')}
+      </tr>`;
+    });
+  });
+
+  html += '</tbody></table></div></div>';
+  main.innerHTML = html;
 }
 
 // 期間フィルター（開始月・表示月数）を整理済み_分析側の月にも適用する。
