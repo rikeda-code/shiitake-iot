@@ -4241,16 +4241,34 @@ function renderPlanCompareTab() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">比較データを計算中...</div>';
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
-  Promise.all([fetchPlanSheet(), loadStdSettingsSheetOnce()]).then(([planData]) => {
-    renderPlanCompareCharts(planData);
+  Promise.all([fetchPlanSheet(), fetchProductionSheet(), loadStdSettingsSheetOnce()]).then(([planData, prodData]) => {
+    renderPlanCompareCharts(planData, prodData);
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
   });
 }
 
-function renderPlanCompareCharts(planData) {
+function renderPlanCompareCharts(planData, prodData) {
   const main = document.getElementById('main');
-  const { months: planMonths, records } = planData;
+  const { months: planMonths, records: rawPlanRecords } = planData;
+  const { months: actualMonths, records: actualRecords } = prodData || { months: [], records: [] };
+
+  // 計画シートの実数計画カテゴリで null になっている月を、実績シートの同名メトリックで補完する
+  // （過去月は計画シートに実績値がなく予定標準工数が 0 になるため）
+  const records = rawPlanRecords.map(r => {
+    if (r.cat !== '実数計画') return r;
+    const hasNull = r.values.some(v => v === null);
+    if (!hasNull) return r;
+    const fallback = actualRecords.find(ar => ar.site === r.site && ar.metric === r.metric);
+    if (!fallback) return r;
+    const merged = r.values.map((v, pi) => {
+      if (v !== null) return v;
+      const month = planMonths[pi];
+      const ai = actualMonths.indexOf(month);
+      return ai >= 0 ? (fallback.values[ai] ?? null) : null;
+    });
+    return { ...r, values: merged };
+  });
   const rows = loadYojitsuStdSettings();
   const conv = loadYojitsuCsConv();
   const originalCount = planMonths.length;
