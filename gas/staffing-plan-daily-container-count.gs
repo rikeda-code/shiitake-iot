@@ -395,11 +395,18 @@ function stage2b_roundTotals(totals) {
   };
 }
 
+// 指定した暦年月の日数(28〜31)を返す(3拠点共通で使う小さなヘルパー)
+function stage2b_daysInMonth(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+
 // 「ファーム勤務時間」ファイルの「整理済み_計画_更新」シートの指定列(targetCol)の、
-// この拠点(config.seiriRows)に対応する7行(散水は除く6行)に、読み戻して合算した値を書き込む
-// (テスト用。月次集計ロジックは未実装のため、本来は月内全日の合計が入るべき列に、明示的に
-// 指定した日数分の合計だけが入る)。labelはログ表示用(例:"7/1+7/2の合計(2日分)")
-function stage2b_writeToSeiriSheet(config, roundedTotals, label, targetCol) {
+// この拠点(config.seiriRows)に対応する7行(散水は除く6行)に、読み戻して合算した値を書き込む。
+// coveredDaysCount/daysInMonthを渡すことで、実際に何日分を合算した値なのかをログ上で
+// 明示する(呼び出し元が意図的に一部日数だけを渡すテスト呼び出しと、月の全日が渡された
+// はずの本番呼び出しの両方から使われるため、件数不一致を書き込み時点で検知できるようにする)。
+// labelはログ表示用(例:"7/1+7/2の合計(2日分)")
+function stage2b_writeToSeiriSheet(config, roundedTotals, label, targetCol, coveredDaysCount, daysInMonth) {
   const ss2 = SpreadsheetApp.openById(STAGE2B_FARM_HOURS_FILE_ID);
   const sheet2 = ss2.getSheetByName(STAGE2B_SEIRI_SHEET_NAME);
   if (!sheet2) {
@@ -415,10 +422,18 @@ function stage2b_writeToSeiriSheet(config, roundedTotals, label, targetCol) {
   sheet2.getRange(config.seiriRows.haiki, targetCol).setValue(roundedTotals.haiki);
   sheet2.getRange(config.seiriRows.active, targetCol).setValue(roundedTotals.active);
 
+  const isFullMonth = typeof coveredDaysCount === 'number' && typeof daysInMonth === 'number' && coveredDaysCount === daysInMonth;
+  const coverageNote = (typeof coveredDaysCount === 'number' && typeof daysInMonth === 'number')
+    ? (isFullMonth
+      ? '（' + coveredDaysCount + '/' + daysInMonth + '日、当該月の全日を合算した正しい合計です）'
+      : '（⚠ ' + coveredDaysCount + '/' + daysInMonth + '日分のみを合算した部分集計です。'
+        + '一部の日付が列特定に失敗した(月ラベルの表記ゆれ等)か、意図的に一部日数だけを渡す'
+        + 'テスト呼び出しの可能性があります。本番の月次集計として使う場合は原因を確認してください）')
+    : '';
+
   Logger.log('✅ 「整理済み_計画_更新」列' + stage2b_colLabel(targetCol) + 'の' + config.label + '分(行'
     + config.seiriRows.kikodo + '〜' + config.seiriRows.active + ')を上書き完了'
-    + '（' + config.label + ' ' + label + '。月次集計ロジック未実装のため、'
-    + '本来は当該月全日の合計が入るべき列にテストとして一部日数分のみ書き込んでいる点に注意）');
+    + '（' + config.label + ' ' + label + '）' + coverageNote);
 }
 
 // 拠点のガントシートの140〜146行目相当(config.summaryRows・指定列)から、丸め済みの値をそのまま読み戻す
@@ -505,7 +520,8 @@ function stage2b_writeSeiriAggregate(config, targetDates) {
     const roundedSum = stage2b_roundTotals(stage2b_sumDayTotals(dayTotalsList));
     const seiriCol = stage2b_seiriColumnForMonth(group.year, group.month);
     Logger.log(group.year + '/' + group.month + '分(' + dayLabels.join('+') + ')の合計(丸め後): ' + JSON.stringify(roundedSum));
-    stage2b_writeToSeiriSheet(config, roundedSum, dayLabels.join('+') + 'の合計(' + group.dates.length + '日分, ' + group.year + '/' + group.month + ')', seiriCol);
+    stage2b_writeToSeiriSheet(config, roundedSum, dayLabels.join('+') + 'の合計(' + group.dates.length + '日分, ' + group.year + '/' + group.month + ')', seiriCol,
+      dayTotalsList.length, stage2b_daysInMonth(group.year, group.month));
   });
 }
 
@@ -733,7 +749,7 @@ function stage2b_writeSiteAndSeiriRangeFast(siteKey, startYear, startMonth, star
     });
     Object.keys(missingByMonth).forEach(function (key) {
       const parts = key.split('/');
-      const daysInThatMonth = new Date(Number(parts[0]), Number(parts[1]), 0).getDate();
+      const daysInThatMonth = stage2b_daysInMonth(Number(parts[0]), Number(parts[1]));
       if (missingByMonth[key] >= daysInThatMonth - 1) {
         Logger.log('❌❌❌ ' + config.label + ' ' + key + '分がほぼ丸ごと(' + missingByMonth[key] + '/' + daysInThatMonth
           + '日)見つかりませんでした。行3の月ラベルがこの月だけ想定外の表記(全角文字・"年月"表記の混在等)に'
@@ -816,13 +832,14 @@ function stage2b_writeSeiriAggregateFromTotals(config, dateEntries) {
         + '件存在します。個別の値: ' + JSON.stringify(nonZeroMekaki.map(function (t) { return t.mekaki; })));
     }
 
-    stage2b_writeToSeiriSheet(config, roundedSum, group.list.length + '日分の合計(' + group.year + '/' + group.month + ')', seiriCol);
+    stage2b_writeToSeiriSheet(config, roundedSum, group.list.length + '日分の合計(' + group.year + '/' + group.month + ')', seiriCol,
+      group.list.length, stage2b_daysInMonth(group.year, group.month));
   });
 }
 
 // 指定拠点・年月(1ヶ月分)を高速一括版で処理する便利関数
 function stage2b_writeSiteAndSeiriForMonthFast(siteKey, year, month) {
-  const daysInMonth = new Date(year, month, 0).getDate();
+  const daysInMonth = stage2b_daysInMonth(year, month);
   stage2b_writeSiteAndSeiriRangeFast(siteKey, year, month, 1, year, month, daysInMonth);
 }
 
