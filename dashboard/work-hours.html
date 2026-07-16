@@ -4499,11 +4499,15 @@ function renderPlanCompareCharts(planData, prodData) {
         });
       });
 
-      // 標準工数合計 vs 勤務時間合計（雇用区分別積み上げ）
+      // 標準工数合計 vs 勤務時間合計（実績2026/6まで、2026/7以降は予想）
       const totalCtx = document.getElementById(`plancmp-${site}-total`)?.getContext('2d');
       if (totalCtx) {
-        // 標準工数合計（栽培 + 出荷）
-        const stdTotalData = sl(planMonths.map((_, mi) =>
+        const mnum = m => { const [y, mo] = m.split('/').map(Number); return y * 100 + mo; };
+        const ACTUAL_CUTOFF = mnum('2026/6');
+        const BASE_MONTH = '2026/5';
+
+        // 標準工数合計（全月、スライス前）
+        const stdTotalRaw = planMonths.map((_, mi) =>
           divs.reduce((sum, div) => {
             const d = window._planCmpChartData[`${site}-${div}`];
             if (!d) return sum;
@@ -4513,17 +4517,55 @@ function renderPlanCompareCharts(planData, prodData) {
             }, 0);
             return sum + v;
           }, 0) || null
-        ));
+        );
 
-        // 雇用区分別勤務時間
-        const empHoursMap = EMP_SERIES.map(et => ({
-          ...et,
-          data: sl(workHoursByEmpForPlanMonths(site, et.match)),
-        }));
+        // 雇用区分別の全月実績データ
+        const allActual = {};
+        EMP_SERIES.forEach(et => { allActual[et.label] = workHoursByEmpForPlanMonths(site, et.match); });
 
+        // 2026/5ベースの実績値
+        const baseIdx = planMonths.indexOf(BASE_MONTH);
+        const baseH = {};
+        EMP_SERIES.forEach(et => { baseH[et.label] = baseIdx >= 0 ? (allActual[et.label][baseIdx] ?? 0) : 0; });
+
+        // 技能実習生の拠点・月別増分
+        const techIncrement = planMonth => {
+          const mn = mnum(planMonth);
+          if (site === 'いなべ') return mn >= mnum('2026/8') ? 540 : 0;
+          if (site === '群馬')   return mn >= mnum('2026/7') ? 180 : 0;
+          if (site === '南丹')   return mn >= mnum('2026/8') ? 180 : 0;
+          return 0;
+        };
+
+        // 実績データ（2026/6以前）と予想データ（2026/7以降）を分離
+        const actualData = {}, forecastData = {};
+        EMP_SERIES.forEach(et => {
+          actualData[et.label] = planMonths.map((m, mi) =>
+            mnum(m) <= ACTUAL_CUTOFF ? allActual[et.label][mi] : null
+          );
+          forecastData[et.label] = planMonths.map((m, mi) => {
+            if (mnum(m) <= ACTUAL_CUTOFF) return null;
+            if (et.label === '社員') return Math.round(baseH['社員'] * 10) / 10;
+            if (et.label === '技能実習生') return Math.round((baseH['技能実習生'] + techIncrement(m)) * 10) / 10;
+            return null; // パートは後で計算
+          });
+        });
+        // パート予想 = max(0, 標準合計 - 社員予想 - 技能予想)
+        planMonths.forEach((m, mi) => {
+          if (mnum(m) <= ACTUAL_CUTOFF) return;
+          const std = stdTotalRaw[mi] ?? 0;
+          const emp = forecastData['社員'][mi] ?? 0;
+          const tech = forecastData['技能実習生'][mi] ?? 0;
+          forecastData['パート'][mi] = Math.max(0, Math.round((std - emp - tech) * 10) / 10);
+        });
+
+        const stdTotalData = sl(stdTotalRaw);
         const allVals = [
           ...stdTotalData.filter(v => v !== null),
-          ...empHoursMap.flatMap(et => et.data.filter(v => v !== null)),
+          ...EMP_SERIES.flatMap(et => [
+            ...sl(actualData[et.label]).filter(v => v !== null),
+            ...sl(forecastData[et.label]).filter(v => v !== null),
+          ]),
         ];
         const totalYMax = computeSharedAxisMax([allVals], 100) || undefined;
 
@@ -4533,10 +4575,17 @@ function renderPlanCompareCharts(planData, prodData) {
             backgroundColor: '#38bdf866', borderColor: '#38bdf8', borderWidth: 1,
             stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
           },
-          ...empHoursMap.map(et => ({
-            type: 'bar', label: et.label, data: et.data,
+          // 実績（濃色・2026/6以前）
+          ...EMP_SERIES.map(et => ({
+            type: 'bar', label: `${et.label}（実績）`, data: sl(actualData[et.label]),
             backgroundColor: et.color + '99', borderColor: et.color, borderWidth: 0,
             stack: 'actual', yAxisID: 'y', order: 1,
+          })),
+          // 予想（薄色・2026/7以降）
+          ...EMP_SERIES.map(et => ({
+            type: 'bar', label: `${et.label}（予想）`, data: sl(forecastData[et.label]),
+            backgroundColor: et.color + '44', borderColor: et.color, borderWidth: 1,
+            stack: 'forecast', yAxisID: 'y', order: 1,
           })),
         ];
 
@@ -4554,12 +4603,13 @@ function renderPlanCompareCharts(planData, prodData) {
                     return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString('ja-JP')} h`;
                   },
                   footer: items => {
-                    const actTotal = items.filter(i => i.dataset.stack === 'actual' && i.parsed.y != null)
+                    const workTotal = items
+                      .filter(i => (i.dataset.stack === 'actual' || i.dataset.stack === 'forecast') && i.parsed.y != null)
                       .reduce((s, i) => s + i.parsed.y, 0);
                     const stdTotal = items.filter(i => i.dataset._stdGroup && i.parsed.y != null)
                       .reduce((s, i) => s + i.parsed.y, 0);
                     const lines = [];
-                    if (actTotal > 0) lines.push(`勤務時間合計: ${Math.round(actTotal).toLocaleString('ja-JP')} h`);
+                    if (workTotal > 0) lines.push(`勤務時間合計: ${Math.round(workTotal).toLocaleString('ja-JP')} h`);
                     if (stdTotal > 0) lines.push(`予定標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
                     return lines;
                   },
