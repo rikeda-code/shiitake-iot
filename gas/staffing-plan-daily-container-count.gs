@@ -203,7 +203,7 @@ function stage2b_readContainers(sheet, tz) {
   const containers = [];
   const warnings = [];
   let carriedYear = null;
-  let reachedEnd = false;
+  let blankRowCount = 0;
 
   for (let i = 0; i < values.length; i++) {
     const rowNum = STAGE2B_CONTAINER_DATA_START_ROW + i;
@@ -212,9 +212,13 @@ function stage2b_readContainers(sheet, tz) {
     const cVal = values[i][STAGE2B_COL_C_PLANT_DATE - 1];
     const dVal = values[i][STAGE2B_COL_D_BEDS - 1];
 
+    // B列(No.)が空白の行は、月ブロック間の区切り行等でありうる(コンテナ行の終端とは限らない)。
+    // 以前はここで走査を打ち切っていたが、それだと区切り行より下の全コンテナが読み落とされる
+    // 不具合があったため、この行だけスキップして以降の行も引き続き読み進めるようにした。
+    // 走査範囲自体はSTAGE2B_CONTAINER_MAX_SCAN_ROW(集計行の手前)で区切られる
     if (bVal === '' || bVal === null) {
-      reachedEnd = true;
-      break; // No.が空白＝コンテナ行の終端
+      blankRowCount++;
+      continue;
     }
 
     const monthLabel = stage2b_parseYearMonthCell(aVal, tz);
@@ -235,9 +239,8 @@ function stage2b_readContainers(sheet, tz) {
     containers.push({ rowNum: rowNum, plantDate: parsed.date, beds: beds });
   }
 
-  if (!reachedEnd) {
-    warnings.push('警告: コンテナ行の終端(B列空白)が見つからないまま集計行付近(' + STAGE2B_CONTAINER_MAX_SCAN_ROW + '行目)に達しました。範囲設定を見直してください');
-  }
+  Logger.log('コンテナ行スキャン範囲: ' + STAGE2B_CONTAINER_DATA_START_ROW + '〜' + maxScanRow + '行目'
+    + '（B列空白でスキップした行: ' + blankRowCount + '件）');
 
   return { containers: containers, warnings: warnings };
 }
@@ -956,6 +959,49 @@ function stage2b_verifyKikodoMekaki(startYear, startMonth, startDay, endYear, en
 // 8月・9月分の菌床入れ・芽かき検証（今回の報告範囲）
 function verifyKikodoMekaki_Aug_Sep_test() {
   stage2b_verifyKikodoMekaki(2026, 8, 1, 2026, 9, 30);
+}
+
+/**
+ * 全コンテナ候補行(B列が空白でない行)について、C列(投入日)の生の値・型・
+ * ダックタイピング判定結果・パース結果を1行ずつダンプする。「表示形式は同じ(自動)なのに
+ * 実際の値の型が違う」ケースや、特定の行だけパースに失敗しているケースを直接確認できる。
+ */
+function stage2b_dumpContainerRawValues() {
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+
+  const maxScanRow = Math.min(sheet.getLastRow(), STAGE2B_CONTAINER_MAX_SCAN_ROW);
+  const numRows = maxScanRow - STAGE2B_CONTAINER_DATA_START_ROW + 1;
+  const values = sheet.getRange(STAGE2B_CONTAINER_DATA_START_ROW, 1, numRows, STAGE2B_COL_D_BEDS).getValues();
+
+  Logger.log('=== 全コンテナ候補行(' + STAGE2B_CONTAINER_DATA_START_ROW + '〜' + maxScanRow + '行目)のC列(投入日) 生データ一覧 ===');
+  let carriedYear = null;
+  for (let i = 0; i < values.length; i++) {
+    const rowNum = STAGE2B_CONTAINER_DATA_START_ROW + i;
+    const aVal = values[i][STAGE2B_COL_A_PLANT_MONTH - 1];
+    const bVal = values[i][STAGE2B_COL_B_NO - 1];
+    const cVal = values[i][STAGE2B_COL_C_PLANT_DATE - 1];
+    const dVal = values[i][STAGE2B_COL_D_BEDS - 1];
+
+    const monthLabel = stage2b_parseYearMonthCell(aVal, tz);
+    if (monthLabel) carriedYear = monthLabel.year;
+
+    if (bVal === '' || bVal === null) {
+      Logger.log('行' + rowNum + ': B列(No.)が空白（区切り行等とみなしスキップ）');
+      continue;
+    }
+
+    const parsed = stage2b_parsePlantDate(cVal, tz, carriedYear);
+    Logger.log('行' + rowNum + ': A列=' + stage2b_debugValue(aVal, tz) + ' B列=' + bVal + ' D列=' + dVal
+      + ' / C列: typeof=' + (typeof cVal) + ' isDateLike(ダックタイピング)=' + stage2b_isDateLike(cVal)
+      + ' 生値=' + stage2b_debugValue(cVal, tz)
+      + ' → パース結果=' + (parsed.date ? stage2b_fmtDate(parsed.date) : ('❌解析失敗: ' + parsed.warning)));
+  }
 }
 
 /**
