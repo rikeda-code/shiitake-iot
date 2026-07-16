@@ -763,6 +763,14 @@ const PROD_GID = '2016642543'; // 整理済み_分析
 const PLAN_GID = '530402103';  // 整理済み_計画_更新
 const STD_SETTINGS_SHEET_NAME = '標準工数設定';
 
+// 計画シート（整理済み_計画_更新）では出荷量が「出荷計画実数」1行にまとまっているため、
+// パック数・袋数・合計(点数) のいずれも同列にフォールバックして計算する
+const PLAN_METRIC_ALIASES = {
+  'パック数':   '出荷計画実数',
+  '袋数':       '出荷計画実数',
+  '合計(点数)': '出荷計画実数',
+};
+
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
 // 読み取り用の定数・関数は該当Stageで追加する
@@ -2965,7 +2973,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
   const conv = loadCsConv();
 
   const originalCount = planMonths.length;
-  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
+  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, PLAN_METRIC_ALIASES);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
   const divCount = {};
@@ -3245,12 +3253,17 @@ function calcCs(pcs, bara, conv) {
 //   超過列は空文字）
 // originalCount: displayMonthsのうち選択範囲内（実データを載せてよい）の本数
 // conv: { pcsPerCs, baraMetric }（出荷cs換算設定）
-function createStdHoursEngine(records, prodMonths, displayMonths, originalCount, conv) {
+// metricAliases: { [primaryKey]: fallbackKey } — 計画シート等で別名メトリックを使う場合に指定
+//   例: { 'パック数': '出荷計画実数', '袋数': '出荷計画実数', '合計(点数)': '出荷計画実数' }
+function createStdHoursEngine(records, prodMonths, displayMonths, originalCount, conv, metricAliases) {
+  const aliases = metricAliases || {};
   function getProdVal(site, metricKey, mi) {
     if (mi >= originalCount) return null;
     const m = displayMonths[mi];
     if (!m) return null;
-    const r = records.find(rr => rr.site === site && rr.metric === metricKey);
+    const lookup = key => records.find(rr => rr.site === site && rr.metric === key);
+    let r = lookup(metricKey);
+    if (!r && aliases[metricKey]) r = lookup(aliases[metricKey]);
     if (!r) return null;
     const pi = prodMonths.indexOf(normalizeMonth(m));
     return pi >= 0 ? (r.values[pi] ?? null) : null;
@@ -4090,7 +4103,7 @@ function renderPlanCompareCharts(planData) {
   const rows = loadStdSettings();
   const conv = loadCsConv();
   const originalCount = planMonths.length;
-  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
+  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, PLAN_METRIC_ALIASES);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
 
