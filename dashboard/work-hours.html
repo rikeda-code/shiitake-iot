@@ -4401,6 +4401,18 @@ function renderPlanCompareCharts(planData, prodData) {
     });
   }
 
+  // 計画月ごとの人数を雇用区分でフィルタして返す（工数>0の人を1人と数える）
+  function headcountByEmpForPlanMonths(site, empMatcher) {
+    const { employees, months: activeMonths } = getActiveData();
+    const emps = employees.filter(e => e.base === site && e.workType && empMatcher(e));
+    return planMonths.map(planMonth => {
+      const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+      if (ami < 0) return null;
+      const count = emps.filter(e => (e.hours[ami] ?? 0) > 0).length;
+      return count > 0 ? count : null;
+    });
+  }
+
   // ① 拠点別
   let planCmpSiteTab = availSites[0] || 'いなべ';
   const SITE_TABS = [...availSites, '全拠点合計'];
@@ -4408,6 +4420,7 @@ function renderPlanCompareCharts(planData, prodData) {
   // 月の数値比較用ヘルパー（renderSiteView内で共用）
   const mnum = m => { const [y, mo] = m.split('/').map(Number); return y * 100 + mo; };
   const ACTUAL_CUTOFF = mnum('2026/6');
+  const HEADCOUNT_CUTOFF = mnum('2026/5'); // 人数実績は2026/5まで
   const BASE_MONTH = '2026/5';
 
   // 拠点ごとの標準工数合計・実績・予想データを構築
@@ -4453,13 +4466,41 @@ function renderPlanCompareCharts(planData, prodData) {
       const tech = forecastData['技能実習生'][mi] ?? 0;
       forecastData['パート'][mi] = Math.max(0, Math.round((std - emp - tech) * 10) / 10);
     });
-    return { stdTotalRaw, actualData, forecastData };
+
+    // 人数データ（実績: 〜2026/5、予想: 2026/7〜）
+    const allActualCount = {};
+    EMP_SERIES.forEach(et => { allActualCount[et.label] = headcountByEmpForPlanMonths(site, et.match); });
+    const baseCount = {};
+    EMP_SERIES.forEach(et => { baseCount[et.label] = baseIdx >= 0 ? (allActualCount[et.label][baseIdx] ?? 0) : 0; });
+    // 2026/5時点のパート1人当たり工数
+    const partHourPerPerson = baseCount['パート'] > 0 ? (baseH['パート'] / baseCount['パート']) : null;
+    const actualCountData = {}, forecastCountData = {};
+    EMP_SERIES.forEach(et => {
+      actualCountData[et.label] = planMonths.map((m, mi) =>
+        mnum(m) <= HEADCOUNT_CUTOFF ? allActualCount[et.label][mi] : null
+      );
+      forecastCountData[et.label] = planMonths.map((m, mi) => {
+        if (mnum(m) <= ACTUAL_CUTOFF) return null; // 2026/6は空白
+        if (et.label === '社員') return baseCount['社員'];
+        if (et.label === '技能実習生') return baseCount['技能実習生'] + Math.round(techIncrement(m) / 180);
+        if (et.label === 'パート') {
+          if (!partHourPerPerson) return null;
+          const fcH = forecastData['パート'][mi] ?? 0;
+          return Math.round(fcH / partHourPerPerson * 10) / 10;
+        }
+        return null;
+      });
+    });
+
+    return { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData };
   }
 
   // 標準工数合計 vs 勤務時間合計グラフを描画（単拠点 or 全拠点）
-  function renderTotalChart(canvasId, stdTotalRaw, actualDataMap, forecastDataMap) {
+  function renderTotalChart(canvasId, stdTotalRaw, actualDataMap, forecastDataMap, opts) {
     const ctx = document.getElementById(canvasId)?.getContext('2d');
     if (!ctx) return;
+    const extraDatasets = (opts && opts.extraDatasets) || [];
+    const extraScales   = (opts && opts.extraScales)   || {};
     const stdTotalData = sl(stdTotalRaw);
     const allVals = [
       ...stdTotalData.filter(v => v !== null),
@@ -4485,6 +4526,7 @@ function renderPlanCompareCharts(planData, prodData) {
         backgroundColor: et.color + '44', borderColor: et.color, borderWidth: 1,
         stack: 'forecast', yAxisID: 'y', order: 1,
       })),
+      ...extraDatasets,
     ];
     planCmpChartInstances[canvasId] = new Chart(ctx, {
       data: { labels: visMonths(), datasets },
@@ -4495,9 +4537,13 @@ function renderPlanCompareCharts(planData, prodData) {
           legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
           tooltip: {
             callbacks: {
-              label: ctx => ctx.parsed.y == null ? null : `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString('ja-JP')} h`,
+              label: ctx => {
+                if (ctx.parsed.y == null) return null;
+                if (ctx.dataset._countLine) return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ja-JP')} 人`;
+                return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString('ja-JP')} h`;
+              },
               footer: items => {
-                const workTotal = items.filter(i => (i.dataset.stack === 'actual' || i.dataset.stack === 'forecast') && i.parsed.y != null).reduce((s, i) => s + i.parsed.y, 0);
+                const workTotal = items.filter(i => (i.dataset.stack === 'actual' || i.dataset.stack === 'forecast') && !i.dataset._countLine && i.parsed.y != null).reduce((s, i) => s + i.parsed.y, 0);
                 const stdTotal  = items.filter(i => i.dataset._stdGroup && i.parsed.y != null).reduce((s, i) => s + i.parsed.y, 0);
                 const lines = [];
                 if (workTotal > 0) lines.push(`勤務時間合計: ${Math.round(workTotal).toLocaleString('ja-JP')} h`);
@@ -4510,6 +4556,7 @@ function renderPlanCompareCharts(planData, prodData) {
         scales: {
           x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
           y: { stacked: true, position: 'left', ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` }, grid: { color: '#1e2235' }, suggestedMin: 0, max: yMax, title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } } },
+          ...extraScales,
         },
       },
     });
@@ -4578,7 +4625,52 @@ function renderPlanCompareCharts(planData, prodData) {
           return total > 0 ? Math.round(total * 10) / 10 : null;
         });
       });
-      renderTotalChart('plancmp-all-total', allStdTotalRaw, allActualData, allForecastData);
+
+      // 人数折れ線データ（全拠点合計）
+      const allActualCountData = {}, allForecastCountData = {};
+      EMP_SERIES.forEach(et => {
+        allActualCountData[et.label] = planMonths.map((_, mi) => {
+          const total = siteDataList.reduce((s, d) => s + (d.actualCountData[et.label][mi] ?? 0), 0);
+          return total > 0 ? total : null;
+        });
+        allForecastCountData[et.label] = planMonths.map((m, mi) => {
+          if (mnum(m) <= ACTUAL_CUTOFF) return null;
+          const total = siteDataList.reduce((s, d) => s + (d.forecastCountData[et.label][mi] ?? 0), 0);
+          return total > 0 ? Math.round(total * 10) / 10 : null;
+        });
+      });
+      const countMax = computeSharedAxisMax([
+        EMP_SERIES.flatMap(et => [
+          ...sl(allActualCountData[et.label]).filter(v => v !== null),
+          ...sl(allForecastCountData[et.label]).filter(v => v !== null),
+        ]),
+      ], 1) || undefined;
+      const countDatasets = EMP_SERIES.flatMap(et => [
+        {
+          type: 'line', label: `${et.label}人数（実績）`, data: sl(allActualCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+        },
+        {
+          type: 'line', label: `${et.label}人数（予想）`, data: sl(allForecastCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, borderDash: [5, 4],
+          pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+        },
+      ]);
+      const countScale = {
+        y2: {
+          position: 'right',
+          ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v} 人` },
+          grid: { drawOnChartArea: false },
+          suggestedMin: 0, max: countMax,
+          title: { display: true, text: '人', color: '#64748b', font: { size: 10 } },
+        },
+      };
+      renderTotalChart('plancmp-all-total', allStdTotalRaw, allActualData, allForecastData,
+        { extraDatasets: countDatasets, extraScales: countScale });
     } else {
       // 単拠点: 栽培・出荷チャート + 合計チャート
       const site = planCmpSiteTab;
