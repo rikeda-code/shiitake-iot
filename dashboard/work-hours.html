@@ -4257,8 +4257,8 @@ function renderPlanCompareCharts(planData) {
   const { calcRow, getProdVal } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, null, '実数計画');
 
   // div ごとの生産計画量を拠点・月別に返す（右軸の折れ線用）
-  const DIV_METRIC = { '栽培': '収穫量(kg)', '出荷': '合計(点数)' };
-  const DIV_UNIT   = { '栽培': 'kg',          '出荷': '点' };
+  const DIV_METRIC = { '栽培': '収穫量(kg)', '出荷': '出荷量(kg)' };
+  const DIV_UNIT   = { '栽培': 'kg',          '出荷': 'kg' };
   function planVolume(site, div, mi) {
     return getProdVal(site, DIV_METRIC[div], mi);
   }
