@@ -253,7 +253,9 @@ function stage2b_computeDailyCounts(containers, targetDate) {
     const cycleDay = stage2b_daysDiff(c.plantDate, targetDate) + 1;
     if (cycleDay < 1 || cycleDay > 60) return;
     const weight = c.beds / STAGE2B_BASE_BEDS;
-    result.active += weight;
+    // 稼働コンテナ数は実績側の既存GAS(工程カウント.gs)と同じ考え方で、床数係数を掛けない
+    // 単純な+1カウントとする(工程別カウントのみ床数/基準床数の係数で重み付けする)
+    result.active += 1;
     const process = stage2b_processForCycleDay(cycleDay);
     if (process) result[process] += weight;
     detail.push({ rowNum: c.rowNum, plantDate: stage2b_fmtDate(c.plantDate), cycleDay: cycleDay, process: process || '(稼働のみ)' });
@@ -959,6 +961,43 @@ function stage2b_verifyKikodoMekaki(startYear, startMonth, startDay, endYear, en
 // 8月・9月分の菌床入れ・芽かき検証（今回の報告範囲）
 function verifyKikodoMekaki_Aug_Sep_test() {
   stage2b_verifyKikodoMekaki(2026, 8, 1, 2026, 9, 30);
+}
+
+/**
+ * 指定範囲内の各日について、収穫(harvest)判定されたコンテナを1件ずつログ出力する。
+ * ユーザーがガントチャート上で目視カウントした結果と、1日ずつ・1コンテナずつ突き合わせる
+ * ための診断関数。同じ日に複数コンテナが収穫中の場合、それぞれの投入日・サイクル日数が
+ * わかるので、想定外のコンテナが含まれていないか(または想定していたコンテナが漏れて
+ * いないか)を直接確認できる。
+ */
+function stage2b_dumpHarvestDetail(startYear, startMonth, startDay, endYear, endMonth, endDay) {
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+  const { containers, warnings } = stage2b_readContainers(sheet, tz);
+  warnings.forEach(function (w) { Logger.log('⚠ ' + w); });
+
+  const dates = stage2b_dateRange(startYear, startMonth, startDay, endYear, endMonth, endDay);
+  Logger.log('=== 収穫判定の詳細ダンプ: ' + stage2b_fmtDate(new Date(startYear, startMonth - 1, startDay))
+    + ' 〜 ' + stage2b_fmtDate(new Date(endYear, endMonth - 1, endDay)) + '（コンテナ' + containers.length + '件中）===');
+
+  dates.forEach(function (d) {
+    const targetDate = new Date(d.year, d.month - 1, d.day);
+    const { totals, detail } = stage2b_computeDailyCounts(containers, targetDate);
+    const harvestDetail = detail.filter(function (x) { return x.process === 'harvest'; });
+    Logger.log(stage2b_fmtDate(targetDate) + ': 収穫コンテナ数=' + harvestDetail.length
+      + '（重み付き収穫合計=' + stage2b_round1(totals.harvest) + '） '
+      + JSON.stringify(harvestDetail.map(function (x) { return { 行: x.rowNum, 投入日: x.plantDate, サイクル日: x.cycleDay }; })));
+  });
+}
+
+// 8月分の収穫詳細ダンプ（今回の報告範囲）
+function dumpHarvestDetail_Aug_test() {
+  stage2b_dumpHarvestDetail(2026, 8, 1, 2026, 8, 31);
 }
 
 /**
