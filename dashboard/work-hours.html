@@ -4301,11 +4301,10 @@ function renderPlanCompareCharts(planData) {
     planCmpChartInstances = {};
   }
 
-  // 表示月範囲（インデックス）
-  let planCmpStartIdx = 0;
-  let planCmpEndIdx = planMonths.length - 1;
-  const sl = arr => arr.slice(planCmpStartIdx, planCmpEndIdx + 1);
-  function visMonths() { return planMonths.slice(planCmpStartIdx, planCmpEndIdx + 1); }
+  // 表示する月のインデックスセット（任意の月を個別選択可）
+  let planCmpSelected = new Set(planMonths.map((_, i) => i)); // 初期：全月選択
+  const sl = arr => arr.filter((_, i) => planCmpSelected.has(i));
+  function visMonths() { return planMonths.filter((_, i) => planCmpSelected.has(i)); }
 
   function tooltipOpts(showStdFooter, showActualTotal) {
     return {
@@ -4390,8 +4389,7 @@ function renderPlanCompareCharts(planData) {
       const valueArrays = availSites.map(site => {
         const d = window._planCmpChartData[`${site}-${div}`];
         if (!d) return [];
-        return visMonths().flatMap((_, vmi) => {
-          const mi = planCmpStartIdx + vmi;
+        return [...planCmpSelected].flatMap(mi => {
           const stdTotal = d.divRows.reduce((s, r) => {
             const res = calcRow(site, r, mi);
             return s + (res.h !== null ? res.h : 0);
@@ -4623,50 +4621,71 @@ function renderPlanCompareCharts(planData) {
     else renderSiteView();
   }
 
-  const monthOptions = planMonths.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+  const chipStyle = (active) =>
+    `cursor:pointer;padding:3px 9px;border-radius:12px;font-size:0.75rem;border:1px solid;transition:background 0.15s;` +
+    (active
+      ? 'background:#38bdf8;border-color:#38bdf8;color:#0f1117;font-weight:600'
+      : 'background:transparent;border-color:#3a3f5c;color:#8892a4');
+
+  const chipsHtml = planMonths.map((m, i) =>
+    `<button class="plancmp-chip" data-idx="${i}" style="${chipStyle(true)}">${m}</button>`
+  ).join('');
+
   main.innerHTML = `
     <div class="compare-shell">
-      <div class="compare-header-row">
-        <div class="chart-section-label">📊 予定標準工数 vs 実績工数 比較　<span style="font-size:0.72rem;font-weight:400;color:var(--muted)">※ 左棒(赤) = 実績工数　右棒(積み上げ) = 予定標準工数（タスク別）</span></div>
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <div style="display:flex;gap:6px;align-items:center;font-size:0.82rem;color:var(--muted)">
-            <span>期間</span>
-            <select id="plancmp-start" style="background:#1a1f35;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-              ${monthOptions}
-            </select>
-            <span>〜</span>
-            <select id="plancmp-end" style="background:#1a1f35;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-              ${monthOptions}
-            </select>
-          </div>
+      <div class="compare-header-row" style="flex-wrap:wrap;gap:8px">
+        <div class="chart-section-label" style="flex-shrink:0">📊 予定標準工数 vs 実績工数 比較
+          <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">※ 左棒(赤)=実績　右棒(積み上げ)=予定標準</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
           <div class="transfer-toggle" id="plancmp-subtabs">
             <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
           </div>
         </div>
       </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0 10px;flex-wrap:wrap">
+        <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
+        <div id="plancmp-chips" style="display:flex;gap:5px;flex-wrap:wrap">${chipsHtml}</div>
+        <button id="plancmp-all" style="padding:3px 10px;font-size:0.75rem;border-radius:12px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">全選択</button>
+        <button id="plancmp-clear" style="padding:3px 10px;font-size:0.75rem;border-radius:12px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">クリア</button>
+      </div>
       <div id="compare-content"></div>
     </div>`;
 
-  // 終了月セレクトの初期値を末尾に
-  document.getElementById('plancmp-end').value = String(planMonths.length - 1);
+  function updateChipStyles() {
+    document.querySelectorAll('.plancmp-chip').forEach(btn => {
+      const i = parseInt(btn.dataset.idx);
+      btn.style.cssText = chipStyle(planCmpSelected.has(i));
+    });
+  }
 
-  document.getElementById('plancmp-start').addEventListener('change', e => {
-    planCmpStartIdx = parseInt(e.target.value);
-    if (planCmpStartIdx > planCmpEndIdx) {
-      planCmpEndIdx = planCmpStartIdx;
-      document.getElementById('plancmp-end').value = String(planCmpEndIdx);
+  document.getElementById('plancmp-chips').addEventListener('click', e => {
+    const btn = e.target.closest('.plancmp-chip');
+    if (!btn) return;
+    const i = parseInt(btn.dataset.idx);
+    if (planCmpSelected.has(i)) {
+      if (planCmpSelected.size <= 1) return; // 最低1月は残す
+      planCmpSelected.delete(i);
+    } else {
+      planCmpSelected.add(i);
     }
+    updateChipStyles();
     renderContent();
   });
-  document.getElementById('plancmp-end').addEventListener('change', e => {
-    planCmpEndIdx = parseInt(e.target.value);
-    if (planCmpEndIdx < planCmpStartIdx) {
-      planCmpStartIdx = planCmpEndIdx;
-      document.getElementById('plancmp-start').value = String(planCmpStartIdx);
-    }
+
+  document.getElementById('plancmp-all').onclick = () => {
+    planMonths.forEach((_, i) => planCmpSelected.add(i));
+    updateChipStyles();
     renderContent();
-  });
+  };
+  document.getElementById('plancmp-clear').onclick = () => {
+    const sorted = [...planCmpSelected].sort((a, b) => a - b);
+    const keep = sorted[sorted.length - 1] ?? 0;
+    planCmpSelected = new Set([keep]);
+    updateChipStyles();
+    renderContent();
+  };
 
   document.querySelectorAll('#plancmp-subtabs .transfer-toggle-btn').forEach(btn => {
     btn.onclick = () => {
