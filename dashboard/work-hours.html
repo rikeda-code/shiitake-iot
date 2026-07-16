@@ -4573,6 +4573,14 @@ function renderPlanCompareCharts(planData, prodData) {
     let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;padding-bottom:12px" id="plancmp-site-tabbar">${tabBarHtml}</div>`;
 
     if (planCmpSiteTab === '全拠点合計') {
+      divs.forEach(div => {
+        html += `<div class="schart-section">
+          <div class="schart-header">${div}（全拠点合計）
+            <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準 vs 実績（h）3拠点合計</span>
+          </div>
+          ${chartWrapHtml(`plancmp-all-${div}`, vm.length, { heightPx: 320, inlineHeight: true })}
+        </div>`;
+      });
       html += `<div class="schart-section">
         <div class="schart-header">全拠点合計 - 標準工数 vs 勤務時間
           <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準（栽培+出荷・3拠点合計） vs 実勤務（雇用区分別積み上げ・3拠点合計）</span>
@@ -4608,6 +4616,82 @@ function renderPlanCompareCharts(planData, prodData) {
     });
 
     if (planCmpSiteTab === '全拠点合計') {
+      // 全拠点合計: 栽培・出荷チャート（3拠点集計）
+      divs.forEach(div => {
+        const ctx = document.getElementById(`plancmp-all-${div}`)?.getContext('2d');
+        if (!ctx) return;
+        const divRows = rows.filter(r => r.div === div);
+        // 実績工数: 全拠点の actualH を合計
+        const allActualH = planMonths.map((_, mi) =>
+          availSites.reduce((s, site) => s + (window._planCmpChartData[`${site}-${div}`]?.actualH[mi] ?? 0), 0) || null
+        );
+        // 予定標準: 全拠点合計で各タスク行を集計
+        const taskData = divRows.map(r =>
+          planMonths.map((_, mi) => {
+            const total = availSites.reduce((s, site) => {
+              const res = calcRow(site, r, mi);
+              return s + (res.h !== null ? res.h : 0);
+            }, 0);
+            return total > 0 ? Math.round(total * 10) / 10 : null;
+          })
+        );
+        // 計画量（右軸）: 全拠点合計
+        const volData = planMonths.map((_, mi) =>
+          availSites.reduce((s, site) => {
+            const v = planVolume(site, div, mi);
+            return s + (v !== null ? v : 0);
+          }, 0) || null
+        );
+        const allYValues = [
+          ...sl(allActualH).filter(v => v !== null),
+          ...taskData.flatMap(d => sl(d).filter(v => v !== null)),
+        ];
+        const yMax = computeSharedAxisMax([allYValues], 100) || undefined;
+        const volMax = computeSharedAxisMax([sl(volData).filter(v => v !== null)], 1000) || undefined;
+        const datasets = [
+          {
+            type: 'bar', label: '実績工数', data: sl(allActualH),
+            backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 1,
+            stack: 'actual', yAxisID: 'y', order: 1,
+          },
+          ...divRows.map((r, ri) => ({
+            type: 'bar', label: r.task, data: sl(taskData[ri]),
+            backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+            borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+            borderWidth: 0, stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
+          })),
+          {
+            type: 'line', label: DIV_METRIC[div], data: sl(volData),
+            borderColor: '#94a3b8', backgroundColor: 'transparent',
+            borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
+            tension: 0.3, yAxisID: 'y2', order: 0,
+            _volumeLine: true, _unit: DIV_UNIT[div],
+          },
+        ];
+        planCmpChartInstances[`plancmp-all-${div}`] = new Chart(ctx, {
+          data: { labels: visMonths(), datasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              tooltip: tooltipOpts(true),
+            },
+            scales: {
+              x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+              y: { stacked: true, position: 'left', ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` }, grid: { color: '#1e2235' }, suggestedMin: 0, max: yMax, title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } } },
+              y2: {
+                position: 'right',
+                ticks: { color: '#64748b', font: { size: 10 }, callback: v => v.toLocaleString('ja-JP') },
+                grid: { drawOnChartArea: false },
+                suggestedMin: 0, max: volMax,
+                title: { display: true, text: DIV_UNIT[div], color: '#64748b', font: { size: 10 } },
+              },
+            },
+          },
+        });
+      });
+
       // 全拠点合計: 各拠点データを集約して描画
       const siteDataList = availSites.map(s => computeSiteTotalData(s));
       const allStdTotalRaw = planMonths.map((_, mi) =>
