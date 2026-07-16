@@ -4097,7 +4097,14 @@ function renderPlanCompareCharts(planData) {
   const rows = loadStdSettings();
   const conv = loadCsConv();
   const originalCount = planMonths.length;
-  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
+  const { calcRow, getProdVal } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
+
+  // div ごとの生産計画量を拠点・月別に返す（右軸の折れ線用）
+  const DIV_METRIC = { '栽培': '収穫量(kg)', '出荷': '合計(点数)' };
+  const DIV_UNIT   = { '栽培': 'kg',          '出荷': '点' };
+  function planVolume(site, div, mi) {
+    return getProdVal(site, DIV_METRIC[div], mi);
+  }
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
 
@@ -4146,6 +4153,7 @@ function renderPlanCompareCharts(planData) {
         label: ctx => {
           const v = ctx.parsed.y;
           if (v === null || v === undefined) return null;
+          if (ctx.dataset._volumeLine) return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} ${ctx.dataset._unit}`;
           return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
         },
         afterLabel: showActualTotal ? function (ctx) {
@@ -4166,6 +4174,31 @@ function renderPlanCompareCharts(planData) {
           return `${indent}予定標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
         } : undefined,
       },
+    };
+  }
+
+  function volumeLineDataset(site, div) {
+    const data = planMonths.map((_, mi) => {
+      const v = planVolume(site, div, mi);
+      return v !== null ? Math.round(v * 10) / 10 : null;
+    });
+    return {
+      type: 'line', label: DIV_METRIC[div], data,
+      borderColor: '#94a3b8', backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
+      tension: 0.3, yAxisID: 'y2', order: 0,
+      _volumeLine: true, _unit: DIV_UNIT[div],
+    };
+  }
+
+  function y2Axis(div, volumeData) {
+    const max = computeSharedAxisMax([volumeData.filter(v => v !== null)], 1000) || undefined;
+    return {
+      position: 'right',
+      ticks: { color: '#64748b', font: { size: 10 }, callback: v => v.toLocaleString('ja-JP') },
+      grid: { drawOnChartArea: false },
+      suggestedMin: 0, max,
+      title: { display: true, text: DIV_UNIT[div], color: '#64748b', font: { size: 10 } },
     };
   }
 
@@ -4234,6 +4267,9 @@ function renderPlanCompareCharts(planData) {
           });
         });
 
+        const volDs = volumeLineDataset(site, div);
+        datasets.push(volDs);
+
         planCmpChartInstances[key] = new Chart(ctx, {
           data: { labels: planMonths, datasets },
           options: {
@@ -4251,6 +4287,7 @@ function renderPlanCompareCharts(planData) {
                 grid: { color: '#1e2235' }, suggestedMin: 0, max: divYMax[div],
                 title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
               },
+              y2: y2Axis(div, volDs.data),
             },
           },
         });
@@ -4286,21 +4323,35 @@ function renderPlanCompareCharts(planData) {
         return total > 0 ? Math.round(total * 10) / 10 : null;
       }));
 
+      // 3拠点合計の計画量（右軸折れ線用）
+      const volSummaryData = planMonths.map((_, mi) =>
+        availSites.reduce((s, site) => {
+          const v = planVolume(site, div, mi);
+          return s + (v !== null ? v : 0);
+        }, 0) || null
+      );
+      const volSummaryDs = {
+        type: 'line', label: DIV_METRIC[div] + '（計画・3拠点合計）', data: volSummaryData,
+        borderColor: '#94a3b8', backgroundColor: 'transparent',
+        borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
+        tension: 0.3, yAxisID: 'y2', order: 0,
+        _volumeLine: true, _unit: DIV_UNIT[div],
+      };
+
       const stdMonthlyTotals = planMonths.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
       const sharedMax = computeSharedAxisMax([...actualBySite, stdMonthlyTotals], 100);
+      const volSumMax = y2Axis(div, volSummaryData);
 
       const actualCtx = document.getElementById(`plansum-${div}-actual`)?.getContext('2d');
       if (actualCtx) {
+        const ds = availSites.map((site, si) => ({
+          label: site, data: actualBySite[si],
+          backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+          borderColor: SITE_COLORS[site] || '#fff', borderWidth: 1, _actualGroup: true,
+        }));
+        ds.push({ ...volSummaryDs });
         planCmpChartInstances[`${div}-actual`] = new Chart(actualCtx, {
-          type: 'bar',
-          data: {
-            labels: planMonths,
-            datasets: availSites.map((site, si) => ({
-              label: site, data: actualBySite[si],
-              backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
-              borderColor: SITE_COLORS[site] || '#fff', borderWidth: 1, _actualGroup: true,
-            })),
-          },
+          data: { labels: planMonths, datasets: ds },
           options: {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
@@ -4316,6 +4367,7 @@ function renderPlanCompareCharts(planData) {
                 grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
                 title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
               },
+              y2: volSumMax,
             },
           },
         });
@@ -4323,17 +4375,15 @@ function renderPlanCompareCharts(planData) {
 
       const stdCtx = document.getElementById(`plansum-${div}-std`)?.getContext('2d');
       if (stdCtx) {
+        const ds = divRows.map((r, ri) => ({
+          label: r.task, data: stdByTask[ri],
+          backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+          borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+          borderWidth: 0, stack: 'std', _stdGroup: true,
+        }));
+        ds.push({ ...volSummaryDs });
         planCmpChartInstances[`${div}-std`] = new Chart(stdCtx, {
-          type: 'bar',
-          data: {
-            labels: planMonths,
-            datasets: divRows.map((r, ri) => ({
-              label: r.task, data: stdByTask[ri],
-              backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
-              borderColor: TASK_COLORS[ri % TASK_COLORS.length],
-              borderWidth: 0, stack: 'std', _stdGroup: true,
-            })),
-          },
+          data: { labels: planMonths, datasets: ds },
           options: {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
@@ -4349,6 +4399,7 @@ function renderPlanCompareCharts(planData) {
                 grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
                 title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
               },
+              y2: volSumMax,
             },
           },
         });
@@ -4373,6 +4424,7 @@ function renderPlanCompareCharts(planData) {
             borderWidth: 0, stack: 'std', order: 2, _stdGroup: true,
           });
         });
+        datasets.push({ ...volSummaryDs });
         planCmpChartInstances[`${div}-combined`] = new Chart(combinedCtx, {
           data: { labels: planMonths, datasets },
           options: {
@@ -4390,6 +4442,7 @@ function renderPlanCompareCharts(planData) {
                 grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
                 title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
               },
+              y2: volSumMax,
             },
           },
         });
