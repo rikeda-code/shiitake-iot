@@ -4735,9 +4735,135 @@ function renderPlanCompareCharts(planData, prodData) {
         });
       });
 
-      const { stdTotalRaw, actualData, forecastData } = computeSiteTotalData(site);
-      renderTotalChart(`plancmp-${site}-total`, stdTotalRaw, actualData, forecastData);
+      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = computeSiteTotalData(site);
+      const siteCountMax = computeSharedAxisMax([
+        EMP_SERIES.flatMap(et => [
+          ...sl(actualCountData[et.label]).filter(v => v !== null),
+          ...sl(forecastCountData[et.label]).filter(v => v !== null),
+        ]),
+      ], 1) || undefined;
+      const siteCountDatasets = EMP_SERIES.flatMap(et => [
+        {
+          type: 'line', label: `${et.label}人数（実績）`, data: sl(actualCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+        },
+        {
+          type: 'line', label: `${et.label}人数（予想）`, data: sl(forecastCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, borderDash: [5, 4],
+          pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true,
+        },
+      ]);
+      const siteCountScale = {
+        y2: {
+          position: 'right',
+          ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v} 人` },
+          grid: { drawOnChartArea: false },
+          suggestedMin: 0, max: siteCountMax,
+          title: { display: true, text: '人', color: '#64748b', font: { size: 10 } },
+        },
+      };
+      renderTotalChart(`plancmp-${site}-total`, stdTotalRaw, actualData, forecastData,
+        { extraDatasets: siteCountDatasets, extraScales: siteCountScale });
     }
+  }
+
+  // ③ 表ビュー
+  function renderTableView() {
+    const content = document.getElementById('compare-content');
+    const vm = visMonths();
+    const cellStyle = 'padding:5px 10px;text-align:right;font-size:0.78rem;white-space:nowrap;border:1px solid #2a2f4a';
+    const headStyle = 'padding:5px 10px;text-align:center;font-size:0.75rem;white-space:nowrap;border:1px solid #2a2f4a;background:#1a1f35;color:#8892a4';
+    const rowHeadStyle = 'padding:5px 10px;text-align:left;font-size:0.78rem;white-space:nowrap;border:1px solid #2a2f4a;background:#12172a;color:#cbd5e1;min-width:160px';
+    const sectionHeadStyle = 'padding:5px 10px;text-align:left;font-size:0.78rem;font-weight:600;border:1px solid #2a2f4a;background:#0f1117;color:#38bdf8;';
+
+    const fmt = (v, unit) => v === null || v === undefined ? '<span style="color:#3a3f5c">-</span>' : `${typeof v === 'number' ? (unit === 'h' ? Math.round(v).toLocaleString('ja-JP') : (Math.round(v * 10) / 10).toLocaleString('ja-JP')) : v}`;
+
+    function buildSiteTable(site, siteLabel, siteData) {
+      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = siteData;
+      const months = visMonths();
+      const mi = i => planMonths.indexOf(months[i]);
+
+      const rows = [
+        { label: '予定標準工数合計 (h)', unit: 'h', isSection: true },
+        { label: '　予定標準工数合計', unit: 'h', getData: i => stdTotalRaw[mi(i)] },
+        { label: '勤務時間 実績 (h)', unit: 'h', isSection: true },
+        ...EMP_SERIES.map(et => ({ label: `　${et.label}（実績）`, unit: 'h', getData: i => actualData[et.label][mi(i)] })),
+        { label: '勤務時間 予想 (h)', unit: 'h', isSection: true },
+        ...EMP_SERIES.map(et => ({ label: `　${et.label}（予想）`, unit: 'h', getData: i => forecastData[et.label][mi(i)] })),
+        { label: '人数 実績 (人)', unit: '人', isSection: true },
+        ...EMP_SERIES.map(et => ({ label: `　${et.label}（実績）`, unit: '人', getData: i => actualCountData[et.label][mi(i)] })),
+        { label: '人数 予想 (人)', unit: '人', isSection: true },
+        ...EMP_SERIES.map(et => ({ label: `　${et.label}（予想）`, unit: '人', getData: i => forecastCountData[et.label][mi(i)] })),
+      ];
+
+      const headerCells = months.map(m => `<th style="${headStyle}">${m}</th>`).join('');
+      const bodyRows = rows.map(row => {
+        if (row.isSection) {
+          return `<tr><td colspan="${months.length + 1}" style="${sectionHeadStyle}">${row.label}</td></tr>`;
+        }
+        const cells = months.map((_, i) => {
+          const v = row.getData(i);
+          return `<td style="${cellStyle};color:${v === null ? '#3a3f5c' : '#e2e8f0'}">${fmt(v, row.unit)}</td>`;
+        }).join('');
+        return `<tr><td style="${rowHeadStyle}">${row.label}</td>${cells}</tr>`;
+      }).join('');
+
+      return `<div class="schart-section" style="margin-bottom:24px">
+        <div class="schart-header">${siteLabel}</div>
+        <div style="overflow-x:auto">
+          <table style="border-collapse:collapse;width:100%">
+            <thead><tr><th style="${rowHeadStyle};background:#12172a">項目</th>${headerCells}</tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    let html = '';
+    // 各拠点
+    availSites.forEach(site => {
+      html += buildSiteTable(site, site, computeSiteTotalData(site));
+    });
+
+    // 全拠点合計
+    const siteDataList = availSites.map(s => computeSiteTotalData(s));
+    const allStdTotalRaw = planMonths.map((_, mi) =>
+      siteDataList.reduce((sum, d) => sum + (d.stdTotalRaw[mi] ?? 0), 0) || null
+    );
+    const allActualData = {}, allForecastData = {}, allActualCountData = {}, allForecastCountData = {};
+    EMP_SERIES.forEach(et => {
+      allActualData[et.label] = planMonths.map((_, mi) => {
+        const t = siteDataList.reduce((s, d) => s + (d.actualData[et.label][mi] ?? 0), 0);
+        return t > 0 ? Math.round(t * 10) / 10 : null;
+      });
+      allForecastData[et.label] = planMonths.map((m, mi) => {
+        if (mnum(m) <= ACTUAL_CUTOFF) return null;
+        const t = siteDataList.reduce((s, d) => s + (d.forecastData[et.label][mi] ?? 0), 0);
+        return t > 0 ? Math.round(t * 10) / 10 : null;
+      });
+      allActualCountData[et.label] = planMonths.map((_, mi) => {
+        const t = siteDataList.reduce((s, d) => s + (d.actualCountData[et.label][mi] ?? 0), 0);
+        return t > 0 ? t : null;
+      });
+      allForecastCountData[et.label] = planMonths.map((m, mi) => {
+        if (mnum(m) <= ACTUAL_CUTOFF) return null;
+        const t = siteDataList.reduce((s, d) => s + (d.forecastCountData[et.label][mi] ?? 0), 0);
+        return t > 0 ? Math.round(t * 10) / 10 : null;
+      });
+    });
+    html += buildSiteTable('all', '全拠点合計', {
+      stdTotalRaw: allStdTotalRaw,
+      actualData: allActualData,
+      forecastData: allForecastData,
+      actualCountData: allActualCountData,
+      forecastCountData: allForecastCountData,
+    });
+
+    content.innerHTML = html;
   }
 
   // ② 拠点サマリ
@@ -4900,6 +5026,7 @@ function renderPlanCompareCharts(planData, prodData) {
   function renderContent() {
     destroyCharts();
     if (planCmpSubtab === 'summary') renderSummaryView();
+    else if (planCmpSubtab === 'table') renderTableView();
     else renderSiteView();
   }
 
@@ -4919,6 +5046,7 @@ function renderPlanCompareCharts(planData, prodData) {
           <div class="transfer-toggle" id="plancmp-subtabs">
             <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
+            <button class="transfer-toggle-btn${planCmpSubtab === 'table' ? ' active' : ''}" data-tab="table">表</button>
           </div>
         </div>
       </div>
