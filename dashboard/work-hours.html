@@ -2926,7 +2926,7 @@ function renderPlanTable({ months: planMonths, records }) {
       <tbody>`;
 
   siteOrder.forEach((site, si) => {
-    const siteRecs = bySite[site].filter(r => r.cat !== '出荷内訳');
+    const siteRecs = bySite[site].filter(r => r.cat !== '出荷内訳' || r.metric === 'パック数');
     const siteColor = SITE_COLORS[site] || '#e2e8f0';
     let prevCat = '';
 
