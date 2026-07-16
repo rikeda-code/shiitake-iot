@@ -4787,6 +4787,10 @@ function renderPlanCompareCharts(planData, prodData) {
       const months = visMonths();
       const mi = i => planMonths.indexOf(months[i]);
 
+      const perPerson = (hours, count) => {
+        if (hours === null || count === null || count === 0) return null;
+        return Math.round(hours / count * 10) / 10;
+      };
       const rows = [
         { label: '予定標準工数合計 (h)', unit: 'h', isSection: true },
         { label: '　予定標準工数合計', unit: 'h', getData: i => stdTotalRaw[mi(i)] },
@@ -4798,6 +4802,10 @@ function renderPlanCompareCharts(planData, prodData) {
         ...EMP_SERIES.map(et => ({ label: `　${et.label}（実績）`, unit: '人', getData: i => actualCountData[et.label][mi(i)] })),
         { label: '人数 予想 (人)', unit: '人', isSection: true },
         ...EMP_SERIES.map(et => ({ label: `　${et.label}（予想）`, unit: '人', getData: i => forecastCountData[et.label][mi(i)] })),
+        { label: '1人当たり勤務時間 実績 (h/人)', unit: 'h', isSection: true },
+        ...EMP_SERIES.map(et => ({ label: `　${et.label}（実績）`, unit: 'h', getData: i => perPerson(actualData[et.label][mi(i)], actualCountData[et.label][mi(i)]) })),
+        { label: '1人当たり勤務時間 予想 (h/人)', unit: 'h', isSection: true },
+        ...EMP_SERIES.map(et => ({ label: `　${et.label}（予想）`, unit: 'h', getData: i => perPerson(forecastData[et.label][mi(i)], forecastCountData[et.label][mi(i)]) })),
       ];
 
       const headerCells = months.map(m => `<th style="${headStyle}">${m}</th>`).join('');
