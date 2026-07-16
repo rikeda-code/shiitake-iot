@@ -1416,7 +1416,7 @@ function rerenderCurrentView() {
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
 let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu'
-const YOJITSU_MODES = ['staffplan', 'plan'];
+const YOJITSU_MODES = ['staffplan', 'plan', 'planstdhours'];
 
 function renderTabs(bases) {
   // Determine active group from current mode
@@ -1574,6 +1574,10 @@ function renderSubTabs(bases) {
       {
         cls: 'plan-tab', text: '🌱 生産計画', mode: 'plan',
         render: () => { renderPlanTab(); },
+      },
+      {
+        cls: 'planstdhours-tab', text: '📋 予定標準工数(h)', mode: 'planstdhours',
+        render: () => { renderPlanStdHoursTab(); },
       },
     ];
 
@@ -2937,6 +2941,141 @@ function renderPlanTable({ months: planMonths, records }) {
   });
 
   html += '</tbody></table></div></div>';
+  main.innerHTML = html;
+}
+
+/* ── 予定標準工数(h) ─────────────────────────────────────────────── */
+function renderPlanStdHoursTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">予定標準工数を計算中...</div>';
+  Promise.all([fetchPlanSheet(), loadStdSettingsSheetOnce()]).then(([planData]) => {
+    renderPlanStdHoursTable(planData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
+  });
+}
+
+function renderPlanStdHoursTable({ months: planMonths, records }) {
+  const main = document.getElementById('main');
+  const rows = loadStdSettings();
+  const conv = loadCsConv();
+
+  const originalCount = planMonths.length;
+  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
+
+  const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
+  const divCount = {};
+  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+
+  if (!availSites.length) {
+    main.innerHTML = '<div class="loading">計画データが見つかりませんでした</div>';
+    return;
+  }
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📋 予定標準工数(h) ／ 生産計画 × 標準工数設定
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 整理済み_計画_更新シートの計画値 × 標準工数設定で算出　cs換算設定は⚙️タブで変更可</span>
+    </div>`;
+
+  availSites.forEach(site => {
+    const siteColor = SITE_COLORS[site] || '#fff';
+    html += `<div style="margin-bottom:28px">
+      <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
+      <div class="prod-table-wrap"><table class="prod-table">
+        <thead><tr>
+          <th class="th-left" style="min-width:60px">業務区分</th>
+          <th class="th-left" style="min-width:130px">作業区分</th>
+          <th class="th-left" style="min-width:140px">計算根拠</th>
+          ${planMonths.map(m => `<th>${m}</th>`).join('')}
+          <th class="th-left" style="min-width:130px">計算方法</th>
+        </tr></thead><tbody>`;
+
+    let lastDiv = '';
+    rows.forEach(r => {
+      const divCell = r.div !== lastDiv
+        ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
+        : '';
+      if (r.div !== lastDiv) lastDiv = r.div;
+
+      const monthData = planMonths.map((_, mi) => calcRow(site, r, mi));
+      const hasData = monthData.some(d => d.h !== null);
+      const sampleD = [...monthData].reverse().find(d => d.containers !== null);
+      const sampleContainers = sampleD ? sampleD.containers : null;
+      const mkey = r.metricKey || '';
+
+      const statusIcon = r.val === null
+        ? '<span style="color:var(--muted)">未設定</span>'
+        : hasData
+          ? '<span style="color:#34d399">●</span>'
+          : '<span style="color:#f59e0b">○</span>';
+
+      let basisDesc = '—';
+      if (r.val !== null) {
+        if (r.col === 'fixedH') {
+          basisDesc = `固定 ${r.val} h/月`;
+        } else if (r.col === 'kgPerH') {
+          basisDesc = sampleContainers !== null ? `${sampleContainers.toLocaleString('ja-JP')} kg ÷ ${r.val} kg/h` : `${mkey}: データなし`;
+        } else if (r.col === 'perContainer') {
+          basisDesc = sampleContainers !== null ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} コンテナ × ${r.val} ${r.unit}` : `${mkey}: データなし`;
+        } else if (r.col === 'perPiece') {
+          basisDesc = sampleContainers !== null ? `${sampleContainers.toLocaleString('ja-JP')} 点 × ${r.val} 秒` : `${mkey}: データなし`;
+        } else if (r.col === 'perCs') {
+          basisDesc = sampleContainers !== null ? `${sampleContainers.toLocaleString('ja-JP')} cs × ${r.val} 秒` : `${mkey}: データなし`;
+        }
+      }
+
+      html += `<tr>${divCell}
+        <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
+        <td class="col-metric" style="font-size:0.75rem">${statusIcon} <span style="color:var(--muted)">${basisDesc}</span></td>`;
+
+      monthData.forEach(d => {
+        if (d.h !== null) {
+          const disp = d.h < 10 ? d.h.toFixed(1) : Math.round(d.h).toLocaleString('ja-JP');
+          html += `<td class="col-num">${disp}<span style="font-size:0.68rem;color:var(--muted)"> h</span></td>`;
+        } else {
+          html += `<td class="col-num empty" style="color:#444">—</td>`;
+        }
+      });
+
+      html += `<td class="col-metric" style="font-size:0.72rem;color:var(--muted)">${r.note}</td></tr>`;
+    });
+
+    // Subtotals per div
+    ['栽培', '出荷'].forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+      const totals = planMonths.map((_, mi) => {
+        const vals = divRows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      });
+      const color = div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)';
+      html += `<tr style="font-weight:600;background:#1a1f35">
+        <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
+      totals.forEach(t => {
+        html += t !== null
+          ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
+          : `<td class="col-num empty">—</td>`;
+      });
+      html += `<td></td></tr>`;
+    });
+
+    // Grand total
+    const grandTotals = planMonths.map((_, mi) => {
+      const vals = rows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    });
+    html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
+      <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+    grandTotals.forEach(t => {
+      html += t !== null
+        ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
+        : `<td class="col-num empty">—</td>`;
+    });
+    html += `<td></td></tr>`;
+
+    html += `</tbody></table></div></div>`;
+  });
+
+  html += `</div>`;
   main.innerHTML = html;
 }
 
