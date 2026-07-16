@@ -140,13 +140,24 @@ function stage2b_extractYmd(cellValue, tz) {
 
 // 年月を表すセルから年・月を抽出する。Date型(実体はダックタイピングで判定) or
 // "yyyy/M/d","yyyy/M"文字列を許容。コンテナ行のA列(投入月)、行3の月ラベルの両方で使う共通処理
+// 全角数字・全角スラッシュを半角に変換する(全角入力された月ラベル等でも正しくパースできるようにするため)
+function stage2b_normalizeDigits(str) {
+  return str.replace(/[０-９]/g, function (ch) {
+    return String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 0x30);
+  }).replace(/／/g, '/');
+}
+
 function stage2b_parseYearMonthCell(cellValue, tz) {
   if (stage2b_isDateLike(cellValue)) {
     const ymd = stage2b_extractYmd(cellValue, tz);
     return { year: ymd.year, month: ymd.month };
   }
   if (typeof cellValue === 'string') {
-    const m = cellValue.trim().match(/^(\d{4})\/(\d{1,2})(?:\/(\d{1,2}))?$/);
+    const normalized = stage2b_normalizeDigits(cellValue.trim());
+    let m = normalized.match(/^(\d{4})\/(\d{1,2})(?:\/(\d{1,2}))?$/);
+    if (m) return { year: Number(m[1]), month: Number(m[2]) };
+    // "2026年8月"のような表記にも対応する(月によって表記が異なっているケースへの保険)
+    m = normalized.match(/^(\d{4})年(\d{1,2})月$/);
     if (m) return { year: Number(m[1]), month: Number(m[2]) };
   }
   return null;
@@ -695,6 +706,22 @@ function stage2b_writeInabeAndSeiriRangeFast(startYear, startMonth, startDay, en
   if (missingDates.length > 0) {
     Logger.log('⚠ 列が見つからず書き込みをスキップした日付: ' + missingDates.length + '件（先頭10件: '
       + JSON.stringify(missingDates.slice(0, 10).map(function (d) { return d.year + '/' + d.month + '/' + d.day; })) + '）');
+    // 特定の月が丸ごと見つからない場合、行3の月ラベルがその月だけパースできていない
+    // (表記ゆれ・全角文字等)可能性が高いため、月単位で集計してひときわ目立つ形で警告する
+    const missingByMonth = {};
+    missingDates.forEach(function (d) {
+      const key = d.year + '/' + d.month;
+      missingByMonth[key] = (missingByMonth[key] || 0) + 1;
+    });
+    Object.keys(missingByMonth).forEach(function (key) {
+      const parts = key.split('/');
+      const daysInThatMonth = new Date(Number(parts[0]), Number(parts[1]), 0).getDate();
+      if (missingByMonth[key] >= daysInThatMonth - 1) {
+        Logger.log('❌❌❌ ' + key + '分がほぼ丸ごと(' + missingByMonth[key] + '/' + daysInThatMonth
+          + '日)見つかりませんでした。行3の月ラベルがこの月だけ想定外の表記(全角文字・"年月"表記の混在等)に'
+          + 'なっている可能性が高いです。stage2b_dumpMonthLabels()でこの月のラベルの実際の値・型を確認してください');
+      }
+    });
   }
   if (resolved.length === 0) {
     Logger.log('❌ 書き込み対象の列が1つも見つかりませんでした');
@@ -900,4 +927,37 @@ function stage2b_verifyKikodoMekaki(startYear, startMonth, startDay, endYear, en
 // 8月・9月分の菌床入れ・芽かき検証（今回の報告範囲）
 function verifyKikodoMekaki_Aug_Sep_test() {
   stage2b_verifyKikodoMekaki(2026, 8, 1, 2026, 9, 30);
+}
+
+/**
+ * 行3(月ラベル)の生の値・型・パース結果を、月ラベルが見つかった列すべてについて出力する。
+ * 「8月以降だけ菌床入れ・芽かきが0になる」といった、特定の月だけ日付ヘッダーの復元に
+ * 失敗する不具合の切り分け用。全角数字や"年月"表記など、想定外のフォーマットが
+ * 混ざっていないかをこのログで直接確認できる。
+ */
+function stage2b_dumpMonthLabels() {
+  const ss = SpreadsheetApp.openById(STAGE2B_PLAN_SHEET_ID);
+  const sheet = ss.getSheetByName(STAGE2B_INABE_SHEET_NAME);
+  if (!sheet) {
+    Logger.log('❌ シートが見つかりません: ' + STAGE2B_INABE_SHEET_NAME);
+    return;
+  }
+  const tz = ss.getSpreadsheetTimeZone();
+  const lastCol = sheet.getLastColumn();
+  const width = lastCol - STAGE2B_HEADER_SCAN_MIN_COL + 1;
+  const monthLabels = sheet.getRange(STAGE2B_HEADER_LABEL_ROW, STAGE2B_HEADER_SCAN_MIN_COL, 1, width).getValues()[0];
+
+  Logger.log('=== 行' + STAGE2B_HEADER_LABEL_ROW + '(月ラベル)の生データ一覧 ===');
+  let foundCount = 0;
+  for (let i = 0; i < width; i++) {
+    const raw = monthLabels[i];
+    if (raw === '' || raw === null) continue;
+    const col = STAGE2B_HEADER_SCAN_MIN_COL + i;
+    const parsed = stage2b_parseYearMonthCell(raw, tz);
+    const typeInfo = stage2b_isDateLike(raw) ? 'Date型' : (typeof raw === 'string' ? '文字列' : typeof raw);
+    Logger.log('列' + stage2b_colLabel(col) + ': 生値=' + stage2b_debugValue(raw, tz) + '（型=' + typeInfo + '） → パース結果='
+      + (parsed ? parsed.year + '/' + parsed.month : '❌解析失敗'));
+    if (parsed) foundCount++;
+  }
+  Logger.log('=== 空白でないラベルセル総数のうち、正しく解析できたもの: ' + foundCount + '件 ===');
 }
