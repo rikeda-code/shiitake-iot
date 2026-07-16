@@ -2981,7 +2981,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
     const siteColor = SITE_COLORS[site] || '#fff';
     html += `<div style="margin-bottom:28px">
       <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
-      <div class="prod-table-wrap"><table class="prod-table">
+      <div style="overflow-x:auto"><table class="prod-table">
         <thead><tr>
           <th class="th-left" style="min-width:60px">業務区分</th>
           <th class="th-left" style="min-width:130px">作業区分</th>
