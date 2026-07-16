@@ -53,22 +53,54 @@
     #refresh-btn:hover { background: #3a3f5c; }
 
     /* Tabs */
-    .tabs {
+    .tabs-group {
       flex-shrink: 0;
       display: flex;
       gap: 4px;
-      padding: 20px 32px 0;
+      padding: 16px 32px 0;
       flex-wrap: wrap;
     }
-    .tab-btn {
-      padding: 10px 24px;
+    .group-btn {
+      padding: 7px 24px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-bottom: none;
       color: var(--muted);
       cursor: pointer;
       border-radius: 8px 8px 0 0;
-      font-size: 0.9rem;
+      font-size: 0.92rem;
+      font-weight: 600;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+    .group-btn.active {
+      background: #252c48;
+      color: var(--text);
+      border-color: var(--accent-inabe);
+      border-bottom: 2px solid #252c48;
+      margin-bottom: -1px;
+    }
+    .group-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+    .tabs-group-bar {
+      border-bottom: 1px solid var(--accent-inabe);
+      margin: 0 32px;
+    }
+    .tabs {
+      flex-shrink: 0;
+      display: flex;
+      gap: 4px;
+      padding: 4px 32px 0;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      padding: 8px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 6px 6px 0 0;
+      font-size: 0.85rem;
       font-family: inherit;
       transition: background 0.15s, color 0.15s;
     }
@@ -717,6 +749,8 @@
   </div>
 </header>
 
+<div class="tabs-group" id="tabs-group"></div>
+<div class="tabs-group-bar"></div>
 <div class="tabs" id="tabs"></div>
 <div id="transfer-alerts"></div>
 <main id="main"></main>
@@ -1380,28 +1414,64 @@ function rerenderCurrentView() {
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
+let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu'
+const YOJITSU_MODES = ['staffplan'];
+
 function renderTabs(bases) {
+  // Determine active group from current mode
+  activeGroup = YOJITSU_MODES.includes(activeMode) ? 'yojitsu' : 'jisseki';
+  renderGroupTabs(bases);
+  renderSubTabs(bases);
+}
+
+function renderGroupTabs(bases) {
+  const groupEl = document.getElementById('tabs-group');
+  groupEl.innerHTML = '';
+  [
+    { id: 'jisseki', label: '📋 勤務実績' },
+    { id: 'yojitsu', label: '📅 予実' },
+  ].forEach(g => {
+    const btn = document.createElement('button');
+    btn.className = 'group-btn' + (g.id === activeGroup ? ' active' : '');
+    btn.textContent = g.label;
+    btn.onclick = () => {
+      activeGroup = g.id;
+      document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('main').innerHTML = '';
+      renderSubTabs(bases);
+      const firstTab = document.querySelector('.tab-btn');
+      if (firstTab) firstTab.click();
+    };
+    groupEl.appendChild(btn);
+  });
+}
+
+function renderSubTabs(bases) {
   const tabsEl = document.getElementById('tabs');
   tabsEl.innerHTML = '';
 
-  bases.forEach((base, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (activeMode === 'site' && activeBase === base ? ' active' : '');
-    btn.textContent = base;
-    btn.dataset.base = base;
-    btn.onclick = () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      activeBase = base;
-      activeMode = 'site';
-      saveSessionState();
-      document.getElementById('main').innerHTML = '';
-      renderBasePanel();
-      renderTransferAlerts();
-    };
-    tabsEl.appendChild(btn);
-  });
+  if (activeGroup === 'jisseki') {
+    bases.forEach((base, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'tab-btn' + (activeMode === 'site' && activeBase === base ? ' active' : '');
+      btn.textContent = base;
+      btn.dataset.base = base;
+      btn.onclick = () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeBase = base;
+        activeMode = 'site';
+        saveSessionState();
+        document.getElementById('main').innerHTML = '';
+        renderBasePanel();
+        renderTransferAlerts();
+      };
+      tabsEl.appendChild(btn);
+    });
+  }
 
+  if (activeGroup === 'jisseki') {
   // Summary tab
   const sBtn = document.createElement('button');
   sBtn.className = 'tab-btn summary-tab' + (activeMode === 'summary' ? ' active' : '');
@@ -1492,20 +1562,28 @@ function renderTabs(bases) {
   };
   tabsEl.appendChild(cmpBtn);
 
-  // 要員計画 tab
-  const spBtn = document.createElement('button');
-  spBtn.className = 'tab-btn staffplan-tab' + (activeMode === 'staffplan' ? ' active' : '');
-  spBtn.textContent = '👷 要員計画';
-  spBtn.onclick = () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    spBtn.classList.add('active');
-    activeMode = 'staffplan';
-    saveSessionState();
-    document.getElementById('main').innerHTML = '';
-    renderStaffingPlanTab();
-    renderTransferAlerts();
-  };
-  tabsEl.appendChild(spBtn);
+  } // end jisseki group
+
+  if (activeGroup === 'yojitsu') {
+    const spBtn = document.createElement('button');
+    spBtn.className = 'tab-btn staffplan-tab' + (activeMode === 'staffplan' ? ' active' : '');
+    spBtn.textContent = '👷 要員計画';
+    spBtn.onclick = () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      spBtn.classList.add('active');
+      activeMode = 'staffplan';
+      saveSessionState();
+      document.getElementById('main').innerHTML = '';
+      renderStaffingPlanTab();
+      renderTransferAlerts();
+    };
+    tabsEl.appendChild(spBtn);
+
+    // 要員計画がデフォルトでアクティブ
+    if (!['staffplan'].includes(activeMode)) {
+      activeMode = 'staffplan';
+    }
+  }
 }
 
 /* ── Individual base panel ─────────────────────────────────────── */
