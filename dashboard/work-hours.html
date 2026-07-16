@@ -763,14 +763,6 @@ const PROD_GID = '2016642543'; // 整理済み_分析
 const PLAN_GID = '530402103';  // 整理済み_計画_更新
 const STD_SETTINGS_SHEET_NAME = '標準工数設定';
 
-// 計画シート（整理済み_計画_更新）では出荷量が「出荷計画実数」1行にまとまっているため、
-// パック数・袋数・合計(点数) のいずれも同列にフォールバックして計算する
-const PLAN_METRIC_ALIASES = {
-  'パック数':   '出荷計画実数',
-  '袋数':       '出荷計画実数',
-  '合計(点数)': '出荷計画実数',
-};
-
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
 // 読み取り用の定数・関数は該当Stageで追加する
@@ -2855,7 +2847,9 @@ function parseProductionData(json) {
     const values = monthCols.map(m => {
       const c = cells[m.idx];
       if (!c || c.v === null || c.v === undefined || c.v === '') return null;
-      return typeof c.v === 'number' ? c.v : null;
+      if (typeof c.v === 'number') return c.v;
+      const parsed = parseFloat(String(c.v).replace(/,/g, ''));
+      return isNaN(parsed) ? null : parsed;
     });
 
     records.push({ site: currentSite, cat: currentCat, metric, values });
@@ -2973,7 +2967,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
   const conv = loadCsConv();
 
   const originalCount = planMonths.length;
-  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, PLAN_METRIC_ALIASES);
+  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
   const divCount = {};
@@ -4103,7 +4097,7 @@ function renderPlanCompareCharts(planData) {
   const rows = loadStdSettings();
   const conv = loadCsConv();
   const originalCount = planMonths.length;
-  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, PLAN_METRIC_ALIASES);
+  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
 
