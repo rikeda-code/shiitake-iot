@@ -5155,7 +5155,7 @@ function renderPlanCompareCharts(planData, prodData) {
           </div>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 0 10px">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0 10px;flex-wrap:wrap">
         <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
         <div style="position:relative;display:inline-block">
           <button id="plancmp-dd-btn" style="display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;border:1px solid #3a3f5c;background:#1a1f35;color:#e2e8f0;font-size:0.8rem;cursor:pointer;min-width:160px;justify-content:space-between">
@@ -5170,8 +5170,8 @@ function renderPlanCompareCharts(planData, prodData) {
             <div id="plancmp-opts">${dropdownOptionsHtml}</div>
           </div>
         </div>
+        <div id="plancmp-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap;margin-left:auto"></div>
       </div>
-      <div id="plancmp-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap;padding-bottom:12px;flex-shrink:0"></div>
       <div id="compare-content"></div>
     </div>`;
 
