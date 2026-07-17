@@ -623,11 +623,6 @@
     #compare-subtabs.transfer-toggle .transfer-toggle-btn,
     #empchart-subtabs.transfer-toggle .transfer-toggle-btn { min-width: 100px; }
     #compare-content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
-    /* 予実＞比較タブの内側スクロール領域のみ、スクロールバーの見た目を非表示にする
-       （ページ全体・他タブのスクロールバー表示には影響させないためクラスでスコープを絞る）。
-       スクロール動作自体は overflow-y:auto のまま維持されるため機能には影響しない */
-    #compare-content.plancompare-content { scrollbar-width: none; -ms-overflow-style: none; }
-    #compare-content.plancompare-content::-webkit-scrollbar { display: none; width: 0; height: 0; }
     /* 要員計画タブ：固定サブタブエリア＋スクロール可能データエリア */
     .staffplan-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
     .staffplan-period-label { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--muted); }
@@ -908,7 +903,9 @@ function chartWrapHtml(canvasId, monthCount, opts) {
   const PX_PER_MONTH = 70;
   const wrapClass = (opts && opts.wrapClass) || 'schart-wrap';
   const heightPx = (opts && opts.heightPx) || 300;
-  if (monthCount <= MONTH_COLUMN_TARGET) {
+  // forceResponsive: 月数に関わらず固定幅の横スクロール分岐に入らせず、
+  // 常に親要素の幅に追従するレスポンシブ表示にする（棒が月数に応じて縮小する）
+  if ((opts && opts.forceResponsive) || monthCount <= MONTH_COLUMN_TARGET) {
     const style = (opts && opts.inlineHeight) ? ` style="height:${heightPx}px"` : '';
     return `<div class="${wrapClass}"${style}><canvas id="${canvasId}"></canvas></div>`;
   }
@@ -4603,14 +4600,14 @@ function renderPlanCompareCharts(planData, prodData) {
           <div class="schart-header">${div}（全拠点合計）
             <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準 vs 実績（h）3拠点合計</span>
           </div>
-          ${chartWrapHtml(`plancmp-all-${div}`, vm.length, { heightPx: 320, inlineHeight: true })}
+          ${chartWrapHtml(`plancmp-all-${div}`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         </div>`;
       });
       html += `<div class="schart-section">
         <div class="schart-header">全拠点合計 - 標準工数 vs 勤務時間
           <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準（栽培+出荷・3拠点合計） vs 実勤務（雇用区分別積み上げ・3拠点合計）</span>
         </div>
-        ${chartWrapHtml('plancmp-all-total', vm.length, { heightPx: 320, inlineHeight: true })}
+        ${chartWrapHtml('plancmp-all-total', vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
       </div>`;
     } else {
       const site = planCmpSiteTab;
@@ -4619,14 +4616,14 @@ function renderPlanCompareCharts(planData, prodData) {
           <div class="schart-header">${div}
             <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準 vs 実績（h）</span>
           </div>
-          ${chartWrapHtml(`plancmp-${site}-${div}`, vm.length, { heightPx: 320, inlineHeight: true })}
+          ${chartWrapHtml(`plancmp-${site}-${div}`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         </div>`;
       });
       html += `<div class="schart-section">
         <div class="schart-header">標準工数合計 vs 勤務時間合計
           <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準（栽培+出荷） vs 実勤務（雇用区分別積み上げ）</span>
         </div>
-        ${chartWrapHtml(`plancmp-${site}-total`, vm.length, { heightPx: 280, inlineHeight: true })}
+        ${chartWrapHtml(`plancmp-${site}-total`, vm.length, { heightPx: 280, inlineHeight: true, forceResponsive: true })}
       </div>`;
     }
 
@@ -4984,10 +4981,10 @@ function renderPlanCompareCharts(planData, prodData) {
       html += `<div class="schart-section">
         <div class="schart-header">${div} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数（拠点別） / 予定標準工数（工程別・3拠点合計）</span></div>
         <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・拠点別×工程別）</div>
-        ${chartWrapHtml(`plansum-${div}-combined`, vm.length, { heightPx: 320, inlineHeight: true })}
+        ${chartWrapHtml(`plansum-${div}-combined`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div>${chartWrapHtml(`plansum-${div}-actual`, vm.length, { heightPx: 320, inlineHeight: true })}</div>
-          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準工数（工程別・3拠点合計）</div>${chartWrapHtml(`plansum-${div}-std`, vm.length, { heightPx: 320, inlineHeight: true })}</div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（拠点別）</div>${chartWrapHtml(`plansum-${div}-actual`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}</div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準工数（工程別・3拠点合計）</div>${chartWrapHtml(`plansum-${div}-std`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}</div>
         </div>
       </div>`;
     });
@@ -5177,7 +5174,7 @@ function renderPlanCompareCharts(planData, prodData) {
         </div>
         <div id="plancmp-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap"></div>
       </div>
-      <div id="compare-content" class="plancompare-content"></div>
+      <div id="compare-content"></div>
     </div>`;
 
   function syncDropdownLabel() {
