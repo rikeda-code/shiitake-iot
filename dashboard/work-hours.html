@@ -4798,12 +4798,18 @@ function renderPlanCompareCharts(planData, prodData) {
           });
         })
       );
+      // volumeLineDataset()も拠点ごとに1回だけ計算し、下のチャート生成ループで再利用する
+      const volDsAllSites = {};
+      divs.forEach(div => {
+        availSites.forEach(s => { volDsAllSites[`${s}-${div}`] = volumeLineDataset(s, div); });
+      });
+
       const divYMax = {};
       const divVolMax = {};
       divs.forEach((div, di) => {
         divYMax[div] = computeSharedAxisMax(siteValueArraysAllSites[di], 100);
         divVolMax[div] = computeSharedAxisMax(
-          availSites.map(s => sl(volumeLineDataset(s, div).data).filter(v => v !== null)),
+          availSites.map(s => sl(volDsAllSites[`${s}-${div}`].data).filter(v => v !== null)),
           1000
         );
       });
@@ -4832,7 +4838,7 @@ function renderPlanCompareCharts(planData, prodData) {
             borderWidth: 0, stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
           });
         });
-        const volDs = volumeLineDataset(site, div);
+        const volDs = volDsAllSites[`${site}-${div}`];
         const slicedVolDs = { ...volDs, data: sl(volDs.data) };
         datasets.push(slicedVolDs);
         planCmpChartInstances[key] = new Chart(ctx, {
@@ -4853,11 +4859,13 @@ function renderPlanCompareCharts(planData, prodData) {
         });
       });
 
-      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = computeSiteTotalData(site);
-
       // 「標準工数合計 vs 勤務時間合計」チャートも、いなべ・群馬・南丹の3拠点で
-      // 左軸(h)・右軸(人)を統一する（全拠点合計は対象外・従来通り自動スケール）
+      // 左軸(h)・右軸(人)を統一する（全拠点合計は対象外・従来通り自動スケール）。
+      // computeSiteTotalData()は全拠点分を1回だけ計算し、現拠点分はここから再利用する
+      // （site単体分を別途計算し直すと同じ処理を2重に行ってしまうため）
       const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
+      const siteTotalIdx = availSites.indexOf(site);
+      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
       const totalYMax = computeSharedAxisMax(
         allSitesTotalData.map(d => totalChartStackedValues(d.stdTotalRaw, d.actualData, d.forecastData)),
         100
