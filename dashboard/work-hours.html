@@ -4562,15 +4562,35 @@ function renderPlanCompareCharts(planData, prodData) {
     });
   }
 
-  function renderSiteView() {
-    const content = document.getElementById('compare-content');
-    const vm = visMonths();
-    const tabBarHtml = SITE_TABS.map(t =>
+  // 拠点タブ(いなべ/群馬/南丹/全拠点合計)のHTML断片。固定エリア側(renderSiteTabBarFixed)から呼ぶ
+  function siteTabBarHtml() {
+    return SITE_TABS.map(t =>
       `<button class="plancmp-site-tab${planCmpSiteTab === t ? ' active' : ''}" data-site="${t}"
         style="padding:4px 14px;border-radius:6px;border:1px solid ${planCmpSiteTab === t ? '#38bdf8' : '#3a3f5c'};background:${planCmpSiteTab === t ? '#38bdf8' : 'transparent'};color:${planCmpSiteTab === t ? '#0f1117' : '#8892a4'};font-size:0.8rem;cursor:pointer;font-weight:${planCmpSiteTab === t ? '600' : '400'}">${t}</button>`
     ).join('');
+  }
 
-    let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;padding-bottom:12px" id="plancmp-site-tabbar">${tabBarHtml}</div>`;
+  // 拠点タブは表示月ドロップダウンと同じ固定エリア(#plancmp-site-tabbar-fixed)に表示する。
+  // 'site'サブタブの時だけ表示し、他サブタブでは非表示にする
+  function renderSiteTabBarFixed() {
+    const el = document.getElementById('plancmp-site-tabbar-fixed');
+    if (!el) return;
+    if (planCmpSubtab !== 'site') { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'flex';
+    el.innerHTML = siteTabBarHtml();
+    el.querySelectorAll('.plancmp-site-tab').forEach(btn => {
+      btn.onclick = () => {
+        planCmpSiteTab = btn.dataset.site;
+        renderContent();
+      };
+    });
+  }
+
+  function renderSiteView() {
+    const content = document.getElementById('compare-content');
+    const vm = visMonths();
+
+    let html = '';
 
     if (planCmpSiteTab === '全拠点合計') {
       divs.forEach(div => {
@@ -4606,14 +4626,6 @@ function renderPlanCompareCharts(planData, prodData) {
     }
 
     content.innerHTML = html;
-
-    // サイトサブタブ切り替え
-    document.getElementById('plancmp-site-tabbar').addEventListener('click', e => {
-      const btn = e.target.closest('.plancmp-site-tab');
-      if (!btn) return;
-      planCmpSiteTab = btn.dataset.site;
-      renderContent();
-    });
 
     if (planCmpSiteTab === '全拠点合計') {
       // 全拠点合計: 栽培・出荷チャート（3拠点集計）
@@ -5117,6 +5129,7 @@ function renderPlanCompareCharts(planData, prodData) {
   let planCmpSubtab = 'site';
   function renderContent() {
     destroyCharts();
+    renderSiteTabBarFixed();
     if (planCmpSubtab === 'summary') renderSummaryView();
     else if (planCmpSubtab === 'table') renderTableView();
     else renderSiteView();
@@ -5149,7 +5162,7 @@ function renderPlanCompareCharts(planData, prodData) {
             <span id="plancmp-dd-label">全月選択中</span>
             <span style="font-size:0.6rem">▼</span>
           </button>
-          <div id="plancmp-dd-panel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;padding:6px 4px;min-width:160px;max-height:320px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
+          <div id="plancmp-dd-panel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;padding:6px 4px;min-width:160px;max-height:min(80vh, calc(100vh - 160px));overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
             <div style="display:flex;gap:6px;padding:0 4px 6px;border-bottom:1px solid #2a2f4a;margin-bottom:4px">
               <button id="plancmp-all" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">全選択</button>
               <button id="plancmp-clear" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">クリア</button>
@@ -5158,6 +5171,7 @@ function renderPlanCompareCharts(planData, prodData) {
           </div>
         </div>
       </div>
+      <div id="plancmp-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap;padding-bottom:12px;flex-shrink:0"></div>
       <div id="compare-content"></div>
     </div>`;
 
