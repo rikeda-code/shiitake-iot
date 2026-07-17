@@ -5053,14 +5053,20 @@ function renderPlanCompareCharts(planData, prodData) {
         _volumeLine: true, _unit: DIV_UNIT[div],
       };
 
-      const stdMonthlyTotals = planMonths.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
-      const sharedMax = computeSharedAxisMax([...actualBySite, stdMonthlyTotals], 100);
+      // 「拠点サマリ」の統合チャートでは、実績工数(拠点別)・予定標準工数(工程別)とも
+      // 複数系列が積み上げ(スタック)表示されるため、軸MAXは各系列を個別に見るのではなく、
+      // 月ごとの積み上げ合計（実際にグラフ上で到達する高さ）で判定する必要がある。
+      // vm(表示中の月)基準でインデックスを揃える（actualBySite/stdByTaskは既にsl()済みのため）
+      const vm = visMonths();
+      const actualMonthlyTotals = vm.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
+      const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
+      const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals], 100);
       const volSumMax = y2Axis(div, volSummaryData);
 
       const actualCtx = document.getElementById(`plansum-${div}-actual`)?.getContext('2d');
       if (actualCtx) {
         const ds = availSites.map((site, si) => ({
-          label: site, data: actualBySite[si],
+          type: 'bar', label: site, data: actualBySite[si],
           backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
           borderColor: SITE_COLORS[site] || '#fff', borderWidth: 1, _actualGroup: true,
         }));
@@ -5091,7 +5097,7 @@ function renderPlanCompareCharts(planData, prodData) {
       const stdCtx = document.getElementById(`plansum-${div}-std`)?.getContext('2d');
       if (stdCtx) {
         const ds = divRows.map((r, ri) => ({
-          label: r.task, data: stdByTask[ri],
+          type: 'bar', label: r.task, data: stdByTask[ri],
           backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
           borderColor: TASK_COLORS[ri % TASK_COLORS.length],
           borderWidth: 0, stack: 'std', _stdGroup: true,
