@@ -853,7 +853,7 @@ async function loadWeeklySection() {
 
     weeklyState = { containerData, targetData };
     await waitForChart();
-    renderWeeklySection(section, weeklyState, 'week', 'desc');
+    renderWeeklySection(section, weeklyState, 'site', 'desc');
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
@@ -947,11 +947,10 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
       <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
       <span class="sort-label" style="margin-left:12px">グループ:</span>
-      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
-      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">ロット別</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -1526,7 +1525,7 @@ function weeklySetSizeMode(mode) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
   weeklySizeMode = weeklySizeMode === mode ? null : mode;
-  const groupMode = section.dataset.groupMode || 'week';
+  const groupMode = section.dataset.groupMode || 'site';
   const sortOrder = section.dataset.sortOrder || 'desc';
   weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklySizeCharts = [];
@@ -1563,11 +1562,10 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
       <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
       <span class="sort-label" style="margin-left:12px">グループ:</span>
-      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
-      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">ロット別</button>
     </div>`;
 
   const title = weeklySizeMode === 'daily' ? 'サイズ別日次収穫量 (kg)' : 'サイズ別累計収穫量 (kg)';
@@ -1630,7 +1628,7 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
 function weeklySetSort(order) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
-  const groupMode = section.dataset.groupMode || 'week';
+  const groupMode = section.dataset.groupMode || 'site';
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
   if (weeklySizeMode) {
@@ -1674,7 +1672,6 @@ function renderDrillSection(section, valid, targetData) {
   const navBar = `
     <div class="weekly-sort-bar" style="margin-bottom:12px">
       <span class="sort-label">グループ:</span>
-      <button class="sort-btn" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn active" onclick="weeklySetGroup('drill')">担当者別</button>
@@ -2251,7 +2248,7 @@ function updateTabVisibility() {
   if (tempTabActive) renderTempTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
-    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
+    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'site';
     const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
     renderWeeklySection(section, weeklyState, groupMode, sortOrder);
   }
