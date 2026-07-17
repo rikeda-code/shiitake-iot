@@ -4373,8 +4373,8 @@ function renderPlanCompareCharts(planData, prodData) {
     };
   }
 
-  function y2Axis(div, volumeData) {
-    const max = computeSharedAxisMax([volumeData.filter(v => v !== null)], 1000) || undefined;
+  function y2Axis(div, volumeData, maxOverride) {
+    const max = maxOverride !== undefined ? maxOverride : (computeSharedAxisMax([volumeData.filter(v => v !== null)], 1000) || undefined);
     return {
       position: 'right',
       ticks: { color: '#64748b', font: { size: 10 }, callback: v => v.toLocaleString('ja-JP') },
@@ -4498,20 +4498,29 @@ function renderPlanCompareCharts(planData, prodData) {
   }
 
   // 標準工数合計 vs 勤務時間合計グラフを描画（単拠点 or 全拠点）
+  // 「標準工数合計 vs 勤務時間合計」チャートの軸MAX算出用の実データ値一覧を返す。
+  // std/actual/forecastはそれぞれ別スタックとして積み上げ表示されるため、
+  // 実際にグラフ上で到達する高さ（＝スタック内の月ごとの合計）で判定する必要がある。
+  // 雇用区分ごとの値を個別に見るだけだと、積み上げ後の実際の高さを過小評価してしまう
+  function totalChartStackedValues(stdTotalRaw, actualDataMap, forecastDataMap) {
+    const vm = visMonths();
+    const actualTotals = stackedMonthlyTotals(vm, EMP_SERIES.map(et => ({ data: sl(actualDataMap[et.label]) })));
+    const forecastTotals = stackedMonthlyTotals(vm, EMP_SERIES.map(et => ({ data: sl(forecastDataMap[et.label]) })));
+    return [
+      ...sl(stdTotalRaw).filter(v => v !== null),
+      ...actualTotals,
+      ...forecastTotals,
+    ];
+  }
+
   function renderTotalChart(canvasId, stdTotalRaw, actualDataMap, forecastDataMap, opts) {
     const ctx = document.getElementById(canvasId)?.getContext('2d');
     if (!ctx) return;
     const extraDatasets = (opts && opts.extraDatasets) || [];
     const extraScales   = (opts && opts.extraScales)   || {};
     const stdTotalData = sl(stdTotalRaw);
-    const allVals = [
-      ...stdTotalData.filter(v => v !== null),
-      ...EMP_SERIES.flatMap(et => [
-        ...sl(actualDataMap[et.label]).filter(v => v !== null),
-        ...sl(forecastDataMap[et.label]).filter(v => v !== null),
-      ]),
-    ];
-    const yMax = computeSharedAxisMax([allVals], 100) || undefined;
+    const allVals = totalChartStackedValues(stdTotalRaw, actualDataMap, forecastDataMap);
+    const yMax = (opts && opts.yMaxOverride !== undefined) ? opts.yMaxOverride : (computeSharedAxisMax([allVals], 100) || undefined);
     const datasets = [
       {
         type: 'bar', label: '予定標準工数合計', data: stdTotalData,
@@ -4772,20 +4781,37 @@ function renderPlanCompareCharts(planData, prodData) {
     } else {
       // 単拠点: 栽培・出荷チャート + 合計チャート
       const site = planCmpSiteTab;
-      const siteValueArrays = divs.map(div => {
-        const d = window._planCmpChartData[`${site}-${div}`];
-        if (!d) return [];
-        return [...planCmpSelected].flatMap(mi => {
-          const stdTotal = d.divRows.reduce((s, r) => {
-            const res = calcRow(site, r, mi);
-            return s + (res.h !== null ? res.h : 0);
-          }, 0);
-          return [stdTotal, d.actualH[mi]];
-        });
+
+      // 軸MAXの統一（全拠点合計は対象外）：いなべ・群馬・南丹の3拠点間で、
+      // 同じチャート（栽培/出荷/標準工数合計）の左軸・右軸それぞれの最大値を揃えるため、
+      // 現在表示中のsiteだけでなくavailSites(実拠点)全体からMAXを算出する
+      const siteValueArraysAllSites = divs.map(div =>
+        availSites.map(s => {
+          const d = window._planCmpChartData[`${s}-${div}`];
+          if (!d) return [];
+          return [...planCmpSelected].flatMap(mi => {
+            const stdTotal = d.divRows.reduce((sum, r) => {
+              const res = calcRow(s, r, mi);
+              return sum + (res.h !== null ? res.h : 0);
+            }, 0);
+            return [stdTotal, d.actualH[mi]];
+          });
+        })
+      );
+      // volumeLineDataset()も拠点ごとに1回だけ計算し、下のチャート生成ループで再利用する
+      const volDsAllSites = {};
+      divs.forEach(div => {
+        availSites.forEach(s => { volDsAllSites[`${s}-${div}`] = volumeLineDataset(s, div); });
       });
+
       const divYMax = {};
+      const divVolMax = {};
       divs.forEach((div, di) => {
-        divYMax[div] = computeSharedAxisMax([siteValueArrays[di]], 100);
+        divYMax[div] = computeSharedAxisMax(siteValueArraysAllSites[di], 100);
+        divVolMax[div] = computeSharedAxisMax(
+          availSites.map(s => sl(volDsAllSites[`${s}-${div}`].data).filter(v => v !== null)),
+          1000
+        );
       });
 
       divs.forEach(div => {
@@ -4812,7 +4838,7 @@ function renderPlanCompareCharts(planData, prodData) {
             borderWidth: 0, stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
           });
         });
-        const volDs = volumeLineDataset(site, div);
+        const volDs = volDsAllSites[`${site}-${div}`];
         const slicedVolDs = { ...volDs, data: sl(volDs.data) };
         datasets.push(slicedVolDs);
         planCmpChartInstances[key] = new Chart(ctx, {
@@ -4827,19 +4853,30 @@ function renderPlanCompareCharts(planData, prodData) {
             scales: {
               x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
               y: { stacked: true, position: 'left', ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` }, grid: { color: '#1e2235' }, suggestedMin: 0, max: divYMax[div], title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } } },
-              y2: y2Axis(div, slicedVolDs.data),
+              y2: y2Axis(div, slicedVolDs.data, divVolMax[div] || undefined),
             },
           },
         });
       });
 
-      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = computeSiteTotalData(site);
-      const siteCountMax = computeSharedAxisMax([
-        EMP_SERIES.flatMap(et => [
-          ...sl(actualCountData[et.label]).filter(v => v !== null),
-          ...sl(forecastCountData[et.label]).filter(v => v !== null),
-        ]),
-      ], 1) || undefined;
+      // 「標準工数合計 vs 勤務時間合計」チャートも、いなべ・群馬・南丹の3拠点で
+      // 左軸(h)・右軸(人)を統一する（全拠点合計は対象外・従来通り自動スケール）。
+      // computeSiteTotalData()は全拠点分を1回だけ計算し、現拠点分はここから再利用する
+      // （site単体分を別途計算し直すと同じ処理を2重に行ってしまうため）
+      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
+      const siteTotalIdx = availSites.indexOf(site);
+      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
+      const totalYMax = computeSharedAxisMax(
+        allSitesTotalData.map(d => totalChartStackedValues(d.stdTotalRaw, d.actualData, d.forecastData)),
+        100
+      ) || undefined;
+      const siteCountMax = computeSharedAxisMax(
+        allSitesTotalData.map(d => EMP_SERIES.flatMap(et => [
+          ...sl(d.actualCountData[et.label]).filter(v => v !== null),
+          ...sl(d.forecastCountData[et.label]).filter(v => v !== null),
+        ])),
+        1
+      ) || undefined;
       const siteCountDatasets = EMP_SERIES.flatMap(et => [
         {
           type: 'line', label: `${et.label}人数（実績）`, data: sl(actualCountData[et.label]),
@@ -4865,7 +4902,7 @@ function renderPlanCompareCharts(planData, prodData) {
         },
       };
       renderTotalChart(`plancmp-${site}-total`, stdTotalRaw, actualData, forecastData,
-        { extraDatasets: siteCountDatasets, extraScales: siteCountScale });
+        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax });
     }
   }
 
