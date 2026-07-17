@@ -1,0 +1,1274 @@
+<title>収穫量・菌床数ダッシュボード | いなべ・群馬・南丹</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:      #1C2B1E;
+    --surf:    #243029;
+    --surf2:   #2C3A30;
+    --grid:    #2D3E30;
+    --border:  #364A38;
+    --text:    #EEE8DC;
+    --muted:   #7A9A7E;
+    --amber:   #C9912A;
+    --amber-l: #E0B05A;
+    --sage:    #6B9E72;
+    --sage-l:  #8EC496;
+    --sky:     #5B8FA8;
+    --sky-l:   #7DB4CC;
+    --plum:    #9A6B9A;
+    --plum-l:  #C090C0;
+    --total:   #B07040;
+    --total-l: #D09060;
+    --ship:    #C07060;
+    --ship-l:  #E09080;
+    --teal:    #4A8C8A;
+    --teal-l:  #6EB8B4;
+  }
+  html { font-size: 18px; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    padding: 1.5rem 1.5rem 3rem;
+    line-height: 1.5;
+  }
+
+  .hdr { margin-bottom: 1.25rem; }
+  .hdr-top { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+  .hdr-title { font-family: Georgia, serif; font-size: 1.6rem; font-weight: normal; color: var(--text); letter-spacing: 0.01em; }
+  .hdr-title em { color: var(--amber); font-style: normal; }
+  .hdr-sub { font-size: 0.78rem; color: var(--muted); letter-spacing: 0.07em; text-transform: uppercase; }
+  hr.div { border: none; border-top: 1px solid var(--grid); margin: 0.6rem 0 1.25rem; }
+
+  /* ── Location tabs (primary) ── */
+  .tabs-loc { display: flex; gap: 2px; margin-bottom: 1rem; background: var(--surf); border-radius: 6px; padding: 3px; width: fit-content; }
+  .tab-loc {
+    padding: 0.5rem 1.2rem;
+    border-radius: 4px;
+    font-size: 0.92rem;
+    cursor: pointer;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+  .tab-loc:hover { color: var(--text); }
+  .tab-loc.active { background: var(--surf2); color: var(--text); }
+  .tab-loc[data-loc="inabe"].active  { color: var(--sage-l); }
+  .tab-loc[data-loc="gunma"].active  { color: var(--sky-l); }
+  .tab-loc[data-loc="nantou"].active { color: var(--plum-l); }
+  .tab-loc[data-loc="total"].active  { color: var(--amber-l); }
+  .tab-loc[data-loc="kinshō"].active { color: var(--teal-l); }
+
+  /* ── Year tabs (secondary) ── */
+  .tabs-yr { display: flex; gap: 2px; margin-bottom: 1.5rem; width: fit-content; }
+  .tab-yr {
+    padding: 0.35rem 1rem;
+    border-radius: 4px;
+    font-size: 0.88rem;
+    cursor: pointer;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    background: transparent;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    white-space: nowrap;
+    letter-spacing: 0.04em;
+  }
+  .tab-yr:hover { color: var(--text); border-color: var(--muted); }
+  .tab-yr.active { background: var(--surf2); color: var(--text); border-color: var(--muted); }
+
+  /* ── Tooltip ── */
+  .chart-tooltip {
+    position: fixed;
+    background: #1A2B1C;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.5rem 0.9rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+  .chart-tooltip.visible { opacity: 1; }
+  .tt-month { color: var(--muted); font-size: 0.78rem; margin-bottom: 0.2rem; }
+  .tt-row { display: flex; gap: 0.5rem; align-items: baseline; margin-bottom: 0.1rem; }
+  .tt-label { font-size: 0.75rem; color: var(--muted); min-width: 3.5em; }
+  .tt-val { font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; font-weight: 700; font-size: 1.05rem; }
+  .tt-diff { font-size: 0.8rem; color: var(--muted); margin-top: 0.1rem; }
+
+  /* ── Chart ── */
+  .chart-wrap { background: var(--surf); border: 1px solid var(--grid); border-radius: 6px; padding: 1.1rem 1.1rem 0.7rem; margin-bottom: 1.5rem; }
+  .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.9rem; flex-wrap: wrap; gap: 0.4rem; }
+  .chart-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .legend { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .leg-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--muted); }
+  .leg-sw { width: 11px; height: 11px; border-radius: 2px; flex-shrink: 0; }
+  canvas { width: 100%; display: block; cursor: crosshair; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; background: var(--surf); border: 1px solid var(--grid); border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  thead th { background: var(--surf2); padding: 0.6rem 0.9rem; text-align: left; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  thead th.num { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--grid); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surf2); }
+  td { padding: 0.5rem 0.9rem; white-space: nowrap; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; }
+  td.bar-cell { width: 130px; }
+  .bar-mini { display: inline-block; height: 6px; border-radius: 2px; vertical-align: middle; }
+  tr.peak td.num-main { color: var(--amber-l); font-weight: 700; }
+
+  .footer { margin-top: 1.25rem; font-size: 0.76rem; color: var(--muted); text-align: right; letter-spacing: 0.03em; }
+
+  .loc-panel { display: none; }
+  .loc-panel.active { display: block; }
+  .yr-panel { display: none; }
+  .yr-panel.active { display: block; }
+
+  @media (max-width: 600px) {
+    .tabs-loc { flex-wrap: wrap; width: 100%; }
+  }
+</style>
+
+<div class="hdr">
+  <div class="hdr-top">
+    <h1 class="hdr-title"><em>月間収穫量・出荷量</em> ダッシュボード</h1>
+    <span id="sync-badge" style="font-size:0.72rem;color:var(--muted);margin-left:auto;align-self:center"></span>
+  </div>
+  <p class="hdr-sub">いなべ・群馬・南丹　／　2025年1月 — 2026年6月　／　椎茸収穫管理</p>
+</div>
+<hr class="div">
+
+<!-- Location tabs -->
+<div class="tabs-loc" role="tablist">
+  <button class="tab-loc active" data-loc="inabe"  role="tab">いなべ</button>
+  <button class="tab-loc"        data-loc="gunma"  role="tab">群馬</button>
+  <button class="tab-loc"        data-loc="nantou" role="tab">南丹</button>
+  <button class="tab-loc"        data-loc="total"  role="tab">全拠点合計</button>
+  <button class="tab-loc"        data-loc="kinshō" role="tab">菌床数</button>
+</div>
+
+<div id="loc-inabe"  class="loc-panel active"></div>
+<div id="loc-gunma"  class="loc-panel"></div>
+<div id="loc-nantou" class="loc-panel"></div>
+<div id="loc-total"  class="loc-panel"></div>
+<div id="loc-kinshō" class="loc-panel"></div>
+
+<div class="footer" id="footer"></div>
+
+<script>
+// ── Data ──
+const MONTHS_2025 = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+const MONTHS_2026 = ['1月','2月','3月','4月','5月','6月'];
+const MONTHS_2025_FULL = MONTHS_2025.map(m => '2025年' + m);
+const MONTHS_2026_FULL = MONTHS_2026.map(m => '2026年' + m);
+
+// 収穫量 (kg) — index 0=Jan2025 … 17=Jun2026
+const HARVEST = {
+  inabe:  [12564.8,12815.4,9392.9,11347.6,14106.8,6917.2,7676.0,6142.0,15652.7,17227.7,21093.8,29042.5, 19940.5,18078.7,14894.3,13764.1,15606.0,15207.9],
+  gunma:  [11451.1,9556.5,8853.1,8940.8,7751.9,7752.9,5762.2,8157.0,6225.7,13920.3,15697.8,14827.9,    21366.8,13873.2,16280.6,12082.2,14005.2,15746.3],
+  nantou: [10965.5,10606.2,11039.3,7051.3,10085.4,8011.6,7606.1,8660.0,8536.7,13581.4,14418.0,19404.8, 17185.9,10889.1,12492.1,9630.7,9966.6,10476.5],
+};
+HARVEST.total = HARVEST.inabe.map((_,i) => HARVEST.inabe[i]+HARVEST.gunma[i]+HARVEST.nantou[i]);
+
+// 出荷量 (kg) — 2026年1-6月のみ
+const SHIP = {
+  inabe:  [15501.8,16248.3,13623.7,13220.3,13252.3,13489.3],
+  gunma:  [18476.7,16252.5,14718.2,12459.0,13040.8,12050.7],
+  nantou: [12866.2,12009.6,11056.2, 8352.8, 8367.6,10029.6],
+};
+SHIP.total = SHIP.inabe.map((_,i) => SHIP.inabe[i]+SHIP.gunma[i]+SHIP.nantou[i]);
+
+// 2025年 出荷量 (kg) — 1〜6月
+const SHIP_2025 = {
+  inabe:  [11234.93, 12128.28,  9130.68, 8693.36, 11275.06, 5512.51],
+  gunma:  [ 9807.25,  7804.84,  7009.85, 7524.37,  7259.08, 5408.60],
+  nantou: [ 8618.63,  8984.10,  9033.75, 6635.26,  8567.71, 6706.20],
+};
+SHIP_2025.total = SHIP_2025.inabe.map((_,i) => SHIP_2025.inabe[i]+SHIP_2025.gunma[i]+SHIP_2025.nantou[i]);
+
+const LOC_CFG = {
+  inabe:  { label: 'いなべ', c: '#6B9E72', cl: '#8EC496' },
+  gunma:  { label: '群馬',   c: '#5B8FA8', cl: '#7DB4CC' },
+  nantou: { label: '南丹',   c: '#9A6B9A', cl: '#C090C0' },
+  total:  { label: '全拠点', c: '#B07040', cl: '#D09060' },
+};
+const SHIP_C  = '#C07060';
+const SHIP_CL = '#E09080';
+
+const BED_C   = '#6EB8B4'; // 菌床数折れ線色
+
+const fmt1 = n => n.toLocaleString('ja-JP',{minimumFractionDigits:1,maximumFractionDigits:1});
+const fmtBed = n => n >= 1000 ? (n/1000).toFixed(1)+'k' : String(n);
+
+// 菌床数（千葉+自社）を拠点×年で返す
+const LOC_JP = { inabe: 'いなべ', gunma: '群馬', nantou: '南丹' };
+function getBedData(loc, yr) {
+  const chiba = yr === 2025 ? CHIBA_2025 : CHIBA_2026;
+  const jisha = yr === 2025 ? JISHA_2025 : JISHA_2026;
+  const n     = yr === 2025 ? 12 : 6;
+  const locs  = loc === 'total' ? ['いなべ','群馬','南丹'] : [LOC_JP[loc]];
+  return Array.from({length: n}, (_, i) =>
+    locs.reduce((s, l) => s + (chiba[l]?.[i] || 0) + (jisha[l]?.[i] || 0), 0)
+  );
+}
+
+// ── Build year panel HTML ──
+function buildYrPanel(loc, yr) {
+  const cfg = LOC_CFG[loc];
+  const isTotal = loc === 'total';
+  const harvestAll = HARVEST[loc];
+  const harvest = yr === 2025 ? harvestAll.slice(0,12) : harvestAll.slice(12);
+  const ship    = yr === 2026 ? SHIP[loc] : null; // only 2026 has ship data
+  const months  = yr === 2025 ? MONTHS_2025 : MONTHS_2026;
+  const monthsFull = yr === 2025 ? MONTHS_2025_FULL : MONTHS_2026_FULL;
+
+  const canvasId = `chart-${loc}-${yr}`;
+  const maxVal   = Math.max(...harvest);
+
+  const legendShip = yr === 2026
+    ? `<div class="leg-item"><div class="leg-sw" style="background:${SHIP_CL}"></div><span>出荷量</span></div>`
+    : '';
+
+  const chartHTML = `<div class="chart-wrap">
+    <div class="chart-head">
+      <span class="chart-label">${yr}年 月間収穫量${yr===2026?'・出荷量':''} (kg) — ${cfg.label}</span>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-sw" style="background:${cfg.cl}"></div><span>収穫量</span></div>
+        ${legendShip}
+        <div class="leg-item"><div class="leg-sw" style="background:${BED_C};height:3px;border-radius:2px;margin-top:5px"></div><span>菌床数（右軸）</span></div>
+      </div>
+    </div>
+    <canvas id="${canvasId}" height="380"></canvas>
+  </div>`;
+
+  let rows = '';
+  harvest.forEach((kg, i) => {
+    const prev = i > 0 ? harvest[i-1] : null;
+    const d    = prev !== null ? kg - prev : null;
+    const barW = Math.round((kg / maxVal) * 110);
+    const isPeak = kg === maxVal;
+    const shipKg = ship ? ship[i] : null;
+    const shipTd = shipKg !== null
+      ? `<td class="num" style="color:${SHIP_CL}">${fmt1(shipKg)}</td>`
+      : yr === 2026 ? `<td class="num" style="color:var(--muted)">—</td>` : '';
+    const shipTh = yr === 2026 ? '' : ''; // col added below conditionally
+    const diffStr = d === null ? '—'
+      : d >= 0 ? `<span style="color:#8EC496">+${fmt1(d)}</span>`
+               : `<span style="color:#E07050">${fmt1(d)}</span>`;
+    rows += `<tr class="${isPeak?'peak':''}">
+      <td>${monthsFull[i]}</td>
+      <td class="num num-main">${fmt1(kg)}</td>
+      ${shipKg!==null ? `<td class="num" style="color:${SHIP_CL}">${fmt1(shipKg)}</td>` : (yr===2026?`<td class="num" style="color:var(--muted)">—</td>`:'')}
+      <td class="num">${diffStr}</td>
+      <td class="bar-cell"><div class="bar-mini" style="width:${barW}px;background:${cfg.cl};opacity:0.8"></div></td>
+    </tr>`;
+  });
+  const shipColHdr = yr === 2026 ? '<th class="num">出荷量 (kg)</th>' : '';
+  const tableHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>月</th><th class="num">収穫量 (kg)</th>${shipColHdr}<th class="num">前月比</th><th>バー</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+
+  return chartHTML + tableHTML;
+}
+
+// ── Build location panel (with year sub-tabs) ──
+function buildLocPanel(loc) {
+  return `
+    <div class="tabs-yr" data-loc="${loc}">
+      <button class="tab-yr active" data-yr="2025">2025年</button>
+      <button class="tab-yr"        data-yr="2026">2026年</button>
+      <button class="tab-yr"        data-yr="compare">前年比較</button>
+    </div>
+    <div id="yr-${loc}-2025"    class="yr-panel active">${buildYrPanel(loc, 2025)}</div>
+    <div id="yr-${loc}-2026"    class="yr-panel">${buildYrPanel(loc, 2026)}</div>
+    <div id="yr-${loc}-compare" class="yr-panel">${buildComparePanel(loc)}</div>
+  `;
+}
+
+// ── Canvas draw ──
+function drawChart(loc, yr) {
+  const canvasId = `chart-${loc}-${yr}`;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  const cfg     = LOC_CFG[loc];
+  const harvestAll = HARVEST[loc];
+  const harvest = yr === 2025 ? harvestAll.slice(0,12) : harvestAll.slice(12);
+  const ship    = yr === 2026 ? SHIP[loc] : null;
+  const months  = yr === 2025 ? MONTHS_2025 : MONTHS_2026;
+  const beds    = getBedData(loc, yr);
+  const n       = harvest.length;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 34;
+  const H   = 380;
+  canvas.width  = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PL=58, PR=56, PT=10, PB=38;
+  const cW=W-PL-PR, cH=H-PT-PB;
+
+  const allVals = ship ? [...harvest, ...ship] : [...harvest];
+  const maxVal  = Math.ceil(Math.max(...allVals) / 5000) * 5000;
+  const GRIDS   = 5;
+
+  const maxBed  = Math.ceil(Math.max(...beds, 1000) / 5000) * 5000;
+
+  // Gridlines + left axis
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    ctx.strokeStyle='#2D3E30'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PL,y); ctx.lineTo(PL+cW,y); ctx.stroke();
+    const val=(i/GRIDS)*maxVal;
+    ctx.fillStyle='#628066';
+    ctx.font=`12px 'Courier New',monospace`;
+    ctx.textAlign='right';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL-5, y+3.5);
+  }
+
+  // Right axis labels (beds)
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    const val = (i/GRIDS)*maxBed;
+    ctx.fillStyle = BED_C+'BB';
+    ctx.font=`12px 'Courier New',monospace`;
+    ctx.textAlign='left';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL+cW+5, y+3.5);
+  }
+
+  const groupW = cW / n;
+  const BAR_GAP = 2;
+  const GROUP_PAD = groupW * 0.12;
+  const peakI = harvest.indexOf(Math.max(...harvest));
+
+  harvest.forEach((kg, i) => {
+    const gx = PL + i * groupW;
+    const hasS = ship !== null;
+
+    let harvestW, shipW, harvestX, shipX;
+    if (hasS) {
+      const total = groupW - GROUP_PAD*2;
+      harvestW = (total - BAR_GAP) / 2;
+      shipW    = harvestW;
+      harvestX = gx + GROUP_PAD;
+      shipX    = harvestX + harvestW + BAR_GAP;
+    } else {
+      harvestW = Math.max(8, groupW * 0.65);
+      harvestX = gx + (groupW - harvestW) / 2;
+    }
+
+    // Harvest bar
+    const hH = (kg / maxVal) * cH;
+    const hY = PT + cH - hH;
+    const g1 = ctx.createLinearGradient(0, hY, 0, hY+hH);
+    g1.addColorStop(0, cfg.cl); g1.addColorStop(1, cfg.c+'99');
+    ctx.fillStyle = g1;
+    ctx.beginPath(); ctx.roundRect(harvestX, hY, harvestW, hH, [2,2,0,0]); ctx.fill();
+
+    if (i === peakI) {
+      ctx.strokeStyle='#E0B05A'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.roundRect(harvestX-1, hY-1, harvestW+2, hH+1, [3,3,0,0]); ctx.stroke();
+    }
+
+    // Ship bar
+    if (hasS) {
+      const sH = (ship[i] / maxVal) * cH;
+      const sY = PT + cH - sH;
+      const g2 = ctx.createLinearGradient(0, sY, 0, sY+sH);
+      g2.addColorStop(0, SHIP_CL); g2.addColorStop(1, SHIP_C+'99');
+      ctx.fillStyle = g2;
+      ctx.beginPath(); ctx.roundRect(shipX, sY, shipW, sH, [2,2,0,0]); ctx.fill();
+    }
+
+    // X labels
+    const midX = gx + groupW/2;
+    ctx.fillStyle='#5A7860'; ctx.font=`12px -apple-system,Arial,sans-serif`; ctx.textAlign='center';
+    ctx.fillText(months[i], midX, PT+cH+16);
+  });
+
+  // 菌床数折れ線（右軸スケール）
+  if (beds.some(v => v > 0)) {
+    ctx.save();
+    ctx.strokeStyle = BED_C;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    beds.forEach((b, i) => {
+      const midX = PL + (i + 0.5) * groupW;
+      const y = PT + cH - (b / maxBed) * cH;
+      i === 0 ? ctx.moveTo(midX, y) : ctx.lineTo(midX, y);
+    });
+    ctx.stroke();
+    // 点
+    beds.forEach((b, i) => {
+      const midX = PL + (i + 0.5) * groupW;
+      const y = PT + cH - (b / maxBed) * cH;
+      ctx.fillStyle = BED_C;
+      ctx.beginPath(); ctx.arc(midX, y, 3.5, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#1C2B1E';
+      ctx.beginPath(); ctx.arc(midX, y, 1.5, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  // Axis
+  ctx.strokeStyle='#3A5040'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
+}
+
+// ── 前年比較パネル ──
+function buildComparePanel(loc) {
+  const cfg     = LOC_CFG[loc];
+  const h25     = HARVEST[loc].slice(0, 6);
+  const h26     = HARVEST[loc].slice(12, 18);
+  const s25     = SHIP_2025 ? SHIP_2025[loc] : null;
+  const s26     = SHIP[loc];
+  const months  = ['1月','2月','3月','4月','5月','6月'];
+  const canvasId = `chart-${loc}-compare`;
+
+  const s25Legend = s25
+    ? `<div class="leg-item"><div class="leg-sw" style="background:${SHIP_C};opacity:0.6"></div><span>2025年 出荷量</span></div>`
+    : '';
+
+  const chartHTML = `<div class="chart-wrap">
+    <div class="chart-head">
+      <span class="chart-label">前年比較 (1〜6月) — ${cfg.label}</span>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-sw" style="background:${cfg.c};opacity:0.6"></div><span>2025年 収穫量</span></div>
+        ${s25Legend}
+        <div class="leg-item"><div class="leg-sw" style="background:${cfg.cl}"></div><span>2026年 収穫量</span></div>
+        <div class="leg-item"><div class="leg-sw" style="background:${SHIP_CL}"></div><span>2026年 出荷量</span></div>
+        <div class="leg-item" style="align-items:center"><div style="width:22px;height:3px;border-radius:2px;background:#7A9A7E;opacity:0.8;margin-right:0"></div><span style="margin-left:6px">2025年 菌床数</span></div>
+        <div class="leg-item" style="align-items:center"><div style="width:22px;height:3px;border-radius:2px;background:${BED_C};margin-right:0"></div><span style="margin-left:6px">2026年 菌床数</span></div>
+      </div>
+    </div>
+    <canvas id="${canvasId}" height="380"></canvas>
+  </div>`;
+
+  const s25Hdr = s25 ? '<th class="num">2025年 出荷量</th>' : '';
+  let rows = '';
+  months.forEach((m, i) => {
+    const hv25 = h25[i], hv26 = h26[i];
+    const diff = hv26 - hv25;
+    const pct  = hv25 > 0 ? ((diff / hv25) * 100).toFixed(1) : null;
+    const diffStr = `<span style="color:${diff>=0?'#8EC496':'#E07050'}">${diff>=0?'+':''}${fmt1(diff)}</span>`;
+    const pctStr  = pct !== null ? `<span style="color:${diff>=0?'#8EC496':'#E07050'}">${diff>=0?'+':''}${pct}%</span>` : '—';
+    const s25Td = s25 ? `<td class="num" style="color:${SHIP_C}CC">${fmt1(s25[i])}</td>` : '';
+    rows += `<tr>
+      <td>${m}</td>
+      <td class="num">${fmt1(hv25)}</td>
+      ${s25Td}
+      <td class="num" style="color:${cfg.cl}">${fmt1(hv26)}</td>
+      <td class="num" style="color:${SHIP_CL}">${fmt1(s26[i])}</td>
+      <td class="num">${diffStr}</td>
+      <td class="num">${pctStr}</td>
+    </tr>`;
+  });
+
+  const tableHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>月</th><th class="num">2025年 収穫量</th>${s25Hdr}<th class="num">2026年 収穫量</th><th class="num">2026年 出荷量</th><th class="num">収穫量 差 (kg)</th><th class="num">前年比</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+
+  return chartHTML + tableHTML;
+}
+
+function drawCompareChart(loc) {
+  const canvas = document.getElementById(`chart-${loc}-compare`);
+  if (!canvas) return;
+
+  const cfg       = LOC_CFG[loc];
+  const harvest25 = HARVEST[loc].slice(0, 6);
+  const harvest26 = HARVEST[loc].slice(12, 18);
+  const ship26    = SHIP[loc];
+  const beds25    = getBedData(loc, 2025).slice(0, 6);
+  const beds26    = getBedData(loc, 2026);
+  const months    = ['1月','2月','3月','4月','5月','6月'];
+  const n = 6;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 34;
+  const H   = 380;
+  canvas.width = W*dpr; canvas.height = H*dpr;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PL=58, PR=56, PT=10, PB=38;
+  const cW=W-PL-PR, cH=H-PT-PB;
+
+  const maxVal = Math.ceil(Math.max(...harvest25,...harvest26,...ship26) / 5000) * 5000;
+  const maxBed = Math.ceil(Math.max(...beds25,...beds26, 1000) / 5000) * 5000;
+  const GRIDS  = 5;
+
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    ctx.strokeStyle='#2D3E30'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PL,y); ctx.lineTo(PL+cW,y); ctx.stroke();
+    const val=(i/GRIDS)*maxVal;
+    ctx.fillStyle='#628066'; ctx.font=`12px 'Courier New',monospace`; ctx.textAlign='right';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL-5, y+3.5);
+  }
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    const val=(i/GRIDS)*maxBed;
+    ctx.fillStyle=BED_C+'BB'; ctx.font=`12px 'Courier New',monospace`; ctx.textAlign='left';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL+cW+5, y+3.5);
+  }
+
+  const ship25    = SHIP_2025 ? SHIP_2025[loc] : null;
+  const numBars   = ship25 ? 4 : 3;
+  const groupW    = cW / n;
+  const GP        = groupW * 0.08;
+  const BAR_GAP   = 2;
+  const barW      = (groupW - GP*2 - BAR_GAP*(numBars-1)) / numBars;
+
+  const allShip = ship25 ? [...ship25, ...ship26] : [...ship26];
+  const maxValFull = Math.ceil(Math.max(...harvest25,...harvest26,...allShip) / 5000) * 5000;
+
+  for (let i=0; i<n; i++) {
+    const gx = PL + i*groupW + GP;
+
+    // 2025 収穫量（半透明）
+    const h25H = (harvest25[i]/maxValFull)*cH;
+    ctx.fillStyle = cfg.c + '66';
+    ctx.beginPath(); ctx.roundRect(gx, PT+cH-h25H, barW, h25H, [2,2,0,0]); ctx.fill();
+
+    // 2025 出荷量（ある場合）
+    if (ship25) {
+      const s25H = (ship25[i]/maxValFull)*cH;
+      ctx.fillStyle = SHIP_C + '77';
+      ctx.beginPath(); ctx.roundRect(gx+barW+BAR_GAP, PT+cH-s25H, barW, s25H, [2,2,0,0]); ctx.fill();
+    }
+
+    // 2026 収穫量
+    const offset2 = ship25 ? barW*2+BAR_GAP*2 : barW+BAR_GAP;
+    const h26H = (harvest26[i]/maxValFull)*cH;
+    const g2 = ctx.createLinearGradient(0, PT+cH-h26H, 0, PT+cH);
+    g2.addColorStop(0, cfg.cl); g2.addColorStop(1, cfg.c+'99');
+    ctx.fillStyle = g2;
+    ctx.beginPath(); ctx.roundRect(gx+offset2, PT+cH-h26H, barW, h26H, [2,2,0,0]); ctx.fill();
+
+    // 2026 出荷量
+    const offset3 = ship25 ? barW*3+BAR_GAP*3 : barW*2+BAR_GAP*2;
+    const s26H = (ship26[i]/maxValFull)*cH;
+    const g3 = ctx.createLinearGradient(0, PT+cH-s26H, 0, PT+cH);
+    g3.addColorStop(0, SHIP_CL); g3.addColorStop(1, SHIP_C+'99');
+    ctx.fillStyle = g3;
+    ctx.beginPath(); ctx.roundRect(gx+offset3, PT+cH-s26H, barW, s26H, [2,2,0,0]); ctx.fill();
+
+    const midX = PL + i*groupW + groupW/2;
+    ctx.fillStyle='#5A7860'; ctx.font=`12px -apple-system,Arial,sans-serif`; ctx.textAlign='center';
+    ctx.fillText(months[i], midX, PT+cH+16);
+  }
+
+  // 菌床数 折れ線
+  const drawBedLine = (beds, color, dash) => {
+    if (!beds.some(v=>v>0)) return;
+    ctx.save();
+    ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.setLineDash(dash||[]);
+    ctx.beginPath();
+    beds.forEach((b,i)=>{
+      const midX=PL+(i+0.5)*groupW, y=PT+cH-(b/maxBed)*cH;
+      i===0?ctx.moveTo(midX,y):ctx.lineTo(midX,y);
+    });
+    ctx.stroke();
+    beds.forEach((b,i)=>{
+      const midX=PL+(i+0.5)*groupW, y=PT+cH-(b/maxBed)*cH;
+      ctx.fillStyle=color; ctx.beginPath(); ctx.arc(midX,y,3.5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1C2B1E'; ctx.beginPath(); ctx.arc(midX,y,1.5,0,Math.PI*2); ctx.fill();
+    });
+    ctx.restore();
+  };
+  drawBedLine(beds25, '#7A9A7E', [5,3]);
+  drawBedLine(beds26, BED_C,    []);
+
+  ctx.strokeStyle='#3A5040'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
+
+  attachCompareTooltip(loc);
+}
+
+// ── Tooltip ──
+const tooltip = document.createElement('div');
+tooltip.className = 'chart-tooltip';
+tooltip.innerHTML = `
+  <div class="tt-month"></div>
+  <div class="tt-row"><span class="tt-label">収穫量</span><span class="tt-val" id="tt-h"></span></div>
+  <div class="tt-row" id="tt-srow" style="display:none"><span class="tt-label">出荷量</span><span class="tt-val" id="tt-s" style="color:${SHIP_CL}"></span></div>
+  <div class="tt-row" id="tt-brow" style="display:none"><span class="tt-label">菌床数</span><span class="tt-val" id="tt-b" style="color:${BED_C}"></span></div>
+  <div class="tt-diff" id="tt-d"></div>`;
+document.body.appendChild(tooltip);
+const TOOLTIP_BASE_HTML = tooltip.innerHTML;
+
+const attached = new Set();
+const compareAttached = new Set();
+
+function attachTooltip(loc, yr) {
+  const key = `${loc}-${yr}`;
+  if (attached.has(key)) return;
+  const canvas = document.getElementById(`chart-${loc}-${yr}`);
+  if (!canvas) return;
+
+  const harvestAll = HARVEST[loc];
+  const harvest = yr === 2025 ? harvestAll.slice(0,12) : harvestAll.slice(12);
+  const ship    = yr === 2026 ? SHIP[loc] : null;
+  const months  = yr === 2025 ? MONTHS_2025_FULL : MONTHS_2026_FULL;
+  const cfg     = LOC_CFG[loc];
+  const beds    = getBedData(loc, yr);
+
+  canvas.addEventListener('mousemove', e => {
+    const rect  = canvas.getBoundingClientRect();
+    const scaleX = (canvas.width / (window.devicePixelRatio||1)) / rect.width;
+    const px    = (e.clientX - rect.left) * scaleX;
+    const W2    = canvas.width / (window.devicePixelRatio||1);
+    const cW2   = W2 - 58 - 56;
+    const n     = harvest.length;
+    const groupW = cW2 / n;
+
+    let found = -1;
+    for (let i=0; i<n; i++) {
+      const gx = 58 + i*groupW;
+      if (px >= gx && px < gx+groupW) { found=i; break; }
+    }
+    if (found === -1) { tooltip.classList.remove('visible'); return; }
+
+    const kg   = harvest[found];
+    const prev = found>0 ? harvest[found-1] : null;
+    const d    = prev!==null ? kg-prev : null;
+    const sk   = ship ? ship[found] : null;
+    const bk   = beds[found];
+
+    tooltip.querySelector('.tt-month').textContent = months[found];
+    const hEl = document.getElementById('tt-h');
+    hEl.textContent = fmt1(kg)+' kg'; hEl.style.color = cfg.cl;
+    const sRow = document.getElementById('tt-srow');
+    const sEl  = document.getElementById('tt-s');
+    if (sk !== null) { sRow.style.display='flex'; sEl.textContent=fmt1(sk)+' kg'; }
+    else sRow.style.display='none';
+    const bRow = document.getElementById('tt-brow');
+    const bEl  = document.getElementById('tt-b');
+    if (bk > 0) { bRow.style.display='flex'; bEl.textContent=bk.toLocaleString('ja-JP')+' 本'; }
+    else bRow.style.display='none';
+    const dEl = document.getElementById('tt-d');
+    if (d!==null) { dEl.textContent='前月比 '+(d>=0?'+':'')+fmt1(d)+' kg'; dEl.style.color=d>=0?'#8EC496':'#E07050'; }
+    else dEl.textContent='';
+
+    tooltip.classList.add('visible');
+    tooltip.style.left=(e.clientX+14)+'px';
+    tooltip.style.top =(e.clientY-50)+'px';
+  });
+  canvas.addEventListener('mouseleave', ()=>tooltip.classList.remove('visible'));
+  attached.add(key);
+}
+
+// ────────── スプレッドシート設定 ──────────
+// スプレッドシートを「リンクを知っている全員が閲覧可能」に設定すること
+const SHEET_ID   = '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY';
+const SHEET_CHIBA = '（ファ）千葉菌床納品';
+const SHEET_JISHA = '（培）志摩工場';
+
+// ────────── 菌床数 Data（フォールバック初期値: 〜2026年6月）──────────
+// スプレッドシート取得成功時は上書き。失敗時はこの値を使用。
+let CHIBA_2025 = {
+  'いなべ': [22682, 20161,  2520, 12770,  2520,  5040,  8420,  7000, 19360, 21160, 46440, 55725],
+  '群馬':   [22680, 17640,  2520, 10080, 12600, 10080, 14490, 14760, 18170, 22610, 45360, 47880],
+  '南丹':   [24453, 25301,  3248, 21751, 19085, 10701, 13063, 14988, 19103, 20999, 39782, 52966],
+};
+let CHIBA_2026 = {
+  'いなべ': [15120, 12960, 20160,  5040, 20160,  8820],
+  '群馬':   [12600, 22680, 20160, 17640, 23930, 18900],
+  '南丹':   [ 7560, 10080, 17640,  8060, 13850,  7560],
+};
+
+let JISHA_2025 = {
+  'いなべ': [ 1771,  5140,   728, 11671, 19085,  5661,  4643, 16460,  5002, 10381,     0,  4755],
+  '群馬':   [    0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0],
+  '南丹':   [    0,     0,     0,  2690,  2520,     0,     0,  8472,  5259, 10542,  6658,  7514],
+};
+let JISHA_2026 = {
+  'いなべ': [    0,     0,  2903,  9890,  5486, 17313],
+  '群馬':   [    0,     0,     0,     0,     0,     0],
+  '南丹':   [ 2282,  1791,  3353,  4096,     0, 10496],
+};
+
+// Active year helpers (set by year tab click)
+let kinshōYear = 2025;
+function chibaNow() { return kinshōYear === 2025 ? CHIBA_2025 : CHIBA_2026; }
+function jishaNow() { return kinshōYear === 2025 ? JISHA_2025 : JISHA_2026; }
+function kinshōMonthCount() { return kinshōYear === 2025 ? 12 : 6; }
+function kinshōMonthLabels() {
+  return kinshōYear === 2025
+    ? ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+    : ['1月','2月','3月','4月','5月','6月'];
+}
+function kinshōMonthFull() {
+  const y = kinshōYear;
+  return kinshōMonthLabels().map((_,i) => `${y}年${i+1}月`);
+}
+
+const KINSHŌ = {
+  locs:    ['いなべ', '群馬', '南丹'],
+  colors:  ['#6B9E72', '#5B8FA8', '#9A6B9A'],
+  colorsl: ['#8EC496', '#7DB4CC', '#C090C0'],
+};
+
+function buildKinshōTable(yr) {
+  const { locs, colors, colorsl } = KINSHŌ;
+  const chiba = yr === 2025 ? CHIBA_2025 : CHIBA_2026;
+  const jisha = yr === 2025 ? JISHA_2025 : JISHA_2026;
+  const n     = yr === 2025 ? 12 : 6;
+  const fmt   = v => v === 0 ? '—' : v.toLocaleString('ja-JP');
+
+  const headerCols = Array.from({length:n}, (_,i) => `<th class="num">${i+1}月</th>`).join('')
+    + '<th class="num" style="color:var(--amber-l)">合計</th>';
+
+  let bodyRows = '';
+  locs.forEach((loc, li) => {
+    const col = colorsl[li];
+    const cv = chiba[loc].slice(0,n);
+    const jv = jisha[loc].slice(0,n);
+    const tots = cv.map((v,i) => v + jv[i]);
+    const cSum = cv.reduce((a,b)=>a+b,0);
+    const jSum = jv.reduce((a,b)=>a+b,0);
+    const tot  = cSum + jSum;
+    const maxT = Math.max(...tots.filter(v=>v>0), 1);
+
+    bodyRows += `<tr style="background:var(--surf2)">
+      <td colspan="2" style="color:${col};font-weight:600;padding:0.55rem 0.9rem">${loc}</td>
+      ${Array(n).fill('<td></td>').join('')}<td></td>
+    </tr>`;
+
+    const mkTds = (arr, color) => arr.map(v=>`<td class="num" style="font-family:'Courier New',monospace;font-variant-numeric:tabular-nums;color:${color}">${fmt(v)}</td>`).join('');
+
+    bodyRows += `<tr>
+      <td style="width:0.5rem;border-right:2px solid ${col}"></td>
+      <td style="color:var(--muted);font-size:0.75rem;padding-left:0.6rem">千葉七河</td>
+      ${mkTds(cv,'var(--sky-l)')}
+      <td class="num" style="font-family:'Courier New',monospace;color:var(--muted)">${fmt(cSum)}</td>
+    </tr>`;
+
+    bodyRows += `<tr>
+      <td style="width:0.5rem;border-right:2px solid ${col}"></td>
+      <td style="color:var(--muted);font-size:0.75rem;padding-left:0.6rem">自社菌床</td>
+      ${mkTds(jv,'var(--amber-l)')}
+      <td class="num" style="font-family:'Courier New',monospace;color:var(--muted)">${fmt(jSum)}</td>
+    </tr>`;
+
+    const totalTds = tots.map((v,mi) => {
+      const bw = v > 0 ? Math.round((v/maxT)*80) : 0;
+      return `<td class="num">
+        <span style="font-family:'Courier New',monospace;color:${col};font-weight:600">${fmt(v)}</span>
+        ${bw>0?`<div style="margin-top:2px"><div style="display:inline-block;width:${bw}px;height:3px;border-radius:2px;background:${colors[li]};opacity:0.55"></div></div>`:''}
+      </td>`;
+    }).join('');
+    bodyRows += `<tr style="border-bottom:2px solid var(--grid)">
+      <td style="width:0.5rem;border-right:2px solid ${col}"></td>
+      <td style="color:var(--muted);font-size:0.75rem;padding-left:0.6rem">合計</td>
+      ${totalTds}
+      <td class="num" style="font-family:'Courier New',monospace;color:var(--amber-l);font-weight:700">${fmt(tot)}</td>
+    </tr>`;
+  });
+
+  // 拠点合計行
+  const allChiba = Array.from({length:n}, (_,mi) => locs.reduce((s,l)=>(s + (chiba[l][mi]||0)), 0));
+  const allJisha = Array.from({length:n}, (_,mi) => locs.reduce((s,l)=>(s + (jisha[l][mi]||0)), 0));
+  const allTots  = allChiba.map((v,i) => v + allJisha[i]);
+  const allCSum  = allChiba.reduce((a,b)=>a+b,0);
+  const allJSum  = allJisha.reduce((a,b)=>a+b,0);
+  const allTotal = allCSum + allJSum;
+  const allMaxT  = Math.max(...allTots.filter(v=>v>0), 1);
+
+  const grandMkTds = (arr, color) => arr.map(v=>`<td class="num" style="font-family:'Courier New',monospace;font-variant-numeric:tabular-nums;color:${color}">${fmt(v)}</td>`).join('');
+  const grandTotalTds = allTots.map(v => {
+    const bw = v > 0 ? Math.round((v/allMaxT)*80) : 0;
+    return `<td class="num">
+      <span style="font-family:'Courier New',monospace;color:var(--total-l);font-weight:700">${fmt(v)}</span>
+      ${bw>0?`<div style="margin-top:2px"><div style="display:inline-block;width:${bw}px;height:3px;border-radius:2px;background:var(--total);opacity:0.6"></div></div>`:''}
+    </td>`;
+  }).join('');
+
+  bodyRows += `<tr style="background:#2A3C28;border-top:2px solid var(--total)">
+    <td colspan="2" style="color:var(--total-l);font-weight:700;padding:0.55rem 0.9rem;letter-spacing:0.02em">全拠点合計</td>
+    ${Array(n).fill('<td></td>').join('')}<td></td>
+  </tr>`;
+  bodyRows += `<tr style="background:#2A3C28">
+    <td style="width:0.5rem;border-right:2px solid var(--total)"></td>
+    <td style="color:var(--muted);font-size:0.75rem;padding-left:0.6rem">千葉七河</td>
+    ${grandMkTds(allChiba,'var(--sky-l)')}
+    <td class="num" style="font-family:'Courier New',monospace;color:var(--muted)">${fmt(allCSum)}</td>
+  </tr>`;
+  bodyRows += `<tr style="background:#2A3C28">
+    <td style="width:0.5rem;border-right:2px solid var(--total)"></td>
+    <td style="color:var(--muted);font-size:0.75rem;padding-left:0.6rem">自社菌床</td>
+    ${grandMkTds(allJisha,'var(--amber-l)')}
+    <td class="num" style="font-family:'Courier New',monospace;color:var(--muted)">${fmt(allJSum)}</td>
+  </tr>`;
+  bodyRows += `<tr style="background:#2A3C28">
+    <td style="width:0.5rem;border-right:2px solid var(--total)"></td>
+    <td style="color:var(--muted);font-size:0.75rem;padding-left:0.6rem">合計</td>
+    ${grandTotalTds}
+    <td class="num" style="font-family:'Courier New',monospace;color:var(--total-l);font-weight:700">${fmt(allTotal)}</td>
+  </tr>`;
+
+  return `<div class="table-wrap"><table>
+    <thead><tr><th colspan="2">拠点</th>${headerCols}</tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table></div>`;
+}
+
+function buildKinshōPanel() {
+  const yrs = [2025, 2026];
+  const yrTabs = yrs.map((y,i) =>
+    `<button class="tab-yr${i===0?' active':''}" data-loc="kinshō" data-yr="${y}" style="color:var(--teal-l)">${y}年</button>`
+  ).join('');
+
+  const panels = yrs.map((y,i) =>
+    `<div id="yr-kinshō-${y}" class="yr-panel${i===0?' active':''}">
+      <div class="chart-wrap">
+        <div class="chart-head">
+          <span class="chart-label">月別菌床納品数 (本) — ${y}年</span>
+          <div class="legend">
+            <div class="leg-item"><div class="leg-sw" style="background:var(--sky-l);opacity:0.9"></div><span>千葉七河</span></div>
+            <div class="leg-item"><div class="leg-sw" style="background:var(--amber-l);opacity:0.9"></div><span>自社菌床</span></div>
+          </div>
+        </div>
+        <canvas id="chart-kinshō-${y}" height="320"></canvas>
+      </div>
+      ${buildKinshōTable(y)}
+    </div>`
+  ).join('');
+
+  return `<div class="yr-tabs" data-loc="kinshō">${yrTabs}</div>${panels}`;
+}
+
+function drawKinshōChart(yr) {
+  yr = yr || kinshōYear;
+  const canvas = document.getElementById('chart-kinshō-'+yr);
+  if (!canvas) return;
+  const { locs } = KINSHŌ;
+  const chiba  = yr === 2025 ? CHIBA_2025 : CHIBA_2026;
+  const jisha  = yr === 2025 ? JISHA_2025 : JISHA_2026;
+  const n      = yr === 2025 ? 12 : 6;
+  const months = yr === 2025
+    ? ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+    : ['1月','2月','3月','4月','5月','6月'];
+
+  // 全拠点合計（月ごと）
+  const chibaTotals = Array.from({length:n}, (_,mi) =>
+    locs.reduce((s,l) => s + (chiba[l][mi]||0), 0));
+  const jishaTotals = Array.from({length:n}, (_,mi) =>
+    locs.reduce((s,l) => s + (jisha[l][mi]||0), 0));
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 34;
+  const H   = 320;
+  canvas.width = W*dpr; canvas.height = H*dpr;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PL=58, PR=8, PT=10, PB=38;
+  const cW=W-PL-PR, cH=H-PT-PB;
+
+  const maxVal = Math.ceil(Math.max(...chibaTotals.map((c,i)=>c+jishaTotals[i]), 1) / 5000) * 5000;
+  const GRIDS  = 5;
+
+  for (let i=0; i<=GRIDS; i++) {
+    const y = PT + cH - (i/GRIDS)*cH;
+    ctx.strokeStyle='#2D3E30'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PL,y); ctx.lineTo(PL+cW,y); ctx.stroke();
+    const val=(i/GRIDS)*maxVal;
+    ctx.fillStyle='#628066'; ctx.font=`12px 'Courier New',monospace`; ctx.textAlign='right';
+    ctx.fillText(val>=1000?(val/1000).toFixed(0)+'k':val, PL-5, y+3.5);
+  }
+
+  const groupW = cW / n;
+  const BAR_PAD = groupW * 0.18;
+  const barW = groupW - BAR_PAD*2;
+
+  for (let mi=0; mi<n; mi++) {
+    const chibaV = chibaTotals[mi];
+    const jishaV = jishaTotals[mi];
+    const totalV = chibaV + jishaV;
+    if (totalV === 0) {
+      const midX = PL + mi*groupW + groupW/2;
+      ctx.fillStyle='#5A7860'; ctx.font=`12px -apple-system,Arial,sans-serif`; ctx.textAlign='center';
+      ctx.fillText(months[mi], midX, PT+cH+16);
+      continue;
+    }
+    const bX = PL + mi*groupW + BAR_PAD;
+    const totalH = (totalV/maxVal)*cH;
+    const chibaH = (chibaV/maxVal)*cH;
+    const jishaH = totalH - chibaH;
+
+    // 千葉七河（下段）
+    if (chibaH > 0) {
+      const g1 = ctx.createLinearGradient(0, PT+cH-chibaH, 0, PT+cH);
+      g1.addColorStop(0, '#7DB4CC');
+      g1.addColorStop(1, '#5B8FA899');
+      ctx.fillStyle = g1;
+      ctx.beginPath();
+      ctx.roundRect(bX, PT+cH-chibaH, barW, chibaH, jishaH>0?[0,0,0,0]:[2,2,0,0]);
+      ctx.fill();
+    }
+
+    // 自社菌床（上段）
+    if (jishaH > 0) {
+      const g2 = ctx.createLinearGradient(0, PT+cH-totalH, 0, PT+cH-chibaH);
+      g2.addColorStop(0, '#E0B05A');
+      g2.addColorStop(1, '#C9912A99');
+      ctx.fillStyle = g2;
+      ctx.beginPath();
+      ctx.roundRect(bX, PT+cH-totalH, barW, jishaH, [2,2,0,0]);
+      ctx.fill();
+    }
+
+    const midX = PL + mi*groupW + groupW/2;
+    ctx.fillStyle='#5A7860'; ctx.font=`12px -apple-system,Arial,sans-serif`; ctx.textAlign='center';
+    ctx.fillText(months[mi], midX, PT+cH+16);
+  }
+
+  ctx.strokeStyle='#3A5040'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
+}
+
+// ── 前年比較 tooltip ──
+function attachCompareTooltip(loc) {
+  if (compareAttached.has(loc)) return;
+  const canvas = document.getElementById(`chart-${loc}-compare`);
+  if (!canvas) return;
+
+  const cfg       = LOC_CFG[loc];
+  const harvest25 = HARVEST[loc].slice(0, 6);
+  const harvest26 = HARVEST[loc].slice(12, 18);
+  const ship25    = SHIP_2025 ? SHIP_2025[loc] : null;
+  const ship26    = SHIP[loc];
+  const beds25    = () => getBedData(loc, 2025).slice(0, 6);
+  const beds26    = () => getBedData(loc, 2026);
+
+  canvas.addEventListener('mousemove', e => {
+    const rect   = canvas.getBoundingClientRect();
+    const scaleX = (canvas.width / (window.devicePixelRatio||1)) / rect.width;
+    const px     = (e.clientX - rect.left) * scaleX;
+    const W2     = canvas.width / (window.devicePixelRatio||1);
+    const groupW = (W2 - 58 - 56) / 6;
+
+    let found = -1;
+    for (let i=0; i<6; i++) {
+      if (px >= 58+i*groupW && px < 58+(i+1)*groupW) { found=i; break; }
+    }
+    if (found === -1) { tooltip.classList.remove('visible'); return; }
+
+    const h25 = harvest25[found], h26 = harvest26[found];
+    const s25 = ship25 ? ship25[found] : null;
+    const s26 = ship26[found];
+    const b25 = beds25()[found], b26 = beds26()[found];
+    const diff = h26 - h25;
+    const pct  = h25 > 0 ? ((diff/h25)*100).toFixed(1) : null;
+    const dc   = diff >= 0 ? '#8EC496' : '#E07050';
+    const row  = (label, val, col) =>
+      `<div class="tt-row"><span class="tt-label" style="min-width:5.5em">${label}</span><span class="tt-val" style="color:${col}">${val}</span></div>`;
+
+    tooltip.innerHTML =
+      `<div class="tt-month">${found+1}月</div>` +
+      row('25収穫量', fmt1(h25)+' kg', cfg.c+'DD') +
+      row('26収穫量', fmt1(h26)+' kg', cfg.cl) +
+      (s25 !== null ? row('25出荷量', fmt1(s25)+' kg', SHIP_C+'CC') : '') +
+      row('26出荷量', fmt1(s26)+' kg', SHIP_CL) +
+      (b25>0 ? row('25菌床数', b25.toLocaleString('ja-JP')+' 本', '#7A9A7E') : '') +
+      (b26>0 ? row('26菌床数', b26.toLocaleString('ja-JP')+' 本', BED_C) : '') +
+      `<div class="tt-diff" style="color:${dc}">収穫量前年比 ${diff>=0?'+':''}${fmt1(diff)} kg${pct?' ('+pct+'%)':''}</div>`;
+
+    tooltip.classList.add('visible');
+    tooltip.style.left = (e.clientX+14)+'px';
+    tooltip.style.top  = (e.clientY-50)+'px';
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+    tooltip.innerHTML = TOOLTIP_BASE_HTML;
+  });
+
+  compareAttached.add(loc);
+}
+
+// Attach kinshō tooltip
+const kinshōTooltipAttachedYrs = new Set();
+function attachKinshōTooltip(yr) {
+  yr = yr || kinshōYear;
+  if (kinshōTooltipAttachedYrs.has(yr)) return;
+  const canvas = document.getElementById('chart-kinshō-'+yr);
+  if (!canvas) return;
+  const { locs } = KINSHŌ;
+  const chiba  = yr === 2025 ? CHIBA_2025 : CHIBA_2026;
+  const jisha  = yr === 2025 ? JISHA_2025 : JISHA_2026;
+  const n      = yr === 2025 ? 12 : 6;
+  const monthsFull = (yr === 2025
+    ? ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+    : ['1月','2月','3月','4月','5月','6月']).map(m=>yr+'年'+m);
+  const fmt = v => v.toLocaleString('ja-JP');
+
+  // 全拠点合計
+  const chibaTotals = Array.from({length:n}, (_,mi) =>
+    locs.reduce((s,l) => s + (chiba[l][mi]||0), 0));
+  const jishaTotals = Array.from({length:n}, (_,mi) =>
+    locs.reduce((s,l) => s + (jisha[l][mi]||0), 0));
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = (canvas.width/(window.devicePixelRatio||1)) / rect.width;
+    const px = (e.clientX-rect.left)*scaleX;
+    const W2 = canvas.width/(window.devicePixelRatio||1);
+    const cW2 = W2-58-8;
+    const groupW = cW2/n;
+    const BAR_PAD = groupW*0.18;
+
+    let foundMi = -1;
+    for (let mi=0; mi<n; mi++) {
+      const bX = 58 + mi*groupW + BAR_PAD;
+      const bEnd = 58 + mi*groupW + groupW - BAR_PAD;
+      if (px >= bX-4 && px <= bEnd+4) { foundMi=mi; break; }
+    }
+    if (foundMi<0) { tooltip.classList.remove('visible'); return; }
+
+    const chibaV = chibaTotals[foundMi];
+    const jishaV = jishaTotals[foundMi];
+    tooltip.querySelector('.tt-month').textContent = monthsFull[foundMi] + ' — 全拠点合計';
+    const hEl = document.getElementById('tt-h');
+    hEl.textContent = fmt(chibaV + jishaV) + ' 本'; hEl.style.color = '#EEE8DC';
+    const srow = document.getElementById('tt-srow');
+    srow.style.display = 'none';
+    const brow = document.getElementById('tt-brow');
+    brow.style.display = 'none';
+    const dEl = document.getElementById('tt-d');
+    const parts = [];
+    if (chibaV > 0) parts.push('千葉: ' + fmt(chibaV));
+    if (jishaV > 0) parts.push('自社: ' + fmt(jishaV));
+    dEl.textContent = parts.join(' / ');
+    dEl.style.color = '#7A9A7E';
+    tooltip.classList.add('visible');
+    tooltip.style.left=(e.clientX+14)+'px';
+    tooltip.style.top=(e.clientY-50)+'px';
+  });
+  canvas.addEventListener('mouseleave',()=>tooltip.classList.remove('visible'));
+  kinshōTooltipAttachedYrs.add(yr);
+}
+
+// ── Init ──
+const LOCS = ['inabe','gunma','nantou','total'];
+
+LOCS.forEach(loc => {
+  document.getElementById('loc-'+loc).innerHTML = buildLocPanel(loc);
+});
+
+document.getElementById('loc-kinshō').innerHTML = buildKinshōPanel();
+
+document.getElementById('footer').textContent =
+  '最終更新: 2026年6月30日　データソース: 各拠点収穫管理表 / 出荷量管理表（2026年1-6月）/ 千葉菌床納品（2026年2-6月）/ 志摩工場（2025年1-8月）';
+
+// Location tab switching
+const ALL_LOCS = [...LOCS, 'kinshō'];
+document.querySelectorAll('.tab-loc').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-loc').forEach(t=>t.classList.remove('active'));
+    btn.classList.add('active');
+    ALL_LOCS.forEach(l=>document.getElementById('loc-'+l).classList.remove('active'));
+    const loc = btn.dataset.loc;
+    document.getElementById('loc-'+loc).classList.add('active');
+    if (loc === 'kinshō') {
+      requestAnimationFrame(()=>{ drawKinshōChart(kinshōYear); attachKinshōTooltip(kinshōYear); });
+    } else {
+      const activeYrBtn = document.querySelector(`[data-loc="${loc}"] .tab-yr.active`);
+      const yr = activeYrBtn ? +activeYrBtn.dataset.yr : 2025;
+      requestAnimationFrame(()=>{ drawChart(loc,yr); attachTooltip(loc,yr); });
+    }
+  });
+});
+
+// Year tab switching (delegated)
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.tab-yr');
+  if (!btn) return;
+  const container = btn.closest('[data-loc]');
+  const loc   = container.dataset.loc;
+  const yrRaw = btn.dataset.yr;
+  const yr    = yrRaw === 'compare' ? 'compare' : +yrRaw;
+  container.querySelectorAll('.tab-yr').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  // hide all yr panels for this loc
+  container.querySelectorAll('.yr-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById(`yr-${loc}-${yr}`).classList.add('active');
+  if (loc === 'kinshō') {
+    kinshōYear = +yr;
+    requestAnimationFrame(()=>{ drawKinshōChart(+yr); attachKinshōTooltip(+yr); });
+  } else if (yr === 'compare') {
+    requestAnimationFrame(()=>{ drawCompareChart(loc); });
+  } else {
+    requestAnimationFrame(()=>{ drawChart(loc,yr); attachTooltip(loc,yr); });
+  }
+});
+
+// ── スプレッドシート自動取得 (gviz/tq) ──────────────────────
+function redrawActive() {
+  attached.clear();
+  kinshōTooltipAttachedYrs.clear();
+  const locBtn = document.querySelector('.tab-loc.active');
+  if (!locBtn) return;
+  const loc = locBtn.dataset.loc;
+  if (loc === 'kinshō') {
+    drawKinshōChart(kinshōYear); attachKinshōTooltip(kinshōYear);
+  } else {
+    const yrBtn  = document.querySelector(`[data-loc="${loc}"] .tab-yr.active`);
+    const yrRaw  = yrBtn ? yrBtn.dataset.yr : '2025';
+    if (yrRaw === 'compare') {
+      drawCompareChart(loc);
+    } else {
+      const yr = +yrRaw;
+      drawChart(loc, yr); attachTooltip(loc, yr);
+    }
+  }
+}
+
+// gviz/tq でシートデータを取得
+async function fetchGviz(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+  const res  = await fetch(url);
+  const text = await res.text();
+  // JSONP ラッパーを除去
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  return json.table;
+}
+
+// gviz の日付セルを Date に変換（Date(2026,1,20) は月が0始まり）
+function gvizToDate(cell) {
+  if (!cell || cell.v == null) return null;
+  const v = String(cell.v);
+  const m = v.match(/^Date\((\d+),(\d+),(\d+)\)/);
+  if (m) return new Date(+m[1], +m[2], +m[3]);
+  // テキスト形式 "2026/2/20" のフォールバック
+  const p = v.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (p) return new Date(+p[1], +p[2]-1, +p[3]);
+  return null;
+}
+
+// 千葉菌床納品シートを解析（C列=日付, D列=拠点, H列=本数）
+function parseChibaTable(table) {
+  const locs = ['いなべ','群馬','南丹'];
+  const res  = {
+    2025: { 'いなべ': new Array(12).fill(0), '群馬': new Array(12).fill(0), '南丹': new Array(12).fill(0) },
+    2026: { 'いなべ': new Array(6).fill(0),  '群馬': new Array(6).fill(0),  '南丹': new Array(6).fill(0)  },
+  };
+  for (const row of (table.rows || [])) {
+    const c    = row.c || [];
+    const date = gvizToDate(c[2]);
+    const loc  = String(c[3]?.v || '').trim();
+    const cnt  = Number(c[7]?.v) || 0;
+    if (!date || !locs.includes(loc) || cnt <= 0) continue;
+    const yr = date.getFullYear();
+    const mo = date.getMonth(); // 0-based
+    if (yr === 2025 && mo < 12) res[2025][loc][mo] += cnt;
+    if (yr === 2026 && mo < 6)  res[2026][loc][mo] += cnt;
+  }
+  return res;
+}
+
+// 志摩工場シートを解析（A列=期間, K列=いなべ, M列=群馬, O列=南丹）
+function parseJishaTable(table) {
+  const res = {
+    2025: { 'いなべ': new Array(12).fill(0), '群馬': new Array(12).fill(0), '南丹': new Array(12).fill(0) },
+    2026: { 'いなべ': new Array(6).fill(0),  '群馬': new Array(6).fill(0),  '南丹': new Array(6).fill(0)  },
+  };
+  for (const row of (table.rows || [])) {
+    const c = row.c || [];
+    // A列：期間セル（"2025/1" テキスト or Date型）
+    let period = '';
+    if (c[0]?.v != null) {
+      const v = String(c[0].v);
+      const dm = v.match(/^Date\((\d+),(\d+),/);
+      period = dm ? `${+dm[1]}/${+dm[2]+1}` : v.trim();
+    }
+    // "YYYY/M/D" → "YYYY/M" に正規化
+    period = period.replace(/^(\d{4}\/\d{1,2})\/\d+$/, '$1');
+    const pm = period.match(/^(2025|2026)\/(\d{1,2})$/);
+    if (!pm) continue;
+    const yr = +pm[1], mo = +pm[2] - 1;
+    if (yr === 2025 && mo < 12) {
+      res[2025]['いなべ'][mo] = Number(c[10]?.v) || 0;
+      res[2025]['群馬'][mo]   = Number(c[12]?.v) || 0;
+      res[2025]['南丹'][mo]   = Number(c[14]?.v) || 0;
+    }
+    if (yr === 2026 && mo < 6) {
+      res[2026]['いなべ'][mo] = Number(c[10]?.v) || 0;
+      res[2026]['群馬'][mo]   = Number(c[12]?.v) || 0;
+      res[2026]['南丹'][mo]   = Number(c[14]?.v) || 0;
+    }
+  }
+  return res;
+}
+
+async function loadSheetData() {
+  const badge = document.getElementById('sync-badge');
+  badge.textContent = '同期中…'; badge.style.color = 'var(--amber-l)';
+
+  try {
+    const [chibaTbl, jishaTbl] = await Promise.all([
+      fetchGviz(SHEET_CHIBA),
+      fetchGviz(SHEET_JISHA),
+    ]);
+
+    const chibaData = parseChibaTable(chibaTbl);
+    const jishaData = parseJishaTable(jishaTbl);
+
+    // 月単位でマージ：スプレッドシートの値が0の月はフォールバック値を維持
+    const mergeYr = (fallback, sheet) => {
+      const res = {};
+      for (const loc of Object.keys(fallback)) {
+        res[loc] = fallback[loc].map((v, i) => (sheet[loc]?.[i] > 0 ? sheet[loc][i] : v));
+      }
+      return res;
+    };
+    CHIBA_2025 = mergeYr(CHIBA_2025, chibaData[2025]);
+    CHIBA_2026 = mergeYr(CHIBA_2026, chibaData[2026]);
+    JISHA_2025 = mergeYr(JISHA_2025, jishaData[2025]);
+    JISHA_2026 = mergeYr(JISHA_2026, jishaData[2026]);
+
+    const now = new Date().toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    badge.textContent = `同期済 ${now}`;
+    badge.style.color = 'var(--sage)';
+    redrawActive();
+  } catch (err) {
+    console.error('シート取得エラー:', err);
+    badge.textContent = '同期失敗 — 保存データを表示中';
+    badge.style.color = 'var(--ship-l)';
+  }
+}
+
+// Initial draw
+requestAnimationFrame(()=>{ drawChart('inabe',2025); attachTooltip('inabe',2025); });
+
+// スプレッドシートからデータ取得（ページ読み込み時）
+loadSheetData();
+
+window.addEventListener('resize', ()=>{
+  const locBtn = document.querySelector('.tab-loc.active');
+  if (!locBtn) return;
+  const loc = locBtn.dataset.loc;
+  if (loc === 'kinshō') { drawKinshōChart(kinshōYear); return; }
+  const yrBtn = document.querySelector(`[data-loc="${loc}"] .tab-yr.active`);
+  const yr = yrBtn ? +yrBtn.dataset.yr : 2025;
+  drawChart(loc, yr);
+});
+</script>

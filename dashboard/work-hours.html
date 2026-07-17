@@ -1,0 +1,3339 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>勤務時間ダッシュボード</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #1e2235;
+      --border: #2e3148;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --accent-inabe: #38bdf8;
+      --accent-gunma: #a78bfa;
+      --accent-nandan: #34d399;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      flex-shrink: 0;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
+    header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+    #last-updated { font-size: 0.8rem; color: var(--muted); }
+    #refresh-btn {
+      background: var(--border);
+      border: none;
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: background 0.2s;
+    }
+    #refresh-btn:hover { background: #3a3f5c; }
+
+    /* Tabs */
+    .tabs {
+      flex-shrink: 0;
+      display: flex;
+      gap: 4px;
+      padding: 20px 32px 0;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      padding: 10px 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 8px 8px 0 0;
+      font-size: 0.9rem;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+    .tab-btn.active {
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom: 2px solid var(--surface2);
+      margin-bottom: -1px;
+    }
+    .tab-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+    /* Transfer mode toggle */
+    .transfer-toggle {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .transfer-toggle-btn {
+      padding: 7px 14px;
+      background: var(--surface);
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .transfer-toggle-btn + .transfer-toggle-btn { border-left: 1px solid var(--border); }
+    .transfer-toggle-btn.active { background: var(--accent-inabe); color: #06202e; font-weight: 700; }
+    .transfer-toggle-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+    /* Transfer alerts */
+    #transfer-alerts { flex-shrink: 0; }
+    #summary-transfer-alerts { flex-shrink: 0; }
+    #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
+    .transfer-alert-box {
+      margin: 16px 32px 0;
+      background: rgba(250,204,21,0.08);
+      border: 1px solid rgba(250,204,21,0.35);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .transfer-alert-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #facc15;
+      margin-bottom: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .transfer-alert-toggle-icon { flex-shrink: 0; width: 12px; font-size: 0.7rem; text-align: center; }
+    .transfer-alert-box ul { margin: 0; padding-left: 20px; }
+    .transfer-alert-box li { font-size: 0.8rem; color: var(--text); line-height: 1.6; }
+
+    main {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0 32px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Site panel */
+    .site-panel {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* KPI row */
+    .kpi-row {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      min-width: 140px;
+    }
+    .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+    .kpi-value { font-size: 1.3rem; font-weight: 700; }
+
+    /* Controls */
+    .select-btn {
+      padding: 5px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .select-btn:hover { border-color: #4a5070; color: var(--text); }
+
+    /* Employee filter (ヘッダー固定エリアのグローバル雇用区分フィルターで使用) */
+    .header-emp-filter {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+    }
+    .header-emp-filter-btns {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+    .header-emp-filter-btns .select-btn { padding: 3px 10px; font-size: 0.7rem; }
+    .header-emp-filter-checks {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 1px;
+      border-left: 1px solid var(--border);
+      padding-left: 10px;
+    }
+    .header-emp-filter-checks .emp-checkbox { padding: 1px 2px; font-size: 0.78rem; }
+    .emp-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 4px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      transition: background 0.1s;
+    }
+    .emp-checkbox:hover { background: var(--surface2); }
+    .emp-checkbox input { cursor: pointer; accent-color: var(--accent-inabe); }
+    .color-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Chart section label */
+    .chart-section-label {
+      flex-shrink: 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding-top: 4px;
+    }
+
+    /* Chart */
+    .chart-wrap {
+      position: relative;
+      height: 380px;
+    }
+
+    /* Loading / error */
+    .loading, .error-msg {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 300px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .error-msg { color: #f87171; }
+
+    /* ── Summary shell & sub-tabs ── */
+    .summary-shell {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .summary-subtabs {
+      flex-shrink: 0;
+      display: flex;
+      gap: 4px;
+    }
+    #summary-content {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .summary-subtab {
+      padding: 8px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 6px 6px 0 0;
+      font-size: 0.85rem;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+    .summary-subtab.active {
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom: 2px solid var(--surface2);
+      margin-bottom: -1px;
+    }
+    .summary-subtab:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+    /* ── Summary table ── */
+    .summary-panel {
+      flex: 1;
+      min-height: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      overflow: auto;
+    }
+
+    /* ── Summary chart ── */
+    .schart-shell {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+    .schart-section { display: flex; flex-direction: column; gap: 12px; }
+    .schart-header {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .schart-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .series-check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      color: var(--muted);
+      transition: border-color 0.15s, color 0.15s;
+      user-select: none;
+    }
+    .series-check:has(input:checked) { border-color: #4a5070; color: var(--text); }
+    .series-check input { display: none; }
+    .schart-wrap { position: relative; height: 300px; }
+
+    /* ── Roster table ── */
+    .roster-panel {
+      flex: 1;
+      min-height: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      overflow: auto;
+    }
+    .roster-table {
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      min-width: 600px;
+      width: 100%;
+    }
+    .roster-table th {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      cursor: pointer;
+      user-select: none;
+    }
+    .roster-table th:hover { color: var(--text); }
+    .roster-table th.sort-asc::after  { content: ' ▲'; font-size: 0.7em; }
+    .roster-table th.sort-desc::after { content: ' ▼'; font-size: 0.7em; }
+    .roster-table th.col-site { position: sticky; left: 0; z-index: 3; text-align: left; }
+    .roster-table td {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .roster-table td.col-site {
+      font-weight: 700;
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+    }
+    .roster-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .roster-table tbody tr:hover td { background: var(--surface2) !important; }
+
+    /* ── Roster filters ── */
+    .roster-filters {
+      flex-shrink: 0;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-bottom: none;
+      border-radius: 0 8px 0 0;
+    }
+    .roster-filter-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .roster-filter-label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-right: 2px;
+      white-space: nowrap;
+    }
+    .roster-pill {
+      padding: 4px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .roster-pill.active {
+      border-color: #4a5070;
+      color: var(--text);
+      background: var(--surface2);
+    }
+    .roster-panel {
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+    }
+    .summary-table {
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      min-width: 700px;
+      width: 100%;
+    }
+    .summary-table th {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 12px;
+      text-align: center;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .summary-table th.col-site { text-align: left; position: sticky; left: 0; z-index: 3; }
+    .summary-table th.col-work { text-align: left; }
+    .summary-table th.col-emp  { text-align: left; }
+    .summary-table td {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .summary-table td.col-site {
+      font-weight: 700;
+      font-size: 0.85rem;
+      vertical-align: top;
+      color: var(--text);
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+    }
+    .summary-table td.col-work {
+      font-weight: 600;
+      vertical-align: top;
+    }
+    .summary-table td.col-emp {
+      color: var(--muted);
+      padding-left: 8px;
+    }
+    .summary-table td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .summary-table td.total-row {
+      font-weight: 700;
+      color: var(--text);
+    }
+    /* Row type colors */
+    .summary-table tr.wt-栽培      td:not(.col-site) { background: rgba(52,211,153,0.06); }
+    .summary-table tr.wt-出荷      td:not(.col-site) { background: rgba(250,204,21,0.06); }
+    .summary-table tr.wt-配送      td:not(.col-site) { background: rgba(248,113,113,0.06); }
+    .summary-table tr.wt-拠点      td:not(.col-site) { background: rgba(249,115,22,0.08); }
+    .summary-table tr.kind-total   td { font-weight: 700; }
+    .summary-table tr.section-sep  td { border-top: 2px solid var(--border); }
+    .summary-table tr.site-total   td { background: rgba(255,255,255,0.04); font-weight: 700; border-top: 2px solid var(--border); }
+    .summary-table tr.site-total-last td { background: rgba(255,255,255,0.07); font-weight: 800; color: var(--text); }
+
+    @media (max-width: 640px) {
+      header, .tabs, main { padding-left: 16px; padding-right: 16px; }
+      .chart-wrap { height: 280px; }
+    }
+
+    /* ── Production table ── */
+    .prod-panel {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--border);
+      border-radius: 0 8px 8px 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .prod-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+    .prod-table {
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      min-width: 700px;
+      width: 100%;
+    }
+    .prod-table th {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 12px;
+      text-align: center;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .prod-table th.th-left { text-align: left; }
+    .prod-table td {
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .prod-table td.col-site {
+      font-weight: 700;
+      font-size: 0.88rem;
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+      vertical-align: top;
+    }
+    .prod-table td.col-cat {
+      font-weight: 600;
+      vertical-align: top;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .prod-table td.col-metric { white-space: nowrap; }
+    .prod-table td.col-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .prod-table td.empty { color: var(--muted); }
+    /* Category row colors */
+    .prod-table tr.cat-seisan td { background: rgba(56,189,248,0.07); }
+    .prod-table tr.cat-seisan td.col-site { background: var(--surface); }
+    .prod-table tr.cat-saibai td { background: rgba(52,211,153,0.06); }
+    .prod-table tr.cat-saibai td.col-site { background: var(--surface); }
+    .prod-table tr.cat-syukka td { background: rgba(250,204,21,0.07); }
+    .prod-table tr.cat-syukka td.col-site { background: var(--surface); }
+    /* Special metric rows */
+    .prod-table tr.metric-syukka-kg td { background: rgba(250,204,21,0.16); }
+    .prod-table tr.metric-syukka-kg td.col-site { background: var(--surface); }
+    .prod-table tr.metric-syukka-kg .col-metric { color: #facc15; font-weight: 600; }
+    .prod-table tr.metric-goukei td { font-weight: 700; }
+    /* Site separator */
+    .prod-table tr.site-start td { border-top: 2px solid var(--border); }
+    /* Standard settings table */
+    .std-set-table input.std-input:focus { outline: 1px solid var(--accent-inabe); border-color: var(--accent-inabe); }
+    .std-set-table input.std-input { transition: border-color 0.15s; }
+    .std-set-table td { vertical-align: middle; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>⏱ 勤務時間ダッシュボード</h1>
+    <div class="subtitle">整理済み_M ／ 個人別・月別 実質勤務時間 (h)</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="header-emp-filter" id="header-emp-filter">
+      <div class="header-emp-filter-btns">
+        <button class="select-btn" onclick="toggleAllEmpTypes(true)">全選択</button>
+        <button class="select-btn" onclick="toggleAllEmpTypes(false)">全解除</button>
+      </div>
+      <div class="header-emp-filter-checks" id="header-emp-filter-checks"></div>
+    </div>
+    <div class="transfer-toggle" id="transfer-toggle">
+      <button class="transfer-toggle-btn active" data-mode="off" onclick="setTransferMode(false)">振替なし</button>
+      <button class="transfer-toggle-btn" data-mode="on" onclick="setTransferMode(true)">振替あり</button>
+    </div>
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
+  </div>
+</header>
+
+<div class="tabs" id="tabs"></div>
+<div id="transfer-alerts"></div>
+<main id="main"></main>
+
+<script>
+const SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
+const SHEET_NAME = '整理済み_M';
+const ADJUST_SHEET_NAME = '整理済み_増減'; // 工数振替（研修・応援）レコード
+const PROD_GID = '2016642543'; // 整理済み_分析
+
+const SITES = ['いなべ', '群馬', '南丹'];
+const SITE_COLORS = {
+  'いなべ': '#38bdf8',
+  '群馬':   '#a78bfa',
+  '南丹':   '#34d399',
+};
+
+const EMP_COLORS = [
+  '#38bdf8','#a78bfa','#34d399','#f97316','#f43f5e','#facc15',
+  '#fb923c','#4ade80','#818cf8','#e879f9','#2dd4bf','#fbbf24',
+  '#60a5fa','#c084fc','#86efac','#fca5a5','#67e8f9','#fde68a',
+  '#a3e635','#f9a8d4','#7dd3fc','#d8b4fe','#6ee7b7','#fcd34d',
+  '#93c5fd','#c4b5fd','#bbf7d0','#fecaca','#99f6e4','#fef08a',
+  '#bef264','#fbcfe8','#e0f2fe','#ede9fe','#dcfce7','#fef9c3',
+  '#fce7f3',
+];
+
+// Map raw 雇用区分 value to summary category
+function classifyEmp(emp) {
+  if (!emp) return 'パート';
+  if (emp.includes('社員') || emp.includes('技能実習')) return '社員・技能実習生';
+  return 'パート'; // アルバイト, パート, etc.
+}
+
+// Work-type color class
+function workTypeClass(wt) {
+  if (!wt) return '';
+  if (wt.includes('拠点')) return 'wt-拠点';
+  if (wt.includes('配送')) return 'wt-配送';
+  if (wt.includes('出荷')) return 'wt-出荷';
+  if (wt.includes('栽培')) return 'wt-栽培';
+  return '';
+}
+
+let allData = null; // { months, monthYms, employees, nameLabel }
+let activeBase = null;
+let activeMode = null; // 'site' | 'summary'
+let chartInstance = null;
+let countChartInstance = null;
+
+let transferMode = false;          // false=振替なし(既定) / true=振替あり
+let transferAdjusted = null;       // { employees, alerts } — 振替反映後のデータ（初回ロード時に計算）
+
+let empTypeFilter = null;          // Set<string>：選択中の雇用区分（全タブ共通のグローバルな絞り込み。nullは未初期化＝絞り込み無し）
+
+function applyEmpTypeFilter(employees) {
+  if (!empTypeFilter) return employees;
+  return employees.filter(e => empTypeFilter.has(e.employment || '（未分類）'));
+}
+
+/* ── Fetch & parse ─────────────────────────────────────────────── */
+async function fetchSheet() {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}&headers=2`;
+  const res = await fetch(url);
+  const text = await res.text();
+  return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+}
+
+async function fetchAdjustSheet() {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(ADJUST_SHEET_NAME)}&headers=2`;
+  const res = await fetch(url);
+  const text = await res.text();
+  return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+}
+
+function parseDuration(cell) {
+  if (!cell) return null;
+  if (typeof cell.v === 'number') {
+    const h = cell.v * 24;
+    return h > 0 ? Math.round(h * 10) / 10 : null;
+  }
+  if (cell.f) {
+    const f = String(cell.f).replace(/^-/, '').trim();
+    const parts = f.split(':').map(Number);
+    if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      const h = parts[0] > 500
+        ? parts[0] / 60 + parts[1] / 3600
+        : parts[0] + parts[1] / 60;
+      return h > 0 ? Math.round(h * 10) / 10 : null;
+    }
+  }
+  return null;
+}
+
+// 「N/10締」列の締め日そのものの年月をYYYYMM数値で返す。
+// 整理済み_増減シートのI列（計上年月）もこれと同じ年月で入力されているため、突き合わせにも使う。
+function closingYearMonth(label) {
+  const m = String(label).match(/(\d+)\/\d+締/);
+  if (!m) return null;
+  const closeMonth = parseInt(m[1]);
+  const year = closeMonth <= 6 ? 2026 : 2025;
+  return year * 100 + closeMonth;
+}
+
+// YYYYMM数値 → "YYYY年M月" の表示ラベル（2行目の年月と常に一致させる）
+function ymToLabel(ym) {
+  if (ym == null) return null;
+  return `${Math.floor(ym / 100)}年${ym % 100}月`;
+}
+
+function buildDataset(json) {
+  const cols = json.table.cols;
+  const rows = json.table.rows || [];
+
+  const jissituCols = [];
+
+  // Step 1: detect monthly 実質勤務時間 columns from labels
+  cols.forEach((c, i) => {
+    if (!c) return;
+    const label = (c.label || '').trim();
+    if (label.includes('実質勤務時間')) {
+      const shimeMatch = label.match(/(\d+\/\d+締)/);
+      const ym = shimeMatch ? closingYearMonth(shimeMatch[1]) : null;
+      const monthLabel = ym !== null ? ymToLabel(ym) : label;
+      jissituCols.push({ month: monthLabel, idx: i, ym });
+    }
+  });
+
+  // Fallback: look for 締め日 pattern in label, use +2 offset for 実質勤務時間
+  if (jissituCols.length === 0) {
+    cols.forEach((c, i) => {
+      if (!c) return;
+      const label = (c.label || '').trim();
+      if (/\d+\/\d+締/.test(label) && i + 2 < cols.length) {
+        const ym = closingYearMonth(label);
+        jissituCols.push({ month: ym !== null ? ymToLabel(ym) : label, idx: i + 2, ym });
+      }
+    });
+  }
+
+  const firstMonthIdx = jissituCols.length > 0 ? jissituCols[0].idx : cols.length;
+
+  // Step 2: detect static columns by scanning data values
+  const VALID_BASES   = new Set(['いなべ', '群馬', '南丹']);
+  const VALID_WORKS   = new Set(['栽培', '出荷', '配送', '拠点業務']);
+  const EMP_KEYWORDS  = ['社員', 'アルバイト', 'パート', '技能実習', '正社員', '契約社員'];
+
+  // Tally how many rows have each known value type per column
+  const baseScore = {}, workScore = {}, empScore = {}, nameScore = {};
+  const sampleRows = rows.slice(0, 30);
+
+  sampleRows.forEach(row => {
+    const cells = row.c || [];
+    for (let i = 0; i < firstMonthIdx; i++) {
+      const v = String(cells[i]?.v ?? '').trim();
+      if (!v) continue;
+      if (VALID_BASES.has(v))                             baseScore[i] = (baseScore[i] || 0) + 1;
+      if (VALID_WORKS.has(v) || ['栽培','出荷','配送'].some(w => v.includes(w)))
+                                                          workScore[i] = (workScore[i] || 0) + 1;
+      if (EMP_KEYWORDS.some(k => v.includes(k)))         empScore[i]  = (empScore[i]  || 0) + 1;
+    }
+  });
+
+  function bestIdx(scores, fallback) {
+    let best = -1, bestVal = 0;
+    Object.entries(scores).forEach(([k, v]) => {
+      if (v > bestVal) { bestVal = v; best = parseInt(k); }
+    });
+    return best === -1 ? fallback : best;
+  }
+
+  // 拠点判定はE列（PRJ、index4）を使用。想定と異なる場合はスコアリングにフォールバック
+  let baseIdx = 4;
+  const col4HasValidBase = sampleRows.some(row => VALID_BASES.has(String(row.c?.[4]?.v ?? '').trim()));
+  if (!col4HasValidBase) baseIdx = bestIdx(baseScore, 3);
+
+  const workIdx = bestIdx(workScore, 4);
+  const empIdx  = bestIdx(empScore,  2);
+  const flagIdx = 1; // B列：フラグ（工数振替の氏名重複解決に使用）
+
+  // 氏名: H列 (index 7) — confirmed by spreadsheet structure
+  // Verify col 7 has string values; if not, scan for a column with Japanese name-like strings
+  let nameIdx = 7;
+  const col7HasNames = sampleRows.some(row => {
+    const v = String(row.c?.[7]?.v ?? '').trim();
+    return v.length > 1 && isNaN(Number(v)) && !VALID_BASES.has(v);
+  });
+  if (!col7HasNames) {
+    // fallback: find column with string values not matching base/work/emp known values
+    nameIdx = -1;
+    for (let i = 0; i < firstMonthIdx; i++) {
+      if (i === baseIdx || i === workIdx || i === empIdx) continue;
+      const hasNames = sampleRows.some(row => {
+        const v = String(row.c?.[i]?.v ?? '').trim();
+        return v.length > 1 && isNaN(Number(v)) && !VALID_BASES.has(v) &&
+               !VALID_WORKS.has(v) && !EMP_KEYWORDS.some(k => v.includes(k));
+      });
+      if (hasNames) { nameIdx = i; break; }
+    }
+    if (nameIdx === -1) nameIdx = 7;
+  }
+
+  // Deduplicate months
+  const monthCounts = {};
+  const months = jissituCols.map(({ month }) => {
+    monthCounts[month] = (monthCounts[month] || 0) + 1;
+    if (monthCounts[month] > 1) return inferNextMonth(month, monthCounts[month]);
+    return month;
+  });
+  // 締め日の年月（YYYYMM）。整理済み_増減シートとの月突き合わせに使う
+  const monthYms = jissituCols.map(({ ym }) => ym);
+
+  const employees = [];
+
+  rows.forEach(row => {
+    const cells = row.c || [];
+    const base = String(cells[baseIdx]?.v ?? '').trim();
+    if (!VALID_BASES.has(base)) return;
+
+    const name = String(cells[nameIdx]?.v ?? cells[nameIdx]?.f ?? '').trim();
+    if (!name) return;
+
+    const employment = String(cells[empIdx]?.v ?? '').trim();
+    const workType   = String(cells[workIdx]?.v ?? '').trim();
+    const empClass   = classifyEmp(employment);
+    const flag       = cells[flagIdx]?.v;
+
+    const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
+    if (hours.every(h => h === null)) return;
+
+    employees.push({ name, base, workType, employment, empClass, hours, flag });
+  });
+
+  const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
+  return { months, monthYms, employees, nameLabel };
+}
+
+function inferNextMonth(base, occurrence) {
+  const m = base.match(/^(\d+)年(\d+)月$/);
+  if (!m) return `${base}(${occurrence})`;
+  let year = parseInt(m[1]);
+  let month = parseInt(m[2]) + (occurrence - 1);
+  while (month > 12) { month -= 12; year++; }
+  return `${year}年${month}月`;
+}
+
+/* ── 工数振替（整理済み_増減）───────────────────────────────────── */
+
+// 「（」「(」（全角・半角）以降を除去し、空白を正規化した上で大文字化する
+function normalizeName(raw) {
+  if (!raw) return '';
+  let s = String(raw);
+  const idxFull = s.indexOf('（');
+  const idxHalf = s.indexOf('(');
+  const cut = [idxFull, idxHalf].filter(i => i >= 0).sort((a, b) => a - b)[0];
+  if (cut !== undefined) s = s.slice(0, cut);
+  s = s.replace(/[　\s]+/g, ' ').trim();
+  return s.toUpperCase();
+}
+
+// gvizの日付セル（cell.v が "Date(y,m,d)" 文字列）からYYYYMM数値を取り出す
+function parseGvizDateYm(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  if (typeof v === 'string') {
+    const m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
+    if (m) return parseInt(m[1]) * 100 + (parseInt(m[2]) + 1); // gvizの月は0始まり
+  }
+  const text = cell.f || (typeof v === 'string' ? v : '');
+  const m2 = String(text).match(/(\d{4})[\/\-](\d{1,2})/);
+  if (m2) return parseInt(m2[1]) * 100 + parseInt(m2[2]);
+  return null;
+}
+
+// 整理済み_増減シートの列位置（固定）
+const ADJ_EMP_COL = 2, ADJ_BASE_COL = 3, ADJ_PRJ_COL = 4, ADJ_ROLE_COL = 5, ADJ_NAME_COL = 7, ADJ_YM_COL = 8, ADJ_HOURS_COL = 9;
+
+function parseAdjustRecords(json) {
+  const rows = json.table.rows || [];
+  const records = [];
+  rows.forEach((row, i) => {
+    const cells = row.c || [];
+    const rawName = String(cells[ADJ_NAME_COL]?.v ?? cells[ADJ_NAME_COL]?.f ?? '').trim();
+    if (!rawName) return; // 空行はスキップ
+
+    const base = String(cells[ADJ_BASE_COL]?.v ?? '').trim();
+    const prj  = String(cells[ADJ_PRJ_COL]?.v ?? '').trim();
+    const role = String(cells[ADJ_ROLE_COL]?.v ?? '').trim();
+    const ym   = parseGvizDateYm(cells[ADJ_YM_COL]);
+    const hours = parseDuration(cells[ADJ_HOURS_COL]) || 0;
+
+    records.push({ rowNum: i + 1, rawName, base, prj, role, ym, hours });
+  });
+  return records;
+}
+
+function formatHM(hours) {
+  const sign = hours < 0 ? '▲' : '';
+  const abs = Math.abs(hours);
+  let h = Math.floor(abs);
+  let mm = Math.round((abs - h) * 60);
+  if (mm === 60) { mm = 0; h += 1; }
+  return `${sign}${h}:${String(mm).padStart(2, '0')}`;
+}
+
+// baseData（振替なしのallData）と整理済み_増減レコードから、
+// 個人単位で加減算を反映した employees 配列とアラート一覧を作る
+function computeTransferAdjustments(baseData, adjustRecords) {
+  const { months, monthYms, employees: baseEmployees } = baseData;
+
+  // 深いコピー（hours配列を独立させる）
+  const employees = baseEmployees.map(e => ({ ...e, hours: e.hours.slice() }));
+
+  const byName = new Map();
+  employees.forEach(e => {
+    const key = normalizeName(e.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(e);
+  });
+
+  const alerts = [];
+  const additions = []; // { emp, monthIdx, destBase, destRole, hours }
+
+  adjustRecords.forEach(rec => {
+    const monthIdx = monthYms.indexOf(rec.ym);
+    if (monthIdx === -1) return; // 対象月が現在の集計範囲に無い（対象外期間）
+
+    const key = normalizeName(rec.rawName);
+    let matches = byName.get(key);
+
+    // 氏名が複数件ヒットする場合（拠点間の恒久異動等）は、B列フラグ＝1のレコードのみに絞り込む
+    if (matches && matches.length > 1) {
+      matches = matches.filter(e => e.flag === 1);
+    }
+
+    if (!matches || matches.length !== 1) {
+      const reason = matches && matches.length > 1 ? '（B列フラグ＝1のレコードが複数あり特定できません）'
+        : (byName.get(key) && byName.get(key).length > 1 ? '（B列フラグ＝1のレコードが見つかりません）' : '');
+      alerts.push(`氏名不一致：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」に一致する従業員が整理済み_Mシートで見つかりません${reason}`);
+      return;
+    }
+    const emp = matches[0];
+
+    const before = emp.hours[monthIdx] ?? 0;
+    const after = before - rec.hours;
+    emp.hours[monthIdx] = after;
+    if (after < 0) {
+      alerts.push(
+        `${emp.name}さん：${months[monthIdx]}度、${rec.role || '振替'}による減算${formatHM(rec.hours)}` +
+        `に対し実質勤務時間${formatHM(before)}のため${formatHM(after)}`
+      );
+    }
+
+    if (rec.base !== rec.prj) {
+      additions.push({ emp, monthIdx, destBase: rec.prj, destRole: rec.role, hours: rec.hours });
+    }
+  });
+
+  // 応援先（拠点×担当）ごとに仮想の従業員レコードへ加算をまとめる
+  const addMap = new Map();
+  additions.forEach(a => {
+    const k = `${normalizeName(a.emp.name)}|${a.destBase}|${a.destRole}`;
+    if (!addMap.has(k)) {
+      addMap.set(k, {
+        name: `${a.emp.name}（応援）`,
+        base: a.destBase,
+        workType: a.destRole,
+        employment: a.emp.employment,
+        empClass: a.emp.empClass,
+        hours: new Array(months.length).fill(null),
+        isTransferVirtual: true,
+      });
+    }
+    const v = addMap.get(k);
+    v.hours[a.monthIdx] = (v.hours[a.monthIdx] ?? 0) + a.hours;
+  });
+
+  return { employees: employees.concat(Array.from(addMap.values())), alerts };
+}
+
+// 現在のトグル状態・雇用区分フィルターに応じたデータ（monthsは共通、employeesだけ切り替え／絞り込み）を返す
+function getActiveData() {
+  const base = (transferMode && transferAdjusted) ? { ...allData, employees: transferAdjusted.employees } : allData;
+  return { ...base, employees: applyEmpTypeFilter(base.employees) };
+}
+
+function setTransferMode(mode) {
+  if (transferMode === mode) return;
+  transferMode = mode;
+  document.querySelectorAll('.transfer-toggle-btn').forEach(b => {
+    b.classList.toggle('active', (b.dataset.mode === 'on') === mode);
+  });
+  renderTransferAlerts();
+  rerenderCurrentView();
+}
+
+let alertsCollapsed = false; // アコーディオンの開閉状態（タブ切替・再描画をまたいで保持）
+
+function toggleTransferAlerts() {
+  alertsCollapsed = !alertsCollapsed;
+  document.querySelectorAll('.transfer-alert-list').forEach(ul => {
+    ul.style.display = alertsCollapsed ? 'none' : '';
+  });
+  document.querySelectorAll('.transfer-alert-toggle-icon').forEach(icon => {
+    icon.textContent = alertsCollapsed ? '▶' : '▼';
+  });
+}
+
+// サブタブを持つタブ（サマリー）ではサブタブの下、それ以外のタブではメインタブの下に表示する
+function renderTransferAlerts() {
+  const summaryEl = document.getElementById('summary-transfer-alerts');
+  const globalEl = document.getElementById('transfer-alerts');
+  const target = summaryEl || globalEl;
+  if (summaryEl && globalEl) globalEl.innerHTML = '';
+  if (!target) return;
+
+  const alerts = transferMode && transferAdjusted ? transferAdjusted.alerts : [];
+  if (!alerts.length) { target.innerHTML = ''; return; }
+
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ 工数振替アラート（${alerts.length}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
+// トグル切替時に、現在表示中のタブ・サブタブだけを再描画する
+function rerenderCurrentView() {
+  if (activeMode === 'site') {
+    renderBasePanel();
+  } else if (activeMode === 'summary') {
+    const activeSub = document.querySelector('.summary-subtab.active');
+    const tab = activeSub ? activeSub.dataset.tab : 'table';
+    destroySummaryCharts();
+    if (tab === 'table') renderSummaryTable();
+    else if (tab === 'work-chart') renderSummaryWorkChart();
+    else if (tab === 'emptype') renderSummaryByEmpType();
+    else if (tab === 'emp-chart') renderSummaryEmpChart();
+    else if (tab === 'chart') renderSummaryChart();
+    else renderSummaryRoster();
+  } else if (activeMode === 'productivity') {
+    renderProductivityTab();
+  } else if (activeMode === 'compare') {
+    renderCompareTab();
+  }
+  // production / stdset / stdhours は整理済み_Mを参照しないため再描画不要
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────── */
+function renderTabs(bases) {
+  const tabsEl = document.getElementById('tabs');
+  tabsEl.innerHTML = '';
+
+  bases.forEach((base, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (activeMode === 'site' && activeBase === base ? ' active' : '');
+    btn.textContent = base;
+    btn.dataset.base = base;
+    btn.onclick = () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeBase = base;
+      activeMode = 'site';
+      document.getElementById('main').innerHTML = '';
+      renderBasePanel();
+      renderTransferAlerts();
+    };
+    tabsEl.appendChild(btn);
+  });
+
+  // Summary tab
+  const sBtn = document.createElement('button');
+  sBtn.className = 'tab-btn summary-tab' + (activeMode === 'summary' ? ' active' : '');
+  sBtn.textContent = '📊 サマリー';
+  sBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    sBtn.classList.add('active');
+    activeMode = 'summary';
+    if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
+    document.getElementById('main').innerHTML = '';
+    renderSummary();
+  };
+  tabsEl.appendChild(sBtn);
+
+  // Production tab
+  const pBtn = document.createElement('button');
+  pBtn.className = 'tab-btn production-tab' + (activeMode === 'production' ? ' active' : '');
+  pBtn.textContent = '🌱 生産実績';
+  pBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    pBtn.classList.add('active');
+    activeMode = 'production';
+    document.getElementById('main').innerHTML = '';
+    renderProductionTab();
+    renderTransferAlerts();
+  };
+  tabsEl.appendChild(pBtn);
+
+  // Productivity tab
+  const prBtn = document.createElement('button');
+  prBtn.className = 'tab-btn productivity-tab' + (activeMode === 'productivity' ? ' active' : '');
+  prBtn.textContent = '📈 生産性';
+  prBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    prBtn.classList.add('active');
+    activeMode = 'productivity';
+    document.getElementById('main').innerHTML = '';
+    renderProductivityTab();
+    renderTransferAlerts();
+  };
+  tabsEl.appendChild(prBtn);
+
+  // 標準工数設定 tab
+  const stBtn = document.createElement('button');
+  stBtn.className = 'tab-btn stdset-tab' + (activeMode === 'stdset' ? ' active' : '');
+  stBtn.textContent = '⚙️ 標準工数設定';
+  stBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    stBtn.classList.add('active');
+    activeMode = 'stdset';
+    document.getElementById('main').innerHTML = '';
+    renderStdSetTab();
+    renderTransferAlerts();
+  };
+  tabsEl.appendChild(stBtn);
+
+  // 標準工数(h) tab
+  const shBtn = document.createElement('button');
+  shBtn.className = 'tab-btn stdhours-tab' + (activeMode === 'stdhours' ? ' active' : '');
+  shBtn.textContent = '📋 標準工数(h)';
+  shBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    shBtn.classList.add('active');
+    activeMode = 'stdhours';
+    document.getElementById('main').innerHTML = '';
+    renderStdHoursTab();
+    renderTransferAlerts();
+  };
+  tabsEl.appendChild(shBtn);
+
+  // 比較 tab
+  const cmpBtn = document.createElement('button');
+  cmpBtn.className = 'tab-btn compare-tab' + (activeMode === 'compare' ? ' active' : '');
+  cmpBtn.textContent = '📊 比較';
+  cmpBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    cmpBtn.classList.add('active');
+    activeMode = 'compare';
+    document.getElementById('main').innerHTML = '';
+    renderCompareTab();
+    renderTransferAlerts();
+  };
+  tabsEl.appendChild(cmpBtn);
+}
+
+/* ── Individual base panel ─────────────────────────────────────── */
+function renderBasePanel() {
+  const main = document.getElementById('main');
+  const { months } = allData;
+  // 従業員数（雇用区分フィルターは反映するが、振替の影響は受けない＝時間の移動であり人数ではないため）
+  const baseEmps = applyEmpTypeFilter(allData.employees).filter(e => e.base === activeBase && e.workType);
+  // 勤務時間の集計（月平均・個人月間最大）は振替・雇用区分フィルターの両方を反映する
+  const adjBaseEmps = getActiveData().employees.filter(e => e.base === activeBase && e.workType);
+  const baseColor = SITE_COLORS[activeBase] || '#38bdf8';
+
+  if (!document.getElementById('site-panel')) {
+    main.innerHTML = `
+      <div class="site-panel" id="site-panel">
+        <div class="kpi-row" id="kpi-row"></div>
+        <div class="chart-section-label">勤務時間グラフ</div>
+        <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+        <div class="chart-section-label">人数グラフ（栽培 / 出荷 / 配送 ／ 社員 / パート / 技能実習生）</div>
+        <div class="chart-wrap" style="height:260px"><canvas id="count-chart"></canvas></div>
+      </div>`;
+  }
+
+  const kpiRow = document.getElementById('kpi-row');
+  const validHours = adjBaseEmps.flatMap(e => e.hours.filter(h => h !== null));
+  const avgPerMonth = months.map((_, mi) => {
+    const vals = adjBaseEmps.map(e => e.hours[mi]).filter(h => h !== null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }).filter(v => v !== null);
+  const grandAvg = avgPerMonth.length ? avgPerMonth.reduce((a,b)=>a+b,0)/avgPerMonth.length : 0;
+  const maxHours = validHours.length ? Math.max(...validHours) : 0;
+
+  kpiRow.innerHTML = `
+    <div class="kpi">
+      <div class="kpi-label">従業員数</div>
+      <div class="kpi-value" style="color:${baseColor}">${baseEmps.length} 名</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">月平均勤務時間（拠点平均）</div>
+      <div class="kpi-value">${grandAvg.toFixed(1)} h</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">個人月間最大</div>
+      <div class="kpi-value">${maxHours.toFixed(1)} h</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">集計月数</div>
+      <div class="kpi-value">${months.length} ヶ月</div>
+    </div>`;
+
+  buildChart();
+  buildCountChart();
+}
+
+function buildChart() {
+  const { months } = allData;
+  const baseEmps = getActiveData().employees.filter(e => e.base === activeBase && e.workType);
+
+  const datasets = baseEmps.map(emp => {
+    const color = empTypeColor(emp.employment || '（未分類）');
+    return {
+      label: `${emp.name}（${emp.employment || '未分類'}）`,
+      data: emp.hours,
+      borderColor: color,
+      backgroundColor: color + '22',
+      borderWidth: 1.8,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+    };
+  });
+
+  const avgData = months.map((_, mi) => {
+    const vals = baseEmps.map(e => e.hours[mi]).filter(h => h !== null);
+    return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length * 10)/10 : null;
+  });
+  datasets.push({
+    label: '拠点平均',
+    data: avgData,
+    borderColor: '#f97316',
+    backgroundColor: 'transparent',
+    borderWidth: 2.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    tension: 0.3,
+    spanGaps: true,
+    order: -1,
+  });
+
+  const ctx = document.getElementById('main-chart').getContext('2d');
+  if (chartInstance) chartInstance.destroy();
+
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: months, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: datasets.length <= 10,
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 10 },
+        },
+        tooltip: {
+          backgroundColor: '#1e2235',
+          borderColor: '#3a3f5c',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#a0aec0',
+          callbacks: {
+            label: ctx => {
+              if (ctx.parsed.y === null) return null;
+              return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', font: { size: 11 }, maxRotation: 45 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+          grid: { color: '#1e2235' },
+          suggestedMin: 0,
+          title: { display: true, text: '実質勤務時間 (h)', color: '#8892a4', font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+function buildCountChart() {
+  const { months } = allData;
+  const baseEmps = applyEmpTypeFilter(allData.employees).filter(e => e.base === activeBase && e.workType);
+
+  const WT_SERIES = [
+    { label: '栽培', key: '栽培', color: '#34d399' },
+    { label: '出荷', key: '出荷', color: '#facc15' },
+    { label: '配送', key: '配送', color: '#f87171' },
+  ];
+  const ET_SERIES = [
+    { label: '社員',       match: e => (e.employment||'').includes('社員') && !(e.employment||'').includes('技能'), color: '#60a5fa' },
+    { label: 'パート',     match: e => ['パート','アルバイト'].some(k => (e.employment||'').includes(k)),          color: '#fb923c' },
+    { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
+  ];
+
+  const datasets = [];
+
+  WT_SERIES.forEach(wt => {
+    const data = months.map((_, mi) =>
+      baseEmps.filter(e => e.workType.includes(wt.key) && e.hours[mi] !== null).length || null
+    );
+    datasets.push({
+      label: wt.label,
+      data,
+      borderColor: wt.color,
+      backgroundColor: wt.color + '33',
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+    });
+  });
+
+  ET_SERIES.forEach(et => {
+    const data = months.map((_, mi) =>
+      baseEmps.filter(e => et.match(e) && e.hours[mi] !== null).length || null
+    );
+    datasets.push({
+      label: et.label,
+      data,
+      borderColor: et.color,
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderDash: [6, 3],
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+    });
+  });
+
+  const ctx = document.getElementById('count-chart')?.getContext('2d');
+  if (!ctx) return;
+  if (countChartInstance) countChartInstance.destroy();
+
+  countChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: months, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 10 },
+        },
+        tooltip: {
+          backgroundColor: '#1e2235',
+          borderColor: '#3a3f5c',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#a0aec0',
+          callbacks: {
+            label: ctx => ctx.parsed.y !== null ? `${ctx.dataset.label}: ${ctx.parsed.y} 名` : null,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', font: { size: 11 }, maxRotation: 45 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} 名`, stepSize: 1 },
+          grid: { color: '#1e2235' },
+          suggestedMin: 0,
+          title: { display: true, text: '人数 (名)', color: '#8892a4', font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+/* ── 雇用区分フィルター（全タブ共通のグローバルな絞り込み。画面上段に1つだけ表示） ── */
+let empTypeColorMap = {}; // 雇用区分ごとの色（ヘッダーのフィルターとグラフの配色を揃えるため、全データから一度だけ算出）
+
+function empTypeColor(type) {
+  return empTypeColorMap[type] || EMP_COLORS[0];
+}
+
+// preserveChecked/preserveAllTypes を渡すと、更新（再読み込み）前の選択状態を維持する
+// （preserveAllTypesに無い＝新しく現れた雇用区分は、初回同様デフォルトで選択状態にする）
+function renderEmpTypeFilterUI(preserveChecked, preserveAllTypes) {
+  const empTypes = [...new Set(allData.employees.filter(e => e.workType).map(e => e.employment || '（未分類）'))].sort();
+  empTypeFilter = new Set(empTypes.filter(t =>
+    !preserveChecked || (preserveAllTypes && !preserveAllTypes.has(t)) || preserveChecked.has(t)
+  ));
+  empTypeColorMap = {};
+  empTypes.forEach((t, i) => { empTypeColorMap[t] = EMP_COLORS[i % EMP_COLORS.length]; });
+
+  const checksEl = document.getElementById('header-emp-filter-checks');
+  checksEl.innerHTML = '';
+  empTypes.forEach(type => {
+    const count = allData.employees.filter(e => e.workType && (e.employment || '（未分類）') === type).length;
+    const label = document.createElement('label');
+    label.className = 'emp-checkbox';
+    label.innerHTML = `
+      <input type="checkbox" data-type="${type}" ${empTypeFilter.has(type) ? 'checked' : ''} onchange="onEmpTypeFilterChange()">
+      <span class="color-dot" style="background:${empTypeColor(type)}"></span>
+      <span>${type} <span style="color:var(--muted);font-size:0.78rem">(${count}名)</span></span>`;
+    checksEl.appendChild(label);
+  });
+}
+
+function onEmpTypeFilterChange() {
+  empTypeFilter = new Set(
+    [...document.querySelectorAll('#header-emp-filter-checks input[type=checkbox]')]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.type)
+  );
+  rerenderCurrentView();
+}
+
+function toggleAllEmpTypes(checked) {
+  document.querySelectorAll('#header-emp-filter-checks input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  onEmpTypeFilterChange();
+}
+
+/* ── Summary helpers ───────────────────────────────────────────── */
+function fmtH(h) {
+  if (h === null || h === undefined || isNaN(h)) return '—';
+  return h.toFixed(1) + ' h';
+}
+
+const SUMMARY_COLORS = [
+  '#34d399','#6ee7b7',  // 栽培
+  '#facc15','#fde68a',  // 出荷
+  '#f87171','#fca5a5',  // 配送
+  '#fb923c','#fed7aa',  // 拠点業務
+  '#60a5fa','#93c5fd',  // その他
+  '#c084fc','#e879f9',
+];
+const TOTAL_COLOR = '#e2e8f0';
+
+function getOrderedWorkTypes(employees) {
+  const order = [];
+  employees.forEach(e => { if (e.workType && !order.includes(e.workType)) order.push(e.workType); });
+  return [...order.filter(wt => !wt.includes('拠点')), ...order.filter(wt => wt.includes('拠点'))];
+}
+
+let summaryChartInstances = {};
+
+function destroySummaryCharts() {
+  Object.values(summaryChartInstances).forEach(c => c.destroy());
+  summaryChartInstances = {};
+}
+
+/* ── Summary shell (sub-tabs) ──────────────────────────────────── */
+function renderSummary() {
+  destroySummaryCharts();
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="summary-shell">
+      <div class="summary-subtabs" id="summary-subtabs">
+        <button class="summary-subtab active" data-tab="table">📋 業務区分別（表）</button>
+        <button class="summary-subtab" data-tab="work-chart">📊 業務区分別（グラフ）</button>
+        <button class="summary-subtab" data-tab="emptype">👥 雇用形態別（表）</button>
+        <button class="summary-subtab" data-tab="emp-chart">📊 雇用形態別（グラフ）</button>
+        <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
+        <button class="summary-subtab" data-tab="roster">👤 名簿</button>
+      </div>
+      <div id="summary-transfer-alerts"></div>
+      <div id="summary-content"></div>
+    </div>`;
+  renderTransferAlerts();
+
+  document.querySelectorAll('.summary-subtab').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.summary-subtab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderSummarySubtab(btn.dataset.tab);
+    };
+  });
+
+  renderSummaryTable();
+}
+
+// サマリーのサブタブ本体を描画する（renderSummary()内のクリックハンドラと、
+// リロード後・振替/雇用区分フィルター変更後の再描画から共通で呼ばれる）
+function renderSummarySubtab(tab) {
+  destroySummaryCharts();
+  if (tab === 'table')         renderSummaryTable();
+  else if (tab === 'work-chart') renderSummaryWorkChart();
+  else if (tab === 'emptype')  renderSummaryByEmpType();
+  else if (tab === 'emp-chart') renderSummaryEmpChart();
+  else if (tab === 'chart')    renderSummaryChart();
+  else if (tab === 'roster')   { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
+}
+
+// activeMode === 'summary' のとき、現在アクティブなサブタブに切り替える（無ければ tab を新たにアクティブ化）
+function switchToSummarySubtab(tab) {
+  if (!tab || tab === 'table') return; // renderSummary()が既定でtableを描画済み
+  const btn = document.querySelector(`.summary-subtab[data-tab="${tab}"]`);
+  if (!btn) return;
+  document.querySelectorAll('.summary-subtab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderSummarySubtab(tab);
+}
+
+/* ── Summary: 表タブ ───────────────────────────────────────────── */
+function renderSummaryTable() {
+  const { months, employees } = getActiveData();
+  const content = document.getElementById('summary-content');
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+  const EMP_CLASSES = ['社員・技能実習生', 'パート'];
+
+  let html = `<div class="summary-panel"><table class="summary-table">
+    <thead><tr>
+      <th class="col-site">拠点</th>
+      <th class="col-work">業務区分</th>
+      <th class="col-emp">区分</th>
+      ${months.map(m => `<th>${m}</th>`).join('')}
+    </tr></thead><tbody>`;
+
+  SITES.forEach(site => {
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    if (!siteEmps.length) return;
+
+    const siteWorkTypes = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
+    const totalRows = siteWorkTypes.length * 9;
+    let siteRowSpan = totalRows + 6;
+    let firstRow = true;
+
+    siteWorkTypes.forEach((wt, wtIdx) => {
+      const wtEmps = siteEmps.filter(e => e.workType === wt);
+      const wtClass = workTypeClass(wt);
+      const isSep = wtIdx > 0;
+
+      const kinds = [
+        { label: '計／時間', sub: EMP_CLASSES.map(ec => ({
+            label: ec,
+            vals: months.map((_, mi) => {
+              const vals = wtEmps.filter(e => e.empClass === ec).map(e => e.hours[mi]).filter(h => h !== null);
+              return vals.length ? vals.reduce((a,b)=>a+b,0) : null;
+            }),
+          })),
+          total: months.map((_, mi) => {
+            const vals = wtEmps.map(e => e.hours[mi]).filter(h => h !== null);
+            return vals.length ? vals.reduce((a,b)=>a+b,0) : null;
+          }),
+        },
+        { label: '計／人数', sub: EMP_CLASSES.map(ec => ({
+            label: ec,
+            vals: months.map((_, mi) => {
+              const n = wtEmps.filter(e => e.empClass === ec && e.hours[mi] !== null).length;
+              return n || null;
+            }),
+          })),
+          total: months.map((_, mi) => {
+            const n = wtEmps.filter(e => e.hours[mi] !== null).length;
+            return n || null;
+          }),
+          isCount: true,
+        },
+        { label: '計／平均', sub: EMP_CLASSES.map(ec => ({
+            label: ec,
+            vals: months.map((_, mi) => {
+              const vals = wtEmps.filter(e => e.empClass === ec).map(e => e.hours[mi]).filter(h => h !== null);
+              return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+            }),
+          })),
+          total: months.map((_, mi) => {
+            const vals = wtEmps.map(e => e.hours[mi]).filter(h => h !== null);
+            return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+          }),
+        },
+      ];
+
+      let wtFirstRow = true;
+      const wtRowCount = 9;
+
+      kinds.forEach(kind => {
+        kind.sub.forEach(sub => {
+          html += `<tr class="${wtClass}${isSep && wtFirstRow ? ' section-sep' : ''}">`;
+          if (firstRow) {
+            html += `<td class="col-site" rowspan="${siteRowSpan}" style="color:${SITE_COLORS[site]||'#fff'}">${site}</td>`;
+            firstRow = false;
+          }
+          if (wtFirstRow) {
+            html += `<td class="col-work" rowspan="${wtRowCount}">${wt}</td>`;
+            wtFirstRow = false;
+          }
+          html += `<td class="col-emp">${sub.label}</td>`;
+          sub.vals.forEach(v => {
+            html += `<td class="num">${kind.isCount ? (v !== null ? v + ' 名' : '—') : fmtH(v)}</td>`;
+          });
+          html += '</tr>';
+        });
+        html += `<tr class="${wtClass} kind-total">`;
+        html += `<td class="col-emp total-row">${kind.label}</td>`;
+        kind.total.forEach(v => {
+          html += `<td class="num total-row">${kind.isCount ? (v !== null ? v + ' 名' : '—') : fmtH(v)}</td>`;
+        });
+        html += '</tr>';
+      });
+    });
+
+    const EMP_CLASSES_INNER = ['社員・技能実習生', 'パート'];
+    EMP_CLASSES_INNER.forEach((ec, ecIdx) => {
+      const vals = months.map((_, mi) =>
+        siteEmps.filter(e => e.empClass === ec).map(e => e.hours[mi]).filter(h => h !== null)
+          .reduce((a, b) => a + b, 0) || null
+      );
+      html += `<tr class="site-total">`;
+      if (ecIdx === 0) html += `<td class="col-work" rowspan="6" style="font-weight:800;color:var(--text);vertical-align:top;border-top:2px solid var(--border)">合計</td>`;
+      html += `<td class="col-emp">${ec}（時間）</td>`;
+      vals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+      html += '</tr>';
+    });
+    const grandHourVals = months.map((_, mi) =>
+      siteEmps.map(e => e.hours[mi]).filter(h => h !== null).reduce((a, b) => a + b, 0) || null
+    );
+    html += `<tr class="site-total-last"><td class="col-emp">計／時間</td>`;
+    grandHourVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    html += '</tr>';
+
+    EMP_CLASSES_INNER.forEach(ec => {
+      const vals = months.map((_, mi) =>
+        siteEmps.filter(e => e.empClass === ec && e.hours[mi] !== null).length || null
+      );
+      html += `<tr class="site-total"><td class="col-emp">${ec}（人数）</td>`;
+      vals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+      html += '</tr>';
+    });
+    const grandCountVals = months.map((_, mi) =>
+      siteEmps.filter(e => e.hours[mi] !== null).length || null
+    );
+    html += `<tr class="site-total-last"><td class="col-emp">計／人数</td>`;
+    grandCountVals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  content.innerHTML = html;
+}
+
+/* ── Summary: グラフタブ ───────────────────────────────────────── */
+function buildSiteSeriesList(site) {
+  const { employees, months } = getActiveData();
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+  const EMP_CLASSES = ['社員・技能実習生', 'パート'];
+  const siteEmps = employees.filter(e => e.base === site);
+  const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
+
+  const series = [];
+  let colorIdx = 0;
+  siteWTs.forEach(wt => {
+    EMP_CLASSES.forEach(ec => {
+      const emps = siteEmps.filter(e => e.workType === wt && e.empClass === ec);
+      if (!emps.length) return;
+      const data = months.map((_, mi) => {
+        const vals = emps.map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0) * 10) / 10 : null;
+      });
+      series.push({
+        label: `${wt} / ${ec}`,
+        data,
+        color: SUMMARY_COLORS[colorIdx++ % SUMMARY_COLORS.length],
+        isTotal: false,
+      });
+    });
+  });
+
+  // 拠点合計
+  const totalData = months.map((_, mi) => {
+    const vals = siteEmps.map(e => e.hours[mi]).filter(h => h !== null);
+    return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0) * 10) / 10 : null;
+  });
+  series.push({ label: '拠点合計（時間）', data: totalData, color: TOTAL_COLOR, isTotal: true });
+
+  return series;
+}
+
+/* ── Shared: 同一ページ内に並ぶ同種グラフのY軸統一（雇用区分フィルター等、絞り込み条件の
+   種類に依存しない汎用ヘルパー。フィルターが増えても、呼び出し側が「フィルター適用後の
+   軸表示値」を渡す限りこの仕組み自体は変更不要） ───────────────────────────── */
+// valueArrays: グラフごとの「軸に表示され得る値」の配列（積み上げ棒なら月ごとの合計値、
+// 折れ線なら各系列の値）を、ページ内の対象グラフの数だけ集めた配列の配列。
+// roundTo: 丸め単位。padding: 最大値に対する余裕率（積み上げ棒は上端が窮屈にならないよう1.1を指定）。
+function computeSharedAxisMax(valueArrays, roundTo = 1, padding = 1) {
+  let max = 0;
+  valueArrays.forEach(values => {
+    (values || []).forEach(v => {
+      if (v !== null && v !== undefined && v > max) max = v;
+    });
+  });
+  if (max <= 0) return roundTo;
+  return Math.ceil((max * padding) / roundTo) * roundTo;
+}
+
+// 積み上げ棒グラフ1本分の「月ごとの合計値」（＝軸上で実際に到達し得る高さ）を求める
+function stackedMonthlyTotals(months, datasets) {
+  return months.map((_, mi) => datasets.reduce((s, ds) => s + (ds.data[mi] || 0), 0));
+}
+
+/* ── Shared: stacked bar chart builder ─────────────────────────── */
+// hMax/nMax はページ内の同種グラフ群から computeSharedAxisMax() で算出した共通値を渡す
+function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax, nMax) {
+  function barOpts(yLabel, isCount, dynMax) {
+    return {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 8 } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          footerColor: '#e2e8f0',
+          callbacks: {
+            label: ctx => {
+              if (ctx.parsed.y == null || ctx.parsed.y === 0) return null;
+              return `${ctx.dataset.label}: ${isCount ? ctx.parsed.y + ' 名' : ctx.parsed.y.toFixed(1) + ' h'}`;
+            },
+            footer: items => {
+              const total = items.reduce((s, ctx) => s + (ctx.parsed.y || 0), 0);
+              if (!total) return '';
+              return `合計: ${isCount ? total + ' 名' : total.toFixed(1) + ' h'}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 11 }, callback: v => isCount ? `${v} 名` : `${v} h` },
+          grid: { color: '#1e2235' }, suggestedMin: 0, max: dynMax,
+          title: { display: true, text: yLabel, color: '#8892a4', font: { size: 11 } } },
+      },
+    };
+  }
+  const hCtx = document.getElementById(containerId + '_h')?.getContext('2d');
+  if (hCtx) summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets: datasetsH }, options: barOpts('実質勤務時間 (h)', false, hMax) });
+  const nCtx = document.getElementById(containerId + '_n')?.getContext('2d');
+  if (nCtx) summaryChartInstances[containerId + '_n'] = new Chart(nCtx, { type: 'bar', data: { labels: months, datasets: datasetsN }, options: barOpts('人数 (名)', true, nMax) });
+}
+
+/* ── Summary: 業務区分別グラフ ─────────────────────────────────── */
+function renderSummaryWorkChart() {
+  const { months, employees } = getActiveData();
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+  const WT_COLORS = { '栽培': '#34d399', '出荷': '#facc15', '配送': '#f87171', '拠点業務': '#fb923c' };
+  // 上記4種に完全一致しない業務区分（配送・出荷、配送・栽培等の複合区分）が
+  // 全て同じ色にならないよう、インデックスでフォールバック色を割り当てる
+  const WT_FALLBACK_COLORS = ['#60a5fa', '#c084fc', '#2dd4bf', '#f472b6', '#a3e635', '#fbbf24'];
+  let wtFallbackIdx = 0;
+  const wtColorMap = {};
+  function wtColor(wt) {
+    if (WT_COLORS[wt]) return WT_COLORS[wt];
+    if (!wtColorMap[wt]) wtColorMap[wt] = WT_FALLBACK_COLORS[wtFallbackIdx++ % WT_FALLBACK_COLORS.length];
+    return wtColorMap[wt];
+  }
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach((site, si) => {
+    const cid = 'wc_' + si;
+    html += `
+      <div class="schart-section">
+        <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="${cid}_h"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="${cid}_n"></canvas></div></div>
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  // 各拠点のデータセットを先に組み立てる（ページ内全拠点でY軸を統一するため）
+  const perSite = activeSites.map((site, si) => {
+    const cid = 'wc_' + si;
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
+    const datasetsH = siteWTs.map(wt => ({
+      label: wt,
+      data: months.map((_, mi) => {
+        const vals = siteEmps.filter(e => e.workType === wt).map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)*10)/10 : null;
+      }),
+      backgroundColor: wtColor(wt),
+    }));
+    const datasetsN = siteWTs.map(wt => ({
+      label: wt,
+      data: months.map((_, mi) => siteEmps.filter(e => e.workType === wt && e.hours[mi] !== null).length || null),
+      backgroundColor: wtColor(wt),
+    }));
+    return { cid, datasetsH, datasetsN };
+  });
+
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフで時間・人数それぞれ共通の軸上限を算出
+  const hMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
+  const nMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
+
+  perSite.forEach(({ cid, datasetsH, datasetsN }) => {
+    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax);
+  });
+}
+
+/* ── Summary: 雇用形態別グラフ ─────────────────────────────────── */
+function renderSummaryEmpChart() {
+  const { months, employees } = getActiveData();
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  const EMP_TYPES = ['社員', '技能実習生', 'パート'];
+  const EMP_COLORS_MAP = { '社員': '#60a5fa', '技能実習生': '#c084fc', 'パート': '#fb923c' };
+
+  function detailEmp(emp) {
+    if (!emp) return 'パート';
+    if (emp.includes('技能実習')) return '技能実習生';
+    if (emp.includes('社員')) return '社員';
+    return 'パート';
+  }
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach((site, si) => {
+    const cid = 'ec_' + si;
+    html += `
+      <div class="schart-section">
+        <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div><div class="schart-wrap"><canvas id="${cid}_h"></canvas></div></div>
+          <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div><div class="schart-wrap"><canvas id="${cid}_n"></canvas></div></div>
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  // 各拠点のデータセットを先に組み立てる（ページ内全拠点でY軸を統一するため）
+  const perSite = activeSites.map((site, si) => {
+    const cid = 'ec_' + si;
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    const datasetsH = EMP_TYPES.map(et => ({
+      label: et,
+      data: months.map((_, mi) => {
+        const vals = siteEmps.filter(e => detailEmp(e.employment) === et).map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)*10)/10 : null;
+      }),
+      backgroundColor: EMP_COLORS_MAP[et],
+    }));
+    const datasetsN = EMP_TYPES.map(et => ({
+      label: et,
+      data: months.map((_, mi) => siteEmps.filter(e => detailEmp(e.employment) === et && e.hours[mi] !== null).length || null),
+      backgroundColor: EMP_COLORS_MAP[et],
+    }));
+    return { cid, datasetsH, datasetsN };
+  });
+
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフで時間・人数それぞれ共通の軸上限を算出
+  const hMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
+  const nMax = computeSharedAxisMax(perSite.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
+
+  perSite.forEach(({ cid, datasetsH, datasetsN }) => {
+    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax);
+  });
+}
+
+/* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
+function renderSummaryByEmpType() {
+  const { months, employees } = getActiveData();
+  const content = document.getElementById('summary-content');
+
+  function detailEmp(emp) {
+    if (!emp) return 'パート';
+    if (emp.includes('技能実習')) return '技能実習生';
+    if (emp.includes('社員'))    return '社員';
+    return 'パート';
+  }
+
+  const EMP_TYPES = ['社員', '技能実習生', 'パート'];
+  const EMP_COLORS_MAP = { '社員': '#60a5fa', '技能実習生': '#c084fc', 'パート': '#fb923c' };
+  const SITE_ROW_SPAN = EMP_TYPES.length * 2 + 2;
+
+  let html = `<div class="summary-panel"><table class="summary-table">
+    <thead><tr>
+      <th class="col-site">拠点</th>
+      <th class="col-work">雇用形態</th>
+      <th class="col-emp">区分</th>
+      ${months.map(m => `<th>${m}</th>`).join('')}
+    </tr></thead><tbody>`;
+
+  SITES.forEach(site => {
+    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    if (!siteEmps.length) return;
+
+    let firstRow = true;
+
+    EMP_TYPES.forEach((et, etIdx) => {
+      const etEmps = siteEmps.filter(e => detailEmp(e.employment) === et);
+      const color = EMP_COLORS_MAP[et];
+      const isSep = etIdx > 0;
+
+      const hourVals = months.map((_, mi) => {
+        const vals = etEmps.map(e => e.hours[mi]).filter(h => h !== null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      });
+      html += `<tr${isSep ? ' class="section-sep"' : ''}>`;
+      if (firstRow) {
+        html += `<td class="col-site" rowspan="${SITE_ROW_SPAN}" style="color:${SITE_COLORS[site]||'#fff'}">${site}</td>`;
+        firstRow = false;
+      }
+      html += `<td class="col-work" rowspan="2" style="color:${color}">${et}</td>`;
+      html += `<td class="col-emp">時間</td>`;
+      hourVals.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+      html += '</tr>';
+
+      const countVals = months.map((_, mi) => {
+        const n = etEmps.filter(e => e.hours[mi] !== null).length;
+        return n || null;
+      });
+      html += '<tr>';
+      html += `<td class="col-emp">人数</td>`;
+      countVals.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+      html += '</tr>';
+    });
+
+    const totalHours = months.map((_, mi) => {
+      const vals = siteEmps.map(e => e.hours[mi]).filter(h => h !== null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    });
+    html += '<tr class="site-total-last"><td class="col-emp" colspan="2" style="font-weight:800">合計／時間</td>';
+    totalHours.forEach(v => { html += `<td class="num">${fmtH(v)}</td>`; });
+    html += '</tr>';
+
+    const totalCount = months.map((_, mi) => siteEmps.filter(e => e.hours[mi] !== null).length || null);
+    html += '<tr class="site-total-last"><td class="col-emp" colspan="2" style="font-weight:800">合計／人数</td>';
+    totalCount.forEach(v => { html += `<td class="num">${v !== null ? v + ' 名' : '—'}</td>`; });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  content.innerHTML = html;
+}
+
+function renderSummaryChart() {
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => getActiveData().employees.some(e => e.base === s));
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach((site, si) => {
+    const siteId = 'sc_' + si;
+    const series = buildSiteSeriesList(site);
+    html += `
+      <div class="schart-section">
+        <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}</div>
+        <div class="schart-controls" id="ctrl-${siteId}">
+          ${series.map((s, i) => `
+            <label class="series-check">
+              <input type="checkbox" data-site="${siteId}" data-idx="${i}" checked
+                     onchange="updateSummaryChart('${siteId}')">
+              <span class="color-dot" style="background:${s.color}"></span>
+              ${s.label}
+            </label>`).join('')}
+        </div>
+        <div class="schart-wrap"><canvas id="${siteId}"></canvas></div>
+      </div>`;
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフで共通の軸上限を算出
+  const summaryYMax = computeSharedAxisMax(activeSites.map(site => buildSiteSeriesList(site).flatMap(s => s.data)), 100);
+
+  activeSites.forEach((site, si) => {
+    const siteId = 'sc_' + si;
+    const series = buildSiteSeriesList(site);
+    const ctx = document.getElementById(siteId).getContext('2d');
+    const datasets = series.map(s => ({
+      label: s.label,
+      data: s.data,
+      borderColor: s.color,
+      backgroundColor: s.color + '22',
+      borderWidth: s.isTotal ? 2.5 : 1.8,
+      borderDash: s.isTotal ? [6, 4] : [],
+      pointRadius: s.isTotal ? 0 : 3,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: true,
+      order: s.isTotal ? -1 : 0,
+    }));
+    summaryChartInstances[siteId] = new Chart(ctx, {
+      type: 'line',
+      data: { labels: getActiveData().months, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1e2235',
+            borderColor: '#3a3f5c',
+            borderWidth: 1,
+            titleColor: '#e2e8f0',
+            bodyColor: '#a0aec0',
+            callbacks: {
+              label: ctx => ctx.parsed.y !== null
+                ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h` : null,
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#8892a4', font: { size: 11 }, maxRotation: 45 },
+            grid: { color: '#1e2235' },
+          },
+          y: {
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' },
+            suggestedMin: 0,
+            max: summaryYMax,
+            title: { display: true, text: '実質勤務時間 (h)', color: '#8892a4', font: { size: 11 } },
+          },
+        },
+      },
+    });
+  });
+}
+
+function updateSummaryChart(siteId) {
+  const chart = summaryChartInstances[siteId];
+  if (!chart) return;
+  document.querySelectorAll(`[data-site="${siteId}"]`).forEach((cb, i) => {
+    chart.data.datasets[i].hidden = !cb.checked;
+  });
+  chart.update();
+}
+
+/* ── Summary: 名簿タブ ─────────────────────────────────────────── */
+let rosterSortCol = 'site';
+let rosterSortAsc = true;
+let rosterFilterSites = new Set(SITES);
+let rosterFilterEmps  = null; // null = all; initialised on first render
+
+function renderSummaryRoster() {
+  const { months, employees, nameLabel } = getActiveData();
+  const content = document.getElementById('summary-content');
+
+  const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
+  const orderedWorkTypes = getOrderedWorkTypes(employees);
+
+  // Unique employment values from data (preserve order of appearance)
+  const allEmpTypes = [];
+  employees.forEach(e => {
+    const v = e.employment || '（未分類）';
+    if (!allEmpTypes.includes(v)) allEmpTypes.push(v);
+  });
+  if (rosterFilterEmps === null) rosterFilterEmps = new Set(allEmpTypes);
+
+  function filteredEmployees() {
+    return employees.filter(e =>
+      e.workType &&
+      rosterFilterSites.has(e.base) &&
+      rosterFilterEmps.has(e.employment || '（未分類）')
+    );
+  }
+
+  function rosterSorted(col) {
+    const copy = [...filteredEmployees()];
+    copy.sort((a, b) => {
+      let va, vb;
+      if (col === 'site') {
+        va = (SITE_ORDER[a.base] ?? 99) * 1000 + orderedWorkTypes.indexOf(a.workType) * 10;
+        vb = (SITE_ORDER[b.base] ?? 99) * 1000 + orderedWorkTypes.indexOf(b.workType) * 10;
+      } else if (col === 'work') { va = a.workType; vb = b.workType; }
+      else if (col === 'emp')    { va = a.employment; vb = b.employment; }
+      else if (col === 'name')   { va = a.name; vb = b.name; }
+      if (typeof va === 'string') return rosterSortAsc ? va.localeCompare(vb,'ja') : vb.localeCompare(va,'ja');
+      return rosterSortAsc ? va - vb : vb - va;
+    });
+    return copy;
+  }
+
+  function pillBtn(label, active, onclick) {
+    return `<button class="roster-pill${active ? ' active' : ''}" onclick="${onclick}">${label}</button>`;
+  }
+
+  function buildContent() {
+    const sorted = rosterSorted(rosterSortCol);
+    const recentMonths = months.slice(-3);
+    const recentIdxs = recentMonths.map(m => months.indexOf(m));
+
+    const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+
+    // Filter bar
+    let filterHtml = `<div class="roster-filters">
+      <div class="roster-filter-group">
+        <span class="roster-filter-label">拠点</span>`;
+    activeSites.forEach(s => {
+      const active = rosterFilterSites.has(s);
+      filterHtml += pillBtn(s, active, `rosterToggleSite('${s}')`);
+    });
+    filterHtml += `</div><div class="roster-filter-group"><span class="roster-filter-label">雇用区分</span>`;
+    allEmpTypes.forEach(et => {
+      const active = rosterFilterEmps.has(et);
+      filterHtml += pillBtn(et, active, `rosterToggleEmp('${et}')`);
+    });
+    filterHtml += `</div></div>`;
+
+    const tableCols = [
+      { key: 'site', label: '拠点' },
+      { key: 'work', label: '業務区分' },
+      { key: 'emp',  label: '雇用区分' },
+      { key: 'name', label: nameLabel || '氏名' },
+    ];
+
+    let tableHtml = `<div class="roster-panel"><table class="roster-table"><thead><tr>`;
+    tableCols.forEach(c => {
+      const cls = c.key === 'site' ? ' col-site' : '';
+      const sortCls = rosterSortCol === c.key ? (rosterSortAsc ? ' sort-asc' : ' sort-desc') : '';
+      tableHtml += `<th class="${cls}${sortCls}" onclick="rosterSort('${c.key}')">${c.label}</th>`;
+    });
+    recentMonths.forEach(m => { tableHtml += `<th>${m}</th>`; });
+    tableHtml += '</tr></thead><tbody>';
+
+    if (sorted.length === 0) {
+      tableHtml += `<tr><td colspan="${tableCols.length + recentMonths.length}" style="text-align:center;color:var(--muted);padding:24px">該当する従業員がいません</td></tr>`;
+    } else {
+      sorted.forEach(e => {
+        tableHtml += `<tr>
+          <td class="col-site" style="color:${SITE_COLORS[e.base]||'#fff'}">${e.base}</td>
+          <td>${e.workType || '—'}</td>
+          <td>${e.employment || '—'}</td>
+          <td>${e.name}</td>`;
+        recentIdxs.forEach(mi => {
+          const h = e.hours[mi];
+          tableHtml += `<td class="num">${h !== null ? h.toFixed(1) + ' h' : '—'}</td>`;
+        });
+        tableHtml += '</tr>';
+      });
+    }
+    tableHtml += `</tbody></table></div>`;
+
+    return filterHtml + tableHtml;
+  }
+
+  content.innerHTML = buildContent();
+
+  window.rosterSort = function(col) {
+    if (rosterSortCol === col) rosterSortAsc = !rosterSortAsc;
+    else { rosterSortCol = col; rosterSortAsc = true; }
+    content.innerHTML = buildContent();
+  };
+  window.rosterToggleSite = function(site) {
+    if (rosterFilterSites.has(site)) rosterFilterSites.delete(site);
+    else rosterFilterSites.add(site);
+    content.innerHTML = buildContent();
+  };
+  window.rosterToggleEmp = function(et) {
+    if (rosterFilterEmps.has(et)) rosterFilterEmps.delete(et);
+    else rosterFilterEmps.add(et);
+    content.innerHTML = buildContent();
+  };
+}
+
+/* ── Production data ─────────────────────────────────────────────── */
+let productionData = null;
+
+async function fetchProductionSheet() {
+  if (productionData) return productionData;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${PROD_GID}&headers=1`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  productionData = parseProductionData(json);
+  return productionData;
+}
+
+function parseProductionData(json) {
+  const cols = json.table.cols;
+  const rows = json.table.rows;
+
+  // Detect month columns: index 3+ that have date-like labels (e.g. "2025/10")
+  const monthCols = [];
+  for (let i = 3; i < cols.length; i++) {
+    const label = (cols[i]?.label || '').trim();
+    if (/^\d{4}\/\d{1,2}$/.test(label)) monthCols.push({ idx: i, label });
+  }
+
+  const records = [];
+  let currentSite = '';
+  let currentCat = '';
+
+  rows.forEach(row => {
+    if (!row || !row.c) return;
+    const cells = row.c;
+    const raw = v => {
+      const c = cells[v];
+      return c ? (c.f || c.v || '') : '';
+    };
+    const siteVal = String(raw(0)).trim();
+    const catVal  = String(raw(1)).trim();
+    const metric  = String(raw(2)).trim();
+
+    if (siteVal) currentSite = siteVal;
+    if (catVal)  currentCat  = catVal;
+    if (!metric || metric === 'null') return;
+
+    const values = monthCols.map(m => {
+      const c = cells[m.idx];
+      if (!c || c.v === null || c.v === undefined || c.v === '') return null;
+      return typeof c.v === 'number' ? c.v : null;
+    });
+
+    records.push({ site: currentSite, cat: currentCat, metric, values });
+  });
+
+  return { months: monthCols.map(m => m.label), records };
+}
+
+function renderProductionTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">生産データを読み込み中...</div>';
+
+  fetchProductionSheet().then(data => {
+    renderProductionTable(data);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+    console.error(e);
+  });
+}
+
+function renderProductionTable({ months, records }) {
+  const main = document.getElementById('main');
+
+  if (!records.length) {
+    main.innerHTML = '<div class="loading">データが見つかりませんでした</div>';
+    return;
+  }
+
+  // Group records by site preserving order
+  const siteOrder = [];
+  const bySite = {};
+  records.forEach(r => {
+    if (!bySite[r.site]) { bySite[r.site] = []; siteOrder.push(r.site); }
+    bySite[r.site].push(r);
+  });
+
+  function rowClass(r) {
+    const classes = [];
+    if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
+    if (r.metric === '合計(点数)') classes.push('metric-goukei');
+    const cat = r.cat;
+    if (cat.includes('生産実績')) classes.push('cat-seisan');
+    else if (cat.includes('栽培')) classes.push('cat-saibai');
+    else if (cat.includes('出荷')) classes.push('cat-syukka');
+    return classes.join(' ');
+  }
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">🌱 生産実績 ／ 整理済み_分析</div>
+    <div class="prod-table-wrap">
+    <table class="prod-table">
+      <thead><tr>
+        <th class="th-left" style="min-width:70px">拠点</th>
+        <th class="th-left" style="min-width:120px">カテゴリ</th>
+        <th class="th-left" style="min-width:130px">指標</th>
+        ${months.map(m => `<th>${m}</th>`).join('')}
+      </tr></thead>
+      <tbody>`;
+
+  siteOrder.forEach((site, si) => {
+    const siteRecs = bySite[site];
+    const siteColor = SITE_COLORS[site] || '#e2e8f0';
+    let prevCat = '';
+
+    siteRecs.forEach((r, ri) => {
+      const isFirstSite = ri === 0;
+      const isNewCat = r.cat !== prevCat;
+      prevCat = r.cat;
+
+      const rc = rowClass(r);
+      const sepClass = (si > 0 && isFirstSite) ? 'site-start' : '';
+      html += `<tr class="${[rc, sepClass].filter(Boolean).join(' ')}">`;
+
+      // Site cell: only on first row of site
+      if (isFirstSite) {
+        html += `<td class="col-site" rowspan="${siteRecs.length}" style="color:${siteColor}">${site}</td>`;
+      }
+
+      // Category cell: only on first row of category group
+      if (isNewCat) {
+        const catCount = siteRecs.filter(x => x.cat === r.cat).length;
+        html += `<td class="col-cat" rowspan="${catCount}">${r.cat}</td>`;
+      }
+
+      // Metric
+      html += `<td class="col-metric">${r.metric}</td>`;
+
+      // Values
+      r.values.forEach(v => {
+        html += v !== null
+          ? `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`
+          : `<td class="col-num empty">—</td>`;
+      });
+
+      html += '</tr>';
+    });
+  });
+
+  html += `</tbody></table>
+    </div></div>`;
+
+  main.innerHTML = html;
+}
+
+/* ── 標準工数設定 ───────────────────────────────────────────────────── */
+
+const STD_STORAGE_KEY = 'shiitake_std_settings';
+
+// cs conversion params stored separately
+const STD_CS_KEY = 'shiitake_std_cs';
+// pcsPerCs: パック・袋ともに30P/cs。バラ(バラ数メトリック)は1個=1cs
+const STD_CS_DEFAULT = { pcsPerCs: 30, baraMetric: 'バラ数' };
+function loadCsConv() {
+  try { const s = localStorage.getItem(STD_CS_KEY); if (s) {
+    const saved = JSON.parse(s);
+    // migrate old format
+    if (saved.packPcsPerCs !== undefined) return { pcsPerCs: saved.packPcsPerCs || 30, baraMetric: saved.baraMetric || 'バラ数' };
+    return { ...STD_CS_DEFAULT, ...saved };
+  }} catch(e) {}
+  return { ...STD_CS_DEFAULT };
+}
+function saveCsConv(c) { localStorage.setItem(STD_CS_KEY, JSON.stringify(c)); }
+// cs数 = (合計点数 - バラ数) / pcsPerCs + バラ数
+function calcCs(pcs, bara, conv) {
+  const nonBara = Math.max(0, pcs - bara);
+  return nonBara / conv.pcsPerCs + bara;
+}
+
+const STD_DEFAULT = [
+  // metricKey: 生産実績シートの対応メトリック名（perContainerはタスク別、その他は固定）
+  { div: '栽培', task: '菌床入れ',         col: 'perContainer', val: 20,   unit: 'h',    metricKey: '菌床入れ',     note: '菌床入れコンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '芽かき',           col: 'perContainer', val: 15,   unit: 'h',    metricKey: '芽かき',       note: '芽かきコンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '収穫',             col: 'kgPerH',       val: 11,   unit: 'kg/h', metricKey: '収穫量(kg)',   note: '収穫量(kg) ÷ kg/h' },
+  { div: '栽培', task: '注水',             col: 'perContainer', val: 8,    unit: 'h',    metricKey: '注水',         note: '注水コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '散水',             col: 'perContainer', val: 5,    unit: '分',   metricKey: '散水',         note: '散水コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: '廃棄',             col: 'perContainer', val: 13,   unit: 'h',    metricKey: '廃棄',         note: '廃棄コンテナ数 × h/コンテナ' },
+  { div: '栽培', task: '計量時間',         col: 'perContainer', val: 10,   unit: '分',   metricKey: '収穫',           note: '収穫コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'コンテナ移動時間', col: 'perContainer', val: 5,    unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'コンテナ点検時間', col: 'perContainer', val: 10,   unit: '分',   metricKey: '稼働コンテナ数', note: '稼働コンテナ数 × 分/コンテナ ÷ 60' },
+  { div: '栽培', task: 'その他間接業',     col: 'fixedH',       val: 63.2, unit: 'h',    metricKey: null,           note: '毎月固定時間' },
+  { div: '出荷', task: 'パック並べる',     col: 'perPiece',     val: 30,   unit: '秒',   metricKey: 'パック数',     note: 'パック数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '袋入れ・閉じ',     col: 'perPiece',     val: null, unit: '秒',   metricKey: '袋数',         note: '袋数 × 秒/個 ÷ 3600' },
+  { div: '出荷', task: '段ボール詰める',   col: 'perCs',        val: 60,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '段ボール作成',     col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '計量',             col: 'perCs',        val: 10,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '納品書・伝票作成', col: 'fixedH',       val: 55,   unit: 'h',    metricKey: null,          note: '毎月固定時間' },
+  { div: '出荷', task: '椎茸運搬(生在庫)', col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+  { div: '出荷', task: '椎茸運搬(製品)',   col: 'perCs',        val: 30,   unit: '秒',   metricKey: '合計(点数)',   note: 'cs数=(点数-バラ)÷30+バラ、cs×秒÷3600' },
+];
+
+function loadStdSettings() {
+  try {
+    const s = localStorage.getItem(STD_STORAGE_KEY);
+    if (s) {
+      const saved = JSON.parse(s);
+      // Merge: fill missing metricKey from STD_DEFAULT by task name
+      const defaultByTask = {};
+      STD_DEFAULT.forEach(r => { defaultByTask[r.task] = r; });
+      return saved.map(r => {
+        const def = defaultByTask[r.task];
+        // Only take user-editable fields (val, metricKey) from saved — col/unit/note always come from STD_DEFAULT
+        return def ? {
+          ...def,
+          val: r.val !== undefined ? r.val : def.val,
+          metricKey: r.metricKey !== undefined ? r.metricKey : def.metricKey,
+        } : r;
+      });
+    }
+  } catch(e) {}
+  return JSON.parse(JSON.stringify(STD_DEFAULT));
+}
+function saveStdSettings(rows) { localStorage.setItem(STD_STORAGE_KEY, JSON.stringify(rows)); }
+
+function renderStdSetTab() {
+  const main = document.getElementById('main');
+  const rows = loadStdSettings();
+  window._stdRows = rows;
+
+  const colLabel = { perContainer: '1コンテナ当たり', kgPerH: '時間当たり(kg/h)', perCs: '1cs当たり', perPiece: '1個当たり', fixedH: '固定時間(h)' };
+  const allCols  = ['perContainer', 'kgPerH', 'perCs', 'perPiece', 'fixedH'];
+
+  // count rows per div for rowspan
+  const divCount = {};
+  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+
+  const conv = loadCsConv();
+  window._stdConv = conv;
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">⚙️ 標準工数設定
+      <span style="float:right;display:flex;gap:8px;align-items:center">
+        <button class="select-btn" style="padding:3px 14px" onclick="resetStdSettings()">リセット</button>
+        <button class="select-btn" style="padding:3px 14px;background:var(--accent-inabe);color:#000;border-color:var(--accent-inabe)" onclick="saveStdSettingsUI()">保存</button>
+      </span>
+    </div>
+    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値を編集後「保存」ボタンを押すと標準工数(h)タブに反映されます。単位は各セルの下に表示。</p>
+    <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
+      <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">
+        📦 出荷cs換算設定　<span style="font-weight:400;font-size:0.72rem">cs数 = (合計点数 − バラ数) ÷ P/cs + バラ数</span>
+      </div>
+      <label style="font-size:0.78rem;color:var(--muted)">パック・袋 P/cs
+        <div><input type="number" id="cs-pcs" value="${conv.pcsPerCs || 30}" min="1"
+          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
+      </label>
+      <label style="font-size:0.78rem;color:var(--muted)">バラのメトリック名
+        <div><input type="text" id="cs-bara" value="${conv.baraMetric || 'バラ数'}"
+          style="width:90px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+        <span style="font-size:0.7rem;color:var(--muted)"> (生産実績シートのメトリック名)</span></div>
+      </label>
+      <div style="font-size:0.72rem;color:var(--muted)">バラ→1cs、パック・袋→${conv.pcsPerCs || 30}P/cs</div>
+    </div>
+    <div class="prod-table-wrap">
+    <table class="prod-table std-set-table">
+      <thead><tr>
+        <th class="th-left" style="min-width:60px">業務区分</th>
+        <th class="th-left" style="min-width:130px">作業区分</th>
+        ${allCols.map(c => `<th style="min-width:110px">${colLabel[c]}</th>`).join('')}
+        <th class="th-left" style="min-width:180px">考え方</th>
+      </tr></thead>
+      <tbody>`;
+
+  let lastDiv = '';
+  rows.forEach((r, i) => {
+    const divCell = r.div !== lastDiv
+      ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
+      : '';
+    if (r.div !== lastDiv) lastDiv = r.div;
+
+    html += `<tr>${divCell}<td class="col-metric" style="font-size:0.82rem">${r.task}</td>`;
+    allCols.forEach(col => {
+      if (r.col === col) {
+        const v = (r.val !== null && r.val !== undefined) ? r.val : '';
+        html += `<td class="col-num" style="padding:2px 4px">
+          <input type="number" class="std-input" data-idx="${i}"
+            value="${v}" placeholder="—"
+            style="width:80px;text-align:right;background:#1a1f35;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
+          <div style="font-size:0.68rem;color:var(--muted);text-align:right">${r.unit}</div>
+        </td>`;
+      } else {
+        html += `<td class="col-num empty" style="color:var(--muted)">—</td>`;
+      }
+    });
+    html += `<td class="col-metric" style="font-size:0.75rem;color:var(--muted)">${r.note}</td></tr>`;
+  });
+
+  html += `</tbody></table></div></div>`;
+  main.innerHTML = html;
+
+  main.querySelectorAll('.std-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.dataset.idx);
+      window._stdRows[idx].val = inp.value === '' ? null : parseFloat(inp.value);
+    });
+  });
+
+  ['cs-pcs', 'cs-bara'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      window._stdConv.pcsPerCs    = parseFloat(document.getElementById('cs-pcs').value) || 30;
+      window._stdConv.baraMetric  = document.getElementById('cs-bara').value.trim() || 'バラ数';
+    });
+  });
+}
+
+window.saveStdSettingsUI = function() {
+  saveStdSettings(window._stdRows);
+  if (window._stdConv) saveCsConv(window._stdConv);
+  const btn = document.querySelector('.prod-panel .select-btn:last-child');
+  if (btn) { const orig = btn.textContent; btn.textContent = '保存済み ✓'; setTimeout(() => { btn.textContent = orig; }, 1500); }
+};
+
+window.resetStdSettings = function() {
+  if (!confirm('デフォルト値にリセットしますか？')) return;
+  window._stdRows = JSON.parse(JSON.stringify(STD_DEFAULT));
+  window._stdConv = { ...STD_CS_DEFAULT }; // pcsPerCs:30, baraMetric:'バラ数'
+  saveStdSettings(window._stdRows);
+  saveCsConv(window._stdConv);
+  renderStdSetTab();
+};
+
+/* ── 標準工数(h) ────────────────────────────────────────────────────── */
+
+function renderStdHoursTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">標準工数を計算中...</div>';
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+  fetchProductionSheet().then(prodData => {
+    renderStdHoursTable(prodData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+  });
+}
+
+function renderStdHoursTable(prodData) {
+  const main = document.getElementById('main');
+  const rows = loadStdSettings();
+  const { months: prodMonths, records } = prodData;
+
+  const commonMonths = prodMonths.map(m => normalizeMonth(m));
+
+  function getProdVal(site, metricKey, mi) {
+    const r = records.find(r => r.site === site && r.metric === metricKey);
+    return r ? (r.values[mi] ?? null) : null;
+  }
+
+  const conv = loadCsConv();
+
+  function calcRow(site, r, mi) {
+    const v = r.val;
+    if (v === null || v === undefined) return { h: null, basis: '—' };
+
+    const mkey = r.metricKey || null;
+
+    if (r.col === 'kgPerH' && v > 0) {
+      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
+      return { h: kg !== null ? kg / v : null,
+               containers: kg };
+    }
+    if (r.col === 'fixedH') return { h: v, containers: null };
+
+    if (r.col === 'perContainer') {
+      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
+      if (containers !== null) {
+        const hPer = r.unit === 'h' ? v : v / 60;
+        return { h: containers * hPer, containers };
+      }
+      return { h: null, containers: null };
+    }
+    if (r.col === 'perPiece') {
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
+      if (pcs !== null) {
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: pcs * secPer / 3600, containers: pcs };
+      }
+      return { h: null, containers: null };
+    }
+    if (r.col === 'perCs') {
+      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
+      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
+      if (pcs !== null) {
+        const cs = calcCs(pcs, bara, conv);
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: cs * secPer / 3600, containers: Math.round(cs) };
+      }
+      return { h: null, containers: null };
+    }
+    return { h: null, containers: null };
+  }
+
+  const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
+  const divCount = {};
+  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📋 標準工数(h) ／ 生産実績 × 標準工数設定
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 稼働コンテナ数・合計点数は生産実績シートから取得　cs換算設定は⚙️タブで変更可</span>
+    </div>`;
+
+  availSites.forEach(site => {
+    const siteColor = SITE_COLORS[site] || '#fff';
+    html += `<div style="margin-bottom:28px">
+      <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
+      <div class="prod-table-wrap"><table class="prod-table">
+        <thead><tr>
+          <th class="th-left" style="min-width:60px">業務区分</th>
+          <th class="th-left" style="min-width:130px">作業区分</th>
+          <th class="th-left" style="min-width:140px">計算根拠</th>
+          ${commonMonths.map(m => `<th>${m}</th>`).join('')}
+          <th class="th-left" style="min-width:130px">計算方法</th>
+        </tr></thead><tbody>`;
+
+    let lastDiv = '';
+    rows.forEach(r => {
+      const divCell = r.div !== lastDiv
+        ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
+        : '';
+      if (r.div !== lastDiv) lastDiv = r.div;
+
+      const monthData = commonMonths.map((_, mi) => calcRow(site, r, mi));
+      const hasData = monthData.some(d => d.h !== null);
+      // Pick latest month's containers value as sample
+      const sampleD = [...monthData].reverse().find(d => d.containers !== null);
+      const sampleContainers = sampleD ? sampleD.containers : null;
+
+      const mkey = r.metricKey || '';
+
+      // Status icon
+      const statusIcon = r.val === null
+        ? '<span style="color:var(--muted)">未設定</span>'
+        : hasData
+          ? '<span style="color:#34d399">●</span>'
+          : '<span style="color:#f59e0b">○</span>';
+
+      // Basis description (skip if val not set)
+      let basisDesc = '—';
+      if (r.val !== null) {
+        if (r.col === 'fixedH') {
+          basisDesc = `固定 ${r.val} h/月`;
+        } else if (r.col === 'kgPerH') {
+          basisDesc = sampleContainers !== null
+            ? `${sampleContainers.toLocaleString('ja-JP')} kg ÷ ${r.val} kg/h`
+            : `${mkey}: データなし`;
+        } else if (r.col === 'perContainer') {
+          basisDesc = sampleContainers !== null
+            ? `${mkey}: ${sampleContainers.toLocaleString('ja-JP')} コンテナ × ${r.val} ${r.unit}`
+            : `${mkey}: データなし`;
+        } else if (r.col === 'perPiece') {
+          basisDesc = sampleContainers !== null
+            ? `${sampleContainers.toLocaleString('ja-JP')} 点 × ${r.val} 秒`
+            : `${mkey}: データなし`;
+        } else if (r.col === 'perCs') {
+          basisDesc = sampleContainers !== null
+            ? `${sampleContainers.toLocaleString('ja-JP')} cs × ${r.val} 秒`
+            : `${mkey}: データなし`;
+        }
+      }
+
+      html += `<tr>${divCell}
+        <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
+        <td class="col-metric" style="font-size:0.75rem">
+          ${statusIcon} <span style="color:var(--muted)">${basisDesc}</span>
+        </td>`;
+
+      monthData.forEach(d => {
+        if (d.h !== null) {
+          const disp = d.h < 10 ? d.h.toFixed(1) : Math.round(d.h).toLocaleString('ja-JP');
+          html += `<td class="col-num">${disp}<span style="font-size:0.68rem;color:var(--muted)"> h</span></td>`;
+        } else {
+          html += `<td class="col-num empty" style="color:#444">—</td>`;
+        }
+      });
+
+      html += `<td class="col-metric" style="font-size:0.72rem;color:var(--muted)">${r.note}</td></tr>`;
+    });
+
+    // Subtotals per div
+    ['栽培', '出荷'].forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+      const totals = commonMonths.map((_, mi) => {
+        const vals = divRows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      });
+      const color = div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)';
+      html += `<tr style="font-weight:600;background:#1a1f35">
+        <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:var(--muted)">
+          ${div} 小計
+        </td>`;
+      totals.forEach(t => {
+        html += t !== null
+          ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
+          : `<td class="col-num empty">—</td>`;
+      });
+      html += `<td></td></tr>`;
+    });
+
+    // Grand total
+    const grandTotals = commonMonths.map((_, mi) => {
+      const vals = rows.map(r => calcRow(site, r, mi).h).filter(v => v !== null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    });
+    html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
+      <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+    grandTotals.forEach(t => {
+      html += t !== null
+        ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
+        : `<td class="col-num empty">—</td>`;
+    });
+    html += `<td></td></tr>`;
+
+    html += `</tbody></table></div></div>`;
+  });
+
+  html += `</div>`;
+  main.innerHTML = html;
+}
+
+/* ── Productivity ─────────────────────────────────────────────────── */
+
+// "2025年10月" → "2025/10"
+function normalizeMonth(m) {
+  return String(m).replace(/(\d+)年(\d+)月/, (_, y, mo) => `${y}/${parseInt(mo)}`);
+}
+
+// "2026/5" のような "YYYY/M" 文字列を n ヶ月分ずらす（年をまたぐ場合も対応）
+function shiftMonthStr(m, n) {
+  const match = String(m).match(/^(\d+)\/(\d+)$/);
+  if (!match) return m;
+  let year = parseInt(match[1]);
+  let month = parseInt(match[2]) + n;
+  while (month > 12) { month -= 12; year++; }
+  while (month < 1) { month += 12; year--; }
+  return `${year}/${month}`;
+}
+
+// 整理済み_Mは10日締め（対象期間は前月11日〜当月10日）で、PR#29以降のラベルは締め日の年月
+// （例：「6/10締」→「2026年6月」）。一方、整理済み_分析（生産実績）の月はカレンダー通りの暦月
+// （例："2026/5"は5/1〜5/31）。よって「6/10締」の実質勤務時間は実態としては5月分が中心であり、
+// 生産実績の暦月と突き合わせる際は「整理済み_M側の月 = 整理済み_分析側の月 + 1」という
+// 固定オフセットが必要（表示ラベルは整理済み_分析側の値をそのまま使う）。
+const PROD_TO_WORK_MONTH_OFFSET = 1;
+
+const productivityChartInstances = {};
+
+function renderProductivityTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">生産性データを計算中...</div>';
+
+  Object.values(productivityChartInstances).forEach(c => c.destroy());
+  Object.keys(productivityChartInstances).forEach(k => delete productivityChartInstances[k]);
+
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+
+  fetchProductionSheet().then(prodData => {
+    renderProductivityCharts(getActiveData(), prodData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">エラー: ${e.message}</div>`;
+    console.error(e);
+  });
+}
+
+function renderProductivityCharts(workData, prodData) {
+  const main = document.getElementById('main');
+  const { months: workMonths, employees } = workData;
+  const { months: prodMonths, records } = prodData;
+
+  // Normalize work-hours months for matching
+  const normWorkMonths = workMonths.map(normalizeMonth);
+
+  // Common months that appear in both datasets（整理済み_M側は+1ヶ月オフセットして突き合わせる）
+  const commonMonths = prodMonths.filter(m => normWorkMonths.includes(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET)));
+  if (!commonMonths.length) {
+    main.innerHTML = '<div class="loading">共通月が見つかりません（月ラベル形式を確認してください）</div>';
+    return;
+  }
+
+  // Collect all sites that appear in production data
+  const prodSites = [...new Set(records.map(r => r.site))];
+  // Use sites that appear in both work data and production data
+  const sites = SITES.filter(s => prodSites.includes(s) && employees.some(e => e.base === s));
+  if (!sites.length) {
+    main.innerHTML = '<div class="loading">拠点データの突合ができませんでした</div>';
+    return;
+  }
+
+  // Helper: sum hours by workType filter for a site, indexed by common month
+  // （commonMonthsは整理済み_分析側の暦月。整理済み_M側は+1ヶ月した列を参照する）
+  function workHours(site, typeFilter) {
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+    return commonMonths.map(m => {
+      const wi = normWorkMonths.indexOf(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET));
+      if (wi < 0) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  }
+
+  // Helper: get production metric values aligned to commonMonths
+  function prodVals(site, metric) {
+    const r = records.find(x => x.site === site && x.metric === metric);
+    if (!r) return commonMonths.map(() => null);
+    return commonMonths.map(m => {
+      const pi = prodMonths.indexOf(m);
+      return (pi >= 0 && r.values[pi] !== null) ? r.values[pi] : null;
+    });
+  }
+
+  // Calculate productivity per site
+  const data = {};
+  sites.forEach(site => {
+    // Match summary table classification (配送・栽培 → 配送, not 栽培)
+    const cultivationH = workHours(site, wt => workTypeClass(wt) === 'wt-栽培');
+    const shippingH    = workHours(site, wt => workTypeClass(wt) === 'wt-出荷');
+    const harvest      = prodVals(site, '収穫量(kg)');
+    const shipKg       = prodVals(site, '出荷量(kg)');
+    const shipPcs      = prodVals(site, '合計(点数)');
+
+    const ratio = (a, b) => a.map((v, i) =>
+      (v !== null && b[i] !== null && b[i] > 0) ? Math.round(v / b[i] * 10) / 10 : null
+    );
+
+    data[site] = {
+      cultivationH,
+      shippingH,
+      harvestPerH:  ratio(harvest, cultivationH),
+      shipKgPerH:   ratio(shipKg,  shippingH),
+      shipPcsPerH:  ratio(shipPcs, shippingH),
+      harvest,
+      shipKg,
+      shipPcs,
+    };
+  });
+
+  // Build latest-month KPI values
+  const lastMonth = commonMonths[commonMonths.length - 1];
+  const lastIdx   = commonMonths.length - 1;
+
+  function kpiHtml(label, site, key, unit, decimals = 1) {
+    const v = data[site]?.[key]?.[lastIdx];
+    const color = SITE_COLORS[site] || '#e2e8f0';
+    return `<div class="kpi">
+      <div class="kpi-label" style="color:${color}">${site}</div>
+      <div class="kpi-value">${v !== null && v !== undefined ? v.toFixed(decimals) : '—'} <span style="font-size:0.7em;color:var(--muted)">${unit}</span></div>
+    </div>`;
+  }
+
+  // Chart definitions: productivity line (left Y) + volume/time bars (right Y)
+  const barMode = window._prodBarMode || 'volume';
+  const metrics = [
+    { key: 'harvestPerH', title: '① 栽培生産性', sub: '栽培時間あたり収穫量', unit: 'kg/h', decimals: 1,
+      volKey: 'harvest',    volUnit: 'kg', volLabel: '収穫量',
+      hKey:   'cultivationH', hUnit: 'h', hLabel: '栽培時間' },
+    { key: 'shipKgPerH',  title: '② 出荷生産性（重量）', sub: '出荷時間あたり出荷量', unit: 'kg/h', decimals: 1,
+      volKey: 'shipKg',     volUnit: 'kg', volLabel: '出荷量',
+      hKey:   'shippingH',  hUnit: 'h', hLabel: '出荷時間' },
+    { key: 'shipPcsPerH', title: '③ 出荷生産性（点数）', sub: '出荷時間あたり合計点数', unit: '点/h', decimals: 0,
+      volKey: 'shipPcs',    volUnit: '点', volLabel: '合計点数',
+      hKey:   'shippingH',  hUnit: 'h', hLabel: '出荷時間' },
+  ];
+
+  // Combo chart options: left Y = productivity (line), right Y = volume/time (bar)
+  function comboOpts(ratioUnit, ratioDecimals, barUnit) {
+    return {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 8 } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (v === null || v === undefined) return null;
+              if (ctx.dataset.yAxisID === 'y') {
+                return `${ctx.dataset.label}: ${ratioDecimals === 0 ? Math.round(v).toLocaleString('ja-JP') : v.toFixed(ratioDecimals)} ${ratioUnit}`;
+              }
+              const u = ctx.dataset._barUnit || barUnit;
+              return `${ctx.dataset.label}: ${u === '点' ? Math.round(v).toLocaleString('ja-JP') : v.toLocaleString('ja-JP')} ${u}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+        y: {
+          position: 'left',
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} ${ratioUnit}` },
+          grid: { color: '#1e2235' }, suggestedMin: 0,
+          title: { display: true, text: ratioUnit, color: '#8892a4', font: { size: 10 } },
+        },
+        y1: {
+          position: 'right',
+          ticks: { color: '#6b7a90', font: { size: 10 }, callback: v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : `${v}` },
+          grid: { drawOnChartArea: false }, suggestedMin: 0,
+          title: { display: true, text: barUnit, color: '#6b7a90', font: { size: 10 } },
+        },
+      },
+    };
+  }
+
+  // Render HTML
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📈 生産性 ／ 最新月: ${lastMonth}
+      <span style="float:right;display:flex;align-items:center;gap:6px;font-size:0.78rem">
+        <span style="color:var(--muted)">棒グラフ:</span>
+        <button id="prd-toggle-vol" class="select-btn" style="padding:2px 10px" onclick="switchProdBar('volume')">生産量</button>
+        <button id="prd-toggle-time" class="select-btn" style="padding:2px 10px" onclick="switchProdBar('time')">時間</button>
+      </span>
+    </div>
+    <div class="kpi-row">
+      ${metrics.map(m => sites.map(s => kpiHtml(m.title, s, m.key, m.unit, m.decimals)).join('')).join('')}
+    </div>`;
+
+  metrics.forEach((m, i) => {
+    html += `<div class="schart-section">
+      <div class="schart-header">${m.title}
+        <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">${m.sub}</span>
+        <span style="float:right;font-size:0.72rem;color:var(--muted)">折れ線(左軸): ${m.unit}　棒(右軸): 生産量/時間 切替</span>
+      </div>
+      <div class="schart-wrap" style="height:340px"><canvas id="prd-${i}"></canvas></div>
+    </div>`;
+  });
+
+  html += `</div>`;
+  main.innerHTML = html;
+
+  // Store references for toggle function
+  window._prodBarMode = barMode;
+  window._prodBarData = { metrics, data, sites };
+
+  // Draw combo charts
+  metrics.forEach((m, i) => {
+    const ctx = document.getElementById(`prd-${i}`)?.getContext('2d');
+    if (!ctx) return;
+
+    const datasets = [];
+
+    // Productivity lines per site (left Y)
+    sites.forEach(site => {
+      const color = SITE_COLORS[site] || '#fff';
+      datasets.push({
+        type: 'line',
+        label: `${site} (${m.unit})`,
+        data: data[site][m.key],
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2.5,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        tension: 0.3,
+        spanGaps: true,
+        yAxisID: 'y',
+        order: 0,
+      });
+    });
+
+    // Volume/time bars per site (right Y) — controlled by barMode
+    const barKey  = barMode === 'volume' ? m.volKey  : m.hKey;
+    const barUnit = barMode === 'volume' ? m.volUnit : m.hUnit;
+    const barLbl  = barMode === 'volume' ? m.volLabel : m.hLabel;
+    sites.forEach(site => {
+      const color = SITE_COLORS[site] || '#fff';
+      datasets.push({
+        type: 'bar',
+        label: `${site} ${barLbl}(${barUnit})`,
+        data: data[site][barKey],
+        backgroundColor: color + '44',
+        borderColor: color + '88',
+        borderWidth: 1,
+        yAxisID: 'y1',
+        order: 2,
+        _barUnit: barUnit,
+      });
+    });
+
+    productivityChartInstances[`prd-${i}`] = new Chart(ctx, {
+      data: { labels: commonMonths, datasets },
+      options: comboOpts(m.unit, m.decimals, barUnit),
+    });
+  });
+
+  // Set initial toggle button styles
+  updateProdToggleButtons();
+}
+
+function updateProdToggleButtons() {
+  const volBtn  = document.getElementById('prd-toggle-vol');
+  const timeBtn = document.getElementById('prd-toggle-time');
+  if (!volBtn || !timeBtn) return;
+  const accentStyle = 'background:var(--accent-inabe);color:#000;border-color:var(--accent-inabe)';
+  const plainStyle  = '';
+  if (window._prodBarMode === 'time') {
+    volBtn.style.cssText  = plainStyle;
+    timeBtn.style.cssText = accentStyle;
+  } else {
+    volBtn.style.cssText  = accentStyle;
+    timeBtn.style.cssText = plainStyle;
+  }
+}
+
+window.switchProdBar = function(mode) {
+  window._prodBarMode = mode;
+  updateProdToggleButtons();
+  // Need access to metrics and data; re-read from closure via a stored reference
+  if (!window._prodBarData) return;
+  const { metrics, data, sites } = window._prodBarData;
+  metrics.forEach((m, i) => {
+    const chart = productivityChartInstances[`prd-${i}`];
+    if (!chart) return;
+    const isVol   = mode === 'volume';
+    const barKey  = isVol ? m.volKey  : m.hKey;
+    const barUnit = isVol ? m.volUnit : m.hUnit;
+    const barLbl  = isVol ? m.volLabel : m.hLabel;
+    const n = sites.length;
+    sites.forEach((site, si) => {
+      const ds = chart.data.datasets[n + si];
+      ds.data     = data[site][barKey];
+      ds.label    = `${site} ${barLbl}(${barUnit})`;
+      ds._barUnit = barUnit;
+    });
+    chart.options.scales.y1.title.text = barUnit;
+    chart.update();
+  });
+};
+
+/* ── Main ────────────────────────────────────────────────────────── */
+async function loadAll() {
+  // 更新前のタブ状態（メインタブ・サマリーのサブタブ・雇用区分フィルター）を保持しておき、
+  // データ再取得後に同じ表示へ戻す（振替あり/なしのトグルはグローバル変数のままなので触れない）
+  const prevActiveMode = activeMode;
+  const prevActiveBase = activeBase;
+  const prevSummarySubtab = activeMode === 'summary'
+    ? (document.querySelector('.summary-subtab.active')?.dataset.tab || 'table')
+    : null;
+  const prevEmpTypeChecked = empTypeFilter ? new Set(empTypeFilter) : null;
+  const prevEmpTypeAll = empTypeFilter ? new Set(Object.keys(empTypeColorMap)) : null;
+
+  document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
+  document.getElementById('tabs').innerHTML = '';
+  document.getElementById('last-updated').textContent = '';
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
+  productionData = null; // 生産実績タブ等に戻った際、更新ボタンで実際に再取得されるようキャッシュも破棄する
+
+  try {
+    const json = await fetchSheet();
+    allData = buildDataset(json);
+    renderEmpTypeFilterUI(prevEmpTypeChecked, prevEmpTypeAll);
+
+    try {
+      const adjJson = await fetchAdjustSheet();
+      const adjustRecords = parseAdjustRecords(adjJson);
+      transferAdjusted = computeTransferAdjustments(allData, adjustRecords);
+    } catch (adjErr) {
+      console.error(adjErr);
+      transferAdjusted = { employees: allData.employees, alerts: [`「${ADJUST_SHEET_NAME}」シートの取得に失敗したため、振替は反映されていません（${adjErr.message}）`] };
+    }
+
+    const bases = SITES.filter(s => allData.employees.some(e => e.base === s));
+    if (bases.length === 0) throw new Error('拠点データが見つかりません');
+
+    // 更新前のタブ状態を復元する（拠点が無くなっていた場合のみ先頭拠点にフォールバック）
+    if (prevActiveMode === 'site' && bases.includes(prevActiveBase)) {
+      activeMode = 'site';
+      activeBase = prevActiveBase;
+    } else if (prevActiveMode && prevActiveMode !== 'site') {
+      activeMode = prevActiveMode;
+      activeBase = bases[0];
+    } else {
+      activeMode = 'site';
+      activeBase = bases[0];
+    }
+
+    renderTabs(bases);
+    document.getElementById('main').innerHTML = '';
+    renderActiveTabContent(prevSummarySubtab);
+
+    document.getElementById('last-updated').textContent =
+      `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+  } catch (e) {
+    document.getElementById('main').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+
+// 現在の activeMode に応じたタブ内容を描画する（更新ボタン押下後、直前のタブ状態を復元するために使用）
+function renderActiveTabContent(summarySubtab) {
+  if (activeMode === 'site') {
+    renderBasePanel();
+  } else if (activeMode === 'summary') {
+    renderSummary();
+    switchToSummarySubtab(summarySubtab);
+  } else if (activeMode === 'production') {
+    renderProductionTab();
+  } else if (activeMode === 'productivity') {
+    renderProductivityTab();
+  } else if (activeMode === 'stdset') {
+    renderStdSetTab();
+  } else if (activeMode === 'stdhours') {
+    renderStdHoursTab();
+  } else if (activeMode === 'compare') {
+    renderCompareTab();
+  }
+  renderTransferAlerts();
+}
+
+/* ── 比較タブ: 標準工数 vs 実績工数 ────────────────────────────── */
+function renderCompareTab() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="loading">比較データを計算中...</div>';
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+  fetchProductionSheet().then(prodData => {
+    renderCompareCharts(prodData);
+  }).catch(e => {
+    main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
+  });
+}
+
+function renderCompareCharts(prodData) {
+  const main = document.getElementById('main');
+  const { months: workMonths, employees } = getActiveData();
+  const { months: prodMonths, records } = prodData;
+  const rows = loadStdSettings();
+  const conv = loadCsConv();
+
+  const normWorkMonths = workMonths.map(m => normalizeMonth(m));
+  const commonMonths = prodMonths.map(m => normalizeMonth(m));
+
+  const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
+
+  function getProdVal(site, metricKey, mi) {
+    const r = records.find(r => r.site === site && r.metric === metricKey);
+    return r ? (r.values[mi] ?? null) : null;
+  }
+
+  function calcRow(site, r, mi) {
+    const v = r.val;
+    if (v === null || v === undefined) return { h: null };
+    const mkey = r.metricKey || null;
+    if (r.col === 'kgPerH' && v > 0) {
+      const kg = getProdVal(site, mkey || '収穫量(kg)', mi);
+      return { h: kg !== null ? kg / v : null };
+    }
+    if (r.col === 'fixedH') return { h: v };
+    if (r.col === 'perContainer') {
+      const containers = getProdVal(site, mkey || '稼働コンテナ数', mi);
+      if (containers !== null) {
+        const hPer = r.unit === 'h' ? v : v / 60;
+        return { h: containers * hPer };
+      }
+      return { h: null };
+    }
+    if (r.col === 'perPiece') {
+      const pcs = getProdVal(site, mkey || '合計(点数)', mi);
+      if (pcs !== null) {
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: pcs * secPer / 3600 };
+      }
+      return { h: null };
+    }
+    if (r.col === 'perCs') {
+      const pcs  = getProdVal(site, mkey || '合計(点数)', mi);
+      const bara = getProdVal(site, conv.baraMetric || 'バラ数', mi) || 0;
+      if (pcs !== null) {
+        const cs = calcCs(pcs, bara, conv);
+        const secPer = r.unit === '秒' ? v : v * 60;
+        return { h: cs * secPer / 3600 };
+      }
+      return { h: null };
+    }
+    return { h: null };
+  }
+
+  // commonMonthsは整理済み_分析側の暦月。整理済み_M側は+1ヶ月した列を参照する
+  function workHours(site, typeFilter) {
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+    return commonMonths.map(m => {
+      const wi = normWorkMonths.indexOf(shiftMonthStr(m, PROD_TO_WORK_MONTH_OFFSET));
+      if (wi < 0) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[wi] ?? 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  }
+
+  // Task colors for stacked bar (20 distinct colors)
+  const TASK_COLORS = [
+    '#60a5fa','#34d399','#f472b6','#fbbf24','#a78bfa',
+    '#38bdf8','#4ade80','#fb923c','#e879f9','#facc15',
+    '#93c5fd','#6ee7b7','#fca5a5','#c4b5fd','#86efac',
+    '#fdba74','#f9a8d4','#67e8f9','#bef264','#fde68a',
+  ];
+
+  const divs = ['栽培', '出荷'];
+
+  let html = `<div class="prod-panel">
+    <div class="chart-section-label">📊 標準工数 vs 実績工数 比較
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 左棒(積み上げ) = 標準工数（タスク別）　右棒(赤) = 実績工数</span>
+    </div>`;
+
+  availSites.forEach(site => {
+    const siteColor = SITE_COLORS[site] || '#fff';
+    html += `<div style="margin-bottom:32px">
+      <div class="schart-header" style="color:${siteColor}">${site}</div>`;
+
+    divs.forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualH = workHours(site, typeFilter);
+
+      html += `<div class="schart-section">
+        <div class="schart-header">${div}
+          <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 標準 vs 実績（h）</span>
+        </div>
+        <div class="schart-wrap" style="height:320px"><canvas id="cmp-${site}-${div}"></canvas></div>
+      </div>`;
+
+      // Store for later chart draw
+      if (!window._cmpChartData) window._cmpChartData = {};
+      window._cmpChartData[`${site}-${div}`] = { divRows, actualH, div };
+    });
+
+    html += `</div>`;
+  });
+
+  html += `</div>`;
+  main.innerHTML = html;
+
+  // フィルター適用後のデータをもとに、ページ内の全拠点グラフでdivごとに共通の軸上限を算出
+  const divYMax = {};
+  divs.forEach(div => {
+    const valueArrays = availSites.map(site => {
+      const d = window._cmpChartData[`${site}-${div}`];
+      if (!d) return [];
+      return commonMonths.flatMap((_, mi) => {
+        const stdTotal = d.divRows.reduce((s, r) => {
+          const res = calcRow(site, r, mi);
+          return s + (res.h !== null ? res.h : 0);
+        }, 0);
+        return [stdTotal, d.actualH[mi]];
+      });
+    });
+    divYMax[div] = computeSharedAxisMax(valueArrays, 100);
+  });
+
+  // Draw charts after DOM update
+  const compareChartInstances = {};
+  availSites.forEach(site => {
+    divs.forEach(div => {
+      const key = `${site}-${div}`;
+      const d = window._cmpChartData[key];
+      if (!d) return;
+      const ctx = document.getElementById(`cmp-${key}`)?.getContext('2d');
+      if (!ctx) return;
+
+      const { divRows, actualH } = d;
+      const labels = commonMonths;
+      const datasets = [];
+
+      // Stacked bar datasets: one per task
+      divRows.forEach((r, ri) => {
+        const data = commonMonths.map((_, mi) => {
+          const res = calcRow(site, r, mi);
+          return res.h !== null ? Math.round(res.h * 10) / 10 : null;
+        });
+        datasets.push({
+          type: 'bar',
+          label: r.task,
+          data,
+          backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+          borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+          borderWidth: 0,
+          stack: 'std',
+          yAxisID: 'y',
+          order: 2,
+        });
+      });
+
+      // Actual hours bar (separate stack so it appears side-by-side with std total)
+      datasets.push({
+        type: 'bar',
+        label: '実績工数',
+        data: actualH,
+        backgroundColor: '#f8717199',
+        borderColor: '#f87171',
+        borderWidth: 1,
+        stack: 'actual',
+        yAxisID: 'y',
+        order: 1,
+      });
+
+      const opts = {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          tooltip: {
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (v === null || v === undefined) return null;
+                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
+              },
+              footer: items => {
+                const stdTotal = items
+                  .filter(i => i.dataset.stack === 'std' && i.parsed.y != null)
+                  .reduce((s, i) => s + i.parsed.y, 0);
+                if (stdTotal === 0) return;
+                return `標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            stacked: true,
+            position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' }, suggestedMin: 0,
+            max: divYMax[div],
+            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+          },
+        },
+      };
+
+      if (compareChartInstances[key]) compareChartInstances[key].destroy();
+      compareChartInstances[key] = new Chart(ctx, { data: { labels, datasets }, options: opts });
+    });
+  });
+}
+
+loadAll();
+</script>
+</body>
+</html>

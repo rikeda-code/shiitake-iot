@@ -1,0 +1,3161 @@
+// ── Config ─────────────────────────────────────────────────────────────────────
+
+// Site-specific config (set by wrapper HTML before loading this script)
+const _SC = window.SITE_CONFIG || {};
+
+let SITES = [
+  { name: 'いなべ', id: '1TWOwAAFlV4ufYwaicbWGZ_Agv3ZF-rbDXZQDxYqHAiQ', color: '#38bdf8', indexSheet: '収穫実績集計表1' },
+  { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#f97316', indexSheet: '収穫実績集計表' },
+  { name: '南丹',   id: '1bAdmTLPGtwn6JH6C16m2nzr3RJhZpgAuSMaVtIL1aRc', color: '#34d399', indexSheet: '収穫実績集計表' },
+];
+// Apply site filter from SITE_CONFIG
+if (_SC.siteName) SITES = SITES.filter(s => s.name === _SC.siteName);
+
+const SIZES = [
+  { key: 'm',       label: 'M秀',  color: '#38bdf8' },
+  { key: 'l',       label: 'L秀',  color: '#34d399' },
+  { key: 'xl',      label: '2L秀', color: '#a78bfa' },
+  { key: 'premium', label: '優',   color: '#f97316' },
+];
+
+const CONTAINER_PALETTE = [
+  '#38bdf8','#34d399','#a78bfa','#f97316','#fb7185','#facc15',
+  '#4ade80','#c084fc','#f472b6','#60a5fa','#fb923c','#2dd4bf',
+  '#818cf8','#e879f9','#a3e635','#fbbf24',
+];
+
+// ── State ──────────────────────────────────────────────────────────────────────
+
+let currentSiteIdx = 0;
+const cache     = {}; // { [siteId]: { summary: [], containers: [], data: {} } }
+let chartCumul = null;
+let weeklyCharts = [];
+
+const SITE_WEEKLY_COLORS = {
+  'いなべ': '#3b82f6',
+  '群馬':   '#f97316',
+  '南丹':   '#34d399',
+};
+
+// ── LocalStorage cache ─────────────────────────────────────────────────────────
+const LS_TTL = 60 * 60 * 1000; // 1 hour
+
+function lsGet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > LS_TTL) { localStorage.removeItem(key); return null; }
+    return data;
+  } catch { return null; }
+}
+
+function lsSet(key, data) {
+  try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+
+// ── Chart.js loader ────────────────────────────────────────────────────────────
+function waitForChart(ms = 15000) {
+  if (typeof Chart !== 'undefined') return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + ms;
+    const poll = () => {
+      if (typeof Chart !== 'undefined') { resolve(); return; }
+      if (Date.now() > deadline) {
+        // Last resort: inject script dynamically
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('Chart.js failed to load'));
+        document.head.appendChild(s);
+        return;
+      }
+      setTimeout(poll, 100);
+    };
+    setTimeout(poll, 100);
+  });
+}
+
+// ── Data helpers ───────────────────────────────────────────────────────────────
+
+async function fetchSheet(sheetId, sheetName, headers = 1) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
+    const text = await res.text();
+    const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+    if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function gvizDateStr(v, f) {
+  // Prefer formatted string
+  if (f && typeof f === 'string') return f;
+  if (!v) return null;
+  const s = String(v);
+  // "Date(2025,5,14)" → month is 0-based
+  const m = s.match(/Date\((\d+),(\d+),(\d+)\)/);
+  if (m) return `${m[1]}/${parseInt(m[2]) + 1}/${m[3]}`;
+  return s;
+}
+
+// コンテナ名から番号部分を抽出: "2-4(6/19)L3" → "2-4", "5(6/17)L3" → "5"
+function extractContainerNo(name) {
+  const m = String(name).match(/^(.+?)\(/);
+  return m ? m[1].trim() : String(name).trim();
+}
+
+// サイト別ソートキー: [group, subNo]
+function containerSortKey(siteName, no) {
+  const simple   = /^\d+$/.test(no);
+  const compound = no.match(/^(\d+)-(\d+)$/);
+
+  if (siteName === 'いなべ') {
+    return [0, simple ? parseInt(no) : 999];
+  }
+  if (siteName === '群馬') {
+    if (simple)    return [0, parseInt(no)];
+    if (compound) {
+      const [, p, s] = compound;
+      if (p === '3') return [1, parseInt(s)];
+      if (p === '2') return [2, parseInt(s)];
+    }
+    return [99, 0];
+  }
+  if (siteName === '南丹') {
+    if (simple)    return [0, simple ? parseInt(no) : 999];
+    if (compound) {
+      const [, p, s] = compound;
+      if (p === '1') return [1, parseInt(s)];
+      if (p === '2') return [2, parseInt(s)];
+      if (p === '3') return [3, parseInt(s)];
+    }
+    return [99, 0];
+  }
+  return [0, simple ? parseInt(no) : 999];
+}
+
+// 拠点ごとの「常に表示するコンテナNo」定義
+const DEFINED_NOS = {
+  'いなべ': (() => {
+    const nos = [];
+    for (let i = 1; i <= 51; i++) { if (i !== 49) nos.push(String(i)); }
+    return nos;
+  })(),
+  '群馬': (() => {
+    const nos = [];
+    for (let i = 1; i <= 17; i++) { if (i !== 4 && i !== 12) nos.push(String(i)); }
+    for (let i = 1; i <= 18; i++) nos.push(`3-${i}`);
+    for (let i = 1; i <= 19; i++) nos.push(`2-${i}`);
+    return nos;
+  })(),
+  '南丹': (() => {
+    const nos = [];
+    for (let i = 1; i <= 10; i++) nos.push(String(i));
+    const exclude1x = new Set(['1-3', '1-10']);
+    for (let i = 1; i <= 10; i++) { const n = `1-${i}`; if (!exclude1x.has(n)) nos.push(n); }
+    for (let i = 1; i <= 8;  i++) nos.push(`2-${i}`);
+    for (let i = 1; i <= 10; i++) nos.push(`3-${i}`);
+    return nos;
+  })(),
+};
+
+async function fetchSummaryRows(site) {
+  const table = await fetchSheet(site.id, site.indexSheet);
+  // C(2)=栽培開始日 E(4)=栽培日数 F(5)=コンテナ名 J(9)=収穫量g/菌床 M(12)=パック品率
+  const SKIP = new Set(['コンテナ名', '号機', '見本', '']);
+  const raw = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const nameCell = cells[5];
+    const name = (nameCell?.v != null ? String(nameCell.v) : (nameCell?.f ?? '')).trim();
+    if (SKIP.has(name)) return;
+
+    // Prefer raw Date() value for reliable parsing downstream
+    const sdCell    = cells[2];
+    const startDate = sdCell?.v ? (gvizDateStr(sdCell.v, null) ?? gvizDateStr(null, sdCell?.f) ?? '') : (gvizDateStr(null, sdCell?.f) ?? '');
+    const edCell    = cells[3];
+    const endDate   = edCell?.v ? (gvizDateStr(edCell.v, null) ?? '') : '';
+    const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
+    const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+    const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
+    const lot       = cells[7]?.v != null ? String(cells[7].v).trim() : '';
+    const packRaw   = cells[12]?.v;
+    // パック品率: 0-1の小数か0-100の整数かを自動判定
+    let packRate = null;
+    if (packRaw != null && packRaw !== '') {
+      const n = parseFloat(packRaw);
+      if (!isNaN(n)) packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
+    }
+    raw.push({ name, startDate, endDate, days, harvest, packRate, person, lot, no: extractContainerNo(name) });
+  });
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // 同一コンテナNo.の重複処理
+  // - endDate が過去 → 過去実績 (ended)
+  // - 最新 startDate のもの → アクティブ候補
+  const best = {};      // No → 最新行（アクティブ or 空き）
+  const ended = [];     // 終了済み行（endDate 過去日）
+
+  raw.forEach(r => {
+    const ed = parseDateStr(r.endDate);
+    if (ed && ed < today) {
+      ended.push(r);
+      return;
+    }
+    const key = r.no;
+    if (!best[key]) { best[key] = r; return; }
+    const curr = parseDateStr(r.startDate);
+    const prev = parseDateStr(best[key].startDate);
+    if (curr && (!prev || curr > prev)) best[key] = r;
+  });
+
+  const sortByNo = (a, b) => {
+    const ka = containerSortKey(site.name, a.no);
+    const kb = containerSortKey(site.name, b.no);
+    return ka[0] !== kb[0] ? ka[0] - kb[0] : ka[1] - kb[1];
+  };
+
+  // 定義済みNoのうちアクティブデータがないものを「空き」スケルトンとして追加
+  // (endedにあっても現時点スロットとして空きカードを表示)
+  const definedNos = DEFINED_NOS[site.name] || [];
+  const activeNos = new Set(Object.keys(best));
+  for (const no of definedNos) {
+    if (!activeNos.has(no)) {
+      best[no] = { name: no, startDate: '', endDate: '', days: null, harvest: null, packRate: null, person: '', lot: '', no };
+    }
+  }
+
+  const active = Object.values(best).sort(sortByNo);
+
+  // 終了済みは endDate 新しい順
+  ended.sort((a, b) => {
+    const ea = parseDateStr(a.endDate), eb = parseDateStr(b.endDate);
+    if (ea && eb) return eb - ea;
+    return 0;
+  });
+
+  return { active, ended };
+}
+
+function parseContainerRows(table) {
+  const colMap = {};
+  (table.cols || []).forEach((c, i) => {
+    const lbl = (c.label || '').replace(/\s/g, '');
+    if (lbl.includes('日付'))      colMap.date    = i;
+    if (/^M秀/.test(lbl))          colMap.m       = i;
+    if (/^L秀/.test(lbl))          colMap.l       = i;
+    if (/^2L秀/.test(lbl))         colMap.xl      = i;
+    if (/^優/.test(lbl))           colMap.premium = i;
+  });
+
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    if (colMap.date == null) return;
+    const dc = cells[colMap.date];
+    const date = gvizDateStr(dc?.v, dc?.f);
+    if (!date) return;
+
+    const m       = parseFloat(cells[colMap.m]?.v)       || 0;
+    const l       = parseFloat(cells[colMap.l]?.v)       || 0;
+    const xl      = parseFloat(cells[colMap.xl]?.v)      || 0;
+    const premium = parseFloat(cells[colMap.premium]?.v) || 0;
+    const total   = m + l + xl + premium;
+    if (total > 0) rows.push({ date, m, l, xl, premium, total });
+  });
+
+  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// Parse "M/D" or "M月D日" short dates — uses current year as default
+function parseDateMD(v, f) {
+  const s = String(v ?? f ?? '');
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (m) return new Date(new Date().getFullYear(), parseInt(m[1]) - 1, parseInt(m[2]));
+  m = s.match(/^(\d{1,2})月(\d{1,2})日/);
+  if (m) return new Date(new Date().getFullYear(), parseInt(m[1]) - 1, parseInt(m[2]));
+  return null;
+}
+
+// Parse individual container sheet (headers=0).
+// Supports two layouts:
+//   Type A (いなべ/群馬): dayIdx in some col (0-based int), date ~5 cols later, dailyKg ~12 cols later
+//   Type B (南丹): YYYYMMDD string in col3, actual date in col5, dailyKg in cols 13-16
+function parseContainerRowsV2(table, startDateStr) {
+  const allRows = table.rows || [];
+  if (!allRows.length) return { bedCount: null, rows: [] };
+
+  // Detect Type B (南丹): YYYYMMDD in col3 around rows 6-18
+  let isTypeB = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
+  }
+
+  // Helper: parse integer from cell value
+  const toInt = v => {
+    if (typeof v === 'number' && v >= 0 && Number.isInteger(v)) return v;
+    if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v);
+    return NaN;
+  };
+
+  // If not TypeB, attempt TypeA dayCol detection first
+  // TypeA (いなべ): sheet has integer dayIdx (0,1,2...) in some column
+  let dayCol = -1;
+  if (!isTypeB) {
+    const colCandidates = {};
+    for (let ri = 2; ri < Math.min(14, allRows.length); ri++) {
+      const cells = allRows[ri]?.c || [];
+      for (let ci = 0; ci <= 6; ci++) {
+        const n = toInt(cells[ci]?.v);
+        if (!isNaN(n) && n <= 5) {
+          if (!colCandidates[ci]) colCandidates[ci] = new Set();
+          colCandidates[ci].add(n);
+        }
+      }
+    }
+    for (const ci of [0,1,2,3,4,5,6]) {
+      if (colCandidates[ci]?.has(0) && colCandidates[ci]?.has(1)) { dayCol = ci; break; }
+    }
+    if (dayCol === -1) for (const ci of [0,1,2,3,4,5]) {
+      if (colCandidates[ci]?.has(0)) { dayCol = ci; break; }
+    }
+  }
+
+  // Detect Type C (群馬 wide) ONLY if TypeA dayCol not found
+  // TypeC: YYYYMMDD in col2, "号基" in col3 — each row is one day, columns span all beds
+  let isTypeC = false;
+  if (!isTypeB && dayCol === -1) {
+    for (let ri = 1; ri < Math.min(8, allRows.length); ri++) {
+      const cells = allRows[ri]?.c || [];
+      const v2 = cells[2]?.v != null ? String(cells[2].v) : '';
+      const v3 = String(cells[3]?.v ?? '');
+      if (/^\d{8}$/.test(v2) && v3.includes('号基')) {
+        isTypeC = true; break;
+      }
+    }
+  }
+
+  // bedCount location differs by type
+  let bedCount = null;
+  const nearInt = (v, lo = 10, hi = 9999) => {
+    const n = parseFloat(v);
+    const r = Math.round(n);
+    return (r >= lo && r <= hi && Math.abs(n - r) < 0.5) ? r : null;
+  };
+  if (isTypeB) {
+    // Type B: bedCount is at H3 (row index 2, col index 7); fallback to wider scan
+    bedCount = nearInt(allRows[2]?.c?.[7]?.v);
+    if (bedCount === null) {
+      outer: for (let ri = 1; ri <= 4; ri++) {
+        const cells = allRows[ri]?.c || [];
+        for (let ci = 4; ci <= 12; ci++) {
+          bedCount = nearInt(cells[ci]?.v, 10, 9999);
+          if (bedCount !== null) break outer;
+        }
+      }
+    }
+  } else if (isTypeC) {
+    // Type C: scan rows 0-2 for bedCount
+    for (let ri = 0; ri <= 2 && bedCount === null; ri++) {
+      const cells = allRows[ri]?.c || [];
+      for (let ci = 0; ci < Math.min(cells.length, 60); ci++) {
+        bedCount = nearInt(cells[ci]?.v, 10, 9999);
+        if (bedCount !== null) break;
+      }
+    }
+  } else {
+    // Type A: scan rows 1-4, cols 4-12
+    for (let ri = 1; ri <= 4 && bedCount === null; ri++) {
+      for (let ci = 4; ci <= 12 && bedCount === null; ci++) {
+        bedCount = nearInt(allRows[ri]?.c?.[ci]?.v);
+      }
+    }
+  }
+
+  const rows = [];
+  if (isTypeB) {
+    // Type B (南丹): date in col4-6, daily total in col13
+    const startD = parseDateStr(startDateStr);
+    const startYear = startD ? startD.getFullYear() : new Date().getFullYear();
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      // Try cols 5, 4, 6 for row date
+      let rowDate = null;
+      for (const dc of [5, 4, 6]) {
+        rowDate = cellToDate(cells[dc]?.v, cells[dc]?.f);
+        if (rowDate) break;
+      }
+      // Fallback: short M/D date with start year context
+      if (!rowDate) {
+        for (const dc of [5, 4, 6]) {
+          const cell = cells[dc];
+          if (!cell) continue;
+          const md = parseDateMD(cell.v, cell.f);
+          if (md) {
+            rowDate = new Date(startYear, md.getMonth(), md.getDate());
+            if (startD && rowDate < startD) rowDate = new Date(startYear + 1, md.getMonth(), md.getDate());
+            break;
+          }
+        }
+      }
+      if (!rowDate) continue;
+      const v13 = parseFloat(cells[13]?.v);
+      const daily = (!isNaN(v13) && v13 > 0) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
+        const v = parseFloat(cells[ci]?.v);
+        return s + (isNaN(v) || v < 0 ? 0 : v);
+      }, 0);
+      if (!startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum >= 1 && dayNum <= 200) rows.push({ rowDate, dayNum, daily });
+    }
+  } else if (isTypeC) {
+    // Type C (群馬 wide): col1="N日", col2=YYYYMMDD, cols4+ = per-bed harvest values
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayLabel = String(cells[1]?.v ?? '');
+      const dm = dayLabel.match(/^(\d+)日$/);
+      if (!dm) continue;
+      const dayNum = parseInt(dm[1]);
+      if (dayNum < 1 || dayNum > 200) continue;
+      let daily = 0;
+      for (let ci = 4; ci < cells.length; ci++) {
+        const v = parseFloat(cells[ci]?.v);
+        if (!isNaN(v) && v > 0 && v < 10000) daily += v;
+      }
+      // Parse rowDate from col2 YYYYMMDD for future-row cutoff
+      const ds2 = String(cells[2]?.v ?? '');
+      let rowDate = null;
+      if (/^\d{8}$/.test(ds2)) {
+        rowDate = new Date(parseInt(ds2.slice(0,4)), parseInt(ds2.slice(4,6))-1, parseInt(ds2.slice(6,8)));
+      }
+      rows.push({ dayNum, daily, rowDate });
+    }
+  } else {
+    // Type A (いなべ): integer dayIdx in dayCol (already detected above)
+    if (dayCol === -1) dayCol = 1;
+
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayIdx = toInt(cells[dayCol]?.v);
+      if (isNaN(dayIdx)) continue;
+      let rowDate = null;
+      for (let dc = dayCol + 2; dc <= dayCol + 10; dc++) {
+        rowDate = cellToDate(cells[dc]?.v, cells[dc]?.f);
+        if (rowDate) break;
+      }
+      if (!rowDate) continue;
+      let daily = 0;
+      for (const offset of [12, 11, 13, 10]) {
+        const v = parseFloat(cells[dayCol + offset]?.v);
+        if (!isNaN(v) && v >= 0) { daily = v; break; }
+      }
+      rows.push({ rowDate, dayNum: dayIdx + 1, daily });
+    }
+  }
+
+  rows.sort((a, b) => a.dayNum - b.dayNum);
+  // A3 = allRows[2].c[0] → lot label
+  const lotFromSheet = allRows[2]?.c?.[0]?.v != null ? String(allRows[2].c[0].v).trim() : null;
+  return { bedCount, rows, lot: lotFromSheet };
+}
+
+// Return Sun-Sat week info for a date string (e.g. "2025/6/14")
+function getSunSatWeek(dateStr) {
+  const p = dateStr.split('/');
+  if (p.length < 3) return null;
+  const d   = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+  if (isNaN(d)) return null;
+  const dow = d.getDay(); // 0=Sun
+  const sun = new Date(d); sun.setDate(d.getDate() - dow);
+  const sat = new Date(d); sat.setDate(d.getDate() + (6 - dow));
+  const fmt = dt => `${dt.getMonth() + 1}/${dt.getDate()}`;
+  return {
+    key:   sun.toISOString().slice(0, 10),
+    label: `${fmt(sun)}~${fmt(sat)}`,
+  };
+}
+
+// Parse date string to Date object — handles "2025/6/14", "2025年6月14日", "R7/6/14" etc.
+function parseDateStr(s) {
+  if (!s) return null;
+  // "2025/6/14" or "2025/06/14"
+  let m = String(s).match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  // "2025年6月14日"
+  m = String(s).match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  // "6/17/2026" M/D/YYYY (gviz formatted string in some locales)
+  m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]));
+  // Fallback: let browser parse
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+// Extract a JS Date directly from a gviz cell value (prefer raw Date() value over formatted string)
+function cellToDate(v, f) {
+  if (v) {
+    const s = String(v);
+    const m = s.match(/Date\((\d+),(\d+),(\d+)\)/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3])); // month is 0-based from gviz
+  }
+  return parseDateStr(f);
+}
+
+// Hardcoded target line (g/菌床) — index = day number (1-60), index 0 = null
+const HARDCODED_TARGET = [
+  null,
+  0,0,0,0,0,0,
+  15.9,75.4,134.9,194.4,254.0,313.5,373.0,
+  393.0,400.0,400.0,420.0,440.0,460.0,480.0,
+  500.0,520.0,540.0,570.0,600.0,630.0,645.0,650.0,655.0,660.0,
+  660.0,660.0,660.0,660.0,660.0,660.0,660.0,660.0,660.0,660.0,
+  660.0,660.0,660.0,660.0,660.0,660.0,
+  665,675,685,695,710,725,740,765,775,780,785,790,795,800,
+];
+
+async function fetchTargetLine() {
+  try {
+    const TARGET_SHEET_ID = '1dpQb5V29H5LUcuMr1gDscLSKRic8k8zMbP97d-xMCFI';
+    const table = await fetchSheet(TARGET_SHEET_ID, 'シート1', 1);
+    if (!table?.rows?.length) return HARDCODED_TARGET;
+    const cols = table.cols || [];
+    let colIdx = cols.findIndex(c => (c.label || '').includes('標準') || (c.label || '').includes('800'));
+    if (colIdx === -1) colIdx = 1;
+    const values = [null];
+    for (let i = 0; i < 60; i++) {
+      const v = table.rows[i]?.c?.[colIdx]?.v;
+      const n = v != null ? parseFloat(v) : null;
+      values.push(n != null && n >= 0 && n <= 2000 ? n : null);
+    }
+    if (values.filter(v => v !== null).length >= 10) return values;
+  } catch (e) {}
+  return HARDCODED_TARGET;
+}
+
+let weeklyState = null; // { containerData, targetData }
+let weeklyZoomGroups = null; // groupKeys → { label, containers }
+let weeklyZoomChart = null;
+let weeklySizeMode = null; // null | 'daily' | 'cumul'
+let weeklySizeCharts = [];
+
+async function loadWeeklySection() {
+  const section = document.getElementById('weekly-section');
+  if (!section) return;
+
+  const lsKey = `harvest_weekly_${SITES.map(s => s.id).join('_')}`;
+
+  // Show cached data instantly, refresh in background
+  const lsCached = lsGet(lsKey);
+  if (lsCached) {
+    weeklyState = lsCached;
+    await waitForChart();
+    renderWeeklySection(section, weeklyState, 'week', 'desc');
+    _fetchAndCacheWeekly(section, lsKey, true);
+    return;
+  }
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+    <div class="loading" style="height:60px">全拠点データを読み込み中...</div>`;
+  await _fetchAndCacheWeekly(section, lsKey, false);
+}
+
+async function _fetchAndCacheWeekly(section, lsKey, isBackground) {
+  try {
+    const allSummaries = (await Promise.all(SITES.map(site =>
+      fetchSummaryRows(site)
+        .then(({ active, ended }) => [
+          ...active.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: false })),
+          ...ended.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: true })),
+        ])
+        .catch(() => [])
+    ))).flat().filter(r => r.startDate);
+
+    async function fetchWithLimit(items, fn, limit = 15) {
+      const results = [];
+      for (let i = 0; i < items.length; i += limit) {
+        const batch = items.slice(i, i + limit);
+        results.push(...await Promise.all(batch.map(fn)));
+      }
+      return results;
+    }
+    const [containerData, targetData] = await Promise.all([
+      fetchWithLimit(allSummaries, async c => {
+        try {
+          const table = await fetchSheet(c.siteId, c.name, 0);
+          const { bedCount, rows, lot: sheetLot } = parseContainerRowsV2(table, c.startDate);
+          const sizeRows = parseSizeRowsFromTable(table, c.startDate);
+          return { ...c, bedCount, rows, sizeRows, lot: sheetLot || c.lot || '' };
+        } catch (e) {
+          return { ...c, bedCount: null, rows: [] };
+        }
+      }),
+      fetchTargetLine(),
+    ]);
+
+    weeklyState = { containerData, targetData };
+    lsSet(lsKey, weeklyState);
+    await waitForChart();
+    renderWeeklySection(section, weeklyState, 'week', 'desc');
+
+  } catch (e) {
+    console.error('[weekly] CATCH ERROR:', e.message, e.stack);
+    if (!isBackground) {
+      section.innerHTML = `<div class="section-title">週別 累計収穫量推移</div>
+        <div class="error-msg" style="padding:16px 0">エラー: ${e.message}</div>`;
+    }
+  }
+}
+
+let drillState = { site: null, person: null, subMode: 'week', sortOrder: 'desc' };
+
+function renderWeeklySection(section, state, groupMode, sortOrder) {
+  const { containerData, targetData } = state;
+  const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
+  if (!valid.length) {
+    section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+      <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
+    return;
+  }
+
+  if (groupMode === 'drill') {
+    renderDrillSection(section, valid, targetData);
+    section.dataset.groupMode = groupMode;
+    section.dataset.sortOrder = sortOrder;
+    return;
+  }
+
+  // Build groups
+  const groups = {};
+  let groupKeys = [];
+  if (groupMode === 'lot') {
+    const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
+    valid.forEach(c => {
+      const key = c.lot || '未設定';
+      if (LOT_EXCLUDE.has(key) || /^Date\(/.test(key)) return;
+      if (!groups[key]) groups[key] = { label: key, containers: [] };
+      groups[key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrder === 'desc') groupKeys.reverse();
+  } else if (groupMode === 'person') {
+    valid.forEach(c => {
+      const key = c.person || '未設定';
+      if (!groups[key]) groups[key] = { label: key, containers: [] };
+      groups[key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+  } else if (groupMode === 'site') {
+    valid.forEach(c => {
+      if (!groups[c.siteName]) groups[c.siteName] = { label: c.siteName, containers: [] };
+      groups[c.siteName].containers.push(c);
+    });
+    groupKeys = Object.keys(groups);
+  } else if (groupMode === 'month') {
+    valid.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) {
+        const rd = c.rows[0].rowDate;
+        week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`);
+      }
+      if (!week) return;
+      const monthKey = week.key.slice(0, 7); // "2026-01"
+      const monthLabel = `${parseInt(week.key.slice(5,7))}月`;
+      if (!groups[monthKey]) groups[monthKey] = { label: monthLabel, containers: [] };
+      groups[monthKey].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrder === 'desc') groupKeys.reverse();
+  } else {
+    // week (default)
+    valid.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) {
+        const rd = c.rows[0].rowDate;
+        week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`);
+      }
+      if (!week) return;
+      if (!groups[week.key]) groups[week.key] = { label: week.label, containers: [] };
+      groups[week.key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrder === 'desc') groupKeys.reverse();
+  }
+
+  const legendHtml = Object.entries(SITE_WEEKLY_COLORS).map(([name, color]) =>
+    `<div class="weekly-legend-item"><span class="weekly-legend-dot" style="background:${color}"></span>${name}</div>`
+  ).join('');
+
+  const sortBar = `
+    <div class="weekly-sort-bar" style="flex-wrap:wrap;gap:6px">
+      <span class="sort-label">並び順:</span>
+      <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
+      <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
+      <span class="sort-label" style="margin-left:12px">グループ:</span>
+      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
+      <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
+      <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
+      <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
+    </div>`;
+
+  // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
+  const cardsHtml = groupKeys.map((k, idx) => `
+    <div class="weekly-chart-card" style="cursor:pointer" onclick="openWeeklyZoom(${idx})">
+      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div style="display:none">${
+        groups[k].containers.map(c => {
+          const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
+          const sd = parseDateStr(c.startDate);
+          const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
+          const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
+          return `<span style="font-size:0.7rem;color:${color}">${c.name}${startStr}${lotStr}</span>`;
+        }).join('')
+      }</div>
+      <div class="chart-wrap" style="height:260px"><canvas id="wc-${idx}"></canvas></div>
+    </div>`).join('');
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <div class="weekly-legend">${legendHtml}</div>
+      ${sortBar}
+    </div>
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  // Persist current mode for button callbacks
+  section.dataset.groupMode = groupMode;
+  section.dataset.sortOrder = sortOrder;
+
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  // ズーム用にグループ情報を保存
+  weeklyZoomGroups = groupKeys.map(k => ({ label: groups[k].label, containers: groups[k].containers }));
+  groupKeys.forEach((k, idx) => {
+    const canvasId = `wc-${idx}`;
+    const canvas = document.getElementById(canvasId);
+    if (canvas) buildWeeklyLineChart(canvasId, groups[k].containers, targetData);
+  });
+}
+
+let weeklyZoomCurrentIdx = null;
+let weeklyZoomMode = 'cumul'; // 'cumul' | 'daily' | 'size-cumul'
+let weeklyZoomSubCharts = [];
+
+function openWeeklyZoom(idx) {
+  if (!weeklyZoomGroups || !weeklyZoomGroups[idx]) return;
+  weeklyZoomCurrentIdx = idx;
+  weeklyZoomMode = 'cumul';
+  const modal = document.getElementById('weekly-zoom-modal');
+  document.getElementById('weekly-zoom-title').textContent = weeklyZoomGroups[idx].label;
+  // コンテナラベル（拠点名なし）をタイトル下に表示
+  const zoomLabelsEl = document.getElementById('weekly-zoom-labels');
+  if (zoomLabelsEl) {
+    zoomLabelsEl.innerHTML = "";
+  }
+  modal.style.display = 'flex';
+  weeklyZoomUpdateBtns();
+  weeklyZoomRender();
+}
+
+function weeklyZoomUpdateBtns() {
+  ['cumul','daily','size-cumul','weight','mekaki'].forEach(m => {
+    const btn = document.getElementById('zoom-btn-' + m);
+    if (btn) btn.classList.toggle('active', weeklyZoomMode === m);
+  });
+}
+
+function weeklyZoomDestroyAll() {
+  if (weeklyZoomChart) { try { weeklyZoomChart.destroy(); } catch(e) {} weeklyZoomChart = null; }
+  weeklyZoomSubCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyZoomSubCharts = [];
+}
+
+function weeklyZoomRender() {
+  weeklyZoomDestroyAll();
+  if (weeklyZoomMode === 'weight') { weeklyZoomRenderWeight(); return; }
+  if (weeklyZoomMode === 'mekaki') { weeklyZoomRenderMekaki(); return; }
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const body = document.getElementById('weekly-zoom-body');
+
+  if (weeklyZoomMode === 'cumul') {
+    body.innerHTML = `<div style="position:relative;height:480px"><canvas id="weekly-zoom-canvas"></canvas></div>`;
+    setTimeout(() => {
+      weeklyZoomChart = buildWeeklyLineChart('weekly-zoom-canvas', containers, weeklyState?.targetData || null, true);
+    }, 30);
+    return;
+  }
+
+  // サイズ別: コンテナごとに縦並び
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+  const chartOpts = {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 8 } },
+      tooltip: { ...tooltipDefaults },
+    },
+    scales: {
+      x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
+      y: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+    },
+  };
+
+  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
+  if (!validContainers.length) {
+    body.innerHTML = '<div style="color:#8892a4;padding:16px">サイズデータがありません</div>';
+    return;
+  }
+
+  body.innerHTML = validContainers.map((c, i) => {
+    const siteColor = siteColors[c.siteName] || '#8892a4';
+    return `<div style="margin-bottom:24px">
+      <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">
+        <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
+      </div>
+      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
+        <canvas id="wzs-${i}"></canvas>
+      </div>
+    </div>`;
+  }).join('');
+
+  validContainers.forEach((c, i) => {
+    const canvas = document.getElementById(`wzs-${i}`);
+    if (!canvas) return;
+    const sizeRows = c.sizeRows;
+    const labels = sizeRows.map(r => `day${r.day}`);
+    let datasets;
+    if (weeklyZoomMode === 'daily') {
+      datasets = [
+        { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+        { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+        { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+        { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+      ];
+    } else {
+      let cm=0,cl=0,cxl=0,cbg=0;
+      const packRateData = sizeRows.map(r => {
+        cm+=r.m; cl+=r.l; cxl+=r.xl; cbg+=r.bg;
+        const total = cm+cl+cxl+cbg;
+        return total > 0 ? +(((cm+cl+cxl)/total)*100).toFixed(1) : null;
+      });
+      // reset accumulators for dataset generation
+      cm=0; cl=0; cxl=0; cbg=0;
+      datasets = [
+        { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+        {
+          label: '累計パック品率(%)',
+          data: packRateData,
+          type: 'line',
+          yAxisID: 'yRate',
+          borderColor: '#f43f5e',
+          backgroundColor: '#f43f5e',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: '#f43f5e',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1.5,
+          pointHoverRadius: 6,
+          fill: false,
+          tension: 0.3,
+          stack: undefined,
+          order: 0,
+        },
+      ];
+      const comboOpts = {
+        ...chartOpts,
+        scales: {
+          ...chartOpts.scales,
+          yRate: {
+            type: 'linear',
+            position: 'right',
+            min: 0,
+            max: 100,
+            ticks: { color: '#f43f5e', font: { size: 9 }, callback: v => `${v}%` },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      };
+      weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: comboOpts }));
+      return;
+    }
+    weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts }));
+  });
+}
+
+async function weeklyZoomRenderWeight() {
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const body = document.getElementById('weekly-zoom-body');
+  body.innerHTML = '<div style="color:#94a3b8;padding:16px">データ読み込み中...</div>';
+
+  if (!weightData) {
+    weightData = await Promise.all(WEIGHT_SITES.map(async site => {
+      try {
+        const table = await fetchWeightSheet(site.sheetName);
+        return { site, containers: parseWeightRows(table), error: null };
+      } catch(e) {
+        return { site, containers: [], error: e.message };
+      }
+    }));
+  }
+
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+
+  // 自社菌床ロット判定: "6A", "5O" のように 数字+アルファベット
+  const isJishaLot = lot => lot && /^\d+[A-Z]+$/.test(lot.trim());
+  const jishaEntry = weightData.find(w => w.site.name === '自社菌床');
+
+  // 自社菌床ロットの場合は同一ロットの全菌床エントリをまとめて表示（重複除去）
+  const jishaResults = [];
+  if (jishaEntry) {
+    const jishaContainers = jishaEntry.containers || [];
+    jishaContainers.slice(0, 8).forEach((w, i) => console.log(`  [${i}] lot="${w.lot}" no=${w.containerNo} startDate=${w.startDate}`));
+
+    // 対象グループの栽培開始日範囲を収集（自社菌床ロット判定）
+    const jishaLots = new Set();
+    const jishaStartDates = [];
+    containers.forEach(c => {
+      const lot = c.lot || '';
+      if (!isJishaLot(lot)) return;
+      jishaLots.add(lot);
+      const d = parseDateStr(c.startDate);
+      if (d) jishaStartDates.push(d);
+    });
+
+    if (jishaLots.size > 0) {
+      // ① ロット名完全一致で試みる
+      let matchedByLot = jishaContainers.filter(w => jishaLots.has(w.lot));
+      // ② 一致ゼロなら startDate の近さ（±60日）でフォールバック
+      if (matchedByLot.length === 0 && jishaStartDates.length > 0) {
+        const earliest = Math.min(...jishaStartDates.map(d => d.getTime()));
+        const latest   = Math.max(...jishaStartDates.map(d => d.getTime()));
+        matchedByLot = jishaContainers.filter(w => {
+          if (!w.startDate) return false;
+          const t = w.startDate.getTime();
+          return t >= earliest - 60*86400000 && t <= latest + 60*86400000;
+        });
+      }
+
+      // ③ それでもゼロなら全件表示
+      const finalMatches = matchedByLot.length > 0 ? matchedByLot : jishaContainers;
+      const representativeC = containers.find(c => isJishaLot(c.lot || '')) || containers[0];
+      finalMatches.forEach(wc => {
+        jishaResults.push({
+          c: { ...representativeC, siteName: '自社菌床', name: `${wc.lot || '自社'} ${wc.containerNo}号機` },
+          wc,
+        });
+      });
+    }
+  }
+
+  const siteResults = containers.map(c => {
+    if (isJishaLot(c.lot || '')) return { c, wc: null }; // 自社菌床ロットはjishaResultsで処理
+    const siteEntry = weightData.find(w => w.site.name === c.siteName);
+    if (!siteEntry) return { c, wc: null };
+    const no = c.no;
+    const startD = c.startDate ? parseDateStr(c.startDate) : null;
+    const wc = (siteEntry.containers || []).find(w => {
+      if (String(w.containerNo) !== String(no)) return false;
+      if (startD && w.startDate) {
+        const diff = Math.abs(w.startDate - startD);
+        return diff < 14 * 86400000;
+      }
+      return true;
+    });
+    return { c, wc };
+  }).filter(x => x.wc);
+
+  const results = [...siteResults, ...jishaResults];
+
+  if (!results.length) {
+    body.innerHTML = '<div style="color:#64748b;padding:16px">菌床重量データなし</div>';
+    return;
+  }
+
+  body.innerHTML = results.map((x, i) => {
+    const siteColor = siteColors[x.c.siteName] || '#8892a4';
+    const sd = x.wc.startDate;
+    const dateStr = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}` : '';
+    return `<div style="margin-bottom:24px">
+      <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">
+        <span style="color:${siteColor}">${x.c.siteName}</span> ${x.c.name}
+        <span style="color:#64748b;font-size:0.78rem;margin-left:6px">${dateStr}</span>
+      </div>
+      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
+        <canvas id="wzw-${i}"></canvas>
+      </div>
+    </div>`;
+  }).join('');
+
+  results.forEach((x, i) => {
+    const canvas = document.getElementById(`wzw-${i}`);
+    if (!canvas) return;
+    const wc = x.wc;
+    const labels = wc.measurements.map(m => `${m.idx}本目`);
+    const beforeData = wc.measurements.map(m => m.before ?? 0);
+    const absorbData = wc.measurements.map(m =>
+      (m.before != null && m.after != null) ? Math.max(0, m.after - m.before) : 0
+    );
+    const ch = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: '散水前重量', data: beforeData, backgroundColor: '#60a5facc', stack: 's' },
+          { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc', stack: 's' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}g`,
+              footer: items => `散水後: ${Math.round(items.reduce((s,i) => s+i.parsed.y, 0)).toLocaleString()}g`,
+            },
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#a0aec0', footerColor: '#6ee7b7',
+          },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4' }, grid: { color: '#1e2235' } },
+          y: { stacked: true, ticks: { color: '#8892a4', callback: v => v.toLocaleString() }, grid: { color: '#1e2235' } },
+        },
+      },
+    });
+    weeklyZoomSubCharts.push(ch);
+  });
+}
+
+async function weeklyZoomRenderMekaki() {
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const body = document.getElementById('weekly-zoom-body');
+  body.innerHTML = '<div style="color:#94a3b8;padding:16px">データ読み込み中...</div>';
+
+  if (!mekakiRows) {
+    try {
+      const [table, bedMap] = await Promise.all([
+        (async () => {
+          const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
+          const res = await fetch(url);
+          const text = await res.text();
+          const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+          return json.table;
+        })(),
+        buildBedCountMap(),
+      ]);
+      mekakiRows = (table.rows || [])
+        .filter(row => {
+          const cells = row?.c || [];
+          if (!cells[0]?.v && !cells[4]?.v) return false;
+          const sd = gvizToDate(cells[2]);
+          if (!sd) return false;
+          return sd.getFullYear() > 2025 || (sd.getFullYear() === 2025 && sd.getMonth() >= 9);
+        })
+        .map(row => {
+          const cells = row?.c || [];
+          const cv = v => v?.v != null ? String(v.v) : (v?.f ?? '');
+          const siteName = cv(cells[0]).trim();
+          const hozon    = cv(cells[1]).trim();
+          const startRaw = cells[2];
+          const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
+          const startDate = gvizToDate(startRaw);
+          const lotCell = cells[3];
+          let lot = '';
+          if (lotCell != null) {
+            if (lotCell.f != null && lotCell.f !== '') {
+              lot = String(lotCell.f).trim();
+            } else if (lotCell.v != null) {
+              const lv = lotCell.v;
+              if (typeof lv === 'string' && /^Date\(/.test(lv)) {
+                const m = lv.match(/^Date\((\d+),(\d+),(\d+)\)/);
+                lot = m ? `${parseInt(m[2])+1}/${parseInt(m[3])}` : lv;
+              } else {
+                lot = String(lv).trim();
+              }
+            }
+          }
+          const gouki = cv(cells[4]).trim();
+          const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
+          const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
+          const m3 = cells[7]?.v != null ? parseFloat(cells[7].v) : null;
+          const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
+          const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+          const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
+          const startDateKey = gvizDateStr(startRaw?.v, null) ?? '';
+          const no = gouki.replace(/\(.*\)/, '').trim();
+          const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
+          const converted = (total != null && bedCount != null && bedCount > 0)
+            ? (bedCount !== 2520 ? +(total * 2520 / bedCount).toFixed(2) : total) : null;
+          return { siteName, hozon, startStr, startDate, lot, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
+        })
+        .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+    } catch(e) {
+      body.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
+      return;
+    }
+  }
+
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+  const rows = containers.map(c => {
+    const no = c.no;
+    const startD = c.startDate ? parseDateStr(c.startDate) : null;
+    const match = mekakiRows.find(r => {
+      if (r.siteName !== c.siteName) return false;
+      const rno = r.gouki.replace(/\(.*\)/, '').trim();
+      if (rno !== String(no)) return false;
+      if (startD && r.startDate) {
+        return Math.abs(r.startDate - startD) < 14 * 86400000;
+      }
+      return true;
+    });
+    // converted が null の場合は c.bedCount でフォールバック計算
+    const getConverted = (match, c) => {
+      if (match.converted != null) return match.converted;
+      const total = match.total;
+      const bc = c.bedCount > 0 ? c.bedCount : null;
+      if (total != null && bc != null) {
+        return bc !== 2520 ? +(total * 2520 / bc).toFixed(2) : total;
+      }
+      return null;
+    };
+    return { c, match, converted: match ? getConverted(match, c) : null };
+  });
+
+  if (!rows.some(r => r.match)) {
+    body.innerHTML = '<div style="color:#64748b;padding:16px">芽かき量データなし</div>';
+    return;
+  }
+
+  // コンテナごとに回別棒グラフ（横並び grouped bar）+ 2520換算ラベル
+  const ROUND_COLORS = ['#60a5facc','#34d399cc','#f59e0bcc','#c084fccc','#fb923ccc'];
+  const matchedRows = rows.filter(r => r.match);
+
+  body.innerHTML = `
+    <div style="margin-bottom:8px;font-size:0.8rem;color:#6ee7b7;text-align:right;padding-right:4px">
+      ※ 2520換算値
+    </div>
+    <div style="position:relative;height:${Math.max(260, 60 + matchedRows.length * 44)}px;background:#13151f;border-radius:10px;padding:12px">
+      <canvas id="wzm-chart"></canvas>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+      ${matchedRows.map(({ c, match, converted }) => {
+        const color = siteColors[c.siteName] || '#8892a4';
+        const conv = converted != null ? converted.toFixed(2) + ' kg' : '-';
+        return `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:6px;padding:6px 12px;font-size:0.78rem">
+          <span style="color:${color}">${match.siteName}</span>
+          <span style="color:#e2e8f0;margin-left:4px">${match.gouki}</span>
+          <span style="color:#6ee7b7;font-weight:700;margin-left:8px">${conv}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  setTimeout(() => {
+    const canvas = document.getElementById('wzm-chart');
+    if (!canvas) return;
+    const labels = matchedRows.map(({ c, match }) => `${match.siteName} ${match.gouki}`);
+    const rounds = ['1回目','2回目','3回目','4回目','5回目'];
+    const datasets = rounds.map((label, ri) => ({
+      label,
+      data: matchedRows.map(({ match, c }) => {
+        const raw = [match.m1, match.m2, match.m3, match.m4, match.m5][ri];
+        if (raw == null) return 0;
+        const bc = match.bedCount > 0 ? match.bedCount : (c.bedCount > 0 ? c.bedCount : null);
+        if (bc && bc !== 2520) return +(raw * 2520 / bc).toFixed(2);
+        return raw;
+      }),
+      backgroundColor: ROUND_COLORS[ri],
+    }));
+    const ch = new Chart(canvas, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 8 } },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x != null ? ctx.parsed.x.toFixed(1) : 0} kg (2520換算)`,
+            },
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { color: '#8892a4', font: { size: 9 }, callback: v => `${v}kg` },
+            grid: { color: '#1e2235' },
+          },
+          y: {
+            stacked: true,
+            ticks: { color: '#e2e8f0', font: { size: 10 } },
+            grid: { color: '#1e2235' },
+          },
+        },
+      },
+    });
+    weeklyZoomSubCharts.push(ch);
+  }, 30);
+}
+
+function weeklyZoomSetMode(mode) {
+  if (weeklyZoomCurrentIdx === null) return;
+  weeklyZoomMode = mode;
+  weeklyZoomUpdateBtns();
+  weeklyZoomRender();
+}
+
+function closeWeeklyZoom() {
+  document.getElementById('weekly-zoom-modal').style.display = 'none';
+  weeklyZoomDestroyAll();
+  weeklyZoomCurrentIdx = null;
+}
+
+function parseSizeRowsFromTable(table, startDateStr) {
+  const allRows = table.rows || [];
+  let isTypeB = false, isTypeC = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { isTypeB = true; break; }
+  }
+  if (!isTypeB) {
+    for (let ri = 13; ri < Math.min(25, allRows.length); ri++) {
+      const v = allRows[ri]?.c?.[1]?.v;
+      if (typeof v === 'string' && /^\d+日$/.test(v)) { isTypeC = true; break; }
+    }
+  }
+  const result = [];
+  if (isTypeB) {
+    const startD = parseDateStr(startDateStr);
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      if (!rowDate || !startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m = parseFloat(cells[6]?.v) || 0, l = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0, bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) result.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else {
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      let dayNum;
+      if (isTypeC) {
+        const dm = String(cells[1]?.v ?? '').match(/^(\d+)日$/);
+        if (!dm) continue;
+        dayNum = parseInt(dm[1]);
+      } else {
+        dayNum = cells[1]?.v;
+        if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
+      }
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m = parseFloat(cells[6]?.v) || 0, l = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0, bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) result.push({ day: dayNum, m, l, xl, bg });
+    }
+  }
+  return result;
+}
+
+function weeklySetSizeMode(mode) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  weeklySizeMode = weeklySizeMode === mode ? null : mode;
+  const groupMode = section.dataset.groupMode || 'week';
+  const sortOrder = section.dataset.sortOrder || 'desc';
+  weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklySizeCharts = [];
+  if (weeklySizeMode) {
+    renderWeeklySizeSection(section, weeklyState, groupMode, sortOrder);
+  } else {
+    renderWeeklySection(section, weeklyState, groupMode, sortOrder);
+  }
+}
+
+function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
+  weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklySizeCharts = [];
+
+  const valid = state.containerData.filter(c => c.sizeRows?.length > 0);
+  const chartOpts = {
+    responsive: true, maintainAspectRatio: false,
+    animation: false,
+    plugins: {
+      legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 8 } },
+      tooltip: { ...tooltipDefaults },
+    },
+    scales: {
+      x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 15 }, grid: { color: '#1e2235' } },
+      y: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+    },
+  };
+
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+
+  const sortBtns = `
+    <div class="weekly-sort-bar" style="flex-wrap:wrap;gap:6px">
+      <span class="sort-label">並び順:</span>
+      <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
+      <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
+      <span class="sort-label" style="margin-left:12px">グループ:</span>
+      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
+      <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
+      <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
+      <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
+    </div>`;
+
+  const title = weeklySizeMode === 'daily' ? 'サイズ別日次収穫量 (kg)' : 'サイズ別累計収穫量 (kg)';
+  const cardsHtml = valid.map((c, idx) => {
+    const siteColor = siteColors[c.siteName] || '#8892a4';
+    return `
+      <div class="weekly-chart-card">
+        <div class="weekly-chart-title">
+          <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
+          ${c.startDate ? `<span style="font-size:0.72rem;color:#8892a4;margin-left:6px">${c.startDate}</span>` : ''}
+        </div>
+        <div class="chart-wrap" style="height:220px"><canvas id="wcs-${idx}"></canvas></div>
+      </div>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:4px">${title}<span class="sub">全拠点・コンテナ別</span></div>
+    <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:8px">${sortBtns}</div>
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  section.dataset.groupMode = groupMode;
+  section.dataset.sortOrder = sortOrder;
+
+  valid.forEach((c, idx) => {
+    const canvas = document.getElementById(`wcs-${idx}`);
+    if (!canvas) return;
+    const sizeRows = c.sizeRows;
+    let datasets;
+    if (weeklySizeMode === 'daily') {
+      const labels = sizeRows.map(r => `day${r.day}`);
+      datasets = [
+        { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+        { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+        { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+        { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+      ];
+      const chart = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts });
+      weeklySizeCharts.push(chart);
+    } else {
+      let cm = 0, cl = 0, cxl = 0, cbg = 0;
+      const cumM = [], cumL = [], cumXL = [], cumBG = [];
+      for (const r of sizeRows) {
+        cm += r.m; cl += r.l; cxl += r.xl; cbg += r.bg;
+        cumM.push(+cm.toFixed(2)); cumL.push(+cl.toFixed(2));
+        cumXL.push(+cxl.toFixed(2)); cumBG.push(+cbg.toFixed(2));
+      }
+      const labels = sizeRows.map(r => `day${r.day}`);
+      datasets = [
+        { label: 'M',   data: cumM,  backgroundColor: '#3b82f6cc', stack: 's' },
+        { label: 'L',   data: cumL,  backgroundColor: '#10b981cc', stack: 's' },
+        { label: '2L',  data: cumXL, backgroundColor: '#f59e0bcc', stack: 's' },
+        { label: '袋品', data: cumBG, backgroundColor: '#8b5cf6cc', stack: 's' },
+      ];
+      const chart = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts });
+      weeklySizeCharts.push(chart);
+    }
+  });
+}
+
+function weeklySetSort(order) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  const groupMode = section.dataset.groupMode || 'week';
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  if (weeklySizeMode) {
+    renderWeeklySizeSection(section, weeklyState, groupMode, order);
+  } else {
+    renderWeeklySection(section, weeklyState, groupMode, order);
+  }
+}
+
+function weeklySetGroup(mode) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  const sortOrder = section.dataset.sortOrder || 'desc';
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  weeklySizeMode = null;
+  renderWeeklySection(section, weeklyState, mode, sortOrder);
+}
+
+function renderDrillSection(section, valid, targetData) {
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+
+  const SITES_ORDER = ['いなべ', '群馬', '南丹'];
+  const SITE_COLORS = { 'いなべ': '#3b82f6', '群馬': '#f59e0b', '南丹': '#10b981' };
+
+  const backBtn = (label, onclick) =>
+    `<button class="sort-btn active" style="margin-bottom:12px" onclick="${onclick}">← ${label}</button>`;
+
+  const modeBar = (subMode) => `
+    <div class="weekly-sort-bar" style="margin-bottom:12px">
+      <span class="sort-label">表示:</span>
+      <button class="sort-btn${drillState.subMode==='week'?' active':''}" onclick="weeklyDrillSub('week')">週別</button>
+      <button class="sort-btn${drillState.subMode==='month'?' active':''}" onclick="weeklyDrillSub('month')">月別</button>
+      <button class="sort-btn${drillState.subMode==='all'?' active':''}" onclick="weeklyDrillSub('all')">全コンテナ</button>
+      <span class="sort-label" style="margin-left:12px">並び順:</span>
+      <button class="sort-btn${drillState.sortOrder==='desc'?' active':''}" onclick="weeklyDrillSort('desc')">新しい順</button>
+      <button class="sort-btn${drillState.sortOrder==='asc'?' active':''}" onclick="weeklyDrillSort('asc')">古い順</button>
+    </div>`;
+
+  const navBar = `
+    <div class="weekly-sort-bar" style="margin-bottom:12px">
+      <span class="sort-label">グループ:</span>
+      <button class="sort-btn" onclick="weeklySetGroup('week')">週別</button>
+      <button class="sort-btn" onclick="weeklySetGroup('month')">月別</button>
+      <button class="sort-btn" onclick="weeklySetGroup('site')">拠点別</button>
+      <button class="sort-btn active" onclick="weeklySetGroup('drill')">担当者別</button>
+    </div>`;
+
+  if (!drillState.site) {
+    const siteCards = SITES_ORDER.filter(s => valid.some(c => c.siteName === s)).map(s => {
+      const cnt = valid.filter(c => c.siteName === s).length;
+      const color = SITE_COLORS[s] || '#8892a4';
+      return `<button onclick="weeklyDrillSite('${s}')" style="background:var(--surface);border:2px solid ${color};border-radius:10px;padding:20px 32px;cursor:pointer;color:var(--text);font-size:1rem;font-weight:700;text-align:center;min-width:120px"><div style="color:${color};font-size:1.4rem;margin-bottom:4px">${s}</div><div style="font-size:0.75rem;color:var(--muted)">${cnt} コンテナ</div></button>`;
+    }).join('');
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">拠点 → 担当者</span></div>
+      ${navBar}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>
+      <div class="weekly-grid" style="margin-top:16px" id="drill-person-charts"></div>`;
+    const allPersons = [...new Set(valid.map(c => c.person || '未設定'))].sort();
+    allPersons.forEach((p, idx) => {
+      const pContainers = valid.filter(c => (c.person || '未設定') === p);
+      const card = document.createElement('div');
+      card.className = 'weekly-chart-card';
+      card.innerHTML = `<div class="weekly-chart-title">${p}</div><div class="chart-wrap" style="height:260px"><canvas id="drillp-${idx}"></canvas></div>`;
+      document.getElementById('drill-person-charts').appendChild(card);
+      buildWeeklyLineChart(`drillp-${idx}`, pContainers, targetData);
+    });
+    return;
+  }
+
+  const siteContainers = valid.filter(c => c.siteName === drillState.site);
+
+  if (!drillState.person) {
+    const persons = [...new Set(siteContainers.map(c => c.person || '未設定'))].sort();
+    const personCards = persons.map(p => {
+      const cnt = siteContainers.filter(c => (c.person || '未設定') === p).length;
+      const safeP = p.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `<button onclick="weeklyDrillPerson('${safeP}')" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 24px;cursor:pointer;color:var(--text);font-size:0.9rem;font-weight:600;text-align:center;min-width:120px"><div style="font-size:1rem;margin-bottom:4px">${p}</div><div style="font-size:0.72rem;color:var(--muted)">${cnt} コンテナ</div></button>`;
+    }).join('');
+    section.innerHTML = `
+      <div class="section-title" style="margin-bottom:12px">週別 累計収穫量推移<span class="sub">${drillState.site} › 担当者</span></div>
+      ${backBtn(drillState.site, "weeklyDrillSite(null)")}
+      <div style="display:flex;gap:12px;flex-wrap:wrap">${personCards}</div>`;
+    return;
+  }
+
+  const personContainers = siteContainers.filter(c => (c.person || '未設定') === drillState.person);
+  const subMode = drillState.subMode;
+  const sortOrd = drillState.sortOrder;
+  const groups = {};
+  let groupKeys = [];
+
+  if (subMode === 'all') {
+    groups['all'] = { label: `${drillState.person} 全コンテナ`, containers: personContainers };
+    groupKeys = ['all'];
+  } else if (subMode === 'month') {
+    personContainers.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) { const rd = c.rows[0].rowDate; week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`); }
+      if (!week) return;
+      const mk = week.key.slice(0,7); const ml = `${parseInt(week.key.slice(5,7))}月`;
+      if (!groups[mk]) groups[mk] = { label: ml, containers: [] };
+      groups[mk].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrd === 'desc') groupKeys.reverse();
+  } else {
+    personContainers.forEach(c => {
+      let week = c.startDate ? getSunSatWeek(c.startDate) : null;
+      if (!week && c.rows[0]?.rowDate) { const rd = c.rows[0].rowDate; week = getSunSatWeek(`${rd.getFullYear()}/${rd.getMonth()+1}/${rd.getDate()}`); }
+      if (!week) return;
+      if (!groups[week.key]) groups[week.key] = { label: week.label, containers: [] };
+      groups[week.key].containers.push(c);
+    });
+    groupKeys = Object.keys(groups).sort();
+    if (sortOrd === 'desc') groupKeys.reverse();
+  }
+
+  const cardsHtml = groupKeys.map((k, idx) => `
+    <div class="weekly-chart-card">
+      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div class="chart-wrap" style="height:260px"><canvas id="wd-${idx}"></canvas></div>
+    </div>`).join('');
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">${drillState.site} › ${drillState.person}</span></div>
+    ${backBtn(`${drillState.site} › 担当者`, "weeklyDrillPerson(null)")}
+    ${modeBar(subMode)}
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  weeklyCharts = [];
+  groupKeys.forEach((k, idx) => {
+    if (document.getElementById(`wd-${idx}`))
+      buildWeeklyLineChart(`wd-${idx}`, groups[k].containers, targetData);
+  });
+}
+
+function weeklyDrillSite(site) {
+  drillState.site = site; drillState.person = null;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+function weeklyDrillPerson(person) {
+  drillState.person = person;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+function weeklyDrillSub(sub) {
+  drillState.subMode = sub;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+function weeklyDrillSort(order) {
+  drillState.sortOrder = order;
+  const s = document.getElementById('weekly-section');
+  if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
+}
+
+function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) {
+  if (typeof Chart === 'undefined') { console.warn('[buildChart] Chart.js not loaded'); return; }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) { console.warn('[buildChart] canvas not found:', canvasId); return; }
+  const ctx = canvas.getContext('2d');
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today.getTime() + 86400000);
+
+  // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
+  const maxDayInData = containers.reduce((max, c) => {
+    const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
+    const cutoffDate = endD || tomorrow;
+    const fromRows = c.rows.reduce((m, r) => {
+      if (r.rowDate && r.rowDate >= cutoffDate) return m;
+      return Math.max(m, Math.round(r.dayNum || 0));
+    }, 0);
+    const startD = parseDateStr(c.startDate);
+    const fromStart = startD ? Math.round((cutoffDate - startD) / 86400000) : 0;
+    return Math.max(max, fromRows, fromStart);
+  }, 0);
+  const MAX_DAY = Math.max(65, maxDayInData);
+  const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
+
+  const datasets = containers.map(c => {
+    const color = SITE_WEEKLY_COLORS[c.siteName] || '#888';
+    const cumArr = new Array(MAX_DAY + 1).fill(null);
+    const bedCount = c.bedCount > 0 ? c.bedCount : null;
+    let cumKg = 0;
+    let cutoffDay = 0;
+
+    // ended containers: use endDate as cutoff; active: use tomorrow (include today's data)
+    const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
+    const cutoffDate = endD || tomorrow;
+
+    c.rows.forEach(r => {
+      if (r.rowDate && r.rowDate >= cutoffDate) return;
+      cumKg += r.daily;
+      const d = Math.round(r.dayNum);
+      if (d >= 0 && d <= MAX_DAY) {
+        cumArr[d] = bedCount ? Math.round((cumKg * 1000) / bedCount) : null;
+        cutoffDay = Math.max(cutoffDay, d);
+      }
+    });
+
+    // Fallback for Type C rows without rowDate: use startDate calculation
+    if (cutoffDay === 0) {
+      const startD = parseDateStr(c.startDate);
+      if (startD) {
+        cutoffDay = Math.min(Math.round((cutoffDate - startD) / 86400000), MAX_DAY);
+      } else {
+        const harvestDays = c.rows.filter(r => r.daily > 0).map(r => r.dayNum);
+        cutoffDay = harvestDays.length > 0 ? Math.min(Math.max(...harvestDays), MAX_DAY) : 0;
+      }
+    }
+
+    // For active containers, extend cutoffDay to today so the line reaches the current day
+    if (!c.isEnded) {
+      const startD = parseDateStr(c.startDate);
+      if (startD) {
+        const todayDay = Math.min(Math.round((tomorrow - startD) / 86400000) - 1, MAX_DAY);
+        if (todayDay > cutoffDay) cutoffDay = todayDay;
+      }
+    }
+
+    // Forward-fill only up to cutoffDay
+    let last = null;
+    for (let i = 0; i <= MAX_DAY; i++) {
+      if (cumArr[i] !== null) { last = cumArr[i]; }
+      else if (last !== null && i <= cutoffDay) { cumArr[i] = last; }
+    }
+
+    // ラベル: 群馬3-12(6/15)L3 形式
+    const sd = parseDateStr(c.startDate);
+    const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
+    const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
+    const containerLabel = '';
+
+    return {
+      label: `${c.siteName} ${c.name}`,
+      containerLabel,
+      data: cumArr,
+      borderColor: color,
+      backgroundColor: 'transparent',
+      borderWidth: c.isEnded ? 1 : 1.5,
+      borderDash: c.isEnded ? [4, 3] : [],
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0.2,
+      spanGaps: false,
+    };
+  });
+
+  // Target line: index i = day i
+  const tData = targetData || HARDCODED_TARGET;
+  const targetArr = xLabels.map((d, i) => tData[i] != null ? tData[i] : null);
+  datasets.push({
+    label: '目標',
+    data: targetArr,
+    borderColor: '#94a3b8',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderDash: [6, 4],
+    pointRadius: 0,
+    tension: 0,
+    spanGaps: false,
+  });
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: xLabels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            title: items => `栽培${items[0].label}日目`,
+            label: c => c.raw !== null ? `${c.dataset.label}: ${c.raw}g/菌床` : null,
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'category',
+          title: { display: true, text: '栽培日数', color: '#8892a4', font: { size: 10 } },
+          ticks: {
+            color: '#8892a4', font: { size: 10 },
+            callback: (val, idx) => idx % 10 === 0 ? xLabels[idx] : '',
+          },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          min: 0,
+          ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}g` },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+
+  if (!isZoom) weeklyCharts.push(chart);
+  return chart;
+}
+
+// "47(6/14)志摩L3" → { no:"47", startDate:"6/14", location:"志摩", type:"L3" }
+function parseContainerName(raw) {
+  const s = String(raw);
+  // Extract everything before first "(" as the container number/name
+  const parenIdx = s.indexOf('(');
+  if (parenIdx > 0) {
+    const no = s.slice(0, parenIdx).trim();
+    const rest = s.slice(parenIdx + 1);
+    const closeIdx = rest.indexOf(')');
+    const startDate = closeIdx >= 0 ? rest.slice(0, closeIdx) : '';
+    return { no, startDate, location: '', type: '', raw: s };
+  }
+  return { no: s, startDate: '', location: '', type: '', raw: s };
+}
+
+// ── Chart helpers ──────────────────────────────────────────────────────────────
+
+const tooltipDefaults = {
+  backgroundColor: '#1e2235',
+  borderColor: '#3a3f5c',
+  borderWidth: 1,
+  titleColor: '#e2e8f0',
+  bodyColor: '#a0aec0',
+};
+
+function destroyCharts() {
+}
+
+function buildCumulChart(containers, data) {
+  const allDates = new Set();
+  containers.forEach(n => (data[n] || []).forEach(r => allDates.add(r.date)));
+  const dates = Array.from(allDates).sort();
+  if (!dates.length) return;
+
+  const datasets = containers.map((name, idx) => {
+    const byDate = {};
+    (data[name] || []).forEach(r => byDate[r.date] = r.total);
+    let cum = 0;
+    const vals = dates.map(d => { cum += byDate[d] || 0; return +cum.toFixed(3); });
+    const info = parseContainerName(name);
+    const color = CONTAINER_PALETTE[idx % CONTAINER_PALETTE.length];
+    return {
+      label: `No.${info.no} ${info.location}${info.type}`,
+      data: vals,
+      borderColor: color,
+      backgroundColor: color + '18',
+      borderWidth: 2,
+      pointRadius: 2.5,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      fill: false,
+    };
+  });
+
+  const ctx = document.getElementById('cumul-chart').getContext('2d');
+  chartCumul = new Chart(ctx, {
+    type: 'line',
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 14, padding: 16 },
+        },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kg`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45, maxTicksLimit: 20 },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} kg` },
+          grid: { color: '#1e2235' },
+        },
+      },
+    },
+  });
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────────
+
+function renderSetupNotice() {
+  return `<div class="setup-notice">
+    <strong>⚠ データを取得できません</strong><br>
+    スプレッドシートが「ウェブに公開」されていない可能性があります：<br>
+    1. スプレッドシートを開く<br>
+    2. 「ファイル → 共有 → <strong>ウェブに公開</strong>」を選択<br>
+    3. 「ドキュメント全体」→「<strong>公開</strong>」ボタンをクリック<br>
+    4. このページを更新する
+  </div>`;
+}
+
+function renderCards(summary) {
+  if (!summary.length) return renderSetupNotice();
+
+  const html = summary.map(row => {
+    const info = parseContainerName(row.name);
+    const displayName = info.no || row.name;
+
+    // 空きコンテナ（収穫データなし）
+    if (row.harvest == null) {
+      return `<div class="container-card" style="opacity:0.35;cursor:default">
+        <div class="card-cn" title="${row.name}">${displayName}</div>
+        <div class="card-sd" style="font-size:0.72rem;color:var(--muted)">空き</div>
+      </div>`;
+    }
+
+    const harvestVal = Math.round(row.harvest);
+    const harvestCls = harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
+    const packOk     = row.packRate == null || row.packRate >= 80;
+    const packCls    = row.packRate == null ? '' : row.packRate >= 90 ? ' card-chip-green' : row.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
+    const sd   = row.startDate || '—';
+    const days = row.days != null ? `${row.days}日` : '—';
+    const packStr = row.packRate != null ? `${row.packRate}%` : '—';
+
+    const personStr = row.person ? `<span style="color:var(--muted);font-size:0.72rem">${row.person}</span>` : '';
+    return `<div class="container-card" style="cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
+      <div class="card-cn" title="${row.name}" style="display:flex;justify-content:space-between;align-items:baseline">${displayName}${personStr}</div>
+      <div class="card-sd">開始: ${sd}</div>
+      <div class="card-harvest${harvestCls}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
+      <div class="card-meta">
+        <span class="card-chip">${days}</span>
+        <span class="card-chip${packCls}">${packStr}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (!html.trim()) return '<div style="padding:16px;color:#94a3b8">表示中のコンテナはありません</div>';
+  return `<div class="cards-grid">${html}</div>`;
+}
+
+function renderEndedCards(ended) {
+  if (!ended.length) return '';
+
+  // 栽培開始月でグループ化（新しい月順）
+  const groups = {};
+  ended.forEach(row => {
+    const sd = parseDateStr(row.startDate);
+    const key = sd ? `${sd.getFullYear()}年${sd.getMonth() + 1}月` : '不明';
+    const sortKey = sd ? sd.getFullYear() * 100 + sd.getMonth() : 0;
+    if (!groups[key]) groups[key] = { sortKey, rows: [] };
+    groups[key].rows.push(row);
+  });
+
+  const sortedGroups = Object.entries(groups).sort((a, b) => b[1].sortKey - a[1].sortKey);
+
+  return sortedGroups.map(([monthLabel, { rows }]) => {
+    // 月平均カード
+    const harvestRows = rows.filter(r => r.harvest != null);
+    const avgHarvest = harvestRows.length
+      ? Math.round(harvestRows.reduce((s, r) => s + r.harvest, 0) / harvestRows.length)
+      : null;
+    const avgDays = rows.filter(r => r.days != null).length
+      ? Math.round(rows.filter(r => r.days != null).reduce((s, r) => s + r.days, 0) / rows.filter(r => r.days != null).length)
+      : null;
+    const avgHarvestCls = avgHarvest == null ? '' : avgHarvest >= 800 ? ' card-green' : avgHarvest < 660 ? ' card-red' : '';
+    const avgHarvestStr = avgHarvest != null ? `${avgHarvest.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span>` : '—';
+    const avgCard = `<div class="container-card" style="border:1px solid #3e4460;cursor:default">
+      <div class="card-cn">${monthLabel.replace('年','年').replace('月','月')}平均</div>
+      <div class="card-sd" style="color:#8892a4">${harvestRows.length}コンテナ</div>
+      <div class="card-harvest${avgHarvestCls}">${avgHarvestStr}</div>
+      <div class="card-meta">
+        <span class="card-chip">${avgDays != null ? avgDays + '日' : '—'}</span>
+      </div>
+    </div>`;
+    const cards = rows.map(row => {
+      const info = parseContainerName(row.name);
+      const displayName = info.no || row.name;
+      const ed = row.endDate || '—';
+      const sd = row.startDate || '—';
+      const harvestVal = row.harvest != null ? Math.round(row.harvest) : null;
+      const harvestCls = harvestVal == null ? '' : harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
+      const harvestStr = harvestVal != null ? `${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span>` : '<span style="color:var(--muted)">—</span>';
+      const packCls = row.packRate == null ? '' : row.packRate >= 90 ? ' card-chip-green' : row.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
+      const packStr = row.packRate != null ? `${row.packRate}%` : '—';
+      const days = row.days != null ? `${row.days}日` : '—';
+      return `<div class="container-card" style="opacity:0.6;cursor:pointer" onclick="showDetail('${row.name.replace(/'/g,"\\'")}')">
+        <div class="card-cn" title="${row.name}">${displayName}</div>
+        <div class="card-sd">開始: ${sd}</div>
+        <div class="card-sd" style="color:#f87171">終了: ${ed}</div>
+        <div class="card-harvest${harvestCls}">${harvestStr}</div>
+        <div class="card-meta">
+          <span class="card-chip">${days}</span>
+          <span class="card-chip${packCls}">${packStr}</span>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:24px">
+      <div style="font-size:0.8rem;color:#8892a4;margin-bottom:8px;padding-left:2px">${monthLabel}開始</div>
+      <div class="cards-grid">${avgCard}${cards}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Mgmt data ─────────────────────────────────────────────────────────────────
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function renderMain(site, active, ended, containers, data) {
+  destroyCharts();
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+
+  const s1 = document.createElement('section');
+  s1.innerHTML = `<div class="section-title">現時点収穫量<span class="sub">1菌床当たり (g)</span></div>
+    ${renderCards(active)}`;
+  main.appendChild(s1);
+
+  if (ended.length) {
+    const s2 = document.createElement('section');
+    s2.innerHTML = `<div class="section-title" style="margin-top:32px">過去の実績<span class="sub">栽培終了済み</span></div>
+      ${renderEndedCards(ended)}`;
+    main.appendChild(s2);
+  }
+
+  if (!containers.length) return;
+}
+
+// ── Load ───────────────────────────────────────────────────────────────────────
+
+async function loadCurrentSite(forceRefresh = false) {
+  const site = SITES[currentSiteIdx];
+  const lsKey = `harvest_site_${site.id}`;
+
+  // Show cached data instantly, then refresh in background
+  if (!forceRefresh) {
+    const lsCached = lsGet(lsKey);
+    if (lsCached) {
+      const { active, ended, containers, data, updatedAt } = lsCached;
+      cache[site.id] = { active, ended, containers, data };
+      renderMain(site, active, ended, containers, data);
+      document.getElementById('last-updated').textContent =
+        `キャッシュ: ${new Date(updatedAt).toLocaleString('ja-JP')} ↻`;
+      // Refresh in background silently
+      _fetchAndCacheSite(site, lsKey, true);
+      return;
+    }
+    if (cache[site.id]) {
+      const { active, ended, containers, data } = cache[site.id];
+      renderMain(site, active, ended, containers, data);
+      return;
+    }
+  }
+
+  document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
+  document.getElementById('last-updated').textContent = '';
+  await _fetchAndCacheSite(site, lsKey, false);
+}
+
+async function _fetchAndCacheSite(site, lsKey, isBackground) {
+  let active     = [];
+  let ended      = [];
+  let containers = [];
+  let listError  = null;
+
+  try {
+    ({ active, ended } = await fetchSummaryRows(site));
+    containers = active.map(r => r.name);
+  } catch (e) {
+    listError = e.message || String(e);
+  }
+
+  const updatedAt = Date.now();
+  cache[site.id] = { active, ended, containers, data: {} };
+  lsSet(lsKey, { active, ended, containers, data: {}, updatedAt });
+
+  renderMain(site, active, ended, containers, {});
+
+  if (listError) {
+    const msg = document.createElement('div');
+    msg.className = 'error-msg';
+    msg.textContent = `データ取得エラー: ${listError}`;
+    document.getElementById('main').prepend(msg);
+  }
+
+  document.getElementById('last-updated').textContent =
+    `最終更新: ${new Date(updatedAt).toLocaleString('ja-JP')}`;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+
+let weeklyTabActive = false;
+let lotTabActive = false;
+let scatterTabActive = false;
+let weightTabActive = false;
+let mekakiTabActive = false;
+let scatterEndedData = null; // { siteName, no, name, startDate, endDate, days, harvest }[]
+const scatterMonthCharts = {};
+
+function updateTabVisibility() {
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive;
+  document.getElementById('main').style.display = anyAlt ? 'none' : '';
+  document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
+  document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
+  document.getElementById('scatter-section').style.display = scatterTabActive ? '' : 'none';
+  document.getElementById('weight-section').style.display = weightTabActive ? '' : 'none';
+  document.getElementById('mekaki-section').style.display = mekakiTabActive ? '' : 'none';
+  if (weightTabActive) renderWeightTab();
+  if (mekakiTabActive) renderMekakiTab();
+  if (weeklyTabActive && weeklyState) {
+    const section = document.getElementById('weekly-section');
+    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
+    const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
+    renderWeeklySection(section, weeklyState, groupMode, sortOrder);
+  }
+  if (lotTabActive) renderLotTab();
+  if (scatterTabActive) renderScatterTab();
+}
+
+let scatterChart = null;
+let scatterMode = 'all'; // 'all' | 'month-all' | 'month-site'
+let scatterSite = 'all'; // 'all' | 'いなべ' | '群馬' | '南丹'
+
+async function renderScatterTab() {
+  const section = document.getElementById('scatter-section');
+  section.innerHTML = `
+    <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
+    <div class="loading">全拠点データを読み込み中...</div>`;
+
+  // 全拠点の ended を収集（キャッシュ優先、なければフェッチ）
+  const allEnded = [];
+  for (const site of SITES) {
+    let ended = cache[site.id]?.ended;
+    if (!ended) {
+      try {
+        const result = await fetchSummaryRows(site);
+        cache[site.id] = { ...(cache[site.id] || {}), ...result };
+        ended = result.ended;
+      } catch { ended = []; }
+    }
+    (ended || []).forEach(r => {
+      if (r.harvest == null || r.days == null) return;
+      allEnded.push({ ...r, siteName: site.name, siteColor: site.color });
+    });
+  }
+  scatterEndedData = allEnded;
+  renderScatterChart();
+}
+
+function renderScatterChart() {
+  const section = document.getElementById('scatter-section');
+  const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+  const MONTH_COLORS = ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#38bdf8','#60a5fa','#a78bfa','#e879f9','#f472b6','#94a3b8','#fbbf24'];
+
+  const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'avg': '平均' };
+
+  const btnBar = Object.entries(modeLabels).map(([k, v]) =>
+    `<button class="sort-btn${scatterMode===k?' active':''}" onclick="scatterSetMode('${k}')" style="margin-right:6px">${v}</button>`
+  ).join('');
+
+  const showSiteFilter = scatterMode !== 'avg';
+  const siteFilterBtns = showSiteFilter ? [['all','全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) => {
+    const col = k === 'all' ? '' : `color:${SITE_COLORS[k]};border-color:${SITE_COLORS[k]}`;
+    const active = scatterSite === k ? 'active' : '';
+    return `<button class="sort-btn ${active}" onclick="scatterSetSite('${k}')" style="margin-right:6px;${active?col:''}">${v}</button>`;
+  }).join('') : '';
+
+  const allData = scatterEndedData || [];
+
+  // 月一覧を事前収集してHTML生成
+  const monthBuckets = {};
+  allData.forEach(r => {
+    const sd = parseDateStr(r.startDate);
+    if (!sd) return;
+    const key = `${sd.getFullYear()}_${String(sd.getMonth()+1).padStart(2,'0')}`;
+    if (!monthBuckets[key]) monthBuckets[key] = [];
+    monthBuckets[key].push(r);
+  });
+  const sortedMonths = Object.keys(monthBuckets).sort().reverse();
+
+  const monthChartsHtml = sortedMonths.map(mk => {
+    const [yr, mo] = mk.split('_');
+    let canvasHtml;
+    if (scatterSite === 'all') {
+      canvasHtml = `<div style="position:relative;height:300px;background:#13151f;border-radius:12px;padding:16px"><canvas id="scatter-month-${mk}-all"></canvas></div>`;
+    } else {
+      const s = SITES.find(s => s.name === scatterSite);
+      canvasHtml = `
+        <div style="color:${s.color};font-size:0.8rem;font-weight:600;margin-bottom:6px">${s.name}</div>
+        <div style="position:relative;height:300px;background:#13151f;border-radius:12px;padding:16px"><canvas id="scatter-month-${mk}-${scatterSite}"></canvas></div>`;
+    }
+    return `
+      <div style="margin-bottom:40px">
+        <div style="color:#cbd5e1;font-size:0.9rem;font-weight:600;margin-bottom:12px">${yr}年${parseInt(mo)}月開始</div>
+        ${canvasHtml}
+      </div>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
+    <div style="margin-bottom:10px">${btnBar}</div>
+    ${siteFilterBtns ? `<div style="margin-bottom:16px">${siteFilterBtns}</div>` : '<div style="margin-bottom:16px"></div>'}
+    <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
+      <canvas id="scatter-canvas"></canvas>
+    </div>
+    ${monthChartsHtml ? `<div style="margin-top:40px">${monthChartsHtml}</div>` : ''}`;
+
+  // destroy old charts
+  if (scatterChart) { scatterChart.destroy(); scatterChart = null; }
+  Object.values(scatterMonthCharts).forEach(c => c.destroy());
+  Object.keys(scatterMonthCharts).forEach(k => delete scatterMonthCharts[k]);
+
+  const data = scatterSite === 'all' ? allData : allData.filter(r => r.siteName === scatterSite);
+  let datasets = [];
+
+  if (scatterMode === 'all') {
+    for (const site of SITES) {
+      const pts = data.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
+      if (!pts.length) continue;
+      datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+    }
+  } else if (scatterMode === 'month-all') {
+    const monthMap = {};
+    data.forEach(r => {
+      const sd = parseDateStr(r.startDate);
+      const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
+      if (!monthMap[key]) monthMap[key] = [];
+      monthMap[key].push({ x: r.days, y: Math.round(r.harvest), label: r.no });
+    });
+    Object.entries(monthMap).sort().forEach(([month, pts], i) => {
+      datasets.push({ label: `${month}月開始`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
+    });
+  } else {
+    // 平均モード
+    for (const site of SITES) {
+      const siteData = allData.filter(r => r.siteName === site.name);
+      const monthMap = {};
+      siteData.forEach(r => {
+        const sd = parseDateStr(r.startDate);
+        const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
+        if (!monthMap[key]) monthMap[key] = [];
+        monthMap[key].push(r);
+      });
+      const pts = Object.entries(monthMap).sort().map(([month, rs]) => {
+        const avgH = Math.round(rs.reduce((s, r) => s + r.harvest, 0) / rs.length);
+        const avgD = Math.round(rs.reduce((s, r) => s + r.days, 0) / rs.length);
+        return { x: avgD, y: avgH, label: `${month}(${rs.length}件)` };
+      });
+      if (!pts.length) continue;
+      datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 8, pointHoverRadius: 11 });
+    }
+  }
+
+  const scaleOpts = {
+    x: {
+      title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 11 } },
+      ticks: { color: '#8892a4', font: { size: 10 } },
+      grid: { color: '#1e2235' },
+    },
+    y: {
+      title: { display: true, text: '収穫量 (g/菌床)', color: '#8892a4', font: { size: 11 } },
+      ticks: { color: '#8892a4', font: { size: 10 } },
+      grid: { color: '#1e2235' },
+    },
+  };
+
+  scatterChart = new Chart(document.getElementById('scatter-canvas'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } },
+        tooltip: {
+          ...tooltipDefaults,
+          callbacks: {
+            label: ctx => {
+              const p = ctx.raw;
+              if (scatterMode === 'avg')
+                return `${ctx.dataset.label} ${p.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
+              return `No.${p.label}  ${ctx.dataset.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
+            },
+          },
+        },
+      },
+      scales: scaleOpts,
+    },
+  });
+
+  // 月別サブチャート（scatterSiteに応じて表示内容を切替）
+  sortedMonths.forEach(mk => {
+    const monthData = monthBuckets[mk] || [];
+    let subDatasets, canvasId, showLegend;
+    if (scatterSite === 'all') {
+      canvasId = `scatter-month-${mk}-all`;
+      showLegend = true;
+      subDatasets = SITES.map(site => {
+        const pts = monthData.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
+        return pts.length ? { label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 } : null;
+      }).filter(Boolean);
+    } else {
+      canvasId = `scatter-month-${mk}-${scatterSite}`;
+      showLegend = false;
+      const site = SITES.find(s => s.name === scatterSite);
+      const pts = monthData.filter(r => r.siteName === scatterSite).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
+      subDatasets = pts.length ? [{ label: scatterSite, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 }] : [];
+    }
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    scatterMonthCharts[mk] = new Chart(canvas, {
+      type: 'scatter',
+      data: { datasets: subDatasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: showLegend ? { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } } : { display: false },
+          tooltip: {
+            ...tooltipDefaults,
+            callbacks: { label: ctx => `No.${ctx.raw.label}  ${ctx.dataset.label}  ${ctx.raw.x}日 / ${ctx.raw.y.toLocaleString('ja-JP')} g/菌床` },
+          },
+        },
+        scales: scaleOpts,
+      },
+    });
+  });
+}
+
+function scatterSetMode(mode) {
+  scatterMode = mode;
+  renderScatterChart();
+}
+
+function scatterSetSite(site) {
+  scatterSite = site;
+  renderScatterChart();
+}
+
+function renderLotTab() {
+  const section = document.getElementById('lot-section');
+  if (!weeklyState) {
+    section.innerHTML = '<div class="loading">データ読み込み中...</div>';
+    return;
+  }
+  const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
+  const isExcludedLot = lot => LOT_EXCLUDE.has(lot) || /^Date\(/.test(lot) || lot.includes('自動的に収穫量');
+  const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+
+  // Group by lot
+  const groups = {};
+  weeklyState.containerData.forEach(c => {
+    const lot = c.lot || '未設定';
+    if (isExcludedLot(lot)) return;
+    if (!groups[lot]) groups[lot] = [];
+    groups[lot].push(c);
+  });
+  const lotKeys = Object.keys(groups).sort().reverse(); // 新しい順
+
+  if (!lotKeys.length) {
+    section.innerHTML = '<div style="padding:16px;color:#94a3b8">自社菌床データがありません</div>';
+    return;
+  }
+
+  const html = lotKeys.map(lot => {
+    // Strip "自社" prefix for display
+    const lotLabel = lot.replace(/^自社/, '');
+    const cards = groups[lot].map(c => {
+      const siteColor = SITE_COLORS_LOT[c.siteName] || '#8892a4';
+      const displayNo = `${c.siteName}${c.no || c.name}`;
+      const harvestVal = c.harvest != null ? Math.round(c.harvest) : null;
+      const harvestCls = harvestVal == null ? '' : harvestVal >= 800 ? ' card-green' : harvestVal < 660 ? ' card-red' : '';
+      const packCls = c.packRate == null ? '' : c.packRate >= 90 ? ' card-chip-green' : c.packRate >= 80 ? ' card-chip-blue' : ' card-chip-red';
+      const packStr = c.packRate != null ? `${c.packRate}%` : '—';
+      const days = c.days != null ? `${c.days}日` : '—';
+      const safeName = c.name.replace(/'/g,"\\'");
+      if (harvestVal == null) {
+        return `<div class="container-card" style="opacity:0.45;cursor:pointer" onclick="showDetail('${safeName}','${c.siteId}')">
+          <div style="font-size:0.65rem;color:${siteColor};font-weight:700;margin-bottom:2px">${lotLabel}</div>
+          <div class="card-cn">${displayNo}</div>
+          <div class="card-sd" style="font-size:0.68rem">未稼働</div>
+        </div>`;
+      }
+      return `<div class="container-card" style="cursor:pointer" onclick="showDetail('${safeName}','${c.siteId}')">
+        <div style="font-size:0.65rem;color:${siteColor};font-weight:700;margin-bottom:2px">${lotLabel}</div>
+        <div class="card-cn">${displayNo}</div>
+        <div class="card-harvest${harvestCls}">${harvestVal.toLocaleString('ja-JP')}<span class="card-unit"> g/菌床</span></div>
+        <div class="card-meta">
+          <span class="card-chip">${days}</span>
+          <span class="card-chip${packCls}">${packStr}</span>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:28px">
+      <div style="font-size:0.9rem;font-weight:700;color:#e2e8f0;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #2e3148">ロット ${lotLabel}</div>
+      <div class="cards-grid">${cards}</div>
+    </div>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title">自社菌床 収穫状況<span class="sub">ロット別</span></div>
+    ${html}`;
+}
+
+function initTabs() {
+  const tabsEl = document.getElementById('tabs');
+
+  // Site tabs
+  SITES.forEach((site, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
+    btn.textContent = site.name;
+    if (i === 0) {
+      btn.style.color = site.color;
+      btn.style.borderBottomColor = site.color;
+    }
+    btn.addEventListener('click', () => {
+      if (!weeklyTabActive && !lotTabActive && !scatterTabActive && !weightTabActive && currentSiteIdx === i) return;
+      weeklyTabActive = false;
+      lotTabActive = false;
+      scatterTabActive = false;
+      weightTabActive = false;
+      mekakiTabActive = false;
+      currentSiteIdx = i;
+      tabsEl.querySelectorAll('.tab-btn').forEach((b, j) => {
+        b.classList.toggle('active', j === i);
+        if (j < SITES.length) {
+          const s = SITES[j];
+          if (j === i) { b.style.color = s.color; b.style.borderBottomColor = s.color; }
+          else          { b.style.color = ''; b.style.borderBottomColor = ''; }
+        } else {
+          b.style.color = ''; b.style.borderBottomColor = '';
+        }
+      });
+      updateTabVisibility();
+      loadCurrentSite();
+    });
+    tabsEl.appendChild(btn);
+  });
+
+  // 自社菌床 tab
+  const lotBtn = document.createElement('button');
+  lotBtn.className = 'tab-btn';
+  lotBtn.textContent = '自社菌床';
+  lotBtn.addEventListener('click', () => {
+    if (lotTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = true;
+    scatterTabActive = false;
+    weightTabActive = false;
+      mekakiTabActive = false;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = ''; b.style.borderBottomColor = '';
+    });
+    lotBtn.classList.add('active');
+    lotBtn.style.color = '#f59e0b';
+    lotBtn.style.borderBottomColor = '#f59e0b';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  if (_SC.showLotTab !== false) tabsEl.appendChild(lotBtn);
+
+  // 散布図 tab
+  const scatterBtn = document.createElement('button');
+  scatterBtn.className = 'tab-btn';
+  scatterBtn.textContent = '散布図';
+  scatterBtn.addEventListener('click', () => {
+    if (scatterTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = true;
+    weightTabActive = false;
+      mekakiTabActive = false;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = ''; b.style.borderBottomColor = '';
+    });
+    scatterBtn.classList.add('active');
+    scatterBtn.style.color = '#e879f9';
+    scatterBtn.style.borderBottomColor = '#e879f9';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  if (!_SC.siteName) tabsEl.appendChild(scatterBtn);
+
+  // 菌床重量 tab
+  const weightBtn = document.createElement('button');
+  weightBtn.className = 'tab-btn';
+  weightBtn.textContent = '菌床重量';
+  weightBtn.addEventListener('click', () => {
+    if (weightTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = ''; b.style.borderBottomColor = '';
+    });
+    weightBtn.classList.add('active');
+    weightBtn.style.color = '#fb7185';
+    weightBtn.style.borderBottomColor = '#fb7185';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(weightBtn);
+
+  // 芽かき量 tab
+  const mekakiBtn = document.createElement('button');
+  mekakiBtn.className = 'tab-btn';
+  mekakiBtn.textContent = '芽かき量';
+  mekakiBtn.addEventListener('click', () => {
+    if (mekakiTabActive) return;
+    weeklyTabActive = false; lotTabActive = false; scatterTabActive = false;
+    weightTabActive = false; mekakiTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = ''; b.style.borderBottomColor = ''; });
+    mekakiBtn.classList.add('active');
+    mekakiBtn.style.color = '#a78bfa';
+    mekakiBtn.style.borderBottomColor = '#a78bfa';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(mekakiBtn);
+
+  // Standalone weekly tab
+  const weeklyBtn = document.createElement('button');
+  weeklyBtn.className = 'tab-btn';
+  weeklyBtn.textContent = '週別累計';
+  weeklyBtn.addEventListener('click', () => {
+    if (weeklyTabActive) return;
+    weeklyTabActive = true;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = false;
+      mekakiTabActive = false;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = '';
+      b.style.borderBottomColor = '';
+    });
+    weeklyBtn.classList.add('active');
+    weeklyBtn.style.color = '#94a3b8';
+    weeklyBtn.style.borderBottomColor = '#94a3b8';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(weeklyBtn);
+}
+
+function closeDetail() {
+  document.getElementById('detail-modal').style.display = 'none';
+}
+
+async function showDetail(containerName, overrideSiteId) {
+  const modal = document.getElementById('detail-modal');
+  const content = document.getElementById('detail-content');
+  modal.style.display = '';
+  content.innerHTML = '<div class="loading">読み込み中...</div>';
+
+  const site = overrideSiteId
+    ? (SITES.find(s => s.id === overrideSiteId) || SITES[currentSiteIdx])
+    : SITES[currentSiteIdx];
+  const MEKAKI_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
+  const MEKAKI_GID = '1439665705';
+
+  const fetchByGid = async (id, gid) => {
+    const url = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json&gid=${gid}&headers=0`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+    return json.table;
+  };
+
+  let table, mekakiTable;
+  try {
+    [table, mekakiTable] = await Promise.all([
+      fetchSheet(site.id, containerName, 0),
+      fetchByGid(MEKAKI_ID, MEKAKI_GID).catch(() => null),
+    ]);
+  } catch(e) {
+    content.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
+    return;
+  }
+
+  // 芽かき量: A列=拠点, E列=号基, K列=合計重量
+  let mekakiVal = null;
+  const cached = cache[site.id];
+  const summaryRow = cached
+    ? ([...(cached.active || []), ...(cached.ended || [])].find(r => r.name === containerName))
+    : null;
+  const containerNo = summaryRow?.no || (parseContainerName(containerName)).no;
+  const startDateStr = summaryRow?.startDate || '';
+  if (mekakiTable?.rows) {
+    for (const row of mekakiTable.rows) {
+      const cells = row?.c || [];
+      const aSite = String(cells[0]?.v ?? '').trim();
+      const eNo   = cells[4]?.v != null ? String(cells[4].v).trim() : '';
+      const kVal  = cells[10]?.v;
+      if (aSite === '拠点') continue;
+      if (aSite === site.name && eNo === containerNo && kVal != null) {
+        mekakiVal = parseFloat(kVal);
+        break;
+      }
+    }
+  }
+
+  const allRows = table.rows || [];
+
+  // H4 = row3 col7: 菌床数。2520以外なら2520換算に変換
+  const sheetBedCount = parseFloat(allRows[3]?.c?.[7]?.v);
+  const mekakiDisplay = (() => {
+    if (mekakiVal == null || isNaN(mekakiVal)) return null;
+    if (!isNaN(sheetBedCount) && sheetBedCount > 0 && sheetBedCount !== 2520) {
+      return +(mekakiVal * 2520 / sheetBedCount).toFixed(1);
+    }
+    return +mekakiVal.toFixed(1);
+  })();
+  const mekakiLabel = (!isNaN(sheetBedCount) && sheetBedCount > 0 && sheetBedCount !== 2520)
+    ? `芽かき量 (1回目・2520換算) ※実測${mekakiVal?.toFixed(1)}kg / ${sheetBedCount}菌床`
+    : '芽かき量 (1回目)';
+
+  // Fixed column layout (confirmed from sheet structure):
+  // header row: col0="パック品合計", col12="袋品収穫量"  (M/L/2L are in merged cells)
+  // values row: col6=M, col8=L, col10=2L, col12=袋品, col0=パック品合計
+  // pack row:   col1=合計率, col6=M率, col8=L率, col10=2L率
+  let mVal=null, lVal=null, xlVal=null, bagVal=null, packRate=null;
+  for (let ri = 0; ri < Math.min(20, allRows.length); ri++) {
+    const cells = allRows[ri]?.c || [];
+    const c0 = String(cells[0]?.v ?? '');
+    if (c0.includes('パック品合計')) {
+      const vc = allRows[ri + 1]?.c || [];
+      mVal   = parseFloat(vc[6]?.v);
+      lVal   = parseFloat(vc[8]?.v);
+      xlVal  = parseFloat(vc[10]?.v);
+      bagVal = parseFloat(vc[12]?.v);
+      const pr = allRows[ri + 2]?.c || [];
+      const prv = pr[1]?.v;
+      if (prv != null) {
+        const n = parseFloat(prv);
+        packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
+      }
+      break;
+    }
+    // fallback: パック品率 row with % string
+    if (c0.includes('パック品率') && packRate == null) {
+      for (const c of cells) {
+        const v = c?.v;
+        if (v == null) continue;
+        const n = parseFloat(v);
+      }
+    }
+  }
+
+  const info = parseContainerName(containerName);
+  const displayName = info.no || containerName;
+
+  // Calculate totals and percentages
+  const packTotal = [mVal, lVal, xlVal, bagVal].reduce((s, v) => s + (isNaN(v) ? 0 : v), 0);
+  const pct = v => (packTotal > 0 && !isNaN(v)) ? `${((v / packTotal) * 100).toFixed(1)}%` : '—';
+  const fmt = v => (!isNaN(v) && v != null) ? `${v.toFixed(2)} kg` : '—';
+
+  const packCls = packRate == null ? '' : packRate >= 90 ? 'color:#86efac' : packRate >= 80 ? 'color:#93c5fd' : 'color:#f87171';
+
+  // Detect TypeB (南丹): YYYYMMDD string in col3
+  let detailIsTypeB = false;
+  for (let ri = 6; ri < Math.min(18, allRows.length); ri++) {
+    const v = allRows[ri]?.c?.[3]?.v;
+    if (typeof v === 'string' && /^\d{8}$/.test(v)) { detailIsTypeB = true; break; }
+  }
+  // Detect TypeC (群馬): col1 contains "N日" string
+  let detailIsTypeC = false;
+  if (!detailIsTypeB) {
+    for (let ri = 13; ri < Math.min(25, allRows.length); ri++) {
+      const v = allRows[ri]?.c?.[1]?.v;
+      if (typeof v === 'string' && /^\d+日$/.test(v)) { detailIsTypeC = true; break; }
+    }
+  }
+
+  const dailyRows = [];
+  if (detailIsTypeB) {
+    const startD = parseDateStr(startDateStr);
+    for (let ri = 0; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const ds = cells[3]?.v;
+      if (typeof ds !== 'string' || !/^\d{8}$/.test(ds)) continue;
+      const rowDate = cellToDate(cells[5]?.v, cells[5]?.f);
+      if (!rowDate || !startD) continue;
+      const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else if (detailIsTypeC) {
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayLabel = String(cells[1]?.v ?? '');
+      const dm = dayLabel.match(/^(\d+)日$/);
+      if (!dm) continue;
+      const dayNum = parseInt(dm[1]);
+      if (dayNum < 1 || dayNum > 200) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  } else {
+    for (let ri = 13; ri < allRows.length; ri++) {
+      const cells = allRows[ri]?.c || [];
+      const dayNum = cells[1]?.v;
+      if (typeof dayNum !== 'number' || !Number.isInteger(dayNum) || dayNum < 0) continue;
+      const m  = parseFloat(cells[6]?.v) || 0;
+      const l  = parseFloat(cells[7]?.v) || 0;
+      const xl = parseFloat(cells[8]?.v) || 0;
+      const bg = parseFloat(cells[9]?.v) || 0;
+      if (m + l + xl + bg > 0) dailyRows.push({ day: dayNum, m, l, xl, bg });
+    }
+  }
+
+  content.innerHTML = `
+    <div class="detail-title">コンテナ ${displayName} 詳細</div>
+    <div class="detail-grid">
+      <div class="detail-cell">
+        <div class="detail-cell-label">M収穫量</div>
+        <div class="detail-cell-value">${fmt(mVal)}</div>
+        <div class="detail-cell-pct">${pct(mVal)}</div>
+      </div>
+      <div class="detail-cell">
+        <div class="detail-cell-label">L収穫量</div>
+        <div class="detail-cell-value">${fmt(lVal)}</div>
+        <div class="detail-cell-pct">${pct(lVal)}</div>
+      </div>
+      <div class="detail-cell">
+        <div class="detail-cell-label">2L収穫量</div>
+        <div class="detail-cell-value">${fmt(xlVal)}</div>
+        <div class="detail-cell-pct">${pct(xlVal)}</div>
+      </div>
+      <div class="detail-cell">
+        <div class="detail-cell-label">袋品収穫量</div>
+        <div class="detail-cell-value">${fmt(bagVal)}</div>
+        <div class="detail-cell-pct">${pct(bagVal)}</div>
+      </div>
+    </div>
+    <div class="detail-pack">
+      <div class="detail-pack-label">パック品率</div>
+      <div class="detail-pack-value" style="${packCls}">${packRate != null ? packRate + '%' : '—'}</div>
+    </div>
+    ${dailyRows.length > 0 ? `
+    <div style="margin-top:16px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別日次収穫量 (kg)</div>
+    <div style="position:relative;height:220px"><canvas id="detail-bar-canvas"></canvas></div>
+    <div style="margin-top:20px;font-size:0.78rem;color:#8892a4;margin-bottom:6px">サイズ別累計収穫量 (kg)</div>
+    <div style="position:relative;height:220px"><canvas id="detail-cumul-canvas"></canvas></div>` : ''}`;
+
+  if (dailyRows.length > 0) {
+    const chartOpts = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 12, padding: 10 } },
+        tooltip: { ...tooltipDefaults },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, maxTicksLimit: 20 }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
+      },
+    };
+    const labels = dailyRows.map(r => `day${r.day}`);
+    new Chart(document.getElementById('detail-bar-canvas'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'M',   data: dailyRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+          { label: 'L',   data: dailyRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+          { label: '2L',  data: dailyRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+          { label: '袋品', data: dailyRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+        ],
+      },
+      options: chartOpts,
+    });
+    let cm = 0, cl = 0, cxl = 0, cbg = 0;
+    const cumM = [], cumL = [], cumXL = [], cumBG = [];
+    for (const r of dailyRows) {
+      cm += r.m; cl += r.l; cxl += r.xl; cbg += r.bg;
+      cumM.push(+cm.toFixed(2)); cumL.push(+cl.toFixed(2));
+      cumXL.push(+cxl.toFixed(2)); cumBG.push(+cbg.toFixed(2));
+    }
+    new Chart(document.getElementById('detail-cumul-canvas'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'M',   data: cumM,  backgroundColor: '#3b82f6cc', stack: 's' },
+          { label: 'L',   data: cumL,  backgroundColor: '#10b981cc', stack: 's' },
+          { label: '2L',  data: cumXL, backgroundColor: '#f59e0bcc', stack: 's' },
+          { label: '袋品', data: cumBG, backgroundColor: '#8b5cf6cc', stack: 's' },
+        ],
+      },
+      options: chartOpts,
+    });
+  }
+}
+
+// ── 芽かき量タブ ──────────────────────────────────────────────────────────────
+
+const MEKAKI_SHEET_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
+const MEKAKI_SHEET_GID = '1439665705';
+let mekakiData = null;
+
+async function buildBedCountMap() {
+  // 収穫実績集計表のI列(index8)=菌床数 を拠点+号機+栽培開始日でマップ化
+  const map = {};
+  await Promise.all(SITES.map(async site => {
+    try {
+      const table = await fetchSheet(site.id, site.indexSheet);
+      (table.rows || []).forEach(row => {
+        const cells = row.c || [];
+        const sdCell = cells[2];
+        const nameCell = cells[5];
+        const bedCell = cells[8];
+        const name = (nameCell?.v != null ? String(nameCell.v) : (nameCell?.f ?? '')).trim();
+        const bedCount = bedCell?.v != null ? parseFloat(bedCell.v) : null;
+        const startDate = sdCell?.v ? (gvizDateStr(sdCell.v, null) ?? '') : (gvizDateStr(null, sdCell?.f) ?? '');
+        const no = extractContainerNo(name);
+        if (no && bedCount != null && !isNaN(bedCount)) {
+          map[`${site.name}|${no}|${startDate}`] = bedCount;
+          map[`${site.name}|${no}`] = bedCount; // fallback without date
+        }
+      });
+    } catch(e) { /* ignore */ }
+  }));
+  return map;
+}
+
+const MEKAKI_SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+let mekakiRows = null; // parsed row objects
+let mekakiFilters = { site: '', hozon: '', lot: '' };
+
+function mekakiRenderTable() {
+  const filtered = mekakiRows.filter(r =>
+    (!mekakiFilters.site  || r.siteName === mekakiFilters.site) &&
+    (!mekakiFilters.hozon || r.hozon    === mekakiFilters.hozon) &&
+    (!mekakiFilters.lot   || r.lot      === mekakiFilters.lot)
+  );
+  const fmtN = v => v != null ? v.toLocaleString() : '—';
+  const tbody = document.getElementById('mekaki-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = filtered.map(r => {
+    const siteColor = MEKAKI_SITE_COLORS[r.siteName] || '#94a3b8';
+    return `<tr style="border-bottom:1px solid #1e2235">
+      <td style="padding:5px 8px;color:${siteColor};font-weight:600;white-space:nowrap">${r.siteName}</td>
+      <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${r.hozon}</td>
+      <td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${r.startStr}</td>
+      <td style="padding:5px 8px;color:#94a3b8">${r.lot}</td>
+      <td style="padding:5px 8px;text-align:right;color:#64748b">${r.bedCount != null ? r.bedCount.toLocaleString() : '—'}</td>
+      <td style="padding:5px 8px;color:#e2e8f0;white-space:nowrap">${r.gouki}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m1)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m2)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m3)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m4)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#cbd5e1">${fmtN(r.m5)}</td>
+      <td style="padding:5px 8px;text-align:right;color:#e2e8f0;font-weight:600">${fmtN(r.total)}</td>
+      <td style="padding:5px 8px;text-align:right;color:${r.converted != null && r.converted >= 200 ? '#f87171' : '#a78bfa'};font-weight:600">${r.converted != null ? r.converted.toLocaleString() : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function mekakiSetFilter(key, val) {
+  mekakiFilters[key] = val;
+  // Update active filter button style
+  document.querySelectorAll(`[data-mf="${key}"]`).forEach(btn => {
+    const isActive = btn.dataset.val === val;
+    btn.style.background = isActive ? '#a78bfa33' : '';
+    btn.style.color = isActive ? '#a78bfa' : '#cbd5e1';
+  });
+  mekakiRenderTable();
+  // Close all dropdowns
+  document.querySelectorAll('.mekaki-dropdown').forEach(d => d.style.display = 'none');
+}
+
+function mekakiToggleDropdown(key) {
+  const dd = document.getElementById(`mekaki-dd-${key}`);
+  if (!dd) return;
+  const isOpen = dd.style.display === 'block';
+  document.querySelectorAll('.mekaki-dropdown').forEach(d => d.style.display = 'none');
+  dd.style.display = isOpen ? 'none' : 'block';
+}
+
+// Close dropdowns on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.mekaki-filter-th')) {
+    document.querySelectorAll('.mekaki-dropdown').forEach(d => d.style.display = 'none');
+  }
+});
+
+function mekakiFilterHeader(label, key) {
+  const vals = [...new Set(mekakiRows.map(r => r[key]).filter(Boolean))].sort();
+  const active = !!mekakiFilters[key];
+  const items = ['(すべて)', ...vals].map(v => {
+    const val = v === '(すべて)' ? '' : v;
+    const isCur = mekakiFilters[key] === val;
+    return `<div data-mf="${key}" data-val="${val}" onclick="mekakiSetFilter('${key}','${val}')"
+      style="padding:6px 12px;cursor:pointer;color:${isCur ? '#a78bfa' : '#cbd5e1'};background:${isCur ? '#a78bfa22' : 'none'};white-space:nowrap"
+      onmouseover="this.style.background='#2e3148'" onmouseout="this.style.background='${isCur ? '#a78bfa22' : 'none'}'">
+      ${isCur ? '✓ ' : ''}${v}</div>`;
+  }).join('');
+  return `<th class="mekaki-filter-th" style="padding:0;position:relative;white-space:nowrap">
+    <div onclick="mekakiToggleDropdown('${key}')" style="padding:6px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none">
+      <span style="color:${active ? '#a78bfa' : '#64748b'}">${label}</span>
+      <span style="font-size:0.7rem;color:${active ? '#a78bfa' : '#64748b'}">▼</span>
+    </div>
+    <div id="mekaki-dd-${key}" class="mekaki-dropdown" style="display:none;position:absolute;top:100%;left:0;background:#1a1d27;border:1px solid #2e3148;border-radius:6px;z-index:200;min-width:120px;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
+      ${items}
+    </div>
+  </th>`;
+}
+
+async function renderMekakiTab() {
+  const section = document.getElementById('mekaki-section');
+  if (!section) return;
+  if (mekakiRows) { renderMekakiSection(section); return; }
+
+  section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
+
+  try {
+    const [table, bedMap] = await Promise.all([
+      (async () => {
+        const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
+        const res = await fetch(url);
+        const text = await res.text();
+        const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+        return json.table;
+      })(),
+      buildBedCountMap(),
+    ]);
+
+    mekakiRows = (table.rows || [])
+      .filter(row => {
+        const cells = row?.c || [];
+        if (!cells[0]?.v && !cells[4]?.v) return false;
+        const sd = gvizToDate(cells[2]);
+        if (!sd) return false;
+        return sd.getFullYear() > 2025 || (sd.getFullYear() === 2025 && sd.getMonth() >= 9);
+      })
+      .map(row => {
+        const cells = row?.c || [];
+        const cv = v => v?.v != null ? String(v.v) : (v?.f ?? '');
+        const siteName = cv(cells[0]).trim();
+        const hozon    = cv(cells[1]).trim();
+        const startRaw = cells[2];
+        const startStr = startRaw?.f ?? (startRaw?.v != null ? String(startRaw.v) : '');
+        const startDate = gvizToDate(startRaw);
+        const lotCell = cells[3];
+        let lot = '';
+        if (lotCell != null) {
+          if (lotCell.f != null && lotCell.f !== '') {
+            lot = String(lotCell.f).trim();
+          } else if (lotCell.v != null) {
+            const lv = lotCell.v;
+            if (typeof lv === 'string' && /^Date\(/.test(lv)) {
+              const m = lv.match(/^Date\((\d+),(\d+),(\d+)\)/);
+              lot = m ? `${parseInt(m[2])+1}/${parseInt(m[3])}` : lv;
+            } else {
+              lot = String(lv).trim();
+            }
+          }
+        }
+        const gouki = cv(cells[4]).trim();
+        const m1 = cells[5]?.v != null ? parseFloat(cells[5].v) : null;
+        const m2 = cells[6]?.v != null ? parseFloat(cells[6].v) : null;
+        const m3 = cells[7]?.v != null ? parseFloat(cells[7].v) : null;
+        const m4 = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
+        const m5 = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+        const total = cells[10]?.v != null ? parseFloat(cells[10].v) : null;
+        const startDateKey = gvizDateStr(startRaw?.v, null) ?? '';
+        const no = gouki.replace(/\(.*\)/, '').trim();
+        const bedCount = bedMap[`${siteName}|${no}|${startDateKey}`] ?? bedMap[`${siteName}|${no}`] ?? null;
+        const converted = (total != null && bedCount != null && bedCount > 0)
+          ? (bedCount !== 2520 ? +(total * 2520 / bedCount).toFixed(2) : total) : null;
+        return { siteName, hozon, startStr, startDate, lot, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
+      })
+      // 日付新しい順
+      .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+
+    renderMekakiSection(section);
+  } catch(e) {
+    section.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
+  }
+}
+
+function renderMekakiSection(section) {
+  section.innerHTML = `
+    <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
+        <thead>
+          <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
+            ${mekakiFilterHeader('拠点', 'siteName')}
+            ${mekakiFilterHeader('保存条件', 'hozon')}
+            <th style="padding:6px 8px;color:#64748b;text-align:left">栽培開始</th>
+            ${mekakiFilterHeader('菌床ロット', 'lot')}
+            <th style="padding:6px 8px;color:#64748b;text-align:right">菌床本数</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:left">号機</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">1回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">2回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">3回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">4回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">5回目</th>
+            <th style="padding:6px 8px;color:#64748b;text-align:right">合計(kg)</th>
+            <th style="padding:6px 8px;color:#a78bfa;text-align:right">2520換算(kg)</th>
+          </tr>
+        </thead>
+        <tbody id="mekaki-tbody"></tbody>
+      </table>
+    </div>`;
+  mekakiRenderTable();
+}
+
+// ── 菌床重量タブ ──────────────────────────────────────────────────────────────
+
+const WEIGHT_SHEET_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
+const WEIGHT_SITES = [
+  { name: 'いなべ',   sheetName: 'いなべ',   color: '#38bdf8' },
+  { name: '群馬',     sheetName: '群馬',     color: '#f97316' },
+  { name: '南丹',     sheetName: '南丹',     color: '#34d399' },
+  { name: '自社菌床', sheetName: '自社菌床', color: '#f59e0b' },
+];
+let weightActiveSite = 0;
+let weightData = null; // { site, containers, error }[]
+
+async function fetchWeightSheet(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${WEIGHT_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+  return json.table;
+}
+
+function gvizToDate(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  const f = cell.f;
+  // gviz Date object: v = "Date(2026,3,29)"
+  if (typeof v === 'string') {
+    const m = v.match(/^Date\((\d+),(\d+),(\d+)\)/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
+    return parseDateStr(v);
+  }
+  // numeric serial (days since 1899-12-30)
+  if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+  // formatted string fallback
+  if (f) return parseDateStr(f);
+  return null;
+}
+
+function parseWeightRows(table) {
+  // A=ロット, C=栽培開始日, D=号機, F=散水前重量, H=散水後重量
+  // 1コンテナ=6行計測、コンテナ間に空行
+  const rows = table.rows || [];
+  const containers = [];
+  let current = null;
+  let stickyLot = ''; // A列ロットは最初の行にのみ記入されることがあるため引き継ぐ
+
+  for (const row of rows) {
+    const cells = row?.c || [];
+    const aVal = String(cells[0]?.v ?? '').trim().replace(/^自社菌床/, '').trim();
+    const cCell = cells[2];
+    const dVal  = cells[3]?.v != null ? String(cells[3].v).trim() : '';
+    const fVal  = cells[5]?.v;
+    const hVal  = cells[7]?.v;
+
+    if (aVal !== '') stickyLot = aVal;
+
+    // コンテナヘッダー行: D列に号機番号が入っている行
+    if (dVal !== '') {
+      const startDate = gvizToDate(cCell);
+      // 2025/10以降のみ
+      const isRecent = startDate && (startDate.getFullYear() > 2025 ||
+        (startDate.getFullYear() === 2025 && startDate.getMonth() >= 9));
+      if (isRecent) {
+        current = { startDate, containerNo: dVal, lot: stickyLot, measurements: [] };
+        containers.push(current);
+        // 1本目の計測値がヘッダー行と同じ行に入っている場合
+        if (fVal != null || hVal != null) {
+          current.measurements.push({
+            idx: 1,
+            before: typeof fVal === 'number' ? fVal : null,
+            after:  typeof hVal === 'number' ? hVal : null,
+          });
+        }
+      } else {
+        current = null;
+      }
+    } else if (current && (fVal != null || hVal != null)) {
+      current.measurements.push({
+        idx: current.measurements.length + 1,
+        before: typeof fVal === 'number' ? fVal : null,
+        after:  typeof hVal === 'number' ? hVal : null,
+      });
+    }
+  }
+  return containers;
+}
+
+function renderWeightSiteContent(result) {
+  const { site, containers, error } = result;
+  if (error) return `<div style="color:#f87171;font-size:0.85rem;padding:16px">取得エラー: ${error}</div>`;
+  if (containers.length === 0) return `<div style="color:#64748b;font-size:0.85rem;padding:16px">データなし（2025.10以降）</div>`;
+
+  const sorted = [...containers].sort((a, b) => b.startDate - a.startDate);
+  return sorted.map((c, idx) => {
+    const sd = c.startDate;
+    const dateStr = `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}`;
+    const chartId = `wc-weight-${weightActiveSite}-${idx}`;
+    return `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:12px 16px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="color:#e2e8f0;font-weight:700;font-size:0.95rem">${c.containerNo}号機</span>
+        <span style="color:#64748b;font-size:0.82rem">${dateStr} 開始</span>
+        ${c.lot ? `<span style="color:#94a3b8;font-size:0.78rem">${c.lot}</span>` : ''}
+      </div>
+      <div style="height:220px"><canvas id="${chartId}"></canvas></div>
+    </div>`;
+  }).join('');
+}
+
+function drawWeightCharts(result) {
+  const { site, containers } = result;
+  if (!containers || containers.length === 0) return;
+  const sorted = [...containers].sort((a, b) => b.startDate - a.startDate);
+  sorted.forEach((c, idx) => {
+    const chartId = `wc-weight-${weightActiveSite}-${idx}`;
+    const canvas = document.getElementById(chartId);
+    if (!canvas) return;
+    const labels = c.measurements.map(m => `${m.idx}本目`);
+    const beforeData = c.measurements.map(m => m.before ?? 0);
+    const absorbData = c.measurements.map(m =>
+      (m.before != null && m.after != null) ? Math.max(0, m.after - m.before) : 0
+    );
+    new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: '散水前重量', data: beforeData, backgroundColor: '#60a5facc', stack: 's' },
+          { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc',        stack: 's' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}g`,
+              footer: items => {
+                const total = items.reduce((s, i) => s + i.parsed.y, 0);
+                return `散水後: ${Math.round(total).toLocaleString()}g`;
+              },
+            },
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#a0aec0', footerColor: '#6ee7b7',
+          },
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4' }, grid: { color: '#1e2235' } },
+          y: { stacked: true, ticks: { color: '#8892a4', callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
+        },
+      },
+    });
+  });
+}
+
+function renderWeightSubTabs() {
+  const section = document.getElementById('weight-section');
+  if (!section || !weightData) return;
+  const site = WEIGHT_SITES[weightActiveSite];
+  const subTabHtml = WEIGHT_SITES.map((s, i) => {
+    const active = i === weightActiveSite;
+    return `<button onclick="weightSetSite(${i})" style="
+      padding:8px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;
+      color:${active ? s.color : '#64748b'};
+      border-bottom:2px solid ${active ? s.color : 'transparent'};
+      transition:color 0.15s">${s.name}</button>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    <div style="display:flex;gap:4px;border-bottom:1px solid #2e3148;margin-bottom:16px">${subTabHtml}</div>
+    <div id="weight-content">${renderWeightSiteContent(weightData[weightActiveSite])}</div>`;
+  requestAnimationFrame(() => drawWeightCharts(weightData[weightActiveSite]));
+}
+
+function weightSetSite(idx) {
+  weightActiveSite = idx;
+  renderWeightSubTabs();
+}
+
+async function renderWeightTab() {
+  const section = document.getElementById('weight-section');
+  if (!section) return;
+  if (weightData) { renderWeightSubTabs(); return; }
+
+  section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
+
+  weightData = await Promise.all(WEIGHT_SITES.map(async site => {
+    try {
+      const table = await fetchWeightSheet(site.sheetName);
+      return { site, containers: parseWeightRows(table), error: null };
+    } catch(e) {
+      return { site, containers: [], error: e.message };
+    }
+  }));
+
+  renderWeightSubTabs();
+}
+
+window.addEventListener('error', e => {
+  console.error('[global error]', e.message, e.filename, e.lineno);
+  const el = document.getElementById('main');
+  if (el && !el.innerHTML.trim()) {
+    el.innerHTML = `<div style="color:#f87171;padding:24px;font-size:0.85rem">
+      JS Error: ${e.message}<br>${e.filename}:${e.lineno}</div>`;
+  }
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('[unhandled rejection]', e.reason);
+});
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js?v=9').catch(() => {});
+}
+
+try { initTabs(); } catch(e) {
+  console.error('[initTabs error]', e);
+  document.getElementById('tabs').innerHTML =
+    `<span style="color:#f87171;padding:12px;font-size:0.85rem">タブ初期化エラー: ${e.message}</span>`;
+}
+try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
+
+loadCurrentSite().catch(e => {
+  const el = document.getElementById('main');
+  if (el) el.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
+});
+loadWeeklySection().catch(() => {});
+
+// 10秒後にまだ#mainが空なら「再読み込みを促す」メッセージを出す
+setTimeout(() => {
+  const el = document.getElementById('main');
+  if (el && !el.innerHTML.trim()) {
+    el.innerHTML = `<div style="color:#94a3b8;padding:32px;text-align:center">
+      データを取得できませんでした。<br>
+      <button onclick="location.reload()" style="margin-top:12px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem">再読み込み</button>
+    </div>`;
+  }
+}, 10000);
+
+setInterval(() => {
+  loadCurrentSite(true);
+  loadWeeklySection().catch(() => {});
+}, 3 * 60 * 60 * 1000);
