@@ -912,7 +912,7 @@ function chartWrapHtml(canvasId, monthCount, opts) {
     const style = (opts && opts.inlineHeight) ? ` style="height:${heightPx}px"` : '';
     return `<div class="${wrapClass}"${style}><canvas id="${canvasId}"></canvas></div>`;
   }
-  return `<div class="${wrapClass}" style="overflow-x:auto"><div style="position:relative;height:${heightPx}px;min-width:${monthCount * PX_PER_MONTH}px"><canvas id="${canvasId}"></canvas></div></div>`;
+  return `<div class="${wrapClass}" style="overflow-x:auto;height:${heightPx}px"><div style="position:relative;height:${heightPx}px;min-width:${monthCount * PX_PER_MONTH}px"><canvas id="${canvasId}"></canvas></div></div>`;
 }
 
 // 指定のフィルター済みデータ（months/employees）にbuildExtendedMonthList()を適用した
