@@ -947,6 +947,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
       <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
       <span class="sort-label" style="margin-left:12px">グループ:</span>
+      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
@@ -1562,6 +1563,7 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${sortOrder==='desc'?' active':''}" onclick="weeklySetSort('desc')">新しい順</button>
       <button class="sort-btn${sortOrder==='asc'?' active':''}" onclick="weeklySetSort('asc')">古い順</button>
       <span class="sort-label" style="margin-left:12px">グループ:</span>
+      <button class="sort-btn${groupMode==='week'?' active':''}" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
@@ -1672,6 +1674,7 @@ function renderDrillSection(section, valid, targetData) {
   const navBar = `
     <div class="weekly-sort-bar" style="margin-bottom:12px">
       <span class="sort-label">グループ:</span>
+      <button class="sort-btn" onclick="weeklySetGroup('week')">週別</button>
       <button class="sort-btn" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn active" onclick="weeklySetGroup('drill')">担当者別</button>
