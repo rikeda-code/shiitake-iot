@@ -2888,31 +2888,29 @@ function renderPlanTab() {
   });
 }
 
-// カテゴリ列の表示統合用ヘルパー（勤務実績「整理済み_分析」・予実「整理済み_計画_更新」の
-// 両テーブルで共用）。シート上は「栽培内訳」と「(コンテナ数)」が別カテゴリ値として隣接して
-// おり、そのまま表示すると別カテゴリのように見えてしまうため、表示ラベル・グルーピング上は
-// 1つの「栽培内訳（コンテナ数）」として統合する。元データのcat値・行・数値・計算ロジックは
-// 一切変更しない（あくまで見た目のカテゴリ列の罫線・ラベルの結合のみ）
-function displayCatLabel(cat) {
-  if (cat === '栽培内訳' || cat === '(コンテナ数)') return '栽培内訳（コンテナ数）';
-  return cat;
-}
-
 // 出荷関連（パック数・袋数・バラ数・合計(点数)）の4指標。実シート上はこの4指標が
 // 複数の生カテゴリ文言（例:「出荷内訳」→パック数のみ、次いで別文言→残り3指標）に
 // またがって記録されているため、生カテゴリ文言の一致では正しくグルーピングできない
 const SHIPPING_METRICS = new Set(['パック数', '袋数', 'バラ数', '合計(点数)']);
 
+// 栽培内訳（コンテナ数）関連の指標。シート上は「栽培内訳」と「(コンテナ数)」（表記が
+// 全角/半角括弧などで揺れる可能性がある）が別カテゴリ値として隣接しており、生カテゴリ
+// 文言の完全一致に頼ると表記差異で統合に失敗するため、出荷関連と同様に指標の内容で判定する
+const CULTIVATION_METRICS = new Set(['菌床入れ', '芽かき', '収穫', '注水', '散水', '廃棄', '稼働コンテナ数']);
+
 // 拠点内のレコード列を、カテゴリ列に表示する「ブロック」（1ブロック＝1つの結合セル）に
-// グルーピングする。非出荷系は displayCatLabel() 統合後の文言が隣接していれば1ブロックに
-// まとめる（従来通り）。出荷系（SHIPPING_METRICSに含まれる指標）は、生カテゴリ文言の
-// 変化ではなく「4指標が揃った時点」でブロックを閉じる方式で判定し、閉じたブロックごとに
-// labelForOccurrence(1始まりの出現回数)でラベルを割り当てる。これにより生カテゴリ文言の
-// 違いに依存せず、1つの出荷概念グループ＝1ブロックとして復元できる
+// グルーピングする。出荷系（SHIPPING_METRICS）・栽培内訳系（CULTIVATION_METRICS）は、
+// シート上の生カテゴリ文言に依存せず指標の内容で連続する行をまとめてブロック化する。
+// 出荷系は「4指標が揃った時点」でブロックを閉じる方式で判定し、閉じたブロックごとに
+// labelForOccurrence(1始まりの出現回数)でラベルを割り当てる（同一概念グループが複数の
+// 生カテゴリ文言に分割されているケースに対応）。栽培内訳系は1拠点内に1グループのみの
+// 前提で、該当指標が連続する間はそのまま1ブロックにまとめ「栽培内訳（コンテナ数）」を
+// 割り当てる。それ以外の行は元の生カテゴリ文言をそのまま使う
 function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
   const raw = [];
   let shippingRun = null;
   let shippingCount = 0;
+  let cultivationRun = null;
 
   function closeShippingRun() {
     if (!shippingRun) return;
@@ -2920,23 +2918,36 @@ function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
     raw.push({ label: labelForOccurrence(shippingCount), records: shippingRun.records });
     shippingRun = null;
   }
+  function closeCultivationRun() {
+    if (!cultivationRun) return;
+    raw.push({ label: '栽培内訳（コンテナ数）', records: cultivationRun });
+    cultivationRun = null;
+  }
 
   siteRecs.forEach(r => {
     if (SHIPPING_METRICS.has(r.metric)) {
+      closeCultivationRun();
       if (!shippingRun) shippingRun = { records: [], seen: new Set() };
       shippingRun.records.push(r);
       shippingRun.seen.add(r.metric);
       if (shippingRun.seen.size >= SHIPPING_METRICS.size) closeShippingRun();
       return;
     }
+    if (CULTIVATION_METRICS.has(r.metric)) {
+      closeShippingRun();
+      if (!cultivationRun) cultivationRun = [];
+      cultivationRun.push(r);
+      return;
+    }
     closeShippingRun();
-    raw.push({ label: displayCatLabel(r.cat), records: [r] });
+    closeCultivationRun();
+    raw.push({ label: r.cat, records: [r] });
   });
   closeShippingRun();
+  closeCultivationRun();
 
-  // 隣接ブロックが同一ラベルになった場合（栽培内訳/(コンテナ数)の統合、および
-  // 勤務実績側で全出荷ブロックを1つの「出荷内訳（実績）」にまとめる場合）は
-  // 1つの結合セルにまとめる
+  // 隣接ブロックが同一ラベルになった場合（勤務実績側で全出荷ブロックを1つの
+  // 「出荷内訳（実績）」にまとめる場合など）は1つの結合セルにまとめる
   const merged = [];
   raw.forEach(b => {
     const last = merged[merged.length - 1];
