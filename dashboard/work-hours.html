@@ -4665,9 +4665,14 @@ function renderPlanCompareCharts(planData, prodData) {
             return s + (v !== null ? v : 0);
           }, 0) || null
         );
+        // 予定標準（std）は全タスク行が積み上げ表示されるため、軸MAXはタスクごとの
+        // 個別値ではなく、月ごとにタスクを跨いで合計した値（実際にグラフ上で到達する
+        // 高さ）で判定する必要がある。taskData/allActualHとも未スライスの同じ
+        // planMonths基準のインデックスなので、ここで合計してからsl()する
+        const stdMonthlyTotalsAll = planMonths.map((_, mi) => taskData.reduce((s, d) => s + (d[mi] || 0), 0));
         const allYValues = [
           ...sl(allActualH).filter(v => v !== null),
-          ...taskData.flatMap(d => sl(d).filter(v => v !== null)),
+          ...sl(stdMonthlyTotalsAll).filter(v => v !== null),
         ];
         const yMax = computeSharedAxisMax([allYValues], 100) || undefined;
         const volMax = computeSharedAxisMax([sl(volData).filter(v => v !== null)], 1000) || undefined;
@@ -5530,9 +5535,12 @@ function renderCompareCharts(prodData) {
         return total > 0 ? Math.round(total * 10) / 10 : null;
       }));
 
-      // 実績（拠点別）・標準（工程別・積み上げ合計）を、同じdiv内で比較しやすいよう軸を統一
+      // 実績（拠点別）・標準（工程別・積み上げ合計）を、同じdiv内で比較しやすいよう軸を統一。
+      // 統合チャートでは実績工数も3拠点分が積み上げ表示されるため、拠点ごとの個別値ではなく
+      // 月ごとに拠点を跨いで合計した値（実際にグラフ上で到達する高さ）で軸MAXを判定する
+      const actualMonthlyTotals = commonMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
       const stdMonthlyTotals = commonMonths.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
-      const sharedMax = computeSharedAxisMax([...actualBySite, stdMonthlyTotals], 100);
+      const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals], 100);
 
       const actualCtx = document.getElementById(`cmpsum-${div}-actual`)?.getContext('2d');
       if (actualCtx) {
