@@ -2888,6 +2888,16 @@ function renderPlanTab() {
   });
 }
 
+// カテゴリ列の表示統合用ヘルパー（勤務実績「整理済み_分析」・予実「整理済み_計画_更新」の
+// 両テーブルで共用）。シート上は「栽培内訳」と「(コンテナ数)」が別カテゴリ値として隣接して
+// おり、そのまま表示すると別カテゴリのように見えてしまうため、表示ラベル・グルーピング上は
+// 1つの「栽培内訳（コンテナ数）」として統合する。元データのcat値・行・数値・計算ロジックは
+// 一切変更しない（あくまで見た目のカテゴリ列の罫線・ラベルの結合のみ）
+function displayCatLabel(cat) {
+  if (cat === '栽培内訳' || cat === '(コンテナ数)') return '栽培内訳（コンテナ数）';
+  return cat;
+}
+
 function renderPlanTable({ months: planMonths, records }) {
   const main = document.getElementById('main');
 
@@ -2904,11 +2914,20 @@ function renderPlanTable({ months: planMonths, records }) {
     bySite[r.site].push(r);
   });
 
+  // 予実タブ専用のカテゴリ表示ラベル調整。出荷内訳（構成比データ側）・実数計画（出荷実績データ側）
+  // を区別しやすいラベルに変更する（栽培内訳/(コンテナ数)の統合はdisplayCatLabel()で共通処理済み）
+  function planCatLabel(cat) {
+    const merged = displayCatLabel(cat);
+    if (merged === '出荷内訳') return '出荷内訳（構成比）';
+    if (merged === '実数計画') return '出荷実績（実数計画）';
+    return merged;
+  }
+
   function rowClass(r) {
     const classes = [];
     if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
     if (r.metric === '合計(点数)') classes.push('metric-goukei');
-    const cat = r.cat;
+    const cat = planCatLabel(r.cat);
     if (cat.includes('生産実績') || cat.includes('生産計画')) classes.push('cat-seisan');
     else if (cat.includes('栽培')) classes.push('cat-saibai');
     else if (cat.includes('出荷')) classes.push('cat-syukka');
@@ -2934,15 +2953,17 @@ function renderPlanTable({ months: planMonths, records }) {
 
     siteRecs.forEach((r, ri) => {
       const isFirstSite = ri === 0;
-      const isNewCat = r.cat !== prevCat;
-      prevCat = r.cat;
+      const displayCat = planCatLabel(r.cat);
+      const isNewCat = displayCat !== prevCat;
+      prevCat = displayCat;
 
       const siteCell = isFirstSite
         ? `<td rowspan="${siteRecs.length}" style="color:${siteColor};font-weight:600;vertical-align:top;padding-top:10px">${site}</td>`
         : '';
+      // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する
       const catCell = isNewCat
-        ? `<td style="color:var(--muted);font-size:0.78rem;vertical-align:top;padding-top:6px">${r.cat}</td>`
-        : '<td></td>';
+        ? `<td class="col-cat" rowspan="${siteRecs.filter(x => planCatLabel(x.cat) === displayCat).length}" style="color:var(--muted);font-size:0.78rem;vertical-align:top;padding-top:6px">${displayCat}</td>`
+        : '';
 
       const cls = rowClass(r);
       html += `<tr class="${cls}">${siteCell}${catCell}
@@ -3139,7 +3160,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
     const classes = [];
     if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
     if (r.metric === '合計(点数)') classes.push('metric-goukei');
-    const cat = r.cat;
+    const cat = displayCatLabel(r.cat);
     if (cat.includes('生産実績')) classes.push('cat-seisan');
     else if (cat.includes('栽培')) classes.push('cat-saibai');
     else if (cat.includes('出荷')) classes.push('cat-syukka');
@@ -3165,8 +3186,9 @@ function renderProductionTable({ months: filteredMonths, records }) {
 
     siteRecs.forEach((r, ri) => {
       const isFirstSite = ri === 0;
-      const isNewCat = r.cat !== prevCat;
-      prevCat = r.cat;
+      const displayCat = displayCatLabel(r.cat);
+      const isNewCat = displayCat !== prevCat;
+      prevCat = displayCat;
 
       const rc = rowClass(r);
       const sepClass = (si > 0 && isFirstSite) ? 'site-start' : '';
@@ -3177,10 +3199,11 @@ function renderProductionTable({ months: filteredMonths, records }) {
         html += `<td class="col-site" rowspan="${siteRecs.length}" style="color:${siteColor}">${site}</td>`;
       }
 
-      // Category cell: only on first row of category group
+      // Category cell: only on first row of category group（「栽培内訳」「(コンテナ数)」は
+      // displayCatLabel()で1つの結合セルにまとめる。他のカテゴリは従来通り）
       if (isNewCat) {
-        const catCount = siteRecs.filter(x => x.cat === r.cat).length;
-        html += `<td class="col-cat" rowspan="${catCount}">${r.cat}</td>`;
+        const catCount = siteRecs.filter(x => displayCatLabel(x.cat) === displayCat).length;
+        html += `<td class="col-cat" rowspan="${catCount}">${displayCat}</td>`;
       }
 
       // Metric
