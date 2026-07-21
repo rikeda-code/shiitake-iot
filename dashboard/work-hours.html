@@ -2888,6 +2888,64 @@ function renderPlanTab() {
   });
 }
 
+// カテゴリ列の表示統合用ヘルパー（勤務実績「整理済み_分析」・予実「整理済み_計画_更新」の
+// 両テーブルで共用）。シート上は「栽培内訳」と「(コンテナ数)」が別カテゴリ値として隣接して
+// おり、そのまま表示すると別カテゴリのように見えてしまうため、表示ラベル・グルーピング上は
+// 1つの「栽培内訳（コンテナ数）」として統合する。元データのcat値・行・数値・計算ロジックは
+// 一切変更しない（あくまで見た目のカテゴリ列の罫線・ラベルの結合のみ）
+function displayCatLabel(cat) {
+  if (cat === '栽培内訳' || cat === '(コンテナ数)') return '栽培内訳（コンテナ数）';
+  return cat;
+}
+
+// 出荷関連（パック数・袋数・バラ数・合計(点数)）の4指標。実シート上はこの4指標が
+// 複数の生カテゴリ文言（例:「出荷内訳」→パック数のみ、次いで別文言→残り3指標）に
+// またがって記録されているため、生カテゴリ文言の一致では正しくグルーピングできない
+const SHIPPING_METRICS = new Set(['パック数', '袋数', 'バラ数', '合計(点数)']);
+
+// 拠点内のレコード列を、カテゴリ列に表示する「ブロック」（1ブロック＝1つの結合セル）に
+// グルーピングする。非出荷系は displayCatLabel() 統合後の文言が隣接していれば1ブロックに
+// まとめる（従来通り）。出荷系（SHIPPING_METRICSに含まれる指標）は、生カテゴリ文言の
+// 変化ではなく「4指標が揃った時点」でブロックを閉じる方式で判定し、閉じたブロックごとに
+// labelForOccurrence(1始まりの出現回数)でラベルを割り当てる。これにより生カテゴリ文言の
+// 違いに依存せず、1つの出荷概念グループ＝1ブロックとして復元できる
+function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
+  const raw = [];
+  let shippingRun = null;
+  let shippingCount = 0;
+
+  function closeShippingRun() {
+    if (!shippingRun) return;
+    shippingCount += 1;
+    raw.push({ label: labelForOccurrence(shippingCount), records: shippingRun.records });
+    shippingRun = null;
+  }
+
+  siteRecs.forEach(r => {
+    if (SHIPPING_METRICS.has(r.metric)) {
+      if (!shippingRun) shippingRun = { records: [], seen: new Set() };
+      shippingRun.records.push(r);
+      shippingRun.seen.add(r.metric);
+      if (shippingRun.seen.size >= SHIPPING_METRICS.size) closeShippingRun();
+      return;
+    }
+    closeShippingRun();
+    raw.push({ label: displayCatLabel(r.cat), records: [r] });
+  });
+  closeShippingRun();
+
+  // 隣接ブロックが同一ラベルになった場合（栽培内訳/(コンテナ数)の統合、および
+  // 勤務実績側で全出荷ブロックを1つの「出荷内訳（実績）」にまとめる場合）は
+  // 1つの結合セルにまとめる
+  const merged = [];
+  raw.forEach(b => {
+    const last = merged[merged.length - 1];
+    if (last && last.label === b.label) last.records = last.records.concat(b.records);
+    else merged.push({ label: b.label, records: b.records.slice() });
+  });
+  return merged;
+}
+
 function renderPlanTable({ months: planMonths, records }) {
   const main = document.getElementById('main');
 
@@ -2904,11 +2962,10 @@ function renderPlanTable({ months: planMonths, records }) {
     bySite[r.site].push(r);
   });
 
-  function rowClass(r) {
+  function rowClass(r, cat) {
     const classes = [];
     if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
     if (r.metric === '合計(点数)') classes.push('metric-goukei');
-    const cat = r.cat;
     if (cat.includes('生産実績') || cat.includes('生産計画')) classes.push('cat-seisan');
     else if (cat.includes('栽培')) classes.push('cat-saibai');
     else if (cat.includes('出荷')) classes.push('cat-syukka');
@@ -2928,27 +2985,37 @@ function renderPlanTable({ months: planMonths, records }) {
       <tbody>`;
 
   siteOrder.forEach((site, si) => {
-    const siteRecs = bySite[site].filter(r => r.cat !== '出荷内訳' || r.metric === 'パック数');
+    const siteRecs = bySite[site];
     const siteColor = SITE_COLORS[site] || '#e2e8f0';
-    let prevCat = '';
 
-    siteRecs.forEach((r, ri) => {
-      const isFirstSite = ri === 0;
-      const isNewCat = r.cat !== prevCat;
-      prevCat = r.cat;
+    // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
+    // 出荷関連の2グループ（構成比データ側・実数計画データ側）は、シート上の生カテゴリ文言に
+    // 依存せず指標の内容と出現順で「出荷内訳（構成比）」「出荷内訳（計画）」を割り当てる
+    const blocks = groupIntoLabeledBlocks(
+      siteRecs,
+      n => (n === 1 ? '出荷内訳（構成比）' : '出荷内訳（計画）')
+    );
 
-      const siteCell = isFirstSite
-        ? `<td rowspan="${siteRecs.length}" style="color:${siteColor};font-weight:600;vertical-align:top;padding-top:10px">${site}</td>`
-        : '';
-      const catCell = isNewCat
-        ? `<td style="color:var(--muted);font-size:0.78rem;vertical-align:top;padding-top:6px">${r.cat}</td>`
-        : '<td></td>';
+    let rowIdx = 0;
+    blocks.forEach(block => {
+      block.records.forEach((r, bi) => {
+        const isFirstRow = rowIdx === 0;
+        const isFirstOfBlock = bi === 0;
 
-      const cls = rowClass(r);
-      html += `<tr class="${cls}">${siteCell}${catCell}
-        <td style="font-size:0.82rem">${r.metric}</td>
-        ${r.values.map(v => `<td>${v !== null ? (Number.isInteger(v) ? v.toLocaleString('ja-JP') : v.toLocaleString('ja-JP', { maximumFractionDigits: 1 })) : ''}</td>`).join('')}
-      </tr>`;
+        const siteCell = isFirstRow
+          ? `<td rowspan="${siteRecs.length}" style="color:${siteColor};font-weight:600;vertical-align:top;padding-top:10px">${site}</td>`
+          : '';
+        const catCell = isFirstOfBlock
+          ? `<td class="col-cat" rowspan="${block.records.length}" style="color:var(--muted);font-size:0.78rem;vertical-align:top;padding-top:6px">${block.label}</td>`
+          : '';
+
+        const cls = rowClass(r, block.label);
+        html += `<tr class="${cls}">${siteCell}${catCell}
+          <td style="font-size:0.82rem">${r.metric}</td>
+          ${r.values.map(v => `<td>${v !== null ? (Number.isInteger(v) ? v.toLocaleString('ja-JP') : v.toLocaleString('ja-JP', { maximumFractionDigits: 1 })) : ''}</td>`).join('')}
+        </tr>`;
+        rowIdx++;
+      });
     });
   });
 
@@ -3135,11 +3202,10 @@ function renderProductionTable({ months: filteredMonths, records }) {
     bySite[r.site].push(r);
   });
 
-  function rowClass(r) {
+  function rowClass(r, cat) {
     const classes = [];
     if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
     if (r.metric === '合計(点数)') classes.push('metric-goukei');
-    const cat = r.cat;
     if (cat.includes('生産実績')) classes.push('cat-seisan');
     else if (cat.includes('栽培')) classes.push('cat-saibai');
     else if (cat.includes('出荷')) classes.push('cat-syukka');
@@ -3161,41 +3227,47 @@ function renderProductionTable({ months: filteredMonths, records }) {
   siteOrder.forEach((site, si) => {
     const siteRecs = bySite[site];
     const siteColor = SITE_COLORS[site] || '#e2e8f0';
-    let prevCat = '';
 
-    siteRecs.forEach((r, ri) => {
-      const isFirstSite = ri === 0;
-      const isNewCat = r.cat !== prevCat;
-      prevCat = r.cat;
+    // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
+    // 出荷関連カテゴリは、シート上の生カテゴリ文言に依存せず指標の内容で判定し
+    // 「出荷内訳（実績）」に統一する
+    const blocks = groupIntoLabeledBlocks(siteRecs, () => '出荷内訳（実績）');
 
-      const rc = rowClass(r);
-      const sepClass = (si > 0 && isFirstSite) ? 'site-start' : '';
-      html += `<tr class="${[rc, sepClass].filter(Boolean).join(' ')}">`;
+    let rowIdx = 0;
+    blocks.forEach(block => {
+      block.records.forEach((r, bi) => {
+        const isFirstRow = rowIdx === 0;
+        const isFirstOfBlock = bi === 0;
+        const sepClass = (si > 0 && isFirstRow) ? 'site-start' : '';
 
-      // Site cell: only on first row of site
-      if (isFirstSite) {
-        html += `<td class="col-site" rowspan="${siteRecs.length}" style="color:${siteColor}">${site}</td>`;
-      }
+        const rc = rowClass(r, block.label);
+        html += `<tr class="${[rc, sepClass].filter(Boolean).join(' ')}">`;
 
-      // Category cell: only on first row of category group
-      if (isNewCat) {
-        const catCount = siteRecs.filter(x => x.cat === r.cat).length;
-        html += `<td class="col-cat" rowspan="${catCount}">${r.cat}</td>`;
-      }
+        // Site cell: only on first row of site
+        if (isFirstRow) {
+          html += `<td class="col-site" rowspan="${siteRecs.length}" style="color:${siteColor}">${site}</td>`;
+        }
 
-      // Metric
-      html += `<td class="col-metric">${r.metric}</td>`;
+        // Category cell: only on first row of category group
+        if (isFirstOfBlock) {
+          html += `<td class="col-cat" rowspan="${block.records.length}">${block.label}</td>`;
+        }
 
-      // Values（延長列・超過列は空欄、選択範囲内はデータなしを「ー」で表示）
-      prodIdx.forEach((pi, mi) => {
-        if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
-        const v = pi >= 0 ? r.values[pi] : null;
-        html += v !== null
-          ? `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`
-          : `<td class="col-num empty">—</td>`;
+        // Metric
+        html += `<td class="col-metric">${r.metric}</td>`;
+
+        // Values（延長列・超過列は空欄、選択範囲内はデータなしを「ー」で表示）
+        prodIdx.forEach((pi, mi) => {
+          if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
+          const v = pi >= 0 ? r.values[pi] : null;
+          html += v !== null
+            ? `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`
+            : `<td class="col-num empty">—</td>`;
+        });
+
+        html += '</tr>';
+        rowIdx++;
       });
-
-      html += '</tr>';
     });
   });
 
