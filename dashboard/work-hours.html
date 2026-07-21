@@ -3021,9 +3021,12 @@ function renderPlanTable({ months: planMonths, records }) {
           : '';
 
         const cls = rowClass(r, block.label);
+        // 表示上の丸め桁数のみをブロック単位で変える。「出荷内訳（計画）」は表示を整数に
+        // 四捨五入するが、r.values（集計・計算に使う元の数値）自体は変更しない
+        const maxFractionDigits = block.label === '出荷内訳（計画）' ? 0 : 1;
         html += `<tr class="${cls}">${siteCell}${catCell}
           <td style="font-size:0.82rem">${r.metric}</td>
-          ${r.values.map(v => `<td>${v !== null ? (Number.isInteger(v) ? v.toLocaleString('ja-JP') : v.toLocaleString('ja-JP', { maximumFractionDigits: 1 })) : ''}</td>`).join('')}
+          ${r.values.map(v => `<td>${v !== null ? v.toLocaleString('ja-JP', { maximumFractionDigits: maxFractionDigits }) : ''}</td>`).join('')}
         </tr>`;
         rowIdx++;
       });
