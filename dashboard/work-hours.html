@@ -2898,37 +2898,47 @@ function displayCatLabel(cat) {
   return cat;
 }
 
-// 拠点内のレコード列を、隣接する同一カテゴリ(栽培内訳/(コンテナ数)統合後)ごとの
-// 「ブロック」にグルーピングする（1ブロック＝1つの結合セルに対応）
-function groupIntoCategoryBlocks(siteRecs) {
-  const blocks = [];
-  siteRecs.forEach(r => {
-    const merged = displayCatLabel(r.cat);
-    const last = blocks[blocks.length - 1];
-    if (last && last.mergedCat === merged) last.records.push(r);
-    else blocks.push({ mergedCat: merged, records: [r] });
-  });
-  return blocks;
-}
-
-// 出荷関連（パック数・袋数・バラ数・合計(点数)）の指標を含むカテゴリブロックを、
-// シート上の生カテゴリ文言に依存せず指標の内容で判定し、登場順に応じたラベルを
-// labelForOccurrence(1始まりの出現回数)で割り当てる。それ以外のブロックは
-// displayCatLabel()で統合済みのカテゴリ文言をそのまま使う
+// 出荷関連（パック数・袋数・バラ数・合計(点数)）の4指標。実シート上はこの4指標が
+// 複数の生カテゴリ文言（例:「出荷内訳」→パック数のみ、次いで別文言→残り3指標）に
+// またがって記録されているため、生カテゴリ文言の一致では正しくグルーピングできない
 const SHIPPING_METRICS = new Set(['パック数', '袋数', 'バラ数', '合計(点数)']);
-function assignShippingLabels(blocks, labelForOccurrence) {
+
+// 拠点内のレコード列を、カテゴリ列に表示する「ブロック」（1ブロック＝1つの結合セル）に
+// グルーピングする。非出荷系は displayCatLabel() 統合後の文言が隣接していれば1ブロックに
+// まとめる（従来通り）。出荷系（SHIPPING_METRICSに含まれる指標）は、生カテゴリ文言の
+// 変化ではなく「4指標が揃った時点」でブロックを閉じる方式で判定し、閉じたブロックごとに
+// labelForOccurrence(1始まりの出現回数)でラベルを割り当てる。これにより生カテゴリ文言の
+// 違いに依存せず、1つの出荷概念グループ＝1ブロックとして復元できる
+function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
+  const raw = [];
+  let shippingRun = null;
   let shippingCount = 0;
-  const labeled = blocks.map(b => {
-    const isShipping = b.records.some(r => SHIPPING_METRICS.has(r.metric));
-    if (!isShipping) return { label: b.mergedCat, records: b.records };
+
+  function closeShippingRun() {
+    if (!shippingRun) return;
     shippingCount += 1;
-    return { label: labelForOccurrence(shippingCount), records: b.records };
+    raw.push({ label: labelForOccurrence(shippingCount), records: shippingRun.records });
+    shippingRun = null;
+  }
+
+  siteRecs.forEach(r => {
+    if (SHIPPING_METRICS.has(r.metric)) {
+      if (!shippingRun) shippingRun = { records: [], seen: new Set() };
+      shippingRun.records.push(r);
+      shippingRun.seen.add(r.metric);
+      if (shippingRun.seen.size >= SHIPPING_METRICS.size) closeShippingRun();
+      return;
+    }
+    closeShippingRun();
+    raw.push({ label: displayCatLabel(r.cat), records: [r] });
   });
-  // labelForOccurrence()が複数の生カテゴリブロックに同じラベルを割り当てた場合
-  // （例: 勤務実績側で全出荷ブロックを1つの「出荷内訳（実績）」にする場合）、
-  // 隣接するブロック同士は1つの結合セルにまとめる
+  closeShippingRun();
+
+  // 隣接ブロックが同一ラベルになった場合（栽培内訳/(コンテナ数)の統合、および
+  // 勤務実績側で全出荷ブロックを1つの「出荷内訳（実績）」にまとめる場合）は
+  // 1つの結合セルにまとめる
   const merged = [];
-  labeled.forEach(b => {
+  raw.forEach(b => {
     const last = merged[merged.length - 1];
     if (last && last.label === b.label) last.records = last.records.concat(b.records);
     else merged.push({ label: b.label, records: b.records.slice() });
@@ -2975,15 +2985,14 @@ function renderPlanTable({ months: planMonths, records }) {
       <tbody>`;
 
   siteOrder.forEach((site, si) => {
-    // 既存フィルタ（出荷内訳カテゴリはパック数のみ表示）は変更しない。表示行はそのまま
-    const siteRecs = bySite[site].filter(r => r.cat !== '出荷内訳' || r.metric === 'パック数');
+    const siteRecs = bySite[site];
     const siteColor = SITE_COLORS[site] || '#e2e8f0';
 
     // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
-    // 出荷関連の2カテゴリ（構成比データ側・実数計画データ側）は、シート上の生カテゴリ文言に
+    // 出荷関連の2グループ（構成比データ側・実数計画データ側）は、シート上の生カテゴリ文言に
     // 依存せず指標の内容と出現順で「出荷内訳（構成比）」「出荷内訳（計画）」を割り当てる
-    const blocks = assignShippingLabels(
-      groupIntoCategoryBlocks(siteRecs),
+    const blocks = groupIntoLabeledBlocks(
+      siteRecs,
       n => (n === 1 ? '出荷内訳（構成比）' : '出荷内訳（計画）')
     );
 
@@ -3222,7 +3231,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
     // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
     // 出荷関連カテゴリは、シート上の生カテゴリ文言に依存せず指標の内容で判定し
     // 「出荷内訳（実績）」に統一する
-    const blocks = assignShippingLabels(groupIntoCategoryBlocks(siteRecs), () => '出荷内訳（実績）');
+    const blocks = groupIntoLabeledBlocks(siteRecs, () => '出荷内訳（実績）');
 
     let rowIdx = 0;
     blocks.forEach(block => {
