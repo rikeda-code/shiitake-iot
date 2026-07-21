@@ -332,8 +332,54 @@ function waitForChart(ms = 15000) {
 
 // ── Data helpers ───────────────────────────────────────────────────────────────
 
+// Googleスプレッドシート(gviz)への問い合わせ結果を一定時間キャッシュする。
+// 同じURLへの問い合わせはTTL内であればネットワークに出ず再利用し、
+// ページの再読み込みや更新ボタン連打による無駄な再取得を減らす。
+const GVIZ_CACHE_TTL_MS = 5 * 60 * 1000; // 5分
+const gvizMemoryCache = new Map(); // url -> { time, table }
+const GVIZ_CACHE_PREFIX = 'gvizCache:';
+
+function gvizCacheGet(url) {
+  const mem = gvizMemoryCache.get(url);
+  if (mem && Date.now() - mem.time < GVIZ_CACHE_TTL_MS) return mem.table;
+  try {
+    const raw = localStorage.getItem(GVIZ_CACHE_PREFIX + url);
+    if (raw) {
+      const entry = JSON.parse(raw);
+      if (Date.now() - entry.time < GVIZ_CACHE_TTL_MS) {
+        gvizMemoryCache.set(url, entry);
+        return entry.table;
+      }
+    }
+  } catch (e) { /* localStorage無効・壊れたデータは無視してネットワーク取得にフォールバック */ }
+  return null;
+}
+
+function gvizCacheSet(url, table) {
+  const entry = { time: Date.now(), table };
+  gvizMemoryCache.set(url, entry);
+  try {
+    localStorage.setItem(GVIZ_CACHE_PREFIX + url, JSON.stringify(entry));
+  } catch (e) { /* 容量超過等はメモリキャッシュのみで継続 */ }
+}
+
+// 更新ボタン等、明示的に最新データを取りに行きたい時にキャッシュを破棄する
+function clearGvizCache() {
+  gvizMemoryCache.clear();
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(GVIZ_CACHE_PREFIX)) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch (e) { /* ignore */ }
+}
+
 async function fetchSheet(sheetId, sheetName, headers = 1) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
+  const cached = gvizCacheGet(url);
+  if (cached) return cached;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
@@ -342,6 +388,7 @@ async function fetchSheet(sheetId, sheetName, headers = 1) {
     const text = await res.text();
     const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
     if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
+    gvizCacheSet(url, json.table);
     return json.table;
   } finally {
     clearTimeout(timer);
@@ -1295,9 +1342,12 @@ async function weeklyZoomRenderMekaki() {
       const [table, bedMap] = await Promise.all([
         (async () => {
           const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
+          const cached = gvizCacheGet(url);
+          if (cached) return cached;
           const res = await fetch(url);
           const text = await res.text();
           const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+          gvizCacheSet(url, json.table);
           return json.table;
         })(),
         buildBedCountMap(),
@@ -2223,6 +2273,7 @@ const scatterMonthCharts = {};
 
 function refreshActiveTab() {
   for (const k in cache) delete cache[k];
+  clearGvizCache();
   weightData = null;
   mekakiRows = null;
   analysisDataset = null;
@@ -3074,9 +3125,12 @@ async function ensureMekakiRows() {
   const [table, bedMap] = await Promise.all([
     (async () => {
       const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
+      const cached = gvizCacheGet(url);
+      if (cached) return cached;
       const res = await fetch(url);
       const text = await res.text();
       const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+      gvizCacheSet(url, json.table);
       return json.table;
     })(),
     buildBedCountMap(),
@@ -3191,9 +3245,12 @@ let weightData = null; // { site, containers, error }[]
 
 async function fetchWeightSheet(sheetName) {
   const url = `https://docs.google.com/spreadsheets/d/${WEIGHT_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
+  const cached = gvizCacheGet(url);
+  if (cached) return cached;
   const res = await fetch(url);
   const text = await res.text();
   const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+  gvizCacheSet(url, json.table);
   return json.table;
 }
 
