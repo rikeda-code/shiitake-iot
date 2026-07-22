@@ -216,6 +216,7 @@
       transition: all 0.15s;
     }
     .select-btn:hover { border-color: #4a5070; color: var(--text); }
+    .select-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 
     /* Period filter (ヘッダー固定エリアのグローバル集計期間フィルターで使用) */
     .header-period-filter {
@@ -733,6 +734,13 @@
         <select id="period-count-select" onchange="onPeriodFilterChange()"></select>
       </div>
     </div>
+    <div class="header-emp-filter" id="header-role-filter">
+      <div class="header-emp-filter-btns">
+        <button class="select-btn" id="role-select-all-btn" onclick="toggleAllRoleTypes(true)">全選択</button>
+        <button class="select-btn" id="role-select-none-btn" onclick="toggleAllRoleTypes(false)">全解除</button>
+      </div>
+      <div class="header-emp-filter-checks" id="header-role-filter-checks"></div>
+    </div>
     <div class="header-emp-filter" id="header-emp-filter">
       <div class="header-emp-filter-btns">
         <button class="select-btn" onclick="toggleAllEmpTypes(true)">全選択</button>
@@ -811,6 +819,11 @@ let transferMode = true;           // false=振替なし / true=振替あり(既
 let transferAdjusted = null;       // { employees, alerts } — 振替反映後のデータ（初回ロード時に計算）
 
 let empTypeFilter = null;          // Set<string>：選択中の雇用区分（全タブ共通のグローバルな絞り込み。nullは未初期化＝絞り込み無し）
+
+// 業務区分トグル（現時点では「雇用形態別（グラフ）_開発中」タブのみに効く絞り込み。
+// 雇用区分フィルターと違い他タブ共通のデータ取得経路には接続しない）
+const ROLE_TYPES = ['栽培', '出荷', '配送・栽培', '配送・出荷'];
+let roleTypeFilter = new Set(ROLE_TYPES); // Set<string>：選択中の業務区分（初期値は全選択）
 
 let compareSubtab = 'site';        // 比較タブのサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ（更新ボタン押下後も保持）
 let empChartSubtab = 'site';       // サマリー「雇用形態別（グラフ）」のサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ
@@ -1928,6 +1941,42 @@ function toggleAllEmpTypes(checked) {
   onEmpTypeFilterChange();
 }
 
+/* ── 業務区分トグル（雇用区分トグルと見た目・スタイルを統一する。
+   現時点では「雇用形態別（グラフ）_開発中」タブのセクション表示・非表示にのみ効果を
+   持ち、他のタブ（生産実績・標準工数(h)・既存の雇用形態別（グラフ）等）には影響しない） ── */
+const ROLE_TYPE_COLORS = { '栽培': '#34d399', '出荷': '#facc15', '配送・栽培': '#60a5fa', '配送・出荷': '#f472b6' };
+
+// ROLE_TYPESは固定4種のため、雇用区分フィルターのような「データから動的に一覧生成」は不要。
+// roleTypeFilter（現在の選択状態）に合わせてチェック状態を反映するだけの描画関数
+function renderRoleTypeFilterUI() {
+  const checksEl = document.getElementById('header-role-filter-checks');
+  if (!checksEl) return;
+  checksEl.innerHTML = '';
+  ROLE_TYPES.forEach(type => {
+    const label = document.createElement('label');
+    label.className = 'emp-checkbox';
+    label.innerHTML = `
+      <input type="checkbox" data-role="${type}" ${roleTypeFilter.has(type) ? 'checked' : ''} onchange="onRoleTypeFilterChange()">
+      <span class="color-dot" style="background:${ROLE_TYPE_COLORS[type]}"></span>
+      <span>${type}</span>`;
+    checksEl.appendChild(label);
+  });
+}
+
+function onRoleTypeFilterChange() {
+  roleTypeFilter = new Set(
+    [...document.querySelectorAll('#header-role-filter-checks input[type=checkbox]')]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.role)
+  );
+  rerenderCurrentView();
+}
+
+function toggleAllRoleTypes(checked) {
+  document.querySelectorAll('#header-role-filter-checks input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  onRoleTypeFilterChange();
+}
+
 /* ── Summary helpers ───────────────────────────────────────────── */
 function fmtH(h) {
   if (h === null || h === undefined || isNaN(h)) return '—';
@@ -2494,17 +2543,18 @@ function renderEmpChartSummaryView() {
    「雇用形態別（グラフ）」の拠点別表示を、さらに業務区分（栽培／出荷／
    配送・栽培／配送・出荷）ごとに分けて表示する開発中タブ。既存タブは
    一切変更せず、このタブはコピー＋拡張として独立に実装する。
-   内容が確定するまでは仮タブ名のまま運用する ─────────────────────── */
-const DEV_ROLE_WORK_TYPES = ['栽培', '出荷', '配送・栽培', '配送・出荷'];
-
+   内容が確定するまでは仮タブ名のまま運用する。
+   ヘッダーの業務区分トグル（roleTypeFilter）は、現時点ではこのタブの
+   セクション表示・非表示にのみ効き、他のタブには影響しない ────────── */
 function renderSummaryEmpChartDev() {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
 
   let html = '<div class="schart-shell">';
   activeSites.forEach((site, si) => {
-    DEV_ROLE_WORK_TYPES.forEach((wt, wi) => {
+    visibleRoleTypes.forEach((wt, wi) => {
       const cid = `ecdev_${si}_${wi}`;
       html += `
         <div class="schart-section">
@@ -2522,7 +2572,7 @@ function renderSummaryEmpChartDev() {
   // 各拠点×業務区分のデータセットを先に組み立てる（ページ内全グラフでY軸を統一するため）
   const perGroup = [];
   activeSites.forEach((site, si) => {
-    DEV_ROLE_WORK_TYPES.forEach((wt, wi) => {
+    visibleRoleTypes.forEach((wt, wi) => {
       const cid = `ecdev_${si}_${wi}`;
       const groupEmps = employees.filter(e => e.base === site && e.workType === wt);
       const datasetsH = EMP_CHART_TYPES.map(et => ({
@@ -4326,6 +4376,7 @@ async function loadAll() {
     allData = buildDataset(json);
     renderPeriodFilterUI(prevPeriodStart, prevPeriodCount);
     renderEmpTypeFilterUI(prevEmpTypeChecked, prevEmpTypeAll);
+    renderRoleTypeFilterUI();
 
     try {
       const adjJson = await fetchAdjustSheet();
