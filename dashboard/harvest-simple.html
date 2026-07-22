@@ -3354,17 +3354,20 @@ const weightStackValuePlugin = {
         if (value == null || value === 0) return;
         const top = Math.min(bar.y, bar.base);
         const bottom = Math.max(bar.y, bar.base);
-        if (bottom - top < 12) return; // セグメントが小さすぎる場合は描画しない
         const label = `${Math.round(value).toLocaleString()}g`;
+        // セグメントが文字を収められるほど大きければ内側中央に、
+        // 小さい(吸水量が少ない等)場合はセグメントのすぐ上に浮かせて表示する
+        const fitsInside = bottom - top >= 14;
+        const y = fitsInside ? (top + bottom) / 2 : top - 2;
         ctx.save();
         ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textBaseline = fitsInside ? 'middle' : 'bottom';
         ctx.lineWidth = 3;
         ctx.strokeStyle = 'rgba(15,17,23,0.7)';
-        ctx.strokeText(label, bar.x, (top + bottom) / 2);
+        ctx.strokeText(label, bar.x, y);
         ctx.fillStyle = '#fff';
-        ctx.fillText(label, bar.x, (top + bottom) / 2);
+        ctx.fillText(label, bar.x, y);
         ctx.restore();
       });
     });
