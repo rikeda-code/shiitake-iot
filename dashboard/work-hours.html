@@ -2327,7 +2327,10 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax,
     return {
       type: 'line', label: lineOpts.label, data,
       yAxisID: 'y2', borderColor: lineOpts.color, backgroundColor: lineOpts.color,
-      borderWidth: 2, pointRadius: 3, tension: 0.3, order: 0, spanGaps: true,
+      borderWidth: 2, pointRadius: 3, tension: 0.3, spanGaps: true,
+      // 積み上げ棒（order未指定＝既定値0）より手前に描画されるよう、orderを負の値にする
+      // （Chart.jsはorderが小さいデータセットほど後から＝手前に描画される）
+      order: -1,
       _isOverlayLine: true,
     };
   }
