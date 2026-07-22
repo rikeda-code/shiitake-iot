@@ -3415,7 +3415,7 @@ function drawWeightCharts(result) {
         },
         scales: {
           x: { stacked: true, ticks: { color: '#8892a4' }, grid: { color: '#1e2235' } },
-          y: { stacked: true, ticks: { color: '#8892a4', callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
+          y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
         },
       },
     });
