@@ -4277,7 +4277,7 @@ async function renderAnalysisTab() {
   const section = document.getElementById('analysis-section');
   if (!section) return;
 
-  if (!analysisDataset) {
+  if (analysisDataset === null) {
     section.innerHTML = `<div class="section-title">分析<span class="sub">コンテナ横断比較</span></div>
       <div class="loading">データを読み込み中...</div>`;
     try {
@@ -4286,12 +4286,18 @@ async function renderAnalysisTab() {
         ensureWeightData(),
         ensureMekakiRows(),
       ]);
-      analysisDataset = buildAnalysisDataset();
+      // weeklyStateがまだ無い(読み込み中の別呼び出しと競合した等)場合は
+      // 空配列を確定させず、後で再読み込みできるようにnullのままにしておく
+      analysisDataset = weeklyState ? buildAnalysisDataset() : null;
     } catch (e) {
       section.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
       return;
     }
     if (!analysisTabActive) return; // タブ切替後に非同期処理が終わった場合は描画しない
+    if (analysisDataset === null) {
+      section.innerHTML = `<div style="color:#f87171;padding:24px">データを読み込めませんでした。再読み込みしてください。</div>`;
+      return;
+    }
   }
 
   const candidates = analysisFilteredCandidates();
@@ -4830,7 +4836,7 @@ async function fetchTempSheetForSite(site) {
 }
 
 async function ensureTempDataset() {
-  if (tempDataset) return tempDataset;
+  if (tempDataset !== null) return tempDataset;
   if (!weeklyState) await loadWeeklySection();
   const perSite = await Promise.all(SITES.map(site =>
     fetchTempSheetForSite(site).then(list => ({ site, list })).catch(() => ({ site, list: [] }))));
@@ -4984,7 +4990,7 @@ async function renderTempTab() {
   const section = document.getElementById('temp-section');
   if (!section) return;
 
-  if (!tempDataset) {
+  if (tempDataset === null) {
     section.innerHTML = `<div class="section-title">温度分析<span class="sub">コンテナ別温度推移</span></div>
       <div class="loading">温度データを読み込み中...</div>`;
     try {
