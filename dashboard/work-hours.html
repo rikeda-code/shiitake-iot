@@ -5501,6 +5501,23 @@ function renderPlanCompareCharts(planData, prodData) {
         <div class="chart-section-label" style="flex-shrink:0">📊 予定標準工数 vs 実績工数 比較
           <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">※ 左棒(赤)=実績　右棒(積み上げ)=予定標準</span>
         </div>
+        <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
+          <div style="position:relative;display:inline-block">
+            <button id="plancmp-dd-btn" style="display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;border:1px solid #3a3f5c;background:#1a1f35;color:#e2e8f0;font-size:0.8rem;cursor:pointer;min-width:160px;justify-content:space-between">
+              <span id="plancmp-dd-label">全月選択中</span>
+              <span style="font-size:0.6rem">▼</span>
+            </button>
+            <div id="plancmp-dd-panel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;padding:6px 4px;min-width:160px;max-height:min(80vh, calc(100vh - 160px));overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
+              <div style="display:flex;gap:6px;padding:0 4px 6px;border-bottom:1px solid #2a2f4a;margin-bottom:4px">
+                <button id="plancmp-all" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">全選択</button>
+                <button id="plancmp-clear" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">クリア</button>
+              </div>
+              <div id="plancmp-opts">${dropdownOptionsHtml}</div>
+            </div>
+          </div>
+          <div id="plancmp-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap"></div>
+        </div>
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
           <div class="transfer-toggle" id="plancmp-subtabs">
             <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
@@ -5508,23 +5525,6 @@ function renderPlanCompareCharts(planData, prodData) {
             <button class="transfer-toggle-btn${planCmpSubtab === 'table' ? ' active' : ''}" data-tab="table">表</button>
           </div>
         </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;padding:6px 0 10px;flex-wrap:wrap">
-        <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
-        <div style="position:relative;display:inline-block">
-          <button id="plancmp-dd-btn" style="display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;border:1px solid #3a3f5c;background:#1a1f35;color:#e2e8f0;font-size:0.8rem;cursor:pointer;min-width:160px;justify-content:space-between">
-            <span id="plancmp-dd-label">全月選択中</span>
-            <span style="font-size:0.6rem">▼</span>
-          </button>
-          <div id="plancmp-dd-panel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;padding:6px 4px;min-width:160px;max-height:min(80vh, calc(100vh - 160px));overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
-            <div style="display:flex;gap:6px;padding:0 4px 6px;border-bottom:1px solid #2a2f4a;margin-bottom:4px">
-              <button id="plancmp-all" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">全選択</button>
-              <button id="plancmp-clear" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">クリア</button>
-            </div>
-            <div id="plancmp-opts">${dropdownOptionsHtml}</div>
-          </div>
-        </div>
-        <div id="plancmp-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap"></div>
       </div>
       <div id="compare-content"></div>
     </div>`;
