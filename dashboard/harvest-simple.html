@@ -4435,6 +4435,11 @@ function renderAnalysisComparison(items, lotColorMap) {
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weight')"><canvas id="analysis-weight-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向(拠点別)</div>
+        ${analysisPackLegendHtml()}
+        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weighttrend')"><canvas id="analysis-weighttrend-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">芽かき量</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('mekaki')"><canvas id="analysis-mekaki-canvas"></canvas></div>
       </div>
@@ -4521,6 +4526,37 @@ function analysisWeightChartConfig(items, lotColors, lotTickColor) {
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
       scales: {
         x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+// 菌床重量傾向: 収穫量(パック品収穫量)と同じ拠点別配色(自社菌床は蛍光色)で、
+// 濃色=菌床初期重量・淡色=吸水量として積み上げる
+function analysisWeightTrendChartConfig(items) {
+  const categories = items.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
+  const beforeValues = items.map(c => c.weightBefore);
+  const absorbValues = items.map(c => c.weightAbsorb);
+  const totals = items.map((c, i) => (beforeValues[i] ?? 0) + (absorbValues[i] ?? 0));
+  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
+  return {
+    data: {
+      labels: items.map(c => `${c.siteName}${c.no}`),
+      datasets: [
+        { type: 'bar', label: '菌床初期重量(g)', data: beforeValues,
+          backgroundColor: packColors.map(c => c.dark + 'cc'), stack: 's', order: 1 },
+        { type: 'bar', label: '吸水量(g)', data: absorbValues,
+          backgroundColor: packColors.map(c => c.light + 'cc'), stack: 's', order: 1 },
+        analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#94a3b8', 'y', items.length),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
@@ -4675,6 +4711,7 @@ function analysisPackChartConfig(items) {
 const ANALYSIS_CHART_CONFIGS = {
   harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig, legend: analysisLotLegendHtml },
   weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig, legend: analysisLotLegendHtml },
+  weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisPackLegendHtml },
   mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
