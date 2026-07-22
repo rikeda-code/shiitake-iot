@@ -1400,6 +1400,7 @@ function rerenderCurrentView() {
     else if (tab === 'work-chart') renderSummaryWorkChart();
     else if (tab === 'emptype') renderSummaryByEmpType();
     else if (tab === 'emp-chart') renderSummaryEmpChart();
+    else if (tab === 'emp-chart-dev') renderSummaryEmpChartDev();
     else if (tab === 'chart') renderSummaryChart();
     else renderSummaryRoster();
   } else if (activeMode === 'productivity') {
@@ -1967,6 +1968,7 @@ function renderSummary() {
         <button class="summary-subtab" data-tab="work-chart">📊 業務区分別（グラフ）</button>
         <button class="summary-subtab" data-tab="emptype">👥 雇用形態別（表）</button>
         <button class="summary-subtab" data-tab="emp-chart">📊 雇用形態別（グラフ）</button>
+        <button class="summary-subtab" data-tab="emp-chart-dev">📊 雇用形態別（グラフ）_開発中</button>
         <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
         <button class="summary-subtab" data-tab="roster">👤 名簿</button>
       </div>
@@ -1995,6 +1997,7 @@ function renderSummarySubtab(tab) {
   else if (tab === 'work-chart') renderSummaryWorkChart();
   else if (tab === 'emptype')  renderSummaryByEmpType();
   else if (tab === 'emp-chart') renderSummaryEmpChart();
+  else if (tab === 'emp-chart-dev') renderSummaryEmpChartDev();
   else if (tab === 'chart')    renderSummaryChart();
   else if (tab === 'roster')   { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
 }
@@ -2485,6 +2488,67 @@ function renderEmpChartSummaryView() {
 
   buildStackedBarSection('ecsum_emp', months, empDatasetsH, empDatasetsN, hMax, nMax);
   buildStackedBarSection('ecsum_site', months, siteDatasetsH, siteDatasetsN, hMax, nMax);
+}
+
+/* ── Summary: 雇用形態別グラフ（開発中）─────────────────────────────
+   「雇用形態別（グラフ）」の拠点別表示を、さらに業務区分（栽培／出荷／
+   配送・栽培／配送・出荷）ごとに分けて表示する開発中タブ。既存タブは
+   一切変更せず、このタブはコピー＋拡張として独立に実装する。
+   内容が確定するまでは仮タブ名のまま運用する ─────────────────────── */
+const DEV_ROLE_WORK_TYPES = ['栽培', '出荷', '配送・栽培', '配送・出荷'];
+
+function renderSummaryEmpChartDev() {
+  const { months, employees } = getExtendedActiveData();
+  const content = document.getElementById('summary-content');
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach((site, si) => {
+    DEV_ROLE_WORK_TYPES.forEach((wt, wi) => {
+      const cid = `ecdev_${si}_${wi}`;
+      html += `
+        <div class="schart-section">
+          <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}　${wt}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">時間（h）</div>${chartWrapHtml(cid + '_h', months.length)}</div>
+            <div><div class="chart-section-label" style="padding-top:0;margin-bottom:6px">人数（名）</div>${chartWrapHtml(cid + '_n', months.length)}</div>
+          </div>
+        </div>`;
+    });
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  // 各拠点×業務区分のデータセットを先に組み立てる（ページ内全グラフでY軸を統一するため）
+  const perGroup = [];
+  activeSites.forEach((site, si) => {
+    DEV_ROLE_WORK_TYPES.forEach((wt, wi) => {
+      const cid = `ecdev_${si}_${wi}`;
+      const groupEmps = employees.filter(e => e.base === site && e.workType === wt);
+      const datasetsH = EMP_CHART_TYPES.map(et => ({
+        label: et,
+        data: months.map((_, mi) => {
+          const vals = groupEmps.filter(e => empDetailType(e.employment) === et).map(e => e.hours[mi]).filter(h => h !== null);
+          return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)*10)/10 : null;
+        }),
+        backgroundColor: EMP_CHART_COLORS_MAP[et],
+      }));
+      const datasetsN = EMP_CHART_TYPES.map(et => ({
+        label: et,
+        data: months.map((_, mi) => groupEmps.filter(e => empDetailType(e.employment) === et && e.hours[mi] !== null).length || null),
+        backgroundColor: EMP_CHART_COLORS_MAP[et],
+      }));
+      perGroup.push({ cid, datasetsH, datasetsN });
+    });
+  });
+
+  // フィルター適用後のデータをもとに、ページ内の全グラフで時間・人数それぞれ共通の軸上限を算出
+  const hMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
+  const nMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
+
+  perGroup.forEach(({ cid, datasetsH, datasetsN }) => {
+    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax);
+  });
 }
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
