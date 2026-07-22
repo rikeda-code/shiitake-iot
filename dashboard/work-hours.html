@@ -2277,7 +2277,10 @@ function stackedMonthlyTotals(months, datasets) {
 
 /* ── Shared: stacked bar chart builder ─────────────────────────── */
 // hMax/nMax はページ内の同種グラフ群から computeSharedAxisMax() で算出した共通値を渡す
-function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax, nMax) {
+// lineOpts（省略可）: { label, unit, color, dataH, dataN, max } を渡すと、時間・人数
+// 両グラフに右軸(y2)の折れ線を1本重ねる。既存の呼び出し元（lineOptsを渡さない）の
+// 見た目・スケールには一切影響しない
+function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax, nMax, lineOpts) {
   function barOpts(yLabel, isCount, dynMax) {
     return {
       responsive: true, maintainAspectRatio: false,
@@ -2291,10 +2294,12 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax,
           callbacks: {
             label: ctx => {
               if (ctx.parsed.y == null || ctx.parsed.y === 0) return null;
+              if (ctx.dataset._isOverlayLine) return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ja-JP')} ${lineOpts.unit}`;
               return `${ctx.dataset.label}: ${isCount ? ctx.parsed.y + ' 名' : ctx.parsed.y.toFixed(1) + ' h'}`;
             },
             footer: items => {
-              const total = items.reduce((s, ctx) => s + (ctx.parsed.y || 0), 0);
+              const barItems = items.filter(ctx => !ctx.dataset._isOverlayLine);
+              const total = barItems.reduce((s, ctx) => s + (ctx.parsed.y || 0), 0);
               if (!total) return '';
               return `合計: ${isCount ? total + ' 名' : total.toFixed(1) + ' h'}`;
             },
@@ -2306,13 +2311,36 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax,
         y: { stacked: true, ticks: { color: '#8892a4', font: { size: 11 }, callback: v => isCount ? `${v} 名` : `${v} h` },
           grid: { color: '#1e2235' }, suggestedMin: 0, max: dynMax,
           title: { display: true, text: yLabel, color: '#8892a4', font: { size: 11 } } },
+        ...(lineOpts ? {
+          y2: {
+            position: 'right',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString('ja-JP')} ${lineOpts.unit}` },
+            grid: { drawOnChartArea: false },
+            suggestedMin: 0, max: lineOpts.max,
+            title: { display: true, text: `${lineOpts.label}`, color: '#8892a4', font: { size: 11 } },
+          },
+        } : {}),
       },
     };
   }
+  function overlayLineDataset(data) {
+    return {
+      type: 'line', label: lineOpts.label, data,
+      yAxisID: 'y2', borderColor: lineOpts.color, backgroundColor: lineOpts.color,
+      borderWidth: 2, pointRadius: 3, tension: 0.3, order: 0, spanGaps: true,
+      _isOverlayLine: true,
+    };
+  }
   const hCtx = document.getElementById(containerId + '_h')?.getContext('2d');
-  if (hCtx) summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets: datasetsH }, options: barOpts('実質勤務時間 (h)', false, hMax) });
+  if (hCtx) {
+    const datasets = lineOpts ? [...datasetsH, overlayLineDataset(lineOpts.dataH)] : datasetsH;
+    summaryChartInstances[containerId + '_h'] = new Chart(hCtx, { type: 'bar', data: { labels: months, datasets }, options: barOpts('実質勤務時間 (h)', false, hMax) });
+  }
   const nCtx = document.getElementById(containerId + '_n')?.getContext('2d');
-  if (nCtx) summaryChartInstances[containerId + '_n'] = new Chart(nCtx, { type: 'bar', data: { labels: months, datasets: datasetsN }, options: barOpts('人数 (名)', true, nMax) });
+  if (nCtx) {
+    const datasets = lineOpts ? [...datasetsN, overlayLineDataset(lineOpts.dataN)] : datasetsN;
+    summaryChartInstances[containerId + '_n'] = new Chart(nCtx, { type: 'bar', data: { labels: months, datasets }, options: barOpts('人数 (名)', true, nMax) });
+  }
 }
 
 /* ── Summary: 業務区分別グラフ ─────────────────────────────────── */
@@ -2548,12 +2576,55 @@ function renderEmpChartSummaryView() {
    一切変更せず、このタブはコピー＋拡張として独立に実装する。
    内容が確定するまでは仮タブ名のまま運用する。
    ヘッダーの業務区分トグル（roleTypeFilter）は、現時点ではこのタブの
-   セクション表示・非表示にのみ効き、他のタブには影響しない ────────── */
+   セクション表示・非表示にのみ効き、他のタブには影響しない。
+   栽培／出荷セクションには、生産実績（整理済み_分析）の収穫量(kg)／
+   出荷量(kg)を右軸の折れ線として重ねる（配送・栽培／配送・出荷は対象外） ── */
+const DEV_LINE_METRIC_BY_ROLE = { '栽培': '収穫量(kg)', '出荷': '出荷量(kg)' };
+const DEV_LINE_COLOR_BY_ROLE = { '栽培': '#38bdf8', '出荷': '#facc15' };
+
 function renderSummaryEmpChartDev() {
+  const content = document.getElementById('summary-content');
+  content.innerHTML = '<div class="loading">生産実績データを読み込み中...</div>';
+  fetchProductionSheet().then(prodData => {
+    renderSummaryEmpChartDevContent(prodData);
+  }).catch(e => {
+    content.innerHTML = `<div class="error-msg">生産実績データ取得エラー: ${e.message}</div>`;
+    console.error(e);
+  });
+}
+
+function renderSummaryEmpChartDevContent(prodData) {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
+  const { months: prodMonths, records } = prodData;
+
+  // 生産実績側の指標値を、勤務実績側の表示列(months)に月文字列で突き合わせて取得する
+  // （既存の生産性タブのprodVals()と同じ突き合わせ方式。延長分の空月(month:'')はnullのまま）
+  function prodVals(site, metric) {
+    const r = records.find(x => x.site === site && x.metric === metric);
+    if (!r) return months.map(() => null);
+    return months.map(m => {
+      if (!m) return null;
+      const pi = prodMonths.indexOf(normalizeMonth(m));
+      return (pi >= 0 && r.values[pi] !== null) ? r.values[pi] : null;
+    });
+  }
+
+  // 栽培／出荷それぞれの折れ線用データを拠点ごとに先に集めておき、
+  // 同じ指標を重ねる全セクションで右軸の上限を揃える
+  const lineValsBySite = {};
+  activeSites.forEach(site => {
+    lineValsBySite[site] = {
+      '栽培': prodVals(site, DEV_LINE_METRIC_BY_ROLE['栽培']),
+      '出荷': prodVals(site, DEV_LINE_METRIC_BY_ROLE['出荷']),
+    };
+  });
+  const lineMaxByRole = {
+    '栽培': computeSharedAxisMax(activeSites.map(site => lineValsBySite[site]['栽培']), 100, 1.1),
+    '出荷': computeSharedAxisMax(activeSites.map(site => lineValsBySite[site]['出荷']), 100, 1.1),
+  };
 
   let html = '<div class="schart-shell">';
   activeSites.forEach((site, si) => {
@@ -2591,16 +2662,26 @@ function renderSummaryEmpChartDev() {
         data: months.map((_, mi) => groupEmps.filter(e => empDetailType(e.employment) === et && e.hours[mi] !== null).length || null),
         backgroundColor: EMP_CHART_COLORS_MAP[et],
       }));
-      perGroup.push({ cid, datasetsH, datasetsN });
+      const lineMetric = DEV_LINE_METRIC_BY_ROLE[wt];
+      const lineOpts = lineMetric ? {
+        label: lineMetric,
+        unit: 'kg',
+        color: DEV_LINE_COLOR_BY_ROLE[wt],
+        dataH: lineValsBySite[site][wt],
+        dataN: lineValsBySite[site][wt],
+        max: lineMaxByRole[wt],
+      } : undefined;
+      perGroup.push({ cid, datasetsH, datasetsN, lineOpts });
     });
   });
 
   // フィルター適用後のデータをもとに、ページ内の全グラフで時間・人数それぞれ共通の軸上限を算出
+  // （折れ線は右軸=y2側のため、この左軸の集計には含めない）
   const hMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
   const nMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
 
-  perGroup.forEach(({ cid, datasetsH, datasetsN }) => {
-    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax);
+  perGroup.forEach(({ cid, datasetsH, datasetsN, lineOpts }) => {
+    buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax, lineOpts);
   });
 }
 
