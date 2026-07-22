@@ -5448,7 +5448,20 @@ function renderPlanCompareCharts(planData, prodData) {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              legend: {
+                labels: {
+                  color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
+                  // 積み上げの視覚的な上下順（データセット追加順）とは独立に、凡例の表示
+                  // 順序だけは元の拠点順「いなべ→群馬→南丹」に固定する
+                  generateLabels: chart => {
+                    const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                    const siteItems = items.filter(item => availSites.includes(item.text));
+                    const otherItems = items.filter(item => !availSites.includes(item.text));
+                    siteItems.sort((a, b) => availSites.indexOf(a.text) - availSites.indexOf(b.text));
+                    return [...siteItems, ...otherItems];
+                  },
+                },
+              },
               tooltip: tooltipOpts(true, true),
             },
             scales: {
