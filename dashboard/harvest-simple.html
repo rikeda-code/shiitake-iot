@@ -4335,12 +4335,14 @@ async function renderAnalysisTab() {
       : analysisSubTab === 'correlation'
         ? (chartItems.length ? renderAnalysisCorrelationView(chartItems)
           : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">現在の栽培期間フィルターに一致する選択コンテナがありません</div>`)
+      : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrendView(allSelected)
       : renderAnalysisComparison(allSelected, lotColorMap));
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
     { key: 'date', label: '日付' },
     { key: 'correlation', label: '相関図' },
+    { key: 'weighttrend', label: '菌床重量傾向' },
   ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
@@ -4444,11 +4446,6 @@ function renderAnalysisComparison(items, lotColorMap) {
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weight')"><canvas id="analysis-weight-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向(拠点別)</div>
-        ${analysisPackLegendHtml()}
-        <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weighttrend')"><canvas id="analysis-weighttrend-canvas"></canvas></div>
-      </div>
-      <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">芽かき量</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('mekaki')"><canvas id="analysis-mekaki-canvas"></canvas></div>
       </div>
@@ -4464,6 +4461,25 @@ function renderAnalysisComparison(items, lotColorMap) {
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ比率</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('ratio')"><canvas id="analysis-ratio-canvas"></canvas></div>
+      </div>
+    </div>`;
+}
+
+function renderAnalysisWeightTrendView(items) {
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向(拠点別)</div>
+        ${analysisPackLegendHtml()}
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weighttrend')"><canvas id="analysis-weighttrend-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">月別 菌床重量平均(初期重量+吸水量)</div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightmonthly')"><canvas id="analysis-weightmonthly-canvas"></canvas></div>
+      </div>
+      <div style="background:#13151f;border-radius:12px;padding:16px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">週別 菌床重量平均(初期重量+吸水量)</div>
+        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightweekly')"><canvas id="analysis-weightweekly-canvas"></canvas></div>
       </div>
     </div>`;
 }
@@ -4570,6 +4586,56 @@ function analysisWeightTrendChartConfig(items) {
       },
     },
   };
+}
+
+// 月別/週別の菌床重量平均グラフの共通処理: グループごとに初期重量・吸水量の平均を積み上げる
+function analysisWeightGroupChartConfig(labels, groupItemsList) {
+  const beforeAvgs = groupItemsList.map(g => analysisAvg(g.map(c => c.weightBefore)));
+  const absorbAvgs = groupItemsList.map(g => analysisAvg(g.map(c => c.weightAbsorb)));
+  return {
+    data: {
+      labels,
+      datasets: [
+        { type: 'bar', label: '菌床初期重量 平均(g)', data: beforeAvgs, backgroundColor: '#60a5facc', stack: 's', order: 1 },
+        { type: 'bar', label: '吸水量 平均(g)', data: absorbAvgs, backgroundColor: '#fa8072cc', stack: 's', order: 1 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+// 栽培開始月ごとの菌床重量平均
+function analysisWeightMonthlyChartConfig(items) {
+  const groups = {};
+  items.forEach(c => {
+    const sd = parseDateStr(c.startDate);
+    if (!sd) return;
+    const key = `${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, '0')}`;
+    (groups[key] ||= []).push(c);
+  });
+  const keys = Object.keys(groups).sort();
+  const labels = keys.map(k => `${parseInt(k.split('-')[1])}月`);
+  return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k]));
+}
+
+// 栽培開始週(日〜土)ごとの菌床重量平均
+function analysisWeightWeeklyChartConfig(items) {
+  const groups = {};
+  items.forEach(c => {
+    const week = c.startDate ? getSunSatWeek(c.startDate) : null;
+    if (!week) return;
+    (groups[week.key] ||= { label: week.label, items: [] }).items.push(c);
+  });
+  const keys = Object.keys(groups).sort();
+  const labels = keys.map(k => groups[k].label);
+  return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k].items));
 }
 
 function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
@@ -4721,6 +4787,8 @@ const ANALYSIS_CHART_CONFIGS = {
   harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig, legend: analysisLotLegendHtml },
   weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig, legend: analysisLotLegendHtml },
   weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisPackLegendHtml },
+  weightmonthly: { title: '月別 菌床重量平均', build: analysisWeightMonthlyChartConfig },
+  weightweekly: { title: '週別 菌床重量平均', build: analysisWeightWeeklyChartConfig },
   mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
