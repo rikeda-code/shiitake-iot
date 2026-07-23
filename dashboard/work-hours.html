@@ -1001,6 +1001,17 @@ function parseDuration(cell) {
   return null;
 }
 
+// 標準労働時間（I列）は他の時間系列列と異なり、シート上で60進数の時刻シリアル値
+// ではなく10進数の数値（例: 173.8）としてそのまま入力されているため、
+// parseDuration()の24倍変換は適用せず、セルの数値をそのまま時間として扱う
+function parsePlainHours(cell) {
+  if (!cell) return null;
+  if (typeof cell.v === 'number') {
+    return cell.v > 0 ? Math.round(cell.v * 10) / 10 : null;
+  }
+  return null;
+}
+
 // 2行目「実質月」（例: "2025/08"）のYYYY/M表記をラベルから直接抜き出してYYYYMM数値で返す
 function realYearMonth(label) {
   const m = String(label).match(/(\d{4})\/(\d{1,2})(?!\d)/);
@@ -1174,7 +1185,7 @@ function buildDataset(json) {
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
     if (hours.every(h => h === null)) return;
 
-    const stdHours = stdHoursIdx >= 0 ? parseDuration(cells[stdHoursIdx]) : null;
+    const stdHours = stdHoursIdx >= 0 ? parsePlainHours(cells[stdHoursIdx]) : null;
 
     employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours });
   });
