@@ -737,8 +737,8 @@
     </div>
     <div class="header-emp-filter" id="header-site-filter">
       <div class="header-emp-filter-btns">
-        <button class="select-btn" id="site-select-all-btn" disabled>全選択</button>
-        <button class="select-btn" id="site-select-none-btn" disabled>全解除</button>
+        <button class="select-btn" id="site-select-all-btn" onclick="toggleAllSites(true)">全選択</button>
+        <button class="select-btn" id="site-select-none-btn" onclick="toggleAllSites(false)">全解除</button>
       </div>
       <div class="header-emp-filter-checks" id="header-site-filter-checks"></div>
     </div>
@@ -1990,8 +1990,8 @@ function toggleAllRoleTypes(checked) {
   onRoleTypeFilterChange();
 }
 
-/* ── 拠点トグル（配置のみ。雇用区分・業務区分トグルと見た目・スタイルを統一する。
-   この段階ではまだどのタブの表示にも影響しない） ──────────────────────── */
+/* ── 拠点トグル（雇用区分・業務区分トグルと見た目・スタイルを統一する。
+   現時点では「名簿」タブの一覧表示にのみ効果を持ち、他のタブには影響しない） ── */
 // SITESは固定3種のため、雇用区分フィルターのような「データから動的に一覧生成」は不要。
 // siteFilter（現在の選択状態）に合わせてチェック状態を反映するだけの描画関数
 function renderSiteFilterUI() {
@@ -2002,11 +2002,25 @@ function renderSiteFilterUI() {
     const label = document.createElement('label');
     label.className = 'emp-checkbox';
     label.innerHTML = `
-      <input type="checkbox" data-site="${site}" ${siteFilter.has(site) ? 'checked' : ''}>
+      <input type="checkbox" data-site="${site}" ${siteFilter.has(site) ? 'checked' : ''} onchange="onSiteFilterChange()">
       <span class="color-dot" style="background:${SITE_COLORS[site]}"></span>
       <span>${site}</span>`;
     checksEl.appendChild(label);
   });
+}
+
+function onSiteFilterChange() {
+  siteFilter = new Set(
+    [...document.querySelectorAll('#header-site-filter-checks input[type=checkbox]')]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.site)
+  );
+  rerenderCurrentView();
+}
+
+function toggleAllSites(checked) {
+  document.querySelectorAll('#header-site-filter-checks input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  onSiteFilterChange();
 }
 
 /* ── Summary helpers ───────────────────────────────────────────── */
@@ -2924,7 +2938,12 @@ function renderSummaryRoster() {
     return employees.filter(e =>
       e.workType &&
       rosterFilterSites.has(e.base) &&
-      rosterFilterEmps.has(e.employment || '（未分類）')
+      rosterFilterEmps.has(e.employment || '（未分類）') &&
+      // 上部グローバル拠点トグル（名簿タブにのみ適用）
+      siteFilter.has(e.base) &&
+      // 上部グローバル業務区分トグル（名簿タブにのみ適用）。ROLE_TYPESに
+      // 含まれない業務区分（例:「拠点業務」）はトグルの対象外のため、常に表示する
+      (!ROLE_TYPES.includes(e.workType) || roleTypeFilter.has(e.workType))
     );
   }
 
