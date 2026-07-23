@@ -1327,6 +1327,7 @@ function computeTransferAdjustments(baseData, adjustRecords) {
         employment: a.emp.employment,
         empClass: a.emp.empClass,
         hours: new Array(months.length).fill(null),
+        stdHours: null, // 応援先の仮想レコードには標準労働時間の概念がないため常にnull
         isTransferVirtual: true,
       });
     }
@@ -2740,7 +2741,11 @@ const STD_HOURS_BAR_SERIES = [
 // 判定だけで「実質勤務時間が0または未入力のスタッフを除外」の条件を満たせる
 function computeStdHoursLine(emps, months) {
   return months.map((_, mi) => {
-    const vals = emps.filter(e => e.hours[mi] !== null).map(e => e.stdHours).filter(v => v !== null);
+    // 工数振替の「応援」仮想従業員（computeTransferAdjustments()生成分）はstdHours
+    // フィールドを持たずundefinedになるため、!== nullだけでなく!= nullで
+    // undefinedも合わせて除外する（さもないとreduce()の合計がNaNになり、
+    // その月の折れ線だけが描画されなくなる）
+    const vals = emps.filter(e => e.hours[mi] !== null).map(e => e.stdHours).filter(v => v != null);
     return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
   });
 }
