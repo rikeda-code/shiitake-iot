@@ -462,54 +462,6 @@
     }
     .roster-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .roster-table tbody tr:hover td { background: var(--surface2) !important; }
-
-    /* ── Roster filters ── */
-    .roster-filters {
-      flex-shrink: 0;
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      padding: 12px 16px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-top: 2px solid var(--border);
-      border-bottom: none;
-      border-radius: 0 8px 0 0;
-    }
-    .roster-filter-group {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    .roster-filter-label {
-      font-size: 0.72rem;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-right: 2px;
-      white-space: nowrap;
-    }
-    .roster-pill {
-      padding: 4px 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 0.78rem;
-      font-family: inherit;
-      transition: all 0.15s;
-    }
-    .roster-pill.active {
-      border-color: #4a5070;
-      color: var(--text);
-      background: var(--surface2);
-    }
-    .roster-panel {
-      border-top: none;
-      border-radius: 0 0 8px 8px;
-    }
     .summary-table {
       border-collapse: collapse;
       font-size: 0.82rem;
@@ -737,8 +689,8 @@
     </div>
     <div class="header-emp-filter" id="header-site-filter">
       <div class="header-emp-filter-btns">
-        <button class="select-btn" id="site-select-all-btn" disabled>全選択</button>
-        <button class="select-btn" id="site-select-none-btn" disabled>全解除</button>
+        <button class="select-btn" id="site-select-all-btn" onclick="toggleAllSites(true)">全選択</button>
+        <button class="select-btn" id="site-select-none-btn" onclick="toggleAllSites(false)">全解除</button>
       </div>
       <div class="header-emp-filter-checks" id="header-site-filter-checks"></div>
     </div>
@@ -1990,8 +1942,8 @@ function toggleAllRoleTypes(checked) {
   onRoleTypeFilterChange();
 }
 
-/* ── 拠点トグル（配置のみ。雇用区分・業務区分トグルと見た目・スタイルを統一する。
-   この段階ではまだどのタブの表示にも影響しない） ──────────────────────── */
+/* ── 拠点トグル（雇用区分・業務区分トグルと見た目・スタイルを統一する。
+   現時点では「名簿」タブの一覧表示にのみ効果を持ち、他のタブには影響しない） ── */
 // SITESは固定3種のため、雇用区分フィルターのような「データから動的に一覧生成」は不要。
 // siteFilter（現在の選択状態）に合わせてチェック状態を反映するだけの描画関数
 function renderSiteFilterUI() {
@@ -2002,11 +1954,25 @@ function renderSiteFilterUI() {
     const label = document.createElement('label');
     label.className = 'emp-checkbox';
     label.innerHTML = `
-      <input type="checkbox" data-site="${site}" ${siteFilter.has(site) ? 'checked' : ''}>
+      <input type="checkbox" data-site="${site}" ${siteFilter.has(site) ? 'checked' : ''} onchange="onSiteFilterChange()">
       <span class="color-dot" style="background:${SITE_COLORS[site]}"></span>
       <span>${site}</span>`;
     checksEl.appendChild(label);
   });
+}
+
+function onSiteFilterChange() {
+  siteFilter = new Set(
+    [...document.querySelectorAll('#header-site-filter-checks input[type=checkbox]')]
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.site)
+  );
+  rerenderCurrentView();
+}
+
+function toggleAllSites(checked) {
+  document.querySelectorAll('#header-site-filter-checks input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  onSiteFilterChange();
 }
 
 /* ── Summary helpers ───────────────────────────────────────────── */
@@ -2080,7 +2046,7 @@ function renderSummarySubtab(tab) {
   else if (tab === 'emp-chart') renderSummaryEmpChart();
   else if (tab === 'emp-chart-dev') renderSummaryEmpChartDev();
   else if (tab === 'chart')    renderSummaryChart();
-  else if (tab === 'roster')   { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
+  else if (tab === 'roster')   renderSummaryRoster();
 }
 
 // activeMode === 'summary' のとき、現在アクティブなサブタブに切り替える（無ければ tab を新たにアクティブ化）
@@ -2900,8 +2866,6 @@ function updateSummaryChart(siteId) {
 /* ── Summary: 名簿タブ ─────────────────────────────────────────── */
 let rosterSortCol = 'site';
 let rosterSortAsc = true;
-let rosterFilterSites = new Set(SITES);
-let rosterFilterEmps  = null; // null = all; initialised on first render
 
 function renderSummaryRoster() {
   // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
@@ -2912,19 +2876,14 @@ function renderSummaryRoster() {
   const SITE_ORDER = { 'いなべ': 0, '群馬': 1, '南丹': 2 };
   const orderedWorkTypes = getOrderedWorkTypes(employees);
 
-  // Unique employment values from data (preserve order of appearance)
-  const allEmpTypes = [];
-  employees.forEach(e => {
-    const v = e.employment || '（未分類）';
-    if (!allEmpTypes.includes(v)) allEmpTypes.push(v);
-  });
-  if (rosterFilterEmps === null) rosterFilterEmps = new Set(allEmpTypes);
-
   function filteredEmployees() {
     return employees.filter(e =>
       e.workType &&
-      rosterFilterSites.has(e.base) &&
-      rosterFilterEmps.has(e.employment || '（未分類）')
+      // 上部グローバル拠点トグル（名簿タブにのみ適用）
+      siteFilter.has(e.base) &&
+      // 上部グローバル業務区分トグル（名簿タブにのみ適用）。ROLE_TYPESに
+      // 含まれない業務区分（例:「拠点業務」）はトグルの対象外のため、常に表示する
+      (!ROLE_TYPES.includes(e.workType) || roleTypeFilter.has(e.workType))
     );
   }
 
@@ -2944,28 +2903,8 @@ function renderSummaryRoster() {
     return copy;
   }
 
-  function pillBtn(label, active, onclick) {
-    return `<button class="roster-pill${active ? ' active' : ''}" onclick="${onclick}">${label}</button>`;
-  }
-
   function buildContent() {
     const sorted = rosterSorted(rosterSortCol);
-    const activeSites = SITES.filter(s => employees.some(e => e.base === s));
-
-    // Filter bar
-    let filterHtml = `<div class="roster-filters">
-      <div class="roster-filter-group">
-        <span class="roster-filter-label">拠点</span>`;
-    activeSites.forEach(s => {
-      const active = rosterFilterSites.has(s);
-      filterHtml += pillBtn(s, active, `rosterToggleSite('${s}')`);
-    });
-    filterHtml += `</div><div class="roster-filter-group"><span class="roster-filter-label">雇用区分</span>`;
-    allEmpTypes.forEach(et => {
-      const active = rosterFilterEmps.has(et);
-      filterHtml += pillBtn(et, active, `rosterToggleEmp('${et}')`);
-    });
-    filterHtml += `</div></div>`;
 
     const tableCols = [
       { key: 'site', label: '拠点' },
@@ -3003,7 +2942,7 @@ function renderSummaryRoster() {
     }
     tableHtml += `</tbody></table></div>`;
 
-    return filterHtml + tableHtml;
+    return tableHtml;
   }
 
   content.innerHTML = buildContent();
@@ -3011,16 +2950,6 @@ function renderSummaryRoster() {
   window.rosterSort = function(col) {
     if (rosterSortCol === col) rosterSortAsc = !rosterSortAsc;
     else { rosterSortCol = col; rosterSortAsc = true; }
-    content.innerHTML = buildContent();
-  };
-  window.rosterToggleSite = function(site) {
-    if (rosterFilterSites.has(site)) rosterFilterSites.delete(site);
-    else rosterFilterSites.add(site);
-    content.innerHTML = buildContent();
-  };
-  window.rosterToggleEmp = function(et) {
-    if (rosterFilterEmps.has(et)) rosterFilterEmps.delete(et);
-    else rosterFilterEmps.add(et);
     content.innerHTML = buildContent();
   };
 }
