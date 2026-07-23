@@ -2791,7 +2791,8 @@ function renderStdHoursContent() {
 function renderStdHoursSiteView() {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
-  const activeSites = SITES.filter(s => siteFilter.has(s) && employees.some(e => e.base === s));
+  const allSites = SITES.filter(s => employees.some(e => e.base === s));
+  const activeSites = allSites.filter(s => siteFilter.has(s));
   const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
 
   if (!activeSites.length || !visibleRoleTypes.length) {
@@ -2813,28 +2814,33 @@ function renderStdHoursSiteView() {
   html += '</div>';
   content.innerHTML = html;
 
-  const perGroup = [];
-  activeSites.forEach((site, si) => {
-    visibleRoleTypes.forEach((wt, wi) => {
-      const cid = `stdh_site_${si}_${wi}`;
+  // 業務区分（セクション）ごとに、拠点トグルの選択状態に関わらず全拠点(allSites)を
+  // 基準にY軸MAXを算出する。拠点トグルをON/OFFしてもセクションの表示/非表示が
+  // 変わるだけで、残っているセクションのデータ自体は変化しないため、軸スケールも
+  // 変動させない（=全拠点ON相当のMAXに固定する）
+  const roleMax = {};
+  const dataBySiteRole = {};
+  visibleRoleTypes.forEach(wt => {
+    const stacksForRole = [];
+    allSites.forEach(site => {
       const emps = employees.filter(e => e.base === site && e.workType === wt);
       const barDatasets = STD_HOURS_BAR_SERIES.map(s => ({
         type: 'bar', label: s.label, data: s.compute(emps, months),
         backgroundColor: s.color + 'cc', borderColor: s.color, borderWidth: 0, stack: 'actual',
       }));
       const lineData = computeStdHoursLine(emps, months);
-      perGroup.push({ cid, barDatasets, lineData });
+      stacksForRole.push(stackedMonthlyTotals(months, barDatasets), lineData);
+      dataBySiteRole[`${site}|${wt}`] = { barDatasets, lineData };
     });
+    roleMax[wt] = computeSharedAxisMax(stacksForRole, 100, 1.1);
   });
 
-  // ページ内の全セクションで軸MAXを統一する（積み上げ・折れ線とも実際に到達する高さで判定）
-  const sharedMax = computeSharedAxisMax(
-    perGroup.flatMap(p => [stackedMonthlyTotals(months, p.barDatasets), p.lineData]),
-    100, 1.1
-  );
-
-  perGroup.forEach(({ cid, barDatasets, lineData }) => {
-    buildStdHoursChart(cid, months, barDatasets, lineData, sharedMax);
+  activeSites.forEach((site, si) => {
+    visibleRoleTypes.forEach((wt, wi) => {
+      const cid = `stdh_site_${si}_${wi}`;
+      const { barDatasets, lineData } = dataBySiteRole[`${site}|${wt}`];
+      buildStdHoursChart(cid, months, barDatasets, lineData, roleMax[wt]);
+    });
   });
 }
 
