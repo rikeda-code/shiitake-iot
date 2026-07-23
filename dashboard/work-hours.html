@@ -1076,6 +1076,15 @@ function buildDataset(json) {
 
   const firstMonthIdx = jissituCols[0].idx;
 
+  // 標準労働時間（従業員1人あたり固定値の列）は、月別データと同様にヘッダー文字列
+  // （「標準労働時間」）を検索して動的に列を特定する。シート改修で列位置が変わっても
+  // 固定インデックスに依存しないための対応。見つからない場合はnull扱いとする
+  let stdHoursIdx = -1;
+  cols.forEach((c, i) => {
+    if (!c) return;
+    if ((c.label || '').trim().includes('標準労働時間')) stdHoursIdx = i;
+  });
+
   // Step 2: detect static columns by scanning data values
   const VALID_BASES   = new Set(['いなべ', '群馬', '南丹']);
   const VALID_WORKS   = new Set(['栽培', '出荷', '配送', '拠点業務']);
@@ -1165,7 +1174,9 @@ function buildDataset(json) {
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
     if (hours.every(h => h === null)) return;
 
-    employees.push({ name, base, workType, employment, empClass, hours, flag });
+    const stdHours = stdHoursIdx >= 0 ? parseDuration(cells[stdHoursIdx]) : null;
+
+    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
@@ -2687,12 +2698,47 @@ function renderSummaryEmpChartDevContent(prodData) {
   });
 }
 
-/* ── Summary: 標準労働時間タブ（ステップ②：タブ・トグルの配置のみ） ─────────
-   グラフの中身・データ集計ロジック（整理済み_MシートI列の標準労働時間集計、
-   前年/当年稼働実績棒、上部グローバルトグルとの連動等）はステップ③で
-   別途実装する。現時点では「勤務実績＞比較」タブと同じ外枠（拠点別／
-   拠点サマリ切り替え）のみを用意し、中身はプレースホルダー表示とする ── */
+/* ── Summary: 標準労働時間タブ ────────────────────────────────────
+   棒: 当年稼働実績（実質勤務時間合計）。将来「前年稼働実績」を追加する
+   際は元データ整備後にSTD_HOURS_BAR_SERIESへ1件追加するだけで拡張できる
+   構造にしている（現時点では未実装のためcurrentの1系列のみ）。
+   折れ線: 標準労働時間（整理済み_MシートI列。月ごとに、その月に実績
+   [実質勤務時間]があるスタッフのみを対象に合計）。
+   拠点別モードは上部グローバルトグル（拠点／業務区分／雇用形態区分）と
+   連動し、拠点サマリモードは3拠点を色分けして積み上げ表示する
+   （予実＞比較＞拠点サマリと同じ「いなべ最上部→南丹最下部」の積み上げ順
+   ＋凡例は元の拠点順、というパターンを踏襲） ─────────────────────── */
 let stdHoursSubtab = 'site'; // 'site'=拠点別 / 'summary'=拠点サマリ
+
+// 当年稼働実績（実質勤務時間合計）。将来ここに前年稼働実績等を追加する場合は
+// { key, label, color, compute(emps, months) } の形で1件追加するだけでよい
+const STD_HOURS_BAR_SERIES = [
+  {
+    key: 'current',
+    label: '当年稼働実績',
+    color: '#60a5fa',
+    compute: (emps, months) => months.map((_, mi) => {
+      const vals = emps.map(e => e.hours[mi]).filter(h => h !== null);
+      return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
+    }),
+  },
+];
+
+// 標準労働時間（月ごとに、その月に実績[実質勤務時間]があるスタッフのみを対象に合計）。
+// parseDuration()は0以下の値を既にnullとして返しているため、hours[mi] !== nullの
+// 判定だけで「実質勤務時間が0または未入力のスタッフを除外」の条件を満たせる
+function computeStdHoursLine(emps, months) {
+  return months.map((_, mi) => {
+    const vals = emps.filter(e => e.hours[mi] !== null).map(e => e.stdHours).filter(v => v !== null);
+    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
+  });
+}
+
+// 上部グローバル業務区分トグルによる絞り込み。ROLE_TYPESに含まれない業務区分
+// （例:「拠点業務」）はトグルの対象外のため常に含める（名簿タブと同じ扱い）
+function stdHoursRoleVisible(e) {
+  return !ROLE_TYPES.includes(e.workType) || roleTypeFilter.has(e.workType);
+}
 
 function renderSummaryStdHours() {
   const content = document.getElementById('summary-content');
@@ -2722,10 +2768,161 @@ function renderSummaryStdHours() {
 }
 
 function renderStdHoursContent() {
+  destroySummaryCharts();
+  if (stdHoursSubtab === 'summary') renderStdHoursSummaryView();
+  else renderStdHoursSiteView();
+}
+
+// 拠点別：「業務区分別／雇用形態別（グラフ）」タブと同じ粒度で、拠点×業務区分
+// （3拠点×4業務区分＝最大12組）ごとにセクションを分けて表示する。上部グローバル
+// トグルのうち、拠点・業務区分トグルはセクションの表示/非表示に反映し、雇用形態
+// 区分トグルはgetExtendedActiveData()経由で各セクションの集計値自体に反映される
+function renderStdHoursSiteView() {
+  const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
-  if (!content) return;
-  const modeLabel = stdHoursSubtab === 'summary' ? '拠点サマリ' : '拠点別';
-  content.innerHTML = `<div class="loading">「${modeLabel}」表示のグラフ・データ集計は未実装です（今後追加予定）</div>`;
+  const activeSites = SITES.filter(s => siteFilter.has(s) && employees.some(e => e.base === s));
+  const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
+
+  if (!activeSites.length || !visibleRoleTypes.length) {
+    content.innerHTML = '<div class="loading">表示できるデータがありません（拠点・業務区分トグルの選択状況をご確認ください）</div>';
+    return;
+  }
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach((site, si) => {
+    visibleRoleTypes.forEach((wt, wi) => {
+      const cid = `stdh_site_${si}_${wi}`;
+      html += `
+        <div class="schart-section">
+          <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}　${wt}</div>
+          ${chartWrapHtml(cid, months.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
+        </div>`;
+    });
+  });
+  html += '</div>';
+  content.innerHTML = html;
+
+  const perGroup = [];
+  activeSites.forEach((site, si) => {
+    visibleRoleTypes.forEach((wt, wi) => {
+      const cid = `stdh_site_${si}_${wi}`;
+      const emps = employees.filter(e => e.base === site && e.workType === wt);
+      const barDatasets = STD_HOURS_BAR_SERIES.map(s => ({
+        type: 'bar', label: s.label, data: s.compute(emps, months),
+        backgroundColor: s.color + 'cc', borderColor: s.color, borderWidth: 0, stack: 'actual',
+      }));
+      const lineData = computeStdHoursLine(emps, months);
+      perGroup.push({ cid, barDatasets, lineData });
+    });
+  });
+
+  // ページ内の全セクションで軸MAXを統一する（積み上げ・折れ線とも実際に到達する高さで判定）
+  const sharedMax = computeSharedAxisMax(
+    perGroup.flatMap(p => [stackedMonthlyTotals(months, p.barDatasets), p.lineData]),
+    100, 1.1
+  );
+
+  perGroup.forEach(({ cid, barDatasets, lineData }) => {
+    buildStdHoursChart(cid, months, barDatasets, lineData, sharedMax);
+  });
+}
+
+// 拠点サマリ：3拠点合算。拠点ごとに色分けした棒を積み上げ表示するのが目的のため、
+// 上部グローバル拠点トグルでは絞り込まない（業務区分・雇用形態区分トグルは
+// 各拠点内の従業員選定に引き続き適用する）
+function renderStdHoursSummaryView() {
+  const { months, employees } = getExtendedActiveData();
+  const content = document.getElementById('stdhours-content');
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  const cid = 'stdh_summary';
+
+  content.innerHTML = `<div class="schart-shell">
+    <div class="schart-section">
+      <div class="schart-header">3拠点サマリ</div>
+      ${chartWrapHtml(cid, months.length, { heightPx: 360, inlineHeight: true, forceResponsive: true })}
+    </div>
+  </div>`;
+
+  // 積み上げの視覚的な上下順序を「いなべ最上部→南丹最下部」にするため、
+  // 予実＞比較＞拠点サマリと同様にデータセットの追加順を逆にする
+  // （凡例の表示順は別途buildStdHoursChart側でactiveSitesの順に固定する）
+  const barDatasets = [];
+  [...activeSites].reverse().forEach(site => {
+    const emps = employees.filter(e => e.base === site && e.workType && stdHoursRoleVisible(e));
+    const data = STD_HOURS_BAR_SERIES[0].compute(emps, months); // 現時点では「当年稼働実績」のみ
+    barDatasets.push({
+      type: 'bar', label: site, data,
+      backgroundColor: (SITE_COLORS[site] || '#fff') + 'cc', borderColor: SITE_COLORS[site] || '#fff',
+      borderWidth: 0, stack: 'actual',
+    });
+  });
+
+  const allEmps = employees.filter(e => e.workType && stdHoursRoleVisible(e));
+  const lineData = computeStdHoursLine(allEmps, months);
+
+  const sharedMax = computeSharedAxisMax([stackedMonthlyTotals(months, barDatasets), lineData], 100, 1.1);
+
+  buildStdHoursChart(cid, months, barDatasets, lineData, sharedMax, { legendOrder: activeSites });
+}
+
+// 棒（積み上げ）＋標準労働時間の折れ線を同一軸(h)で重ねて描画する共通ヘルパー。
+// legendOrder（省略可）を渡すと、凡例の表示順だけをその順序に固定する
+// （積み上げの視覚的な上下順序とは独立に制御できる）
+function buildStdHoursChart(canvasId, months, barDatasets, lineData, yMax, opts) {
+  const legendOrder = opts && opts.legendOrder;
+  const lineDataset = {
+    type: 'line', label: '標準労働時間', data: lineData,
+    borderColor: '#facc15', backgroundColor: '#facc15',
+    borderWidth: 2, pointRadius: 3, tension: 0.3, spanGaps: true,
+    order: -1, // 積み上げ棒より手前に描画されるようにする
+  };
+  const ctx = document.getElementById(canvasId)?.getContext('2d');
+  if (!ctx) return;
+  summaryChartInstances[canvasId] = new Chart(ctx, {
+    data: { labels: months, datasets: [...barDatasets, lineDataset] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 8,
+            generateLabels: legendOrder ? chart => {
+              const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+              const siteItems = items.filter(item => legendOrder.includes(item.text));
+              const otherItems = items.filter(item => !legendOrder.includes(item.text));
+              siteItems.sort((a, b) => legendOrder.indexOf(a.text) - legendOrder.indexOf(b.text));
+              return [...siteItems, ...otherItems];
+            } : undefined,
+          },
+        },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0', footerColor: '#e2e8f0',
+          callbacks: {
+            label: ctx => {
+              if (ctx.parsed.y == null) return null;
+              return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ja-JP')} h`;
+            },
+            footer: items => {
+              const barTotal = items.filter(i => i.dataset.type !== 'line' && i.parsed.y != null).reduce((s, i) => s + i.parsed.y, 0);
+              if (!barTotal) return '';
+              return `実績合計: ${barTotal.toLocaleString('ja-JP')} h`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+        y: {
+          stacked: true, position: 'left',
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+          grid: { color: '#1e2235' }, suggestedMin: 0, max: yMax,
+          title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+        },
+      },
+    },
+  });
 }
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
