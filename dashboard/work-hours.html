@@ -811,6 +811,7 @@ function saveSessionState() {
       activeMode,
       compareSubtab,
       empChartSubtab,
+      stdHoursSubtab,
       summarySubtab: document.querySelector('.summary-subtab.active')?.dataset.tab || null,
       periodStartMonth,
       periodMonthCount,
@@ -1379,6 +1380,7 @@ function rerenderCurrentView() {
     else if (tab === 'emptype') renderSummaryByEmpType();
     else if (tab === 'emp-chart') renderSummaryEmpChart();
     else if (tab === 'emp-chart-dev') renderSummaryEmpChartDev();
+    else if (tab === 'std-hours') renderSummaryStdHours();
     else if (tab === 'chart') renderSummaryChart();
     else renderSummaryRoster();
   } else if (activeMode === 'productivity') {
@@ -2016,6 +2018,7 @@ function renderSummary() {
         <button class="summary-subtab" data-tab="emptype">👥 雇用形態別（表）</button>
         <button class="summary-subtab" data-tab="emp-chart">📊 雇用形態別（グラフ）</button>
         <button class="summary-subtab" data-tab="emp-chart-dev">📊 業務区分別／雇用形態別（グラフ）</button>
+        <button class="summary-subtab" data-tab="std-hours">⏱ 標準労働時間</button>
         <button class="summary-subtab" data-tab="chart">📈 グラフ</button>
         <button class="summary-subtab" data-tab="roster">👤 名簿</button>
       </div>
@@ -2045,6 +2048,7 @@ function renderSummarySubtab(tab) {
   else if (tab === 'emptype')  renderSummaryByEmpType();
   else if (tab === 'emp-chart') renderSummaryEmpChart();
   else if (tab === 'emp-chart-dev') renderSummaryEmpChartDev();
+  else if (tab === 'std-hours') renderSummaryStdHours();
   else if (tab === 'chart')    renderSummaryChart();
   else if (tab === 'roster')   renderSummaryRoster();
 }
@@ -2681,6 +2685,47 @@ function renderSummaryEmpChartDevContent(prodData) {
   perGroup.forEach(({ cid, datasetsH, datasetsN, lineOpts }) => {
     buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax, lineOpts);
   });
+}
+
+/* ── Summary: 標準労働時間タブ（ステップ②：タブ・トグルの配置のみ） ─────────
+   グラフの中身・データ集計ロジック（整理済み_MシートI列の標準労働時間集計、
+   前年/当年稼働実績棒、上部グローバルトグルとの連動等）はステップ③で
+   別途実装する。現時点では「勤務実績＞比較」タブと同じ外枠（拠点別／
+   拠点サマリ切り替え）のみを用意し、中身はプレースホルダー表示とする ── */
+let stdHoursSubtab = 'site'; // 'site'=拠点別 / 'summary'=拠点サマリ
+
+function renderSummaryStdHours() {
+  const content = document.getElementById('summary-content');
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;flex:1;min-height:0;gap:16px">
+      <div class="compare-header-row">
+        <div class="chart-section-label">⏱ 標準労働時間</div>
+        <div class="transfer-toggle" id="stdhours-subtabs">
+          <button class="transfer-toggle-btn${stdHoursSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
+          <button class="transfer-toggle-btn${stdHoursSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
+        </div>
+      </div>
+      <div id="stdhours-content" style="flex:1;min-height:0;overflow-y:auto"></div>
+    </div>`;
+
+  document.querySelectorAll('#stdhours-subtabs .transfer-toggle-btn').forEach(btn => {
+    btn.onclick = () => {
+      stdHoursSubtab = btn.dataset.tab;
+      document.querySelectorAll('#stdhours-subtabs .transfer-toggle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderStdHoursContent();
+      saveSessionState();
+    };
+  });
+
+  renderStdHoursContent();
+}
+
+function renderStdHoursContent() {
+  const content = document.getElementById('stdhours-content');
+  if (!content) return;
+  const modeLabel = stdHoursSubtab === 'summary' ? '拠点サマリ' : '拠点別';
+  content.innerHTML = `<div class="loading">「${modeLabel}」表示のグラフ・データ集計は未実装です（今後追加予定）</div>`;
 }
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
@@ -6059,6 +6104,7 @@ let restoredSummarySubtab = null;
   if (s.activeMode) activeMode = s.activeMode;
   if (s.compareSubtab) compareSubtab = s.compareSubtab;
   if (s.empChartSubtab) empChartSubtab = s.empChartSubtab;
+  if (s.stdHoursSubtab) stdHoursSubtab = s.stdHoursSubtab;
   if (s.summarySubtab) restoredSummarySubtab = s.summarySubtab;
   if (s.periodStartMonth) periodStartMonth = s.periodStartMonth;
   if (typeof s.periodMonthCount === 'number') periodMonthCount = s.periodMonthCount;
