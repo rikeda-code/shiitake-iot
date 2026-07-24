@@ -2825,12 +2825,34 @@ async function fetchPastYearSheet() {
   return parsePastYearSheet(json);
 }
 
+// セル内の余分な空白（全角スペース含む）を除去してから比較・判定できるようにする
+function normalizeCellLabel(s) {
+  return String(s ?? '').replace(/[　\s]+/g, ' ').trim();
+}
+
+// 年月ヘッダーセルをYYYYMM数値に変換する。gvizは日付として入力されたセルを
+// cell.v = "Date(y,m,d)"（月は0始まり）形式で返すことがあり、その場合は書式済み
+// 文字列(cell.f)を見ずにcell.vを直接見ると一致しないため、整理済み_増減シートの
+// parseGvizDateYm()と同様にDate(...)形式を最優先で判定し、それ以外は書式済み文字列
+// （例:"2024.01"）を正規表現でパースするフォールバックを用いる
+function parsePastYearYmCell(c) {
+  if (!c) return null;
+  const v = c.v;
+  if (typeof v === 'string') {
+    const dm = v.match(/^Date\((\d+),\s*(\d+)/);
+    if (dm) return parseInt(dm[1]) * 100 + (parseInt(dm[2]) + 1); // gvizの月は0始まり
+  }
+  const text = normalizeCellLabel(c.f ?? (typeof v === 'string' ? v : ''));
+  const m = text.match(/(\d{4})[.\/-](\d{1,2})(?!\d)/);
+  return m ? parseInt(m[1]) * 100 + parseInt(m[2]) : null;
+}
+
 // 戻り値: { [site]: { [role]: { [ym]: 数値 } } }（role は '栽培' | '出荷'）
 function parsePastYearSheet(json) {
   const rows = json.table.rows || [];
   const cellText = (row, cIdx) => {
     const c = row && row.c && row.c[cIdx];
-    return c ? String(c.v ?? c.f ?? '').trim() : '';
+    return normalizeCellLabel(c ? (c.v ?? c.f ?? '') : '');
   };
   const cellNumber = (row, cIdx) => {
     const c = row && row.c && row.c[cIdx];
@@ -2860,9 +2882,8 @@ function parsePastYearSheet(json) {
       const cols = [];
       (row?.c || []).forEach((c, cIdx) => {
         if (cIdx === 0) return; // A列はラベル列
-        const text = c ? String(c.v ?? c.f ?? '').trim() : '';
-        const m = text.match(/^(\d{4})[.\/-](\d{1,2})$/);
-        if (m) cols.push({ idx: cIdx, ym: parseInt(m[1]) * 100 + parseInt(m[2]) });
+        const ym = parsePastYearYmCell(c);
+        if (ym !== null) cols.push({ idx: cIdx, ym });
       });
       currentYmCols = cols;
       return;
