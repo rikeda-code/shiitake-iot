@@ -818,6 +818,7 @@ function saveSessionState() {
       compareSubtab,
       empChartSubtab,
       stdHoursSubtab,
+      stdHoursMetric,
       summarySubtab: document.querySelector('.summary-subtab.active')?.dataset.tab || null,
       periodStartMonth,
       periodMonthCount,
@@ -2802,6 +2803,9 @@ function renderSummaryEmpChartDevContent(prodData, planData) {
    ＋凡例は元の拠点順、というパターンを踏襲）。拠点サマリモードには
    前年実績を追加しない（対象は拠点別モードのみ） ─────────────────── */
 let stdHoursSubtab = 'site'; // 'site'=拠点別 / 'summary'=拠点サマリ
+// 'hours'=時間（実装済み） / 'count'=人数（ステップ①では枠組みのみ。データ集計・
+// グラフ描画はステップ②で実装予定）
+let stdHoursMetric = 'hours';
 
 // 「時間_過去実績」シートの拠点ブロック内で、前年実績として使う行ラベルと
 // 対応する業務区分（栽培/出荷のみ。配送・栽培／配送・出荷には対応データがない）
@@ -2990,13 +2994,29 @@ function renderSummaryStdHours() {
     <div style="display:flex;flex-direction:column;flex:1;min-height:0;gap:16px">
       <div class="compare-header-row">
         <div class="chart-section-label">⏱ 標準労働時間</div>
-        <div class="transfer-toggle" id="stdhours-subtabs">
-          <button class="transfer-toggle-btn${stdHoursSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
-          <button class="transfer-toggle-btn${stdHoursSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
+        <div style="display:flex;gap:10px">
+          <div class="transfer-toggle" id="stdhours-metric-toggle">
+            <button class="transfer-toggle-btn${stdHoursMetric === 'hours' ? ' active' : ''}" data-metric="hours">時間</button>
+            <button class="transfer-toggle-btn${stdHoursMetric === 'count' ? ' active' : ''}" data-metric="count">人数</button>
+          </div>
+          <div class="transfer-toggle" id="stdhours-subtabs">
+            <button class="transfer-toggle-btn${stdHoursSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
+            <button class="transfer-toggle-btn${stdHoursSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
+          </div>
         </div>
       </div>
       <div id="stdhours-content" style="flex:1;min-height:0;overflow-y:auto"></div>
     </div>`;
+
+  document.querySelectorAll('#stdhours-metric-toggle .transfer-toggle-btn').forEach(btn => {
+    btn.onclick = () => {
+      stdHoursMetric = btn.dataset.metric;
+      document.querySelectorAll('#stdhours-metric-toggle .transfer-toggle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderStdHoursContent();
+      saveSessionState();
+    };
+  });
 
   document.querySelectorAll('#stdhours-subtabs .transfer-toggle-btn').forEach(btn => {
     btn.onclick = () => {
@@ -3011,8 +3031,52 @@ function renderSummaryStdHours() {
   renderStdHoursContent();
 }
 
+// 人数画面（ステップ①時点では枠組みのみ。データ集計・グラフ描画はステップ②で実装予定）。
+// 時間画面と同じ「拠点別＝拠点×業務区分12セクション」「拠点サマリ＝3拠点サマリ1セクション」
+// という枠組みだけを用意し、中身はプレースホルダーとする
+function renderStdCountSiteViewPlaceholder() {
+  const { employees } = getExtendedActiveData();
+  const content = document.getElementById('stdhours-content');
+  const allSites = SITES.filter(s => employees.some(e => e.base === s));
+  const activeSites = allSites.filter(s => siteFilter.has(s));
+  const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
+
+  if (!activeSites.length || !visibleRoleTypes.length) {
+    content.innerHTML = '<div class="loading">表示できるデータがありません（拠点・業務区分トグルの選択状況をご確認ください）</div>';
+    return;
+  }
+
+  let html = '<div class="schart-shell">';
+  activeSites.forEach(site => {
+    visibleRoleTypes.forEach(wt => {
+      html += `
+        <div class="schart-section">
+          <div class="schart-header" style="color:${SITE_COLORS[site]}">${site}　${wt}</div>
+          <div class="loading" style="height:320px;display:flex;align-items:center;justify-content:center">準備中（人数グラフは次のステップで実装予定です）</div>
+        </div>`;
+    });
+  });
+  html += '</div>';
+  content.innerHTML = html;
+}
+
+function renderStdCountSummaryViewPlaceholder() {
+  const content = document.getElementById('stdhours-content');
+  content.innerHTML = `<div class="schart-shell">
+    <div class="schart-section">
+      <div class="schart-header">3拠点サマリ</div>
+      <div class="loading" style="height:360px;display:flex;align-items:center;justify-content:center">準備中（人数グラフは次のステップで実装予定です）</div>
+    </div>
+  </div>`;
+}
+
 function renderStdHoursContent() {
   destroySummaryCharts();
+  if (stdHoursMetric === 'count') {
+    if (stdHoursSubtab === 'summary') renderStdCountSummaryViewPlaceholder();
+    else renderStdCountSiteViewPlaceholder();
+    return;
+  }
   if (stdHoursSubtab === 'summary') renderStdHoursSummaryView();
   else renderStdHoursSiteView();
 }
@@ -6573,6 +6637,7 @@ let restoredSummarySubtab = null;
   if (s.compareSubtab) compareSubtab = s.compareSubtab;
   if (s.empChartSubtab) empChartSubtab = s.empChartSubtab;
   if (s.stdHoursSubtab) stdHoursSubtab = s.stdHoursSubtab;
+  if (s.stdHoursMetric) stdHoursMetric = s.stdHoursMetric;
   if (s.summarySubtab) restoredSummarySubtab = s.summarySubtab;
   if (s.periodStartMonth) periodStartMonth = s.periodStartMonth;
   if (typeof s.periodMonthCount === 'number') periodMonthCount = s.periodMonthCount;
