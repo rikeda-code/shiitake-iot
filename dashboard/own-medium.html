@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>収穫状況ダッシュボード Plus</title>
+  <title>収穫状況ダッシュボード Plus(自社菌床)</title>
   <meta name="theme-color" content="#1a1d27">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -213,8 +213,8 @@
 
 <header>
   <div>
-    <h1>🍄 収穫状況ダッシュボード</h1>
-    <div class="subtitle">コンテナ別収穫可視化</div>
+    <h1>🍄 収穫状況ダッシュボード<span style="color:#06b6d4">(自社菌床)</span></h1>
+    <div class="subtitle">コンテナ別収穫可視化 ― 自社菌床のみ表示</div>
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <span id="last-updated"></span>
@@ -332,54 +332,8 @@ function waitForChart(ms = 15000) {
 
 // ── Data helpers ───────────────────────────────────────────────────────────────
 
-// Googleスプレッドシート(gviz)への問い合わせ結果を一定時間キャッシュする。
-// 同じURLへの問い合わせはTTL内であればネットワークに出ず再利用し、
-// ページの再読み込みや更新ボタン連打による無駄な再取得を減らす。
-const GVIZ_CACHE_TTL_MS = 5 * 60 * 1000; // 5分
-const gvizMemoryCache = new Map(); // url -> { time, table }
-const GVIZ_CACHE_PREFIX = 'gvizCache:';
-
-function gvizCacheGet(url) {
-  const mem = gvizMemoryCache.get(url);
-  if (mem && Date.now() - mem.time < GVIZ_CACHE_TTL_MS) return mem.table;
-  try {
-    const raw = localStorage.getItem(GVIZ_CACHE_PREFIX + url);
-    if (raw) {
-      const entry = JSON.parse(raw);
-      if (Date.now() - entry.time < GVIZ_CACHE_TTL_MS) {
-        gvizMemoryCache.set(url, entry);
-        return entry.table;
-      }
-    }
-  } catch (e) { /* localStorage無効・壊れたデータは無視してネットワーク取得にフォールバック */ }
-  return null;
-}
-
-function gvizCacheSet(url, table) {
-  const entry = { time: Date.now(), table };
-  gvizMemoryCache.set(url, entry);
-  try {
-    localStorage.setItem(GVIZ_CACHE_PREFIX + url, JSON.stringify(entry));
-  } catch (e) { /* 容量超過等はメモリキャッシュのみで継続 */ }
-}
-
-// 更新ボタン等、明示的に最新データを取りに行きたい時にキャッシュを破棄する
-function clearGvizCache() {
-  gvizMemoryCache.clear();
-  try {
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(GVIZ_CACHE_PREFIX)) keys.push(k);
-    }
-    keys.forEach(k => localStorage.removeItem(k));
-  } catch (e) { /* ignore */ }
-}
-
 async function fetchSheet(sheetId, sheetName, headers = 1) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
-  const cached = gvizCacheGet(url);
-  if (cached) return cached;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
@@ -388,7 +342,6 @@ async function fetchSheet(sheetId, sheetName, headers = 1) {
     const text = await res.text();
     const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
     if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
-    gvizCacheSet(url, json.table);
     return json.table;
   } finally {
     clearTimeout(timer);
@@ -541,7 +494,7 @@ async function fetchSummaryRows(site) {
     }
   }
 
-  const active = Object.values(best).sort(sortByNo);
+  let active = Object.values(best).sort(sortByNo);
 
   // 終了済みは endDate 新しい順
   ended.sort((a, b) => {
@@ -549,8 +502,13 @@ async function fetchSummaryRows(site) {
     if (ea && eb) return eb - ea;
     return 0;
   });
+  let endedFiltered = ended;
 
-  return { active, ended };
+  // このページは自社菌床(菌床ロットあり)のコンテナのみを対象にする
+  active = active.filter(r => analysisFormatLot(r.lot) !== '—');
+  endedFiltered = endedFiltered.filter(r => analysisFormatLot(r.lot) !== '—');
+
+  return { active, ended: endedFiltered };
 }
 
 function parseContainerRows(table) {
@@ -900,7 +858,7 @@ async function loadWeeklySection() {
 
     weeklyState = { containerData, targetData };
     await waitForChart();
-    renderWeeklySection(section, weeklyState, 'site', 'desc');
+    renderWeeklySection(section, weeklyState, 'week', 'desc');
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
@@ -998,7 +956,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
-      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">ロット別</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -1342,12 +1300,9 @@ async function weeklyZoomRenderMekaki() {
       const [table, bedMap] = await Promise.all([
         (async () => {
           const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
-          const cached = gvizCacheGet(url);
-          if (cached) return cached;
           const res = await fetch(url);
           const text = await res.text();
           const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
-          gvizCacheSet(url, json.table);
           return json.table;
         })(),
         buildBedCountMap(),
@@ -1576,7 +1531,7 @@ function weeklySetSizeMode(mode) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
   weeklySizeMode = weeklySizeMode === mode ? null : mode;
-  const groupMode = section.dataset.groupMode || 'site';
+  const groupMode = section.dataset.groupMode || 'week';
   const sortOrder = section.dataset.sortOrder || 'desc';
   weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklySizeCharts = [];
@@ -1617,7 +1572,7 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='month'?' active':''}" onclick="weeklySetGroup('month')">月別</button>
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
-      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">ロット別</button>
+      <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">自社菌床</button>
     </div>`;
 
   const title = weeklySizeMode === 'daily' ? 'サイズ別日次収穫量 (kg)' : 'サイズ別累計収穫量 (kg)';
@@ -1680,7 +1635,7 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
 function weeklySetSort(order) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
-  const groupMode = section.dataset.groupMode || 'site';
+  const groupMode = section.dataset.groupMode || 'week';
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
   if (weeklySizeMode) {
@@ -2273,7 +2228,6 @@ const scatterMonthCharts = {};
 
 function refreshActiveTab() {
   for (const k in cache) delete cache[k];
-  clearGvizCache();
   weightData = null;
   mekakiRows = null;
   analysisDataset = null;
@@ -2302,7 +2256,7 @@ function updateTabVisibility() {
   if (tempTabActive) renderTempTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
-    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'site';
+    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
     const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
     renderWeeklySection(section, weeklyState, groupMode, sortOrder);
   }
@@ -3125,12 +3079,9 @@ async function ensureMekakiRows() {
   const [table, bedMap] = await Promise.all([
     (async () => {
       const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&gid=${MEKAKI_SHEET_GID}&headers=1`;
-      const cached = gvizCacheGet(url);
-      if (cached) return cached;
       const res = await fetch(url);
       const text = await res.text();
       const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
-      gvizCacheSet(url, json.table);
       return json.table;
     })(),
     buildBedCountMap(),
@@ -3183,6 +3134,9 @@ async function ensureMekakiRows() {
       })
       // 日付新しい順
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+
+  // このページは自社菌床(菌床ロットあり)のコンテナのみを対象にする
+  mekakiRows = mekakiRows.filter(r => analysisFormatLot(r.lot) !== '—');
 
   return mekakiRows;
 }
@@ -3245,12 +3199,9 @@ let weightData = null; // { site, containers, error }[]
 
 async function fetchWeightSheet(sheetName) {
   const url = `https://docs.google.com/spreadsheets/d/${WEIGHT_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
-  const cached = gvizCacheGet(url);
-  if (cached) return cached;
   const res = await fetch(url);
   const text = await res.text();
   const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
-  gvizCacheSet(url, json.table);
   return json.table;
 }
 
@@ -3341,39 +3292,6 @@ function renderWeightSiteContent(result) {
   }).join('');
 }
 
-// 積み上げ棒の各セグメント内に数値(g)を描画する共通プラグイン
-const weightStackValuePlugin = {
-  id: 'weightStackValueLabels',
-  afterDatasetsDraw(chart) {
-    const { ctx } = chart;
-    chart.data.datasets.forEach((ds, dsIndex) => {
-      const meta = chart.getDatasetMeta(dsIndex);
-      if (meta.hidden) return;
-      meta.data.forEach((bar, i) => {
-        const value = ds.data[i];
-        if (value == null || value === 0) return;
-        const top = Math.min(bar.y, bar.base);
-        const bottom = Math.max(bar.y, bar.base);
-        const label = `${Math.round(value).toLocaleString()}g`;
-        // セグメントが文字を収められるほど大きければ内側中央に、
-        // 小さい(吸水量が少ない等)場合はセグメントのすぐ上に浮かせて表示する
-        const fitsInside = bottom - top >= 14;
-        const y = fitsInside ? (top + bottom) / 2 : top - 2;
-        ctx.save();
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = fitsInside ? 'middle' : 'bottom';
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(15,17,23,0.7)';
-        ctx.strokeText(label, bar.x, y);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(label, bar.x, y);
-        ctx.restore();
-      });
-    });
-  },
-};
-
 function drawWeightCharts(result) {
   const { site, containers } = result;
   if (!containers || containers.length === 0) return;
@@ -3396,7 +3314,6 @@ function drawWeightCharts(result) {
           { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc',        stack: 's' },
         ],
       },
-      plugins: [weightStackValuePlugin],
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
@@ -3415,7 +3332,7 @@ function drawWeightCharts(result) {
         },
         scales: {
           x: { stacked: true, ticks: { color: '#8892a4' }, grid: { color: '#1e2235' } },
-          y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
+          y: { stacked: true, ticks: { color: '#8892a4', callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
         },
       },
     });
@@ -3452,7 +3369,9 @@ async function ensureWeightData() {
   weightData = await Promise.all(WEIGHT_SITES.map(async site => {
     try {
       const table = await fetchWeightSheet(site.sheetName);
-      return { site, containers: parseWeightRows(table), error: null };
+      // このページは自社菌床(菌床ロットあり)のコンテナのみを対象にする
+      const containers = parseWeightRows(table).filter(c => analysisFormatLot(c.lot) !== '—');
+      return { site, containers, error: null };
     } catch(e) {
       return { site, containers: [], error: e.message };
     }
@@ -4277,7 +4196,7 @@ async function renderAnalysisTab() {
   const section = document.getElementById('analysis-section');
   if (!section) return;
 
-  if (analysisDataset === null) {
+  if (!analysisDataset) {
     section.innerHTML = `<div class="section-title">分析<span class="sub">コンテナ横断比較</span></div>
       <div class="loading">データを読み込み中...</div>`;
     try {
@@ -4286,18 +4205,12 @@ async function renderAnalysisTab() {
         ensureWeightData(),
         ensureMekakiRows(),
       ]);
-      // weeklyStateがまだ無い(読み込み中の別呼び出しと競合した等)場合は
-      // 空配列を確定させず、後で再読み込みできるようにnullのままにしておく
-      analysisDataset = weeklyState ? buildAnalysisDataset() : null;
+      analysisDataset = buildAnalysisDataset();
     } catch (e) {
       section.innerHTML = `<div style="color:#f87171;padding:24px">読み込みエラー: ${e.message}</div>`;
       return;
     }
     if (!analysisTabActive) return; // タブ切替後に非同期処理が終わった場合は描画しない
-    if (analysisDataset === null) {
-      section.innerHTML = `<div style="color:#f87171;padding:24px">データを読み込めませんでした。再読み込みしてください。</div>`;
-      return;
-    }
   }
 
   const candidates = analysisFilteredCandidates();
@@ -4335,14 +4248,12 @@ async function renderAnalysisTab() {
       : analysisSubTab === 'correlation'
         ? (chartItems.length ? renderAnalysisCorrelationView(chartItems)
           : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">現在の栽培期間フィルターに一致する選択コンテナがありません</div>`)
-      : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrendView(allSelected)
       : renderAnalysisComparison(allSelected, lotColorMap));
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
     { key: 'date', label: '日付' },
     { key: 'correlation', label: '相関図' },
-    { key: 'weighttrend', label: '菌床重量傾向' },
   ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
@@ -4465,25 +4376,6 @@ function renderAnalysisComparison(items, lotColorMap) {
     </div>`;
 }
 
-function renderAnalysisWeightTrendView(items) {
-  return `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
-      <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向(拠点別)</div>
-        ${analysisPackLegendHtml()}
-        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weighttrend')"><canvas id="analysis-weighttrend-canvas"></canvas></div>
-      </div>
-      <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">月別 菌床重量平均(初期重量+吸水量)</div>
-        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightmonthly')"><canvas id="analysis-weightmonthly-canvas"></canvas></div>
-      </div>
-      <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">週別 菌床重量平均(初期重量+吸水量)</div>
-        <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightweekly')"><canvas id="analysis-weightweekly-canvas"></canvas></div>
-      </div>
-    </div>`;
-}
-
 // 平均線は元の色をそのまま使うと同色の棒に埋もれて見えにくいため、濃い色に変換する
 function analysisDarken(hex, amount = 0.4) {
   const h = hex.replace('#', '');
@@ -4555,88 +4447,6 @@ function analysisWeightChartConfig(items, lotColors, lotTickColor) {
       },
     },
   };
-}
-
-// 菌床重量傾向: 収穫量(パック品収穫量)と同じ拠点別配色(自社菌床は蛍光色)で、
-// 濃色=菌床初期重量・淡色=吸水量として積み上げる
-function analysisWeightTrendChartConfig(items) {
-  const categories = items.map(analysisPackCategoryFor);
-  const packColors = categories.map(cat => analysisPackColorFor(cat));
-  const beforeValues = items.map(c => c.weightBefore);
-  const absorbValues = items.map(c => c.weightAbsorb);
-  const totals = items.map((c, i) => (beforeValues[i] ?? 0) + (absorbValues[i] ?? 0));
-  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
-  return {
-    data: {
-      labels: items.map(c => `${c.siteName}${c.no}`),
-      datasets: [
-        { type: 'bar', label: '菌床初期重量(g)', data: beforeValues,
-          backgroundColor: packColors.map(c => c.dark + 'cc'), stack: 's', order: 1 },
-        { type: 'bar', label: '吸水量(g)', data: absorbValues,
-          backgroundColor: packColors.map(c => c.light + 'cc'), stack: 's', order: 1 },
-        analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#94a3b8', 'y', items.length),
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
-      scales: {
-        x: { stacked: true, ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
-        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-      },
-    },
-  };
-}
-
-// 月別/週別の菌床重量平均グラフの共通処理: グループごとに初期重量・吸水量の平均を積み上げる
-function analysisWeightGroupChartConfig(labels, groupItemsList) {
-  const beforeAvgs = groupItemsList.map(g => analysisAvg(g.map(c => c.weightBefore)));
-  const absorbAvgs = groupItemsList.map(g => analysisAvg(g.map(c => c.weightAbsorb)));
-  return {
-    data: {
-      labels,
-      datasets: [
-        { type: 'bar', label: '菌床初期重量 平均(g)', data: beforeAvgs, backgroundColor: '#60a5facc', stack: 's', order: 1 },
-        { type: 'bar', label: '吸水量 平均(g)', data: absorbAvgs, backgroundColor: '#fa8072cc', stack: 's', order: 1 },
-      ],
-    },
-    plugins: [weightStackValuePlugin],
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
-      scales: {
-        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-        y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
-      },
-    },
-  };
-}
-
-// 栽培開始月ごとの菌床重量平均
-function analysisWeightMonthlyChartConfig(items) {
-  const groups = {};
-  items.forEach(c => {
-    const sd = parseDateStr(c.startDate);
-    if (!sd) return;
-    const key = `${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, '0')}`;
-    (groups[key] ||= []).push(c);
-  });
-  const keys = Object.keys(groups).sort();
-  const labels = keys.map(k => `${parseInt(k.split('-')[1])}月`);
-  return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k]));
-}
-
-// 栽培開始週(日〜土)ごとの菌床重量平均
-function analysisWeightWeeklyChartConfig(items) {
-  const groups = {};
-  items.forEach(c => {
-    const week = c.startDate ? getSunSatWeek(c.startDate) : null;
-    if (!week) return;
-    (groups[week.key] ||= { label: week.label, items: [] }).items.push(c);
-  });
-  const keys = Object.keys(groups).sort();
-  const labels = keys.map(k => groups[k].label);
-  return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k].items));
 }
 
 function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
@@ -4787,9 +4597,6 @@ function analysisPackChartConfig(items) {
 const ANALYSIS_CHART_CONFIGS = {
   harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig, legend: analysisLotLegendHtml },
   weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig, legend: analysisLotLegendHtml },
-  weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisPackLegendHtml },
-  weightmonthly: { title: '月別 菌床重量平均', build: analysisWeightMonthlyChartConfig },
-  weightweekly: { title: '週別 菌床重量平均', build: analysisWeightWeeklyChartConfig },
   mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
@@ -4905,7 +4712,7 @@ async function fetchTempSheetForSite(site) {
 }
 
 async function ensureTempDataset() {
-  if (tempDataset !== null) return tempDataset;
+  if (tempDataset) return tempDataset;
   if (!weeklyState) await loadWeeklySection();
   const perSite = await Promise.all(SITES.map(site =>
     fetchTempSheetForSite(site).then(list => ({ site, list })).catch(() => ({ site, list: [] }))));
@@ -4915,7 +4722,9 @@ async function ensureTempDataset() {
     list.forEach(bc => {
       const no = extractContainerNo(bc.name);
       // 号機の栽培開始日・菌床ロットは収穫実績側のコンテナ一覧から突き合わせる
+      // (このページは自社菌床のみを対象にするため、収穫実績側に見つからない=対象外として除外する)
       const match = (weeklyState?.containerData || []).find(c => c.siteName === site.name && c.name === bc.name);
+      if (!match) return;
       const startDate = match?.startDate || '';
       const startD = parseDateStr(startDate);
       const points = bc.points.map(p => {
@@ -5059,7 +4868,7 @@ async function renderTempTab() {
   const section = document.getElementById('temp-section');
   if (!section) return;
 
-  if (tempDataset === null) {
+  if (!tempDataset) {
     section.innerHTML = `<div class="section-title">温度分析<span class="sub">コンテナ別温度推移</span></div>
       <div class="loading">温度データを読み込み中...</div>`;
     try {
