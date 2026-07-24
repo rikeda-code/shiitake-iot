@@ -733,7 +733,10 @@ const PROD_GID = '2016642543'; // 整理済み_分析
 const PLAN_GID = '530402103';  // 整理済み_計画_更新
 const STD_SETTINGS_SHEET_NAME = '標準工数設定';
 const PAST_YEAR_SHEET_NAME = '時間_過去実績'; // 標準労働時間タブ「前年実績」棒のデータ元
-const PAST_YEAR_COUNT_SHEET_NAME = '人数_過去実績'; // 標準労働時間タブ「人数」画面「前年実績」棒のデータ元
+// 標準労働時間タブ「人数」画面「前年実績」棒のデータ元。gviz/tqのsheet=名前指定
+// エンドポイントが編集後の内容を長時間反映しない（古いキャッシュを返し続ける）
+// 事象が実データで確認されたため、PROD_GID・PLAN_GIDと同様にgid指定で取得する
+const PAST_YEAR_COUNT_GID = '1654355403'; // 人数_過去実績
 
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
@@ -3089,17 +3092,23 @@ function parseCsv(text) {
   return rows;
 }
 
-// 「人数_過去実績」シートはgvizのJSON出力（tqx=out:json）だと、列内の大多数のセルの
-// 型（このシートではC列以降がほぼ数値のため数値型と推論される）と異なる型のセル
-// （3行目の「10月度」等の文字列）が、列の推論型に合わないという理由で強制的に
-// null化されてしまう問題があったため、この列単位の型推論が行われないCSV出力
-// （tqx=out:csv）を使う。CSVの2次元配列をgvizのJSON形式相当（{c:[{v},...]}）に
-// 詰め替えることで、既存のparsePastYearCountSheet()をそのまま再利用できるようにする。
-// 「時間_過去実績」等、他のシート取得はJSON形式のままで変更しない
+// 「人数_過去実績」シートは、以下2つの問題を回避するため /export?format=csv&gid=
+// で取得する（PROD_GID・PLAN_GIDと同様、シート名ではなくgid指定）。
+// 1. gvizのJSON出力（tqx=out:json）は列単位で型推論を行い、列内の大多数のセルの型
+//    （このシートではC列以降がほぼ数値のため数値型と推論される）と異なる型のセル
+//    （3行目の「10月度」等の文字列）を強制的にnull化してしまう
+// 2. gviz/tqのsheet=名前指定エンドポイントは、シート編集後も古い内容を長時間
+//    キャッシュし続ける（=反映が極端に遅れる）ことが実データで確認された。
+//    同じ内容を/export?format=csvで取得すると最新の内容が正しく反映されていたため、
+//    gid指定のexportエンドポイントに切り替えることでこの問題も回避する
+// CSVの2次元配列をgvizのJSON形式相当（{c:[{v},...]}）に詰め替えることで、
+// 既存のparsePastYearCountSheet()をそのまま再利用する。
+// 「時間_過去実績」等、他のシート取得（gviz/tq、JSON形式）は変更しない
 async function fetchPastYearCountSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(PAST_YEAR_COUNT_SHEET_NAME)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${PAST_YEAR_COUNT_GID}`;
   const res = await fetch(url);
-  const text = await res.text();
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // /exportはUTF-8 BOM付きで返ることがあるため除去
   const csvRows = parseCsv(text);
   const fakeJson = { table: { rows: csvRows.map(cells => ({ c: cells.map(v => ({ v })) })) } };
   return parsePastYearCountSheet(fakeJson);
