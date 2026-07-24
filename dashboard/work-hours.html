@@ -3060,12 +3060,49 @@ function matchCountRowLabel(label) {
   return null;
 }
 
+// 簡易なRFC4180準拠CSVパーサー（ダブルクォートで囲まれたフィールド内の
+// カンマ・改行・エスケープされたダブルクォート""に対応）。「人数_過去実績」の
+// CSV取得（tqx=out:csv）専用の軽量な自前実装で、外部ライブラリには依存しない
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  let i = 0;
+  const len = text.length;
+  while (i < len) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQuotes = true; i++; continue; }
+    if (ch === ',') { row.push(field); field = ''; i++; continue; }
+    if (ch === '\r') { i++; continue; } // CRLFのCRは無視し、直後のLFで改行確定する
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+    field += ch; i++;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); } // 末尾に改行が無い最終行を回収
+  return rows;
+}
+
+// 「人数_過去実績」シートはgvizのJSON出力（tqx=out:json）だと、列内の大多数のセルの
+// 型（このシートではC列以降がほぼ数値のため数値型と推論される）と異なる型のセル
+// （3行目の「10月度」等の文字列）が、列の推論型に合わないという理由で強制的に
+// null化されてしまう問題があったため、この列単位の型推論が行われないCSV出力
+// （tqx=out:csv）を使う。CSVの2次元配列をgvizのJSON形式相当（{c:[{v},...]}）に
+// 詰め替えることで、既存のparsePastYearCountSheet()をそのまま再利用できるようにする。
+// 「時間_過去実績」等、他のシート取得はJSON形式のままで変更しない
 async function fetchPastYearCountSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(PAST_YEAR_COUNT_SHEET_NAME)}&headers=0`;
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(PAST_YEAR_COUNT_SHEET_NAME)}`;
   const res = await fetch(url);
   const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
-  return parsePastYearCountSheet(json);
+  const csvRows = parseCsv(text);
+  const fakeJson = { table: { rows: csvRows.map(cells => ({ c: cells.map(v => ({ v })) })) } };
+  return parsePastYearCountSheet(fakeJson);
 }
 
 // gvizは先頭列（A・B列）が両方とも空欄の行を、他の列にデータがあっても
@@ -3073,9 +3110,17 @@ async function fetchPastYearCountSheet() {
 // 本来A・B列が空欄になり得るため、固定の行番号（2行目・3行目）や固定の
 // データ開始列（B列）を前提にせず、内容（4桁の妥当な年の数値／
 // 「N月度」パターンのテキスト）から年月行・データ開始列を動的に検出する
+
+// CSV化されたセル値は常に文字列のため、桁区切りのカンマ（例:"1,234"）が
+// 含まれる可能性を考慮し、数値変換の前にカンマを取り除く（CSVの区切り文字
+// そのものと衝突するケースはダブルクォートで囲まれるためparseCsv()側で
+// 正しく1フィールドとして扱われるが、念のため数値解釈側でも安全策を入れる）
+function stripThousandsSeparator(raw) {
+  return typeof raw === 'string' ? raw.replace(/,/g, '') : raw;
+}
 function isPlausibleYearValue(raw) {
   if (raw === null || raw === undefined || raw === '') return false;
-  const n = Number(raw);
+  const n = Number(stripThousandsSeparator(raw));
   return Number.isInteger(n) && n >= 2000 && n <= 2100;
 }
 function isMonthDoText(raw) {
@@ -3094,7 +3139,7 @@ function parsePastYearCountSheet(json) {
   const cellNumber = (row, cIdx) => {
     const raw = cellRaw(row, cIdx);
     if (raw === undefined || raw === null || raw === '') return null;
-    const n = Number(raw);
+    const n = Number(stripThousandsSeparator(raw));
     return isNaN(n) ? null : n;
   };
 
@@ -3120,7 +3165,7 @@ function parsePastYearCountSheet(json) {
   const colCount = Math.max(yearRow?.c?.length || 0, monthRow?.c?.length || 0);
   for (let cIdx = 0; cIdx < colCount; cIdx++) {
     const yRaw = cellRaw(yearRow, cIdx);
-    if (isPlausibleYearValue(yRaw)) lastYear = Number(yRaw);
+    if (isPlausibleYearValue(yRaw)) lastYear = Number(stripThousandsSeparator(yRaw));
     const mRaw = String(cellRaw(monthRow, cIdx) ?? '').trim();
     const mMatch = mRaw.match(/^(\d{1,2})月度$/);
     if (lastYear !== null && mMatch) {
