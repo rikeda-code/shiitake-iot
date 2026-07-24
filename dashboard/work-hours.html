@@ -3048,19 +3048,27 @@ function renderSummaryStdHours() {
    同じ拠点合計値になる。拠点サマリモードは、時間画面と異なり前年棒も表示する
    （3拠点合算・雇用形態区分トグル連動の1本棒＋拠点別積み上げの当年棒） ──── */
 
-// 「人数_過去実績」シートの行ラベルは拠点名+区分（例:「いなべ社員」）だが、群馬拠点は
-// 「安中」という表記になっているため、シート上のラベルと実際の拠点名の対応を明示的に定義する
+// 「人数_過去実績」シートの行はA列=拠点名、B列=区分名（社員/パート/技能実習生/合計）。
+// 群馬拠点はA列が「安中」という表記になっているため、シート上のラベルと実際の
+// 拠点名の対応を明示的に定義する。B列の区分名はブロックによって拠点名が前に付く
+// 場合（例:「いなべ社員」）と付かない場合（例:「社員」のみ）があり表記が統一
+// されていないため、拠点の判定（A列）と区分の判定（B列）を独立に行う
 const COUNT_ROW_SITE_ALIAS = { 'いなべ': 'いなべ', '安中': '群馬', '南丹': '南丹' };
 const COUNT_ROW_SUFFIXES = ['社員', 'パート', '技能実習生', '合計'];
 
-function matchCountRowLabel(label) {
-  for (const sheetPrefix of Object.keys(COUNT_ROW_SITE_ALIAS)) {
-    if (label.startsWith(sheetPrefix)) {
-      const suffix = label.slice(sheetPrefix.length);
-      if (COUNT_ROW_SUFFIXES.includes(suffix)) return { site: COUNT_ROW_SITE_ALIAS[sheetPrefix], empClass: suffix };
-    }
-  }
-  return null;
+// row: A列(index0)=拠点名、B列(index1)=区分名（拠点名接頭辞の有無は問わない、
+// endsWith()で末尾一致を見る）。A列が対象拠点（いなべ/安中/南丹）に一致しない行
+// （本社・鹿沼・総計等）はnullを返し対象外とする
+function matchCountRowLabel(row) {
+  const siteLabel = normalizeCellLabel(row?.c?.[0] ? (row.c[0].v ?? row.c[0].f ?? '') : '');
+  const site = COUNT_ROW_SITE_ALIAS[siteLabel];
+  if (!site) return null;
+
+  const classLabel = normalizeCellLabel(row?.c?.[1] ? (row.c[1].v ?? row.c[1].f ?? '') : '');
+  const empClass = COUNT_ROW_SUFFIXES.find(suffix => classLabel.endsWith(suffix));
+  if (!empClass) return null;
+
+  return { site, empClass };
 }
 
 // 簡易なRFC4180準拠CSVパーサー（ダブルクォートで囲まれたフィールド内の
@@ -3186,9 +3194,7 @@ function parsePastYearCountSheet(json) {
   const result = {};
   rows.forEach((row, rIdx) => {
     if (rIdx === yearRowIdx || rIdx === monthRowIdx) return; // 年月行はデータ行として扱わない
-    const label = normalizeCellLabel(row?.c?.[0] ? (row.c[0].v ?? row.c[0].f ?? '') : '');
-    if (!label) return;
-    const matched = matchCountRowLabel(label);
+    const matched = matchCountRowLabel(row);
     if (!matched || matched.empClass === '合計') return;
 
     if (!result[matched.site]) result[matched.site] = {};
