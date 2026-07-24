@@ -2814,10 +2814,10 @@ function monthLabelToYm(label) {
 }
 
 async function fetchPastYearSheet() {
-  // 「時間_過去実績」は拠点ブロックが縦に繰り返される構造（拠点名行→年月ヘッダー行→
-  // データ行×N→空白行、を3拠点分）で、gvizの見出し自動結合(headers>0)では正しく
-  // 扱えないため、標準工数設定シートと同様にheaders=0で生データを取得し、
-  // parsePastYearSheet()側でブロック境界を手動判定する
+  // 「時間_過去実績」は拠点ブロックが縦に繰り返される構造（拠点名行がそのまま
+  // 年月ヘッダー行を兼ね、その下にデータ行×N→空白行、を3拠点分）で、gvizの
+  // 見出し自動結合(headers>0)では正しく扱えないため、標準工数設定シートと同様に
+  // headers=0で生データを取得し、parsePastYearSheet()側でブロック境界を手動判定する
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(PAST_YEAR_SHEET_NAME)}&headers=0`;
   const res = await fetch(url);
   const text = await res.text();
@@ -2830,14 +2830,18 @@ function normalizeCellLabel(s) {
   return String(s ?? '').replace(/[　\s]+/g, ' ').trim();
 }
 
-// 年月ヘッダーセルをYYYYMM数値に変換する。gvizは日付として入力されたセルを
-// cell.v = "Date(y,m,d)"（月は0始まり）形式で返すことがあり、その場合は書式済み
-// 文字列(cell.f)を見ずにcell.vを直接見ると一致しないため、整理済み_増減シートの
-// parseGvizDateYm()と同様にDate(...)形式を最優先で判定し、それ以外は書式済み文字列
-// （例:"2024.01"）を正規表現でパースするフォールバックを用いる
+// 年月ヘッダーセルをYYYYMM数値に変換する。実シートでの主要フォーマットは
+// 「2024.01」のような単純な数値セル（整数部=年、小数部×100を四捨五入=月）。
+// Date(y,m,d)形式・書式済み文字列は、将来シート形式が変わった場合に備えた
+// フォールバックとして残す（整理済み_増減シートのparseGvizDateYm()と同様の考え方）
 function parsePastYearYmCell(c) {
   if (!c) return null;
   const v = c.v;
+  if (typeof v === 'number' && !isNaN(v)) {
+    const year = Math.floor(v);
+    const month = Math.round((v - year) * 100);
+    if (month >= 1 && month <= 12) return year * 100 + month;
+  }
   if (typeof v === 'string') {
     const dm = v.match(/^Date\((\d+),\s*(\d+)/);
     if (dm) return parseInt(dm[1]) * 100 + (parseInt(dm[2]) + 1); // gvizの月は0始まり
@@ -2865,29 +2869,25 @@ function parsePastYearSheet(json) {
 
   const result = {};
   let currentSite = null;
-  let currentYmCols = null; // [{ idx, ym }] または未確定はnull
+  let currentYmCols = null; // [{ idx, ym }]
 
   rows.forEach(row => {
     const label = cellText(row, 0);
 
     if (SITES.includes(label)) {
+      // 拠点名行そのものが年月ヘッダー行を兼ねる（A列=拠点名、B列以降=年月）。
+      // 別行を年月ヘッダーとして待つのではなく、この行のB列以降を直接読み取る
       currentSite = label;
-      currentYmCols = null; // 次の行を年月ヘッダー行として拾う
-      return;
-    }
-    if (!currentSite) return; // 最初の拠点ブロックが始まる前の行は無視
-
-    if (!currentYmCols) {
-      // 拠点名行の直後の行を、そのブロック用の年月ヘッダー行として扱う
       const cols = [];
       (row?.c || []).forEach((c, cIdx) => {
-        if (cIdx === 0) return; // A列はラベル列
+        if (cIdx === 0) return; // A列は拠点名
         const ym = parsePastYearYmCell(c);
         if (ym !== null) cols.push({ idx: cIdx, ym });
       });
       currentYmCols = cols;
       return;
     }
+    if (!currentSite || !currentYmCols) return; // 最初の拠点ブロックが始まる前の行は無視
 
     const role = PAST_YEAR_ROW_LABELS[Object.keys(PAST_YEAR_ROW_LABELS).find(k => label.includes(k))];
     if (!role) return; // 収穫作業時間／出荷作業時間以外の行（収穫量・シフト人数等）は対象外
