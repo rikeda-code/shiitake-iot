@@ -2830,16 +2830,26 @@ function normalizeCellLabel(s) {
   return String(s ?? '').replace(/[　\s]+/g, ' ').trim();
 }
 
-// 年月ヘッダーセルをYYYYMM数値に変換する。実シートでの主要フォーマットは
-// 「2024.01」のような単純な数値セル（整数部=年、小数部×100を四捨五入=月）。
-// Date(y,m,d)形式・書式済み文字列は、将来シート形式が変わった場合に備えた
-// フォールバックとして残す（整理済み_増減シートのparseGvizDateYm()と同様の考え方）
-function parsePastYearYmCell(c) {
+// 年月ヘッダーの先頭列（連番の起点）だけをYYYYMM数値に変換する。実シートでの主要
+// フォーマットは「2024.01」のような単純な数値セル（整数部=年、小数部が月）だが、
+// 年によって小数部の桁数表記が変わることがある（2024年:「2024.01」〜「2024.09」の
+// ゼロ埋め2桁、2025年:「2025.1」〜「2025.7」のゼロ埋めなし1桁、等）。同じ小数部0.1が
+// 「1月(1桁表記)」「10月(2桁表記)」のどちらにも解釈できてしまい1セル単位では原理的に
+// 一意に決められないため、月の判定はここ（起点セル）でのみ行い、以降の列は
+// resolvePastYearYmCols()で1列ごとに+1する連番方式で機械的に求める
+function parsePastYearYmCellBest(c) {
   if (!c) return null;
   const v = c.v;
   if (typeof v === 'number' && !isNaN(v)) {
     const year = Math.floor(v);
-    const month = Math.round((v - year) * 100);
+    const frac = v - year;
+    // 小数部を10倍した値がほぼ整数なら1桁表記（例:2025.1→1月）、そうでなければ
+    // 2桁表記（例:2024.01→1月、2024.10→10月）とみなす簡易ヒューリスティック。
+    // 0.1（1月/1桁 と 10月/2桁 の衝突）のように原理的に一意に決まらない値もあるが、
+    // 起点セルは通常ゼロ埋め2桁表記の年初（例:2024.01）であるため実用上問題にならない
+    const asTenths = frac * 10;
+    const isTenths = Math.abs(asTenths - Math.round(asTenths)) < 1e-6;
+    const month = Math.round(isTenths ? asTenths : frac * 100);
     if (month >= 1 && month <= 12) return year * 100 + month;
   }
   if (typeof v === 'string') {
@@ -2849,6 +2859,26 @@ function parsePastYearYmCell(c) {
   const text = normalizeCellLabel(c.f ?? (typeof v === 'string' ? v : ''));
   const m = text.match(/(\d{4})[.\/-](\d{1,2})(?!\d)/);
   return m ? parseInt(m[1]) * 100 + parseInt(m[2]) : null;
+}
+
+// ブロック内の年月ヘッダー列を連番方式で解決する。headerCellsは値が入っている
+// （＝ヘッダーとして存在する）列を先頭から順に並べたもの。1列目のみ
+// parsePastYearYmCellBest()で年月を特定し、2列目以降はセルの値を見ずに
+// 1列進むごとに月を+1（12月の次は年+1で1月に戻る）で機械的に割り当てる
+function resolvePastYearYmCols(headerCells) {
+  if (!headerCells.length) return [];
+  const first = parsePastYearYmCellBest(headerCells[0].cell);
+  if (first === null) return [];
+
+  let year = Math.floor(first / 100);
+  let month = first % 100;
+  return headerCells.map(({ idx }, i) => {
+    if (i > 0) {
+      month += 1;
+      if (month > 12) { month = 1; year += 1; }
+    }
+    return { idx, ym: year * 100 + month };
+  });
 }
 
 // 戻り値: { [site]: { [role]: { [ym]: 数値 } } }（role は '栽培' | '出荷'）
@@ -2878,13 +2908,12 @@ function parsePastYearSheet(json) {
       // 拠点名行そのものが年月ヘッダー行を兼ねる（A列=拠点名、B列以降=年月）。
       // 別行を年月ヘッダーとして待つのではなく、この行のB列以降を直接読み取る
       currentSite = label;
-      const cols = [];
+      const headerCells = [];
       (row?.c || []).forEach((c, cIdx) => {
         if (cIdx === 0) return; // A列は拠点名
-        const ym = parsePastYearYmCell(c);
-        if (ym !== null) cols.push({ idx: cIdx, ym });
+        if (c && c.v !== null && c.v !== undefined && c.v !== '') headerCells.push({ idx: cIdx, cell: c });
       });
-      currentYmCols = cols;
+      currentYmCols = resolvePastYearYmCols(headerCells);
       return;
     }
     if (!currentSite || !currentYmCols) return; // 最初の拠点ブロックが始まる前の行は無視
