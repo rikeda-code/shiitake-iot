@@ -2073,7 +2073,7 @@ function renderSummarySubtab(tab) {
   else if (tab === 'emp-chart-dev') renderSummaryEmpChartDev();
   else if (tab === 'std-hours') renderSummaryStdHours();
   else if (tab === 'chart')    renderSummaryChart();
-  else if (tab === 'roster')   renderSummaryRoster();
+  else if (tab === 'roster')   { rosterFilterSites = new Set(SITES); rosterFilterEmps = null; renderSummaryRoster(); }
 }
 
 // activeMode === 'summary' のとき、現在アクティブなサブタブに切り替える（無ければ tab を新たにアクティブ化）
@@ -2317,10 +2317,11 @@ function buildStackedBarSection(containerId, months, datasetsH, datasetsN, hMax,
             label: ctx => {
               if (ctx.parsed.y == null || ctx.parsed.y === 0) return null;
               if (ctx.dataset._isOverlayLine) return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ja-JP')} ${lineOpts.unit}`;
+              if (ctx.dataset._isStd) return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h`;
               return `${ctx.dataset.label}: ${isCount ? ctx.parsed.y + ' 名' : ctx.parsed.y.toFixed(1) + ' h'}`;
             },
             footer: items => {
-              const barItems = items.filter(ctx => !ctx.dataset._isOverlayLine);
+              const barItems = items.filter(ctx => !ctx.dataset._isOverlayLine && !ctx.dataset._isStd);
               const total = barItems.reduce((s, ctx) => s + (ctx.parsed.y || 0), 0);
               if (!total) return '';
               return `合計: ${isCount ? total + ' 名' : total.toFixed(1) + ' h'}`;
@@ -2607,23 +2608,55 @@ function renderEmpChartSummaryView() {
 const DEV_LINE_METRIC_BY_ROLE = { '栽培': '収穫量(kg)', '出荷': '出荷量(kg)' };
 const DEV_LINE_COLOR_BY_ROLE = { '栽培': '#38bdf8', '出荷': '#facc15' };
 
+let empChartDevShowStd = true; // 業務区分/雇用形態別グラフの標準工数表示フラグ
+
 function renderSummaryEmpChartDev() {
   const content = document.getElementById('summary-content');
-  content.innerHTML = '<div class="loading">生産実績データを読み込み中...</div>';
-  fetchProductionSheet().then(prodData => {
-    renderSummaryEmpChartDevContent(prodData);
-  }).catch(e => {
-    content.innerHTML = `<div class="error-msg">生産実績データ取得エラー: ${e.message}</div>`;
-    console.error(e);
-  });
+  content.innerHTML = '<div class="loading">データを読み込み中...</div>';
+  Promise.all([fetchProductionSheet(), fetchPlanSheet(), loadStdSettingsSheetOnce()])
+    .then(([prodData, planData]) => {
+      renderSummaryEmpChartDevContent(prodData, planData);
+    }).catch(e => {
+      content.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
+      console.error(e);
+    });
 }
 
-function renderSummaryEmpChartDevContent(prodData) {
+function renderSummaryEmpChartDevContent(prodData, planData) {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
   const { months: prodMonths, records } = prodData;
+
+  // 標準工数エンジン（planDataがある場合のみ初期化）
+  let stdEngine = null, stdRows = [], stdRowsByDiv = {};
+  if (planData) {
+    const { months: planMonths, records: planRecords } = planData;
+    stdRows = loadYojitsuStdSettings();
+    const conv = loadYojitsuCsConv();
+    console.log('[empChartDev] planMonths:', planMonths?.length, 'planRecords:', planRecords?.length, 'stdRows:', stdRows?.length);
+    stdEngine = createStdHoursEngine(planRecords, planMonths, months, planMonths.length, conv, null, '実数計画');
+    ROLE_TYPES.forEach(wt => {
+      stdRowsByDiv[wt] = stdRows.filter(r => r.div === wt);
+      console.log(`[empChartDev] stdRowsByDiv[${wt}]:`, stdRowsByDiv[wt]?.length);
+    });
+  } else {
+    console.warn('[empChartDev] planData is null/undefined');
+  }
+
+  // 業務区分ごとの標準工数（div='栽培' or '出荷'の設定行のみ使用）
+  function calcStdForDiv(site, wt, mi) {
+    if (!stdEngine) return null;
+    const divRows = stdRowsByDiv[wt] || [];
+    if (!divRows.length) return null;
+    let total = 0, hasVal = false;
+    divRows.forEach(r => {
+      const result = stdEngine.calcRow(site, r, mi);
+      if (result.h !== null) { total += result.h; hasVal = true; }
+    });
+    return hasVal ? Math.round(total * 10) / 10 : null;
+  }
 
   // 生産実績側の指標値を、勤務実績側の表示列(months)に月文字列で突き合わせて取得する
   // （既存の生産性タブのprodVals()と同じ突き合わせ方式。延長分の空月(month:'')はnullのまま）
@@ -2651,7 +2684,16 @@ function renderSummaryEmpChartDevContent(prodData) {
     '出荷': computeSharedAxisMax(activeSites.map(site => lineValsBySite[site]['出荷']), 100, 1.1),
   };
 
-  let html = '<div class="schart-shell">';
+  const toggleHtml = planData ? `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;background:var(--card-bg2,#1e2a3a);border-radius:6px;width:fit-content">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:var(--muted)">
+        <input type="checkbox" id="ecdev-std-toggle" ${empChartDevShowStd ? 'checked' : ''}
+          onchange="window._ecdevToggleStd(this.checked)" style="accent-color:#38bdf8;cursor:pointer">
+        標準工数を表示
+      </label>
+    </div>` : '';
+
+  let html = `<div class="schart-shell">${toggleHtml}`;
   activeSites.forEach((site, si) => {
     visibleRoleTypes.forEach((wt, wi) => {
       const cid = `ecdev_${si}_${wi}`;
@@ -2682,6 +2724,19 @@ function renderSummaryEmpChartDevContent(prodData) {
         }),
         backgroundColor: EMP_CHART_COLORS_MAP[et],
       }));
+      // 標準工数バー（単色・非積み上げ）
+      if (planData) {
+        datasetsH.push({
+          label: '標準工数',
+          data: months.map((_, mi) => calcStdForDiv(site, wt, mi)),
+          backgroundColor: '#38bdf844',
+          borderColor: '#38bdf8',
+          borderWidth: 1,
+          stack: 'std',
+          hidden: !empChartDevShowStd,
+          _isStd: true,
+        });
+      }
       const datasetsN = EMP_CHART_TYPES.map(et => ({
         label: et,
         data: months.map((_, mi) => groupEmps.filter(e => empDetailType(e.employment) === et && e.hours[mi] !== null).length || null),
@@ -2702,12 +2757,24 @@ function renderSummaryEmpChartDevContent(prodData) {
 
   // フィルター適用後のデータをもとに、ページ内の全グラフで時間・人数それぞれ共通の軸上限を算出
   // （折れ線は右軸=y2側のため、この左軸の集計には含めない）
-  const hMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsH)), 100, 1.1);
+  const hMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsH.filter(d => !d._isStd))), 100, 1.1);
   const nMax = computeSharedAxisMax(perGroup.map(p => stackedMonthlyTotals(months, p.datasetsN)), 5, 1.1);
 
   perGroup.forEach(({ cid, datasetsH, datasetsN, lineOpts }) => {
     buildStackedBarSection(cid, months, datasetsH, datasetsN, hMax, nMax, lineOpts);
   });
+
+  // 標準工数トグル
+  window._ecdevToggleStd = show => {
+    empChartDevShowStd = show;
+    Object.values(summaryChartInstances).forEach(chart => {
+      if (!chart) return;
+      chart.data.datasets.forEach((ds, i) => {
+        if (ds._isStd) chart.setDatasetVisibility(i, show);
+      });
+      chart.update();
+    });
+  };
 }
 
 /* ── Summary: 標準労働時間タブ ────────────────────────────────────
