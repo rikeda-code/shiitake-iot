@@ -2635,10 +2635,14 @@ function renderSummaryEmpChartDevContent(prodData, planData) {
     const { months: planMonths, records: planRecords } = planData;
     stdRows = loadYojitsuStdSettings();
     const conv = loadYojitsuCsConv();
+    console.log('[empChartDev] planMonths:', planMonths?.length, 'planRecords:', planRecords?.length, 'stdRows:', stdRows?.length);
     stdEngine = createStdHoursEngine(planRecords, planMonths, months, planMonths.length, conv, null, '実数計画');
     ROLE_TYPES.forEach(wt => {
       stdRowsByDiv[wt] = stdRows.filter(r => r.div === wt);
+      console.log(`[empChartDev] stdRowsByDiv[${wt}]:`, stdRowsByDiv[wt]?.length);
     });
+  } else {
+    console.warn('[empChartDev] planData is null/undefined');
   }
 
   // 業務区分ごとの標準工数（div='栽培' or '出荷'の設定行のみ使用）
