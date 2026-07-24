@@ -3068,14 +3068,24 @@ async function fetchPastYearCountSheet() {
   return parsePastYearCountSheet(json);
 }
 
+// gvizは先頭列（A・B列）が両方とも空欄の行を、他の列にデータがあっても
+// レスポンス（json.table.rows）から丸ごと省略することがある。年月ヘッダー行は
+// 本来A・B列が空欄になり得るため、固定の行番号（2行目・3行目）や固定の
+// データ開始列（B列）を前提にせず、内容（4桁の妥当な年の数値／
+// 「N月度」パターンのテキスト）から年月行・データ開始列を動的に検出する
+function isPlausibleYearValue(raw) {
+  if (raw === null || raw === undefined || raw === '') return false;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 2000 && n <= 2100;
+}
+function isMonthDoText(raw) {
+  return typeof raw === 'string' && /^\d{1,2}月度$/.test(raw.trim());
+}
+
 // 戻り値: { [site]: { [empClass]: { [ym]: 数値 } } }（empClassは'社員'|'パート'|'技能実習生'。
 // 「合計」行は社員/パート/技能実習生の内訳から都度合算するため取り込まない）
 function parsePastYearCountSheet(json) {
   const rows = json.table.rows || [];
-  if (rows.length < 3) return {};
-
-  const yearRow = rows[1];   // 2行目（0始まりindex1）：年
-  const monthRow = rows[2];  // 3行目（0始まりindex2）：月（例:「9月度」）
 
   const cellRaw = (row, cIdx) => {
     const c = row && row.c && row.c[cIdx];
@@ -3088,19 +3098,31 @@ function parsePastYearCountSheet(json) {
     return isNaN(n) ? null : n;
   };
 
-  // 年月ヘッダー列を特定する。年（2行目）はセル結合等で最初の列にしか値が
-  // 入っていない可能性があるため、空欄の場合は直前の年を引き継ぐ
+  // 年行・月行を内容ベースで検出する（行番号は決め打ちしない）
+  let yearRowIdx = -1, monthRowIdx = -1;
+  rows.forEach((row, rIdx) => {
+    if (!row || !row.c) return;
+    if (yearRowIdx === -1 && row.c.some(c => c && isPlausibleYearValue(c.v ?? c.f))) yearRowIdx = rIdx;
+    if (monthRowIdx === -1 && row.c.some(c => c && isMonthDoText(String(c.v ?? c.f ?? '')))) monthRowIdx = rIdx;
+  });
+  if (yearRowIdx === -1 || monthRowIdx === -1) {
+    console.warn('[人数_過去実績] 年行または月行を検出できませんでした。前年実績（人数画面）は表示されません。');
+    return {};
+  }
+  const yearRow = rows[yearRowIdx];
+  const monthRow = rows[monthRowIdx];
+
+  // 年月ヘッダー列を特定する。データ開始列も固定せず、実際に年月の値が
+  // 見つかった列を基準にする。年はセル結合等で最初の列にしか値が入って
+  // いない可能性があるため、空欄の場合は直前の年を引き継ぐ
   const ymCols = [];
   let lastYear = null;
   const colCount = Math.max(yearRow?.c?.length || 0, monthRow?.c?.length || 0);
-  for (let cIdx = 1; cIdx < colCount; cIdx++) {
+  for (let cIdx = 0; cIdx < colCount; cIdx++) {
     const yRaw = cellRaw(yearRow, cIdx);
-    if (yRaw !== undefined && yRaw !== null && yRaw !== '') {
-      const yNum = Number(yRaw);
-      if (!isNaN(yNum)) lastYear = yNum;
-    }
-    const mText = normalizeCellLabel(cellRaw(monthRow, cIdx) ?? '');
-    const mMatch = mText.match(/(\d{1,2})\s*月/);
+    if (isPlausibleYearValue(yRaw)) lastYear = Number(yRaw);
+    const mRaw = String(cellRaw(monthRow, cIdx) ?? '').trim();
+    const mMatch = mRaw.match(/^(\d{1,2})月度$/);
     if (lastYear !== null && mMatch) {
       const month = parseInt(mMatch[1]);
       if (month >= 1 && month <= 12) ymCols.push({ idx: cIdx, ym: lastYear * 100 + month });
@@ -3109,7 +3131,7 @@ function parsePastYearCountSheet(json) {
 
   const result = {};
   rows.forEach((row, rIdx) => {
-    if (rIdx <= 2) return; // 1〜3行目はヘッダー（1行目はタイトル等、2-3行目は年月）
+    if (rIdx === yearRowIdx || rIdx === monthRowIdx) return; // 年月行はデータ行として扱わない
     const label = normalizeCellLabel(row?.c?.[0] ? (row.c[0].v ?? row.c[0].f ?? '') : '');
     if (!label) return;
     const matched = matchCountRowLabel(label);
