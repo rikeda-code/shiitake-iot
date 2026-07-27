@@ -876,6 +876,37 @@ let weeklyZoomGroups = null; // groupKeys → { label, containers }
 let weeklyZoomChart = null;
 let weeklySizeMode = null; // null | 'daily' | 'cumul'
 let weeklySizeCharts = [];
+let weeklyDrillPersonGroups = null; // 担当者別ドリルの一覧画面(拠点未選択時)のカード → { label, containers }
+let weeklyDrillZoomGroups = null;   // 担当者別ドリルの最終カード(拠点・担当者選択後)→ { label, containers }
+
+// 週別累計タブの各グラフ用「保存」ボタンの共通処理。containersをそのまま凍結して保存グラフに渡す
+function weeklySaveChart(title, containers) {
+  const frozenContainers = containers.map(c => ({
+    siteName: c.siteName, name: c.name, lot: c.lot, startDate: c.startDate, endDate: c.endDate,
+    isEnded: c.isEnded, bedCount: c.bedCount,
+    rows: (c.rows || []).map(r => ({ rowDate: r.rowDate ? r.rowDate.toISOString() : null, dayNum: r.dayNum, daily: r.daily })),
+  }));
+  savedOpenPicker({
+    kind: 'weekly', title: `週別累計: ${title}`,
+    items: frozenContainers,
+    targetData: weeklyState ? weeklyState.targetData : null,
+  });
+}
+
+function weeklySaveGroupChart(idx) {
+  if (!weeklyZoomGroups || !weeklyZoomGroups[idx]) return;
+  weeklySaveChart(weeklyZoomGroups[idx].label, weeklyZoomGroups[idx].containers);
+}
+
+function weeklySaveDrillPersonChart(idx) {
+  if (!weeklyDrillPersonGroups || !weeklyDrillPersonGroups[idx]) return;
+  weeklySaveChart(weeklyDrillPersonGroups[idx].label, weeklyDrillPersonGroups[idx].containers);
+}
+
+function weeklySaveDrillGroupChart(idx) {
+  if (!weeklyDrillZoomGroups || !weeklyDrillZoomGroups[idx]) return;
+  weeklySaveChart(weeklyDrillZoomGroups[idx].label, weeklyDrillZoomGroups[idx].containers);
+}
 
 async function loadWeeklySection() {
   const section = document.getElementById('weekly-section');
@@ -1023,7 +1054,10 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
   const cardsHtml = groupKeys.map((k, idx) => `
     <div class="weekly-chart-card" style="cursor:pointer" onclick="openWeeklyZoom(${idx})">
-      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${groups[k].label}</div>
+        <button onclick="event.stopPropagation();weeklySaveGroupChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
       <div style="display:none">${
         groups[k].containers.map(c => {
           const color = analysisPackColorFor(analysisPackCategoryFor(c)).dark;
@@ -1761,11 +1795,15 @@ function renderDrillSection(section, valid, targetData) {
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>
       <div class="weekly-grid" style="margin-top:16px" id="drill-person-charts"></div>`;
     const allPersons = [...new Set(valid.map(c => c.person || '未設定'))].sort();
+    weeklyDrillPersonGroups = allPersons.map(p => ({ label: p, containers: valid.filter(c => (c.person || '未設定') === p) }));
     allPersons.forEach((p, idx) => {
-      const pContainers = valid.filter(c => (c.person || '未設定') === p);
+      const pContainers = weeklyDrillPersonGroups[idx].containers;
       const card = document.createElement('div');
       card.className = 'weekly-chart-card';
-      card.innerHTML = `<div class="weekly-chart-title">${p}</div><div class="chart-wrap" style="height:260px"><canvas id="drillp-${idx}"></canvas></div>`;
+      card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${p}</div>
+        <button onclick="weeklySaveDrillPersonChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div><div class="chart-wrap" style="height:260px"><canvas id="drillp-${idx}"></canvas></div>`;
       document.getElementById('drill-person-charts').appendChild(card);
       buildWeeklyLineChart(`drillp-${idx}`, pContainers, targetData);
     });
@@ -1820,9 +1858,14 @@ function renderDrillSection(section, valid, targetData) {
     if (sortOrd === 'desc') groupKeys.reverse();
   }
 
+  weeklyDrillZoomGroups = groupKeys.map(k => ({ label: groups[k].label, containers: groups[k].containers }));
+
   const cardsHtml = groupKeys.map((k, idx) => `
     <div class="weekly-chart-card">
-      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${groups[k].label}</div>
+        <button onclick="weeklySaveDrillGroupChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
       <div class="chart-wrap" style="height:260px"><canvas id="wd-${idx}"></canvas></div>
     </div>`).join('');
 
@@ -5539,6 +5582,14 @@ function savedBuildChartConfig(chart) {
   return null;
 }
 
+// JSON化でISO文字列になったrowDateを、buildWeeklyLineChartが比較に使うDateオブジェクトへ戻す
+function weeklyReviveContainers(items) {
+  return items.map(c => ({
+    ...c,
+    rows: (c.rows || []).map(r => ({ ...r, rowDate: r.rowDate ? new Date(r.rowDate) : null })),
+  }));
+}
+
 function renderSavedTab() {
   const section = document.getElementById('saved-section');
   if (!section) return;
@@ -5590,11 +5641,17 @@ function renderSavedTab() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">${chartsHtml}</div>`;
 
   activeCol.charts.forEach((chart, idx) => {
-    const canvas = document.getElementById(`saved-chart-${idx}`);
-    if (!canvas) return;
+    const canvasId = `saved-chart-${idx}`;
+    if (!document.getElementById(canvasId)) return;
+    if (chart.kind === 'weekly') {
+      const revived = weeklyReviveContainers(chart.items);
+      const built = buildWeeklyLineChart(canvasId, revived, chart.targetData, true);
+      if (built) savedTabCharts.push(built);
+      return;
+    }
     const cfg = savedBuildChartConfig(chart);
     if (!cfg) return;
-    savedTabCharts.push(new Chart(canvas, cfg));
+    savedTabCharts.push(new Chart(document.getElementById(canvasId), cfg));
   });
 }
 
