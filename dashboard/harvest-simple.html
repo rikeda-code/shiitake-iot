@@ -5873,6 +5873,85 @@ function weeklyReviveContainers(items) {
   }));
 }
 
+// ── 分析メモ ────────────────────────────────────────────────────────────
+// コレクションごとに、①現状整理・傾向 ②分析内容(1〜5) ③対応策(1〜5)を書き込める欄を持たせる
+const SAVED_NOTE_SUMMARY_FIELDS = [
+  { key: 'harvest', label: '収穫量' },
+  { key: 'temp', label: '温度' },
+  { key: 'weight', label: '菌床重量' },
+  { key: 'mekaki', label: '芽かき重量' },
+  { key: 'packRate', label: 'パック品率' },
+];
+
+function savedEnsureNotes(col) {
+  if (!col.notes) {
+    col.notes = {
+      summary: Object.fromEntries(SAVED_NOTE_SUMMARY_FIELDS.map(f => [f.key, ''])),
+      analysis: ['', '', '', '', ''],
+      actions: ['', '', '', '', ''],
+    };
+  }
+  // 共有で読み込んだコレクション等、フィールドが一部欠けている場合を補う
+  SAVED_NOTE_SUMMARY_FIELDS.forEach(f => { if (col.notes.summary[f.key] == null) col.notes.summary[f.key] = ''; });
+  if (!Array.isArray(col.notes.analysis)) col.notes.analysis = ['', '', '', '', ''];
+  if (!Array.isArray(col.notes.actions)) col.notes.actions = ['', '', '', '', ''];
+  return col.notes;
+}
+
+// textareaの初期値としてinnerHTMLに埋め込むため、タグとして解釈されうる文字をエスケープする
+function savedEscapeForTextarea(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+let savedNotesSaveTimer = null;
+// 入力の都度renderSavedTab()で再描画するとテキストエリアのフォーカス・カーソル位置が失われるため、
+// ここではメモリ上のデータだけ更新し、保存はデバウンスしてlocalStorageへ書き込む(DOMは触らない)
+function savedNoteInput(collectionId, section, key, value) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  const notes = savedEnsureNotes(col);
+  if (section === 'summary') notes.summary[key] = value;
+  else notes[section][key] = value;
+  clearTimeout(savedNotesSaveTimer);
+  savedNotesSaveTimer = setTimeout(() => {
+    if (!savedCollectionsPersist()) savedToast('メモの保存に失敗しました(ブラウザの保存容量が上限です)');
+  }, 500);
+}
+
+function savedNotesHtml(col) {
+  const notes = savedEnsureNotes(col);
+  const taStyle = 'width:100%;min-height:40px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:0.82rem;resize:vertical;font-family:inherit';
+
+  const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
+    <div style="margin-bottom:8px">
+      <div style="font-size:0.75rem;color:#64748b;margin-bottom:4px">${f.label}</div>
+      <textarea oninput="savedNoteInput('${col.id}','summary','${f.key}',this.value)" style="${taStyle}">${savedEscapeForTextarea(notes.summary[f.key])}</textarea>
+    </div>`).join('');
+
+  const numberedHtml = (arr, section) => arr.map((v, i) => `
+    <div style="margin-bottom:8px">
+      <div style="font-size:0.75rem;color:#64748b;margin-bottom:4px">${i + 1}</div>
+      <textarea oninput="savedNoteInput('${col.id}','${section}',${i},this.value)" style="${taStyle}">${savedEscapeForTextarea(v)}</textarea>
+    </div>`).join('');
+
+  return `
+    <div style="background:#13151f;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#cbd5e1;font-size:0.9rem;font-weight:700;margin-bottom:12px">分析メモ</div>
+      <div style="margin-bottom:16px">
+        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">① 現状整理・傾向</div>
+        ${summaryHtml}
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">② 分析内容</div>
+        ${numberedHtml(notes.analysis, 'analysis')}
+      </div>
+      <div>
+        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">③ 対応策</div>
+        ${numberedHtml(notes.actions, 'actions')}
+      </div>
+    </div>`;
+}
+
 function renderSavedTab() {
   const section = document.getElementById('saved-section');
   if (!section) return;
@@ -5921,6 +6000,7 @@ function renderSavedTab() {
     <div style="margin-bottom:16px">
       <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
     </div>
+    ${savedNotesHtml(activeCol)}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">${chartsHtml}</div>`;
 
   activeCol.charts.forEach((chart, idx) => {
@@ -5959,7 +6039,7 @@ function savedBase64ToText(b64) {
 function savedShareCollection(collectionId) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col) return;
-  const payload = { name: col.name, charts: col.charts };
+  const payload = { name: col.name, charts: col.charts, notes: col.notes };
   const encoded = savedTextToBase64(JSON.stringify(payload));
   // base64の+//=がそのままだと、チャットアプリのリンクプレビュー生成やコピー経路で
   // 文字化けし、受け取った側で確認ダイアログすら出ないまま静かに読み込みが失敗することがある。
@@ -5994,6 +6074,7 @@ function savedImportFromHash() {
     name: payload.name || '共有コレクション',
     createdAt: new Date().toISOString(),
     charts: payload.charts.map(ch => ({ ...ch, id: savedGenId() })),
+    notes: payload.notes,
   };
   savedCollections.push(col);
   savedCollectionsPersist();
