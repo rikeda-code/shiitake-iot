@@ -5919,22 +5919,28 @@ function savedNoteInput(collectionId, section, key, value) {
   }, 500);
 }
 
+// 入力量に応じてテキストエリアの高さを自動で伸ばす(内部スクロールで隠れて見えなくなるのを防ぐ)
+function savedAutoGrowTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 function savedNotesHtml(col) {
   const notes = savedEnsureNotes(col);
   const cardStyle = 'background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:12px 14px';
-  const taStyle = 'width:100%;min-height:64px;background:#0f1117;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.95rem;line-height:1.5;resize:vertical;font-family:inherit';
+  const taStyle = 'width:100%;min-height:64px;background:#0f1117;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.95rem;line-height:1.5;resize:none;overflow-y:hidden;font-family:inherit';
   const gridStyle = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px';
 
   const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
     <div style="${cardStyle}">
       <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${f.label}</div>
-      <textarea oninput="savedNoteInput('${col.id}','summary','${f.key}',this.value)" style="${taStyle}">${savedEscapeForTextarea(notes.summary[f.key])}</textarea>
+      <textarea oninput="savedNoteInput('${col.id}','summary','${f.key}',this.value);savedAutoGrowTextarea(this)" style="${taStyle}">${savedEscapeForTextarea(notes.summary[f.key])}</textarea>
     </div>`).join('');
 
   const numberedHtml = (arr, section) => arr.map((v, i) => `
     <div style="${cardStyle}">
       <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${i + 1}</div>
-      <textarea oninput="savedNoteInput('${col.id}','${section}',${i},this.value)" style="${taStyle}">${savedEscapeForTextarea(v)}</textarea>
+      <textarea oninput="savedNoteInput('${col.id}','${section}',${i},this.value);savedAutoGrowTextarea(this)" style="${taStyle}">${savedEscapeForTextarea(v)}</textarea>
     </div>`).join('');
 
   return `
@@ -6006,6 +6012,8 @@ function renderSavedTab() {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:16px">${chartsHtml}</div>
     ${savedNotesHtml(activeCol)}`;
+
+  section.querySelectorAll('textarea').forEach(savedAutoGrowTextarea);
 
   activeCol.charts.forEach((chart, idx) => {
     const canvasId = `saved-chart-${idx}`;
