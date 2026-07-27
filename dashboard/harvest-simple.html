@@ -231,6 +231,7 @@
 <section id="mekaki-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="temp-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="saved-section" style="display:none;margin:0 32px 40px;"></section>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -269,6 +270,24 @@
     <button onclick="tempCloseZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
     <div id="temp-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:12px"></div>
     <div style="position:relative;height:min(70vh,600px)"><canvas id="temp-zoom-canvas"></canvas></div>
+  </div>
+</div>
+
+<!-- 保存グラフ: コレクション選択モーダル -->
+<div id="saved-picker-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1200;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)savedPickerClose()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:380px;padding:20px;position:relative">
+    <button onclick="savedPickerClose()" style="position:absolute;top:10px;right:14px;background:none;border:none;color:#8892a4;font-size:1.3rem;cursor:pointer;line-height:1">×</button>
+    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin-bottom:12px">どのコレクションに保存しますか？</div>
+    <div id="saved-picker-list" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
+    <div style="border-top:1px solid #2e3148;padding-top:12px">
+      <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">新しいコレクションを作る</div>
+      <div style="display:flex;gap:6px">
+        <input id="saved-picker-newname" type="text" placeholder="コレクション名"
+          style="flex:1;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:0.82rem"
+          onkeydown="if(event.key==='Enter')savedPickerCreateAndConfirm()">
+        <button class="sort-btn" onclick="savedPickerCreateAndConfirm()">作成して保存</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2287,7 +2306,7 @@ function refreshActiveTab() {
 }
 
 function updateTabVisibility() {
-  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive;
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive || savedTabActive;
   document.getElementById('main').style.display = anyAlt ? 'none' : '';
   document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
   document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
@@ -2296,10 +2315,12 @@ function updateTabVisibility() {
   document.getElementById('mekaki-section').style.display = mekakiTabActive ? '' : 'none';
   document.getElementById('analysis-section').style.display = analysisTabActive ? '' : 'none';
   document.getElementById('temp-section').style.display = tempTabActive ? '' : 'none';
+  document.getElementById('saved-section').style.display = savedTabActive ? '' : 'none';
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
   if (analysisTabActive) renderAnalysisTab();
   if (tempTabActive) renderTempTab();
+  if (savedTabActive) renderSavedTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'site';
@@ -2615,6 +2636,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2640,6 +2662,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2659,7 +2682,7 @@ function initTabs() {
   mekakiBtn.addEventListener('click', () => {
     if (mekakiTabActive) return;
     weeklyTabActive = false; lotTabActive = false; scatterTabActive = false;
-    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false; tempTabActive = false;
+    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false; tempTabActive = false; savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = ''; b.style.borderBottomColor = ''; });
     mekakiBtn.classList.add('active');
     mekakiBtn.style.color = '#a78bfa';
@@ -2682,6 +2705,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2708,6 +2732,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = true;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2734,6 +2759,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = true;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2746,6 +2772,34 @@ function initTabs() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(tempBtn);
+
+  // 保存グラフ tab
+  const savedBtn = document.createElement('button');
+  savedBtn.id = 'saved-tab-btn';
+  savedBtn.className = 'tab-btn';
+  savedBtn.textContent = '保存グラフ';
+  savedBtn.addEventListener('click', () => {
+    if (savedTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = false;
+    mekakiTabActive = false;
+    analysisTabActive = false;
+    tempTabActive = false;
+    savedTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = '';
+      b.style.borderBottomColor = '';
+    });
+    savedBtn.classList.add('active');
+    savedBtn.style.color = '#facc15';
+    savedBtn.style.borderBottomColor = '#facc15';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(savedBtn);
 }
 
 function closeDetail() {
@@ -3838,16 +3892,25 @@ function renderAnalysisCorrelationView(items) {
       </div>
     </div>
     <div style="background:#13151f;border-radius:12px;padding:16px">
-      <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">相関図</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">相関図</div>
+        ${analysisSaveBtnHtml('correlation')}
+      </div>
       <div style="position:relative;height:480px;cursor:zoom-in" onclick="analysisOpenZoom('correlation')"><canvas id="analysis-correlation-canvas"></canvas></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-top:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">① 栽培前半(1〜20日)の相関図</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">① 栽培前半(1〜20日)の相関図</div>
+          ${analysisSaveBtnHtml('correlationFirst')}
+        </div>
         <div style="position:relative;height:360px;cursor:zoom-in" onclick="analysisOpenZoom('correlationFirst')"><canvas id="analysis-correlationFirst-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">② 栽培後半(21〜60日)の相関図</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">② 栽培後半(21〜60日)の相関図</div>
+          ${analysisSaveBtnHtml('correlationSecond')}
+        </div>
         <div style="position:relative;height:360px;cursor:zoom-in" onclick="analysisOpenZoom('correlationSecond')"><canvas id="analysis-correlationSecond-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4221,45 +4284,66 @@ function renderAnalysisDateView() {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 コンテナ別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 コンテナ別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('dailycontainer')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailycontainer')"><canvas id="analysis-dailycontainer-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
           <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(コンテナ別内訳・kg)</div>
-          <div style="display:flex;gap:4px" onclick="event.stopPropagation()">${sizeButtons}</div>
+          <div style="display:flex;align-items:center;gap:4px" onclick="event.stopPropagation()">${sizeButtons}${analysisSaveBtnHtml('dailysize')}</div>
         </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailysize')"><canvas id="analysis-dailysize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
           <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">構成比パレート図(コンテナ別)</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">${paretoSizeButtons}</div>
+          <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">${paretoSizeButtons}${analysisSaveBtnHtml('paretocontainer')}</div>
         </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretocontainer')"><canvas id="analysis-paretocontainer-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">構成比パレート図(サイズ別)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">構成比パレート図(サイズ別)</div>
+          ${analysisSaveBtnHtml('paretosize')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretosize')"><canvas id="analysis-paretosize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">該当期間 サイズ別収穫量(コンテナ別・kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">該当期間 サイズ別収穫量(コンテナ別・kg)</div>
+          ${analysisSaveBtnHtml('periodsize')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('periodsize')"><canvas id="analysis-periodsize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 サイズ別収穫量(全コンテナ合計・kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(全コンテナ合計・kg)</div>
+          ${analysisSaveBtnHtml('datesize')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('datesize')"><canvas id="analysis-datesize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫前半(栽培1〜20日) サイズ別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">収穫前半(栽培1〜20日) サイズ別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('firsthalf')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('firsthalf')"><canvas id="analysis-firsthalf-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫後半(栽培21日〜) サイズ別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">収穫後半(栽培21日〜) サイズ別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('secondhalf')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('secondhalf')"><canvas id="analysis-secondhalf-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 栽培日数帯別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 栽培日数帯別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('daybucket')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('daybucket')"><canvas id="analysis-daybucket-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4442,28 +4526,46 @@ function renderAnalysisComparison(items, lotColorMap) {
     ${analysisLotLegendHtml(lotColorMap)}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫量・パック品率</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">収穫量・パック品率</div>
+          ${analysisSaveBtnHtml('harvest')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('harvest')"><canvas id="analysis-harvest-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量(初期重量+吸水量)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">菌床重量(初期重量+吸水量)</div>
+          ${analysisSaveBtnHtml('weight')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weight')"><canvas id="analysis-weight-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">芽かき量</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">芽かき量</div>
+          ${analysisSaveBtnHtml('mekaki')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('mekaki')"><canvas id="analysis-mekaki-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">パック品収穫量</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">パック品収穫量</div>
+          ${analysisSaveBtnHtml('pack')}
+        </div>
         ${analysisPackLegendHtml()}
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('pack')"><canvas id="analysis-pack-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量(g/菌床)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">サイズ別収穫量(g/菌床)</div>
+          ${analysisSaveBtnHtml('size')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('size')"><canvas id="analysis-size-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ比率</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">サイズ比率</div>
+          ${analysisSaveBtnHtml('ratio')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('ratio')"><canvas id="analysis-ratio-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4473,17 +4575,26 @@ function renderAnalysisWeightTrendView(items) {
   return `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向(拠点別)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">菌床重量傾向(拠点別)</div>
+          ${analysisSaveBtnHtml('weighttrend')}
+        </div>
         ${analysisWeightPackLegendHtml()}
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weighttrend')"><canvas id="analysis-weighttrend-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">月別 菌床重量平均(拠点別・初期重量+吸水量)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">月別 菌床重量平均(拠点別・初期重量+吸水量)</div>
+          ${analysisSaveBtnHtml('weightmonthly')}
+        </div>
         ${analysisWeightPackLegendHtml()}
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightmonthly')"><canvas id="analysis-weightmonthly-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">週別 菌床重量平均(拠点別・初期重量+吸水量)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">週別 菌床重量平均(拠点別・初期重量+吸水量)</div>
+          ${analysisSaveBtnHtml('weightweekly')}
+        </div>
         ${analysisWeightPackLegendHtml()}
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightweekly')"><canvas id="analysis-weightweekly-canvas"></canvas></div>
       </div>
@@ -4869,6 +4980,24 @@ function analysisCloseZoom() {
   if (analysisZoomChartInstance) { analysisZoomChartInstance.destroy(); analysisZoomChartInstance = null; }
 }
 
+function analysisSaveBtnHtml(key) {
+  return `<button onclick="event.stopPropagation();analysisSaveChart('${key}')" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>`;
+}
+
+// 分析タブの各グラフ用「保存」ボタンの入口。表示中のitems/lotColorMapをそのまま凍結してコレクション選択モーダルを開く
+function analysisSaveChart(key) {
+  if (!analysisZoomState) return;
+  const cfg = ANALYSIS_CHART_CONFIGS[key];
+  if (!cfg) return;
+  savedOpenPicker({
+    kind: 'analysis',
+    configKey: key,
+    title: cfg.title,
+    items: JSON.parse(JSON.stringify(analysisZoomState.items)),
+    lotColorMap: JSON.parse(JSON.stringify(analysisZoomState.lotColorMap)),
+  });
+}
+
 // ── 温度分析タブ ──────────────────────────────────────────────────────────────
 
 const TEMP_SHEET_ID = '13-pcuNp-QHVz4RlwpdzagoC_ComuZHl5uonBBX9KvYY';
@@ -5007,8 +5136,18 @@ function tempFormatDayHour(x) {
   return `${day}日${hour}:00`;
 }
 
-function tempChartConfig(items) {
-  const datasets = items.map(c => tempLineDataset(c)).filter(d => d.data.length);
+// 保存グラフ用: 保存時点でtempFilterPoints済みのpointsをそのまま使い、再フィルタしない
+function tempLineDatasetFrozen(c) {
+  const color = tempColorFor(c);
+  return {
+    type: 'line', label: `${c.siteName}${c.no}`,
+    data: c.points.map(p => ({ x: p.x, y: p.temp })),
+    borderColor: color, backgroundColor: color, pointRadius: 0, borderWidth: 1.5, tension: 0.15,
+  };
+}
+
+function tempChartConfig(items, frozen = false) {
+  const datasets = items.map(c => (frozen ? tempLineDatasetFrozen(c) : tempLineDataset(c))).filter(d => d.data.length);
   return {
     type: 'line',
     data: { datasets },
@@ -5155,7 +5294,10 @@ async function renderTempTab() {
     bodyHtml = groups.length
       ? `<div class="weekly-grid">${groups.map((g, idx) => `
         <div class="weekly-chart-card" style="cursor:zoom-in" onclick="tempOpenZoomGroup(${idx})">
-          <div class="weekly-chart-title">${g.label}<span class="sub">(${g.items.length}コンテナ)</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div class="weekly-chart-title" style="margin-bottom:0">${g.label}<span class="sub">(${g.items.length}コンテナ)</span></div>
+            <button onclick="event.stopPropagation();tempSaveGroupChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+          </div>
           <div class="chart-wrap" style="height:260px"><canvas id="temp-group-${idx}"></canvas></div>
         </div>`).join('')}</div>`
       : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
@@ -5200,7 +5342,10 @@ async function renderTempTab() {
         <div>
           ${tempSelected.size ? `<button class="sort-btn" onclick="tempClearSelection()" style="margin-bottom:10px">選択解除 (${tempSelected.size})</button>` : ''}
           <div style="background:#13151f;border-radius:12px;padding:16px">
-            <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">温度推移</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+              <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">温度推移</div>
+              ${selected.length ? `<button onclick="tempSaveContainerChart()" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>` : ''}
+            </div>
             ${analysisPackLegendHtml()}
             ${selected.length
               ? `<div style="position:relative;height:480px;cursor:zoom-in" onclick="tempOpenZoomContainer()"><canvas id="temp-container-canvas"></canvas></div>`
@@ -5242,6 +5387,284 @@ function tempCloseZoom() {
   if (tempZoomChartInstance) { tempZoomChartInstance.destroy(); tempZoomChartInstance = null; }
 }
 
+// 温度分析タブの各グラフ用「保存」ボタンの入口。現在のtempFiltersをその場で焼き込んで凍結保存する
+function tempSaveChart(title, items) {
+  const frozenItems = items.map(c => ({
+    key: c.key, siteName: c.siteName, no: c.no, name: c.name, startDate: c.startDate, lot: c.lot,
+    points: tempFilterPoints(c.points).map(p => ({ x: p.x, temp: p.temp })),
+  }));
+  savedOpenPicker({ kind: 'temp', title: `温度分析: ${title}`, items: frozenItems });
+}
+
+function tempSaveGroupChart(idx) {
+  if (!tempCurrentGroups || !tempCurrentGroups[idx]) return;
+  tempSaveChart(tempCurrentGroups[idx].label, tempCurrentGroups[idx].items);
+}
+
+function tempSaveContainerChart() {
+  if (!tempCurrentSelected || !tempCurrentSelected.length) return;
+  tempSaveChart('コンテナ指定比較', tempCurrentSelected);
+}
+
+// ── 保存グラフタブ ────────────────────────────────────────────────────────────
+// 分析タブ・温度分析タブの各グラフの📌ボタンから凍結保存されたスナップショットを、
+// 名前付きコレクション単位でまとめて閲覧・共有できるようにする。
+
+const SAVED_COLLECTIONS_KEY = 'savedChartCollections';
+
+function savedCollectionsLoad() {
+  try {
+    const raw = localStorage.getItem(SAVED_COLLECTIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+
+function savedCollectionsPersist() {
+  try { localStorage.setItem(SAVED_COLLECTIONS_KEY, JSON.stringify(savedCollections)); }
+  catch (e) { /* 容量超過等は保存をあきらめる(表示は継続) */ }
+}
+
+function savedGenId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+let savedCollections = savedCollectionsLoad();
+let savedActiveCollectionId = savedCollections[0]?.id || null;
+let savedTabActive = false;
+let savedTabCharts = [];
+let savedPickerPending = null; // 保存待ちのスナップショット { kind, configKey?, title, items, lotColorMap? }
+
+function savedToast(message) {
+  const el = document.createElement('div');
+  el.textContent = message;
+  el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1d27;border:1px solid #2e3148;color:#e2e8f0;padding:10px 18px;border-radius:8px;font-size:0.85rem;z-index:2000;box-shadow:0 4px 16px rgba(0,0,0,0.4)';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
+// 分析/温度分析タブの📌ボタンの共通入口。どのコレクションに保存するかをモーダルで選ばせる
+function savedOpenPicker(snapshot) {
+  savedPickerPending = snapshot;
+  const listEl = document.getElementById('saved-picker-list');
+  listEl.innerHTML = savedCollections.length
+    ? savedCollections.map(col => `
+      <button class="sort-btn" style="display:block;width:100%;text-align:left;margin-bottom:6px"
+        onclick="savedPickerConfirm('${col.id}')">${col.name}<span style="color:#64748b;font-size:0.75rem"> (${col.charts.length}件)</span></button>`).join('')
+    : `<div style="color:#64748b;font-size:0.82rem;padding:6px 0 12px">まだコレクションがありません。下から新規作成してください。</div>`;
+  document.getElementById('saved-picker-newname').value = '';
+  document.getElementById('saved-picker-modal').style.display = 'flex';
+}
+
+function savedPickerClose() {
+  document.getElementById('saved-picker-modal').style.display = 'none';
+  savedPickerPending = null;
+}
+
+function savedPickerConfirm(collectionId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col || !savedPickerPending) return;
+  col.charts.push({ id: savedGenId(), savedAt: new Date().toISOString(), ...savedPickerPending });
+  savedCollectionsPersist();
+  savedActiveCollectionId = col.id;
+  savedPickerClose();
+  savedToast(`「${col.name}」に保存しました`);
+  if (savedTabActive) renderSavedTab();
+}
+
+function savedPickerCreateAndConfirm() {
+  const input = document.getElementById('saved-picker-newname');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  const col = { id: savedGenId(), name, createdAt: new Date().toISOString(), charts: [] };
+  savedCollections.push(col);
+  savedPickerConfirm(col.id);
+}
+
+function savedChartRemove(collectionId, chartId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  col.charts = col.charts.filter(ch => ch.id !== chartId);
+  savedCollectionsPersist();
+  renderSavedTab();
+}
+
+function savedCollectionCreate() {
+  const name = prompt('新しいコレクション名を入力してください');
+  if (!name || !name.trim()) return;
+  const col = { id: savedGenId(), name: name.trim(), createdAt: new Date().toISOString(), charts: [] };
+  savedCollections.push(col);
+  savedCollectionsPersist();
+  savedActiveCollectionId = col.id;
+  renderSavedTab();
+}
+
+function savedCollectionRename(id) {
+  const col = savedCollections.find(c => c.id === id);
+  if (!col) return;
+  const name = prompt('コレクション名を変更', col.name);
+  if (!name || !name.trim()) return;
+  col.name = name.trim();
+  savedCollectionsPersist();
+  renderSavedTab();
+}
+
+function savedCollectionDelete(id) {
+  const col = savedCollections.find(c => c.id === id);
+  if (!col) return;
+  if (!confirm(`コレクション「${col.name}」を削除しますか？(${col.charts.length}件のグラフも削除されます)`)) return;
+  savedCollections = savedCollections.filter(c => c.id !== id);
+  savedCollectionsPersist();
+  if (savedActiveCollectionId === id) savedActiveCollectionId = savedCollections[0]?.id || null;
+  renderSavedTab();
+}
+
+function savedSetActiveCollection(id) {
+  savedActiveCollectionId = id;
+  renderSavedTab();
+}
+
+// 保存済みスナップショットからChart.js設定を再構築する。kindごとに既存のビルダー関数をそのまま再利用する
+function savedBuildChartConfig(chart) {
+  if (chart.kind === 'analysis') {
+    const cfg = ANALYSIS_CHART_CONFIGS[chart.configKey];
+    if (!cfg) return null;
+    const lotColorMap = chart.lotColorMap || {};
+    const lotColors = chart.items.map(c => analysisLotColorFor(lotColorMap, c.lot));
+    const lotTickColor = ctx => lotColors[ctx.index] || '#8892a4';
+    return cfg.build(chart.items, lotColors, lotTickColor);
+  }
+  if (chart.kind === 'temp') {
+    return tempChartConfig(chart.items, true);
+  }
+  return null;
+}
+
+function renderSavedTab() {
+  const section = document.getElementById('saved-section');
+  if (!section) return;
+
+  savedTabCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+  savedTabCharts = [];
+
+  if (!savedActiveCollectionId && savedCollections.length) savedActiveCollectionId = savedCollections[0].id;
+  const activeCol = savedCollections.find(c => c.id === savedActiveCollectionId) || null;
+
+  const collectionTabsHtml = savedCollections.map(col => `
+    <span style="display:inline-flex;align-items:center;gap:2px">
+      <button class="sort-btn${col.id === savedActiveCollectionId ? ' active' : ''}" onclick="savedSetActiveCollection('${col.id}')">${col.name}<span style="color:#64748b;font-size:0.72rem"> (${col.charts.length})</span></button>
+      <button title="名前変更" onclick="savedCollectionRename('${col.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.85rem;padding:2px 4px">✏️</button>
+      <button title="削除" onclick="savedCollectionDelete('${col.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.85rem;padding:2px 4px">🗑</button>
+    </span>`).join('');
+
+  const headerHtml = `
+    <div class="section-title" style="margin-bottom:12px">保存グラフ<span class="sub">お気に入りのグラフをコレクションにまとめて保存・共有</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px">
+      ${collectionTabsHtml}
+      <button class="sort-btn" onclick="savedCollectionCreate()">＋ 新規コレクション</button>
+    </div>`;
+
+  if (!activeCol) {
+    section.innerHTML = `${headerHtml}
+      <div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">
+        保存されたグラフはありません。分析タブ・温度分析タブの各グラフにある📌ボタンから保存できます。
+      </div>`;
+    return;
+  }
+
+  const chartsHtml = activeCol.charts.length ? activeCol.charts.map((chart, idx) => `
+    <div style="background:#13151f;border-radius:12px;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
+        <div>
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">${chart.title}</div>
+          <div style="color:#64748b;font-size:0.7rem;margin-top:2px">${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存</div>
+        </div>
+        <button title="削除" onclick="savedChartRemove('${activeCol.id}','${chart.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem">🗑</button>
+      </div>
+      <div style="position:relative;height:280px"><canvas id="saved-chart-${idx}"></canvas></div>
+    </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">このコレクションにはまだグラフがありません。</div>`;
+
+  section.innerHTML = `${headerHtml}
+    <div style="margin-bottom:16px">
+      <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">${chartsHtml}</div>`;
+
+  activeCol.charts.forEach((chart, idx) => {
+    const canvas = document.getElementById(`saved-chart-${idx}`);
+    if (!canvas) return;
+    const cfg = savedBuildChartConfig(chart);
+    if (!cfg) return;
+    savedTabCharts.push(new Chart(canvas, cfg));
+  });
+}
+
+// ── 共有リンク ──────────────────────────────────────────────────────────────
+// 日本語を含むJSONを安全にbase64化する(大きなデータでも引数展開の上限に当たらないようチャンク分割する)
+function savedTextToBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+function savedBase64ToText(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function savedShareCollection(collectionId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  const payload = { name: col.name, charts: col.charts };
+  const encoded = savedTextToBase64(JSON.stringify(payload));
+  const url = `${location.origin}${location.pathname}#sharedCollection=${encoded}`;
+  if (url.length > 8000) {
+    savedToast('リンクが長いため、一部の共有ツールでは送れない可能性があります');
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url).then(
+      () => savedToast('共有リンクをコピーしました'),
+      () => prompt('このリンクをコピーしてください', url),
+    );
+  } else {
+    prompt('このリンクをコピーしてください', url);
+  }
+}
+
+// ページ読み込み時、共有リンク(#sharedCollection=...)があれば新規コレクションとして取り込む(自分のローカル保存分は保持したまま追加)。
+// 取り込んで保存グラフタブに切り替えた場合はtrueを返す(呼び出し側でデフォルトタブ表示をスキップするため)
+function savedImportFromHash() {
+  const m = location.hash.match(/^#sharedCollection=(.+)$/);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  let payload;
+  try { payload = JSON.parse(savedBase64ToText(decodeURIComponent(m[1]))); }
+  catch (e) { console.error('[savedImportFromHash] parse error', e); return false; }
+  if (!payload || !Array.isArray(payload.charts)) return false;
+  if (!confirm(`共有されたコレクション「${payload.name}」(${payload.charts.length}件のグラフ)を読み込みますか？`)) return false;
+  const col = {
+    id: savedGenId(),
+    name: payload.name || '共有コレクション',
+    createdAt: new Date().toISOString(),
+    charts: payload.charts.map(ch => ({ ...ch, id: savedGenId() })),
+  };
+  savedCollections.push(col);
+  savedCollectionsPersist();
+  savedActiveCollectionId = col.id;
+  savedOpenTab();
+  return true;
+}
+
+// 保存グラフタブへ切り替える(共有リンク読み込み後などに使用)
+function savedOpenTab() {
+  const btn = document.getElementById('saved-tab-btn');
+  if (btn) btn.click();
+}
+
 window.addEventListener('error', e => {
   console.error('[global error]', e.message, e.filename, e.lineno);
   const el = document.getElementById('main');
@@ -5263,8 +5686,12 @@ try { initTabs(); } catch(e) {
   document.getElementById('tabs').innerHTML =
     `<span style="color:#f87171;padding:12px;font-size:0.85rem">タブ初期化エラー: ${e.message}</span>`;
 }
-scatterTabActive = true;
-try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
+let sharedCollectionImported = false;
+try { sharedCollectionImported = savedImportFromHash(); } catch(e) { console.error('[savedImportFromHash error]', e); }
+if (!sharedCollectionImported) {
+  scatterTabActive = true;
+  try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
+}
 
 loadWeeklySection().catch(() => {});
 
