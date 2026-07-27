@@ -6134,18 +6134,34 @@ async function savedExportCollectionPdf(collectionId) {
     addTextBlock(`出力日時: ${new Date().toLocaleString('ja-JP')}`, { fontSize: 10, color: '#666666' });
     y += 6;
 
-    col.charts.forEach((chart, idx) => {
-      const canvas = document.getElementById(`saved-chart-${idx}`);
-      addTextBlock(chart.title, { fontSize: 13, fontWeight: 'bold' });
-      addTextBlock(`${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存`, { fontSize: 9, color: '#666666' });
-      if (canvas && canvas.width && canvas.height) {
-        const imgW = contentWidth;
-        const imgH = imgW * (canvas.height / canvas.width);
-        ensureSpace(imgH + 16);
-        pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, y, imgW, imgH);
-        y += imgH + 16;
-      }
-    });
+    // 画面の保存グラフ一覧と同じく、グラフをグリッド状(2列)に並べて項目別に見比べやすくする
+    const gridCols = 2;
+    const gridGap = 12;
+    const colWidth = (contentWidth - gridGap * (gridCols - 1)) / gridCols;
+    for (let i = 0; i < col.charts.length; i += gridCols) {
+      const rowCells = col.charts.slice(i, i + gridCols).map((chart, colIdx) => {
+        const idx = i + colIdx;
+        const canvas = document.getElementById(`saved-chart-${idx}`);
+        const title = savedTextToImage(chart.title, { fontSize: 11, fontWeight: 'bold', maxWidthPx: colWidth });
+        const timestamp = savedTextToImage(`${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存`, { fontSize: 8, color: '#666666', maxWidthPx: colWidth });
+        const imgH = canvas && canvas.width && canvas.height ? colWidth * (canvas.height / canvas.width) : 0;
+        return { canvas, title, timestamp, imgH };
+      });
+      const rowHeight = Math.max(...rowCells.map(c => c.title.heightPx + 2 + c.timestamp.heightPx + 4 + c.imgH));
+      ensureSpace(rowHeight + 16);
+      rowCells.forEach((cell, colIdx) => {
+        const x = margin + colIdx * (colWidth + gridGap);
+        let cellY = y;
+        pdf.addImage(cell.title.dataUrl, 'PNG', x, cellY, cell.title.widthPx, cell.title.heightPx);
+        cellY += cell.title.heightPx + 2;
+        pdf.addImage(cell.timestamp.dataUrl, 'PNG', x, cellY, cell.timestamp.widthPx, cell.timestamp.heightPx);
+        cellY += cell.timestamp.heightPx + 4;
+        if (cell.canvas && cell.imgH) {
+          pdf.addImage(cell.canvas.toDataURL('image/png', 1.0), 'PNG', x, cellY, colWidth, cell.imgH);
+        }
+      });
+      y += rowHeight + 16;
+    }
 
     const notes = savedEnsureNotes(col);
     addTextBlock('分析メモ', { fontSize: 15, fontWeight: 'bold' });
