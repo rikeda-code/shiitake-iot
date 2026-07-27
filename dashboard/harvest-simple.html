@@ -5933,7 +5933,10 @@ function savedShareCollection(collectionId) {
   if (!col) return;
   const payload = { name: col.name, charts: col.charts };
   const encoded = savedTextToBase64(JSON.stringify(payload));
-  const url = `${location.origin}${location.pathname}#sharedCollection=${encoded}`;
+  // base64の+//=がそのままだと、チャットアプリのリンクプレビュー生成やコピー経路で
+  // 文字化けし、受け取った側で確認ダイアログすら出ないまま静かに読み込みが失敗することがある。
+  // URLエンコードして%XXだけの安全な文字列にすることでこれを防ぐ。
+  const url = `${location.origin}${location.pathname}#sharedCollection=${encodeURIComponent(encoded)}`;
   if (url.length > 8000) {
     savedToast('リンクが長いため、一部の共有ツールでは送れない可能性があります');
   }
