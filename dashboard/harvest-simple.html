@@ -208,8 +208,15 @@
       .weekly-grid { grid-template-columns: 1fr; }
     }
 
-    /* 保存グラフのPDF出力用コンテナ。html2canvasで描画キャプチャするため画面外に配置(display:noneだとレイアウトされずキャプチャできない) */
-    #print-pdf-container { position: fixed; left: -99999px; top: 0; width: 800px; background: #fff; }
+    /* 保存グラフのPDF出力用コンテナ。html2canvasは画面外に大きくオフセットした要素(例: left:-99999px)を
+       正しくキャプチャできず白紙になることがあるため、画面内(top:0,left:0)に置いた上で
+       ローディングオーバーレイ(#pdf-generating-overlay)で覆い隠す方式にしている。 */
+    #print-pdf-container { position: fixed; top: 0; left: 0; width: 800px; background: #fff; z-index: 9998; }
+    #pdf-generating-overlay {
+      display: none; position: fixed; inset: 0; z-index: 9999;
+      background: #0f1117; color: #e2e8f0; align-items: center; justify-content: center;
+      font-size: 0.95rem;
+    }
   </style>
 </head>
 <body>
@@ -236,6 +243,7 @@
 <section id="temp-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="saved-section" style="display:none;margin:0 32px 40px;"></section>
 <div id="print-pdf-container"></div>
+<div id="pdf-generating-overlay">PDFを生成しています…</div>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -6089,15 +6097,23 @@ function savedBuildPrintHtml(col) {
     </div>`;
 }
 
+function savedNextPaint() {
+  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
 async function savedExportCollectionPdf(collectionId) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col) return;
   const container = document.getElementById('print-pdf-container');
+  const overlay = document.getElementById('pdf-generating-overlay');
   if (!container) return;
   container.innerHTML = savedBuildPrintHtml(col);
+  if (overlay) overlay.style.display = 'flex';
   savedToast('PDFを生成しています…');
   try {
     await waitForHtml2Pdf();
+    // グラフ画像・レイアウトの描画が確実に終わってからキャプチャする
+    await savedNextPaint();
     await window.html2pdf().from(container).set({
       margin: 10,
       filename: `${savedSafeFilename(col.name)}.pdf`,
@@ -6111,6 +6127,7 @@ async function savedExportCollectionPdf(collectionId) {
     savedToast('PDF生成に失敗しました(通信環境をご確認ください)');
   } finally {
     container.innerHTML = '';
+    if (overlay) overlay.style.display = 'none';
   }
 }
 
