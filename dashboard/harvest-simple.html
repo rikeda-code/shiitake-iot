@@ -4327,6 +4327,9 @@ async function renderAnalysisTab() {
   // 相関図は「栽培日数」「栽培開始日」フィルターで栽培期間を絞れるよう、
   // フィルターから外れた選択(hiddenSelected)は含めない(他タブは選択維持のため含める)
   const chartItems = analysisSubTab === 'correlation' ? selected : allSelected;
+  // グラフの横軸は「左が古い・右が新しい」の一般的な並びにする。
+  // 左側の候補一覧は新しい順のままにしておきたいため、グラフ表示用に別途昇順で並べ替える。
+  const chartOrderedSelected = [...allSelected].sort((a, b) => (parseDateStr(a.startDate) || 0) - (parseDateStr(b.startDate) || 0));
 
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
   const rightHtml = !allSelected.length
@@ -4335,8 +4338,8 @@ async function renderAnalysisTab() {
       : analysisSubTab === 'correlation'
         ? (chartItems.length ? renderAnalysisCorrelationView(chartItems)
           : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">現在の栽培期間フィルターに一致する選択コンテナがありません</div>`)
-      : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrendView(allSelected)
-      : renderAnalysisComparison(allSelected, lotColorMap));
+      : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrendView(chartOrderedSelected)
+      : renderAnalysisComparison(chartOrderedSelected, lotColorMap));
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
@@ -4396,7 +4399,8 @@ async function renderAnalysisTab() {
       <div>${rightHtml}</div>
     </div>`;
 
-  if (chartItems.length) drawAnalysisCharts(chartItems, lotColorMap);
+  const drawItems = analysisSubTab === 'correlation' ? chartItems : chartOrderedSelected;
+  if (drawItems.length) drawAnalysisCharts(drawItems, lotColorMap);
 }
 
 function renderAnalysisComparison(items, lotColorMap) {
