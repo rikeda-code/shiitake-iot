@@ -208,15 +208,6 @@
       .weekly-grid { grid-template-columns: 1fr; }
     }
 
-    /* 保存グラフのPDF出力用コンテナ。html2canvasは画面外に大きくオフセットした要素(例: left:-99999px)を
-       正しくキャプチャできず白紙になることがあるため、画面内(top:0,left:0)に置いた上で
-       ローディングオーバーレイ(#pdf-generating-overlay)で覆い隠す方式にしている。 */
-    #print-pdf-container { position: fixed; top: 0; left: 0; width: 800px; background: #fff; z-index: 9998; }
-    #pdf-generating-overlay {
-      display: none; position: fixed; inset: 0; z-index: 9999;
-      background: #0f1117; color: #e2e8f0; align-items: center; justify-content: center;
-      font-size: 0.95rem;
-    }
   </style>
 </head>
 <body>
@@ -242,8 +233,6 @@
 <section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="temp-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="saved-section" style="display:none;margin:0 32px 40px;"></section>
-<div id="print-pdf-container"></div>
-<div id="pdf-generating-overlay">PDFを生成しています…</div>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -6036,23 +6025,25 @@ function renderSavedTab() {
 // ── PDF出力 ────────────────────────────────────────────────────────────────
 // 巨大なコレクション(グラフ数が多い・温度など点数の多いデータ)はURL共有だと文字数が
 // 数十万字に達し実用的に送れないため、PDFとして直接ダウンロード保存できるようにする。
-// jsPDF単体でPDFを直接組み立てると日本語フォントが埋め込まれず文字化けするため、
-// html2canvasでDOMをブラウザにそのまま描画・画像化してからPDFに埋め込む(html2pdf.js)ことで
-// 日本語表示とグラフの見た目(配色・レイアウト)を確実に保っている。
-function waitForHtml2Pdf(ms = 15000) {
-  if (window.html2pdf) return Promise.resolve();
+// html2canvasでDOM全体を画像化する方式は、画面外配置や画像の読み込みタイミングに起因して
+// 白紙PDFになる不具合が繰り返し発生したため採用しない。代わりに、グラフはすでに生成済みの
+// PNG画像(canvas.toDataURL)をjsPDFで直接埋め込み、日本語テキスト(タイトル・メモ)は
+// ブラウザのCanvas 2D(fillText)でラスタライズしてから画像として埋め込む。
+// jsPDFのネイティブテキスト描画は日本語フォントが埋め込まれず文字化けするため使わない。
+function waitForJsPDF(ms = 15000) {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    if (!document.getElementById('html2pdf-cdn-script')) {
+    if (!document.getElementById('jspdf-cdn-script')) {
       const s = document.createElement('script');
-      s.id = 'html2pdf-cdn-script';
-      s.src = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js';
-      s.onerror = () => reject(new Error('html2pdf failed to load'));
+      s.id = 'jspdf-cdn-script';
+      s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
+      s.onerror = () => reject(new Error('jsPDF failed to load'));
       document.head.appendChild(s);
     }
     const deadline = Date.now() + ms;
     const poll = () => {
-      if (window.html2pdf) { resolve(); return; }
-      if (Date.now() > deadline) { reject(new Error('html2pdf load timeout')); return; }
+      if (window.jspdf && window.jspdf.jsPDF) { resolve(); return; }
+      if (Date.now() > deadline) { reject(new Error('jsPDF load timeout')); return; }
       setTimeout(poll, 100);
     };
     setTimeout(poll, 100);
@@ -6064,72 +6055,103 @@ function savedSafeFilename(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').trim() || 'saved-collection';
 }
 
-function savedBuildPrintHtml(col) {
-  const chartsHtml = col.charts.map((chart, idx) => {
-    const canvas = document.getElementById(`saved-chart-${idx}`);
-    const imgSrc = canvas ? canvas.toDataURL('image/png', 1.0) : '';
-    return `
-      <div style="break-inside:avoid;page-break-inside:avoid;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #ccc">
-        <div style="font-size:13px;font-weight:700;margin-bottom:2px">${savedEscapeForTextarea(chart.title)}</div>
-        <div style="font-size:10px;color:#666;margin-bottom:8px">${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存</div>
-        ${imgSrc ? `<img src="${imgSrc}" style="max-width:100%">` : '<div style="font-size:11px;color:#999">(画像を生成できませんでした)</div>'}
-      </div>`;
-  }).join('');
+// テキストをオフスクリーンcanvasにラスタライズしてPNG化する(日本語対応・折り返し込み)
+function savedTextToImage(text, { fontSize = 14, fontWeight = 'normal', color = '#111111', maxWidthPx = 760, lineHeight = 1.4 } = {}) {
+  const scale = 2; // 高解像度化(retina対応)
+  const font = `${fontWeight} ${fontSize}px sans-serif`;
+  const measureCanvas = document.createElement('canvas');
+  const measureCtx = measureCanvas.getContext('2d');
+  measureCtx.font = font;
 
-  const notes = savedEnsureNotes(col);
-  const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
-    <div style="margin-bottom:6px;font-size:11px"><b>${f.label}:</b> ${savedEscapeForTextarea(notes.summary[f.key]).replace(/\n/g, '<br>') || '(未記入)'}</div>`).join('');
-  const numberedHtml = arr => arr.map((v, i) => `
-    <div style="margin-bottom:6px;font-size:11px">${i + 1}. ${savedEscapeForTextarea(v).replace(/\n/g, '<br>') || '(未記入)'}</div>`).join('');
+  const lines = [];
+  String(text ?? '').split('\n').forEach(paragraph => {
+    let line = '';
+    for (const ch of paragraph) {
+      const test = line + ch;
+      if (line && measureCtx.measureText(test).width > maxWidthPx) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = test;
+      }
+    }
+    lines.push(line);
+  });
+  if (!lines.length) lines.push('');
 
-  return `
-    <div style="font-family:sans-serif;color:#111;padding:24px;max-width:800px;margin:0 auto">
-      <h1 style="font-size:19px;margin-bottom:4px">${savedEscapeForTextarea(col.name)}</h1>
-      <div style="font-size:10px;color:#666;margin-bottom:20px">出力日時: ${new Date().toLocaleString('ja-JP')}</div>
-      ${chartsHtml}
-      <div style="break-inside:avoid;page-break-inside:avoid;margin-top:20px">
-        <h2 style="font-size:15px;margin-bottom:10px">分析メモ</h2>
-        <h3 style="font-size:12px;margin-bottom:6px">① 現状整理・傾向</h3>
-        ${summaryHtml}
-        <h3 style="font-size:12px;margin:14px 0 6px">② 分析内容</h3>
-        ${numberedHtml(notes.analysis)}
-        <h3 style="font-size:12px;margin:14px 0 6px">③ 対応策</h3>
-        ${numberedHtml(notes.actions)}
-      </div>
-    </div>`;
-}
+  const lineHeightPx = Math.ceil(fontSize * lineHeight);
+  const heightPx = lineHeightPx * lines.length;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(maxWidthPx * scale);
+  canvas.height = Math.ceil(heightPx * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'top';
+  lines.forEach((line, i) => ctx.fillText(line, 0, i * lineHeightPx));
 
-function savedNextPaint() {
-  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  return { dataUrl: canvas.toDataURL('image/png'), widthPx: maxWidthPx, heightPx };
 }
 
 async function savedExportCollectionPdf(collectionId) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col) return;
-  const container = document.getElementById('print-pdf-container');
-  const overlay = document.getElementById('pdf-generating-overlay');
-  if (!container) return;
-  container.innerHTML = savedBuildPrintHtml(col);
-  if (overlay) overlay.style.display = 'flex';
   savedToast('PDFを生成しています…');
   try {
-    await waitForHtml2Pdf();
-    // グラフ画像・レイアウトの描画が確実に終わってからキャプチャする
-    await savedNextPaint();
-    await window.html2pdf().from(container).set({
-      margin: 10,
-      filename: `${savedSafeFilename(col.name)}.pdf`,
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, backgroundColor: '#ffffff' },
-      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'] },
-    }).save();
+    await waitForJsPDF();
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 36;
+    const contentWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const ensureSpace = neededHeight => {
+      if (y + neededHeight > pageHeight - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+    };
+    const addTextBlock = (text, opts) => {
+      if (!text) return;
+      const { dataUrl, widthPx, heightPx } = savedTextToImage(text, { maxWidthPx: contentWidth, ...opts });
+      ensureSpace(heightPx + 6);
+      pdf.addImage(dataUrl, 'PNG', margin, y, widthPx, heightPx);
+      y += heightPx + 6;
+    };
+
+    addTextBlock(col.name, { fontSize: 20, fontWeight: 'bold', color: '#111111' });
+    addTextBlock(`出力日時: ${new Date().toLocaleString('ja-JP')}`, { fontSize: 10, color: '#666666' });
+    y += 6;
+
+    col.charts.forEach((chart, idx) => {
+      const canvas = document.getElementById(`saved-chart-${idx}`);
+      addTextBlock(chart.title, { fontSize: 13, fontWeight: 'bold' });
+      addTextBlock(`${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存`, { fontSize: 9, color: '#666666' });
+      if (canvas && canvas.width && canvas.height) {
+        const imgW = contentWidth;
+        const imgH = imgW * (canvas.height / canvas.width);
+        ensureSpace(imgH + 16);
+        pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, y, imgW, imgH);
+        y += imgH + 16;
+      }
+    });
+
+    const notes = savedEnsureNotes(col);
+    addTextBlock('分析メモ', { fontSize: 15, fontWeight: 'bold' });
+    addTextBlock('① 現状整理・傾向', { fontSize: 12, fontWeight: 'bold' });
+    SAVED_NOTE_SUMMARY_FIELDS.forEach(f => addTextBlock(`${f.label}: ${notes.summary[f.key] || '(未記入)'}`, { fontSize: 10 }));
+    addTextBlock('② 分析内容', { fontSize: 12, fontWeight: 'bold' });
+    notes.analysis.forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
+    addTextBlock('③ 対応策', { fontSize: 12, fontWeight: 'bold' });
+    notes.actions.forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
+
+    pdf.save(`${savedSafeFilename(col.name)}.pdf`);
   } catch (e) {
     console.error('[savedExportCollectionPdf] failed', e);
     savedToast('PDF生成に失敗しました(通信環境をご確認ください)');
-  } finally {
-    container.innerHTML = '';
-    if (overlay) overlay.style.display = 'none';
   }
 }
 
