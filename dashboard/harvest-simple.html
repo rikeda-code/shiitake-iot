@@ -3379,10 +3379,18 @@ function mekakiWeeklyChartConfig(rows) {
       plugins: { legend: { display: false }, tooltip: tooltipDefaults },
       scales: {
         x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
-        y: { min: 0, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { min: 0, max: 400, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
   };
+}
+
+// 芽かき量タブの各週カード用「保存」ボタンの入口。そのままの拠点別配色データを凍結保存する
+function mekakiSaveWeeklyChart(idx) {
+  if (!mekakiWeeklyGroups || !mekakiWeeklyGroups[idx]) return;
+  const group = mekakiWeeklyGroups[idx];
+  const frozenRows = group.rows.map(r => ({ siteName: r.siteName, no: r.no, lot: r.lot, converted: r.converted }));
+  savedOpenPicker({ kind: 'mekaki-weekly', title: `芽かき量: ${group.label}`, items: frozenRows });
 }
 
 function renderMekakiWeeklySection(section) {
@@ -3394,7 +3402,10 @@ function renderMekakiWeeklySection(section) {
 
   const cardsHtml = groups.length ? groups.map((g, idx) => `
     <div class="weekly-chart-card">
-      <div class="weekly-chart-title">${g.label}<span class="sub">(${g.rows.length}コンテナ)</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${g.label}<span class="sub">(${g.rows.length}コンテナ)</span></div>
+        <button onclick="mekakiSaveWeeklyChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
       <div class="chart-wrap" style="height:260px"><canvas id="mekaki-week-${idx}"></canvas></div>
     </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
 
@@ -5547,9 +5558,24 @@ function savedCollectionsLoad() {
   } catch (e) { return []; }
 }
 
+// 保存に成功すればtrue、失敗(主に容量超過)すればfalseを返す。
+// 呼び出し側は失敗時に必ずロールバック+ユーザーへの通知を行うこと(でないと「見た目は保存済みだが
+// リロードすると消えている」という事故につながる)。
 function savedCollectionsPersist() {
-  try { localStorage.setItem(SAVED_COLLECTIONS_KEY, JSON.stringify(savedCollections)); }
-  catch (e) { /* 容量超過等は保存をあきらめる(表示は継続) */ }
+  try {
+    localStorage.setItem(SAVED_COLLECTIONS_KEY, JSON.stringify(savedCollections));
+    return true;
+  } catch (e) {
+    // 容量超過時は、再取得可能なgvizキャッシュ(5分間の一時キャッシュ)を解放して1回だけ再試行する
+    try {
+      clearGvizCache();
+      localStorage.setItem(SAVED_COLLECTIONS_KEY, JSON.stringify(savedCollections));
+      return true;
+    } catch (e2) {
+      console.error('[savedCollectionsPersist] failed', e2);
+      return false;
+    }
+  }
 }
 
 function savedGenId() {
@@ -5588,11 +5614,19 @@ function savedPickerClose() {
   savedPickerPending = null;
 }
 
-function savedPickerConfirm(collectionId) {
+function savedPickerConfirm(collectionId, isNewCollection = false) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col || !savedPickerPending) return;
   col.charts.push({ id: savedGenId(), savedAt: new Date().toISOString(), ...savedPickerPending });
-  savedCollectionsPersist();
+  if (!savedCollectionsPersist()) {
+    // 保存に失敗したのに見た目だけ保存済みになる事故を防ぐため、メモリ上の変更も取り消す
+    col.charts.pop();
+    if (isNewCollection) savedCollections = savedCollections.filter(c => c.id !== collectionId);
+    savedPickerClose();
+    savedToast('保存に失敗しました(ブラウザの保存容量が上限です)。不要な保存グラフを削除してからお試しください');
+    if (savedTabActive) renderSavedTab();
+    return;
+  }
   savedActiveCollectionId = col.id;
   savedPickerClose();
   savedToast(`「${col.name}」に保存しました`);
@@ -5605,14 +5639,15 @@ function savedPickerCreateAndConfirm() {
   if (!name) { input.focus(); return; }
   const col = { id: savedGenId(), name, createdAt: new Date().toISOString(), charts: [] };
   savedCollections.push(col);
-  savedPickerConfirm(col.id);
+  savedPickerConfirm(col.id, true);
 }
 
 function savedChartRemove(collectionId, chartId) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col) return;
+  const prevCharts = col.charts;
   col.charts = col.charts.filter(ch => ch.id !== chartId);
-  savedCollectionsPersist();
+  if (!savedCollectionsPersist()) { col.charts = prevCharts; savedToast('削除を保存できませんでした'); }
   renderSavedTab();
 }
 
@@ -5621,7 +5656,11 @@ function savedCollectionCreate() {
   if (!name || !name.trim()) return;
   const col = { id: savedGenId(), name: name.trim(), createdAt: new Date().toISOString(), charts: [] };
   savedCollections.push(col);
-  savedCollectionsPersist();
+  if (!savedCollectionsPersist()) {
+    savedCollections = savedCollections.filter(c => c.id !== col.id);
+    savedToast('コレクションを作成できませんでした(ブラウザの保存容量が上限です)');
+    return;
+  }
   savedActiveCollectionId = col.id;
   renderSavedTab();
 }
@@ -5631,8 +5670,9 @@ function savedCollectionRename(id) {
   if (!col) return;
   const name = prompt('コレクション名を変更', col.name);
   if (!name || !name.trim()) return;
+  const prevName = col.name;
   col.name = name.trim();
-  savedCollectionsPersist();
+  if (!savedCollectionsPersist()) { col.name = prevName; savedToast('名前の変更を保存できませんでした'); }
   renderSavedTab();
 }
 
@@ -5640,8 +5680,9 @@ function savedCollectionDelete(id) {
   const col = savedCollections.find(c => c.id === id);
   if (!col) return;
   if (!confirm(`コレクション「${col.name}」を削除しますか？(${col.charts.length}件のグラフも削除されます)`)) return;
+  const prevCollections = savedCollections;
   savedCollections = savedCollections.filter(c => c.id !== id);
-  savedCollectionsPersist();
+  if (!savedCollectionsPersist()) { savedCollections = prevCollections; savedToast('削除を保存できませんでした'); return; }
   if (savedActiveCollectionId === id) savedActiveCollectionId = savedCollections[0]?.id || null;
   renderSavedTab();
 }
@@ -5663,6 +5704,9 @@ function savedBuildChartConfig(chart) {
   }
   if (chart.kind === 'temp') {
     return tempChartConfig(chart.items, true);
+  }
+  if (chart.kind === 'mekaki-weekly') {
+    return mekakiWeeklyChartConfig(chart.items);
   }
   return null;
 }
