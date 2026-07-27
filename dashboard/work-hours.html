@@ -3284,7 +3284,7 @@ function computePastYearCountBar(site, months) {
   return computePastYearCountBarWithBuckets(site, months, activeCountBuckets());
 }
 
-// 拠点サマリモード用：3拠点合算の前年実績人数（雇用区分トグル連動）
+// 拠点サマリモード用：選択中拠点（拠点トグル連動）の前年実績人数（雇用区分トグル連動）
 function computePastYearCountSummaryBar(months) {
   const buckets = activeCountBuckets();
   return months.map(label => {
@@ -3293,6 +3293,7 @@ function computePastYearCountSummaryBar(months) {
     const prevYm = ym - 100;
     let sum = 0, any = false;
     SITES.forEach(site => {
+      if (!siteFilter.has(site)) return;
       const bySite = pastYearCountData && pastYearCountData[site];
       if (!bySite) return;
       buckets.forEach(b => {
@@ -3456,12 +3457,13 @@ function renderStdCountSiteView() {
   });
 }
 
-// 拠点サマリ：時間画面と異なり前年棒も表示する（3拠点合算・雇用形態区分トグル連動の
-// 1本棒＋拠点別に色分けした当年積み上げ棒）
+// 拠点サマリ：前年棒（拠点トグル・雇用形態区分トグル連動の1本棒）＋拠点別に色分けした
+// 当年積み上げ棒（拠点トグル連動）を表示する
 function renderStdCountSummaryView() {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
-  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  // 前年棒・当年棒とも拠点トグルに連動させる（PR #193の時間画面拠点サマリと同じ考え方）
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s) && siteFilter.has(s));
   const cid = 'stdc_summary';
 
   content.innerHTML = `<div class="schart-shell">
