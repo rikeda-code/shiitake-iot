@@ -3387,21 +3387,25 @@ function renderStdCountSiteView() {
   const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
 
   // Y軸MAXは、拠点・業務区分・雇用形態区分いずれのトグル操作にも左右されないよう
-  // 「全トグルON」を基準に拠点ごとに独立算出する（PR #161のY軸MAX変動バグの教訓を
-  // 踏まえた対応）。業務区分トグルはemployees自体を絞り込まないためROLE_TYPESを
-  // そのまま使えばよいが、雇用形態区分トグルはgetExtendedActiveData()の時点で
-  // employeesに反映済みのため、軸算出専用に無視した（全員含む）データを別途取得する
+  // 「全トグルON」を基準に算出する（PR #161のY軸MAX変動バグの教訓を踏まえた対応）。
+  // さらに、3拠点セクション間でも見た目上の高さを比較しやすいよう、拠点ごとに
+  // 個別算出（PR #175）ではなく3拠点の中の最大値を共通のMAXとして全セクションに
+  // 適用する。拠点トグルでいずれかの拠点をOFFにしても、常にallSites（拠点トグルの
+  // 選択状態を無視した全拠点）を基準に算出するため、残るセクションのMAXは変動しない。
+  // 業務区分トグルはemployees自体を絞り込まないためROLE_TYPESをそのまま使えばよいが、
+  // 雇用形態区分トグルはgetExtendedActiveData()の時点でemployeesに反映済みのため、
+  // 軸算出専用に無視した（全員含む）データを別途取得する
   const { employees: allEmpTypeEmployees } = getExtendedActiveDataAllEmpTypes();
   const ALL_EMP_BUCKETS = new Set(['社員', 'パート', '技能実習生']);
 
-  const siteMax = {};
-  allSites.forEach(site => {
+  const siteStacksForMax = allSites.map(site => {
     const siteEmpsAll = allEmpTypeEmployees.filter(e => e.base === site);
     const currentTotalAll = months.map((_, mi) =>
       ROLE_TYPES.reduce((s, wt) => s + (countActiveEmployees(siteEmpsAll.filter(e => e.workType === wt), mi) || 0), 0));
     const previousTotalAll = computePastYearCountBarWithBuckets(site, months, ALL_EMP_BUCKETS);
-    siteMax[site] = computeSharedAxisMax([currentTotalAll, previousTotalAll], 5, 1.1);
+    return [currentTotalAll, previousTotalAll];
   });
+  const sharedSiteMax = computeSharedAxisMax(siteStacksForMax.flat(), 5, 1.1);
 
   activeSites.forEach((site, si) => {
     const cid = `stdc_site_${si}`;
@@ -3424,7 +3428,7 @@ function renderStdCountSiteView() {
       };
     });
 
-    buildStdCountChart(cid, months, [previousDataset, ...currentDatasets], siteMax[site]);
+    buildStdCountChart(cid, months, [previousDataset, ...currentDatasets], sharedSiteMax);
   });
 }
 
