@@ -3611,6 +3611,23 @@ function drawWeightCharts(result) {
   });
 }
 
+let weightViewMode = 'site'; // 'site' | 'weekly'
+let weightWeeklyCharts = [];
+let weightWeeklyGroups = null;
+
+function weightModeBarHtml() {
+  return `<div class="weekly-sort-bar" style="margin-bottom:12px">
+    <button class="sort-btn${weightViewMode === 'site' ? ' active' : ''}" onclick="weightSetViewMode('site')">拠点別</button>
+    <button class="sort-btn${weightViewMode === 'weekly' ? ' active' : ''}" onclick="weightSetViewMode('weekly')">週別グラフ</button>
+  </div>`;
+}
+
+function weightSetViewMode(mode) {
+  weightViewMode = mode;
+  const section = document.getElementById('weight-section');
+  if (mode === 'weekly') renderWeightWeeklySection(section); else renderWeightSubTabs();
+}
+
 function renderWeightSubTabs() {
   const section = document.getElementById('weight-section');
   if (!section || !weightData) return;
@@ -3626,6 +3643,7 @@ function renderWeightSubTabs() {
 
   section.innerHTML = `
     <div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    ${weightModeBarHtml()}
     <div style="display:flex;gap:4px;border-bottom:1px solid #2e3148;margin-bottom:16px">${subTabHtml}</div>
     <div id="weight-content">${renderWeightSiteContent(weightData[weightActiveSite])}</div>`;
   requestAnimationFrame(() => drawWeightCharts(weightData[weightActiveSite]));
@@ -3634,6 +3652,108 @@ function renderWeightSubTabs() {
 function weightSetSite(idx) {
   weightActiveSite = idx;
   renderWeightSubTabs();
+}
+
+// 各コンテナの計測値(measurements)を平均して、菌床初期重量・吸水量を1つの値にまとめる
+// (分析タブのbuildAnalysisDatasetにおける菌床重量の集計と同じ考え方)
+function weightAverageMeasurements(measurements) {
+  const befores = (measurements || []).map(m => m.before).filter(v => v != null);
+  const absorbs = (measurements || [])
+    .filter(m => m.before != null && m.after != null)
+    .map(m => Math.max(0, m.after - m.before));
+  return {
+    weightBefore: befores.length ? +(befores.reduce((a, b) => a + b, 0) / befores.length).toFixed(1) : null,
+    weightAbsorb: absorbs.length ? +(absorbs.reduce((a, b) => a + b, 0) / absorbs.length).toFixed(1) : null,
+  };
+}
+
+// 週別累計タブと同じ栽培開始週(日〜土)でグルーピングし、各週のコンテナ別菌床重量をまとめる
+function weightBuildWeeklyGroups() {
+  const groups = {};
+  (weightData || []).forEach(({ site, containers }) => {
+    (containers || []).forEach(c => {
+      if (!c.startDate) return;
+      const { weightBefore, weightAbsorb } = weightAverageMeasurements(c.measurements);
+      if (weightBefore == null && weightAbsorb == null) return;
+      const week = getSunSatWeek(`${c.startDate.getFullYear()}/${c.startDate.getMonth() + 1}/${c.startDate.getDate()}`);
+      if (!week) return;
+      (groups[week.key] ||= { label: week.label, rows: [] }).rows.push({
+        siteName: site.name, containerNo: c.containerNo, lot: c.lot, weightBefore, weightAbsorb,
+      });
+    });
+  });
+  const keys = Object.keys(groups).sort().reverse(); // 新しい順(週別累計タブのデフォルトに合わせる)
+  return keys.map(k => groups[k]);
+}
+
+// 菌床重量タブ本来の配色(散水前重量=青/吸水量=サーモン)をそのまま踏襲する
+function weightWeeklyChartConfig(rows) {
+  return {
+    data: {
+      labels: rows.map(r => `${r.siteName}${r.containerNo}`),
+      datasets: [
+        { type: 'bar', label: '散水前重量(初期重量)', data: rows.map(r => r.weightBefore), backgroundColor: '#60a5facc', stack: 's' },
+        { type: 'bar', label: '吸水量', data: rows.map(r => r.weightAbsorb), backgroundColor: '#fa8072cc', stack: 's' },
+      ],
+    },
+    plugins: [weightStackValuePlugin],
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toLocaleString() : '—'}g`,
+            footer: items => {
+              const total = items.reduce((s, i) => s + (i.parsed.y || 0), 0);
+              return `散水後: ${Math.round(total).toLocaleString()}g`;
+            },
+          },
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0', footerColor: '#6ee7b7',
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+// 菌床重量タブの各週カード用「保存」ボタンの入口
+function weightSaveWeeklyChart(idx) {
+  if (!weightWeeklyGroups || !weightWeeklyGroups[idx]) return;
+  const group = weightWeeklyGroups[idx];
+  savedOpenPicker({ kind: 'weight-weekly', title: `菌床重量: ${group.label}`, items: group.rows.map(r => ({ ...r })) });
+}
+
+function renderWeightWeeklySection(section) {
+  if (!section) return;
+  weightWeeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weightWeeklyCharts = [];
+
+  const groups = weightBuildWeeklyGroups();
+  weightWeeklyGroups = groups;
+
+  const cardsHtml = groups.length ? groups.map((g, idx) => `
+    <div class="weekly-chart-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${g.label}<span class="sub">(${g.rows.length}コンテナ)</span></div>
+        <button onclick="weightSaveWeeklyChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
+      <div class="chart-wrap" style="height:260px"><canvas id="weight-week-${idx}"></canvas></div>
+    </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px">菌床重量<span class="sub">週別・コンテナ別 菌床重量(散水前重量+吸水量・g)</span></div>
+    ${weightModeBarHtml()}
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  groups.forEach((g, idx) => {
+    const canvas = document.getElementById(`weight-week-${idx}`);
+    if (canvas) weightWeeklyCharts.push(new Chart(canvas, weightWeeklyChartConfig(g.rows)));
+  });
 }
 
 async function ensureWeightData() {
@@ -3652,13 +3772,16 @@ async function ensureWeightData() {
 async function renderWeightTab() {
   const section = document.getElementById('weight-section');
   if (!section) return;
-  if (weightData) { renderWeightSubTabs(); return; }
+  if (weightData) {
+    if (weightViewMode === 'weekly') renderWeightWeeklySection(section); else renderWeightSubTabs();
+    return;
+  }
 
   section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
 
   await ensureWeightData();
-  renderWeightSubTabs();
+  if (weightViewMode === 'weekly') renderWeightWeeklySection(section); else renderWeightSubTabs();
 }
 
 // ── 分析タブ ──────────────────────────────────────────────────────────────
@@ -5707,6 +5830,9 @@ function savedBuildChartConfig(chart) {
   }
   if (chart.kind === 'mekaki-weekly') {
     return mekakiWeeklyChartConfig(chart.items);
+  }
+  if (chart.kind === 'weight-weekly') {
+    return weightWeeklyChartConfig(chart.items);
   }
   return null;
 }
