@@ -207,6 +207,13 @@
       #weekly-section { margin: 0 16px 32px; }
       .weekly-grid { grid-template-columns: 1fr; }
     }
+
+    /* 保存グラフのPDF出力: #print-pdf-container だけを印刷し、他の画面要素は一切出さない */
+    #print-pdf-container { display: none; }
+    @media print {
+      body > *:not(#print-pdf-container) { display: none !important; }
+      #print-pdf-container { display: block !important; }
+    }
   </style>
 </head>
 <body>
@@ -232,6 +239,7 @@
 <section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="temp-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="saved-section" style="display:none;margin:0 32px 40px;"></section>
+<div id="print-pdf-container"></div>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -5997,8 +6005,9 @@ function renderSavedTab() {
     </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">このコレクションにはまだグラフがありません。</div>`;
 
   section.innerHTML = `${headerHtml}
-    <div style="margin-bottom:16px">
+    <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
+      <button class="sort-btn" onclick="savedExportCollectionPdf('${activeCol.id}')">🖨 PDFとして保存</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:16px">${chartsHtml}</div>
     ${savedNotesHtml(activeCol)}`;
@@ -6017,6 +6026,61 @@ function renderSavedTab() {
     savedTabCharts.push(new Chart(document.getElementById(canvasId), cfg));
   });
 }
+
+// ── PDF出力 ────────────────────────────────────────────────────────────────
+// 巨大なコレクション(グラフ数が多い・温度など点数の多いデータ)はURL共有だと文字数が
+// 数十万字に達し実用的に送れないため、ブラウザの印刷機能(PDFとして保存)を使う。
+// jsPDF等でPDFを直接組み立てると日本語フォントが埋め込まれず文字化けするため、
+// DOMをそのままブラウザに描画・印刷させることで日本語表示を確実にしている。
+function savedBuildPrintHtml(col) {
+  const chartsHtml = col.charts.map((chart, idx) => {
+    const canvas = document.getElementById(`saved-chart-${idx}`);
+    const imgSrc = canvas ? canvas.toDataURL('image/png', 1.0) : '';
+    return `
+      <div style="break-inside:avoid;page-break-inside:avoid;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #ccc">
+        <div style="font-size:13px;font-weight:700;margin-bottom:2px">${savedEscapeForTextarea(chart.title)}</div>
+        <div style="font-size:10px;color:#666;margin-bottom:8px">${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存</div>
+        ${imgSrc ? `<img src="${imgSrc}" style="max-width:100%">` : '<div style="font-size:11px;color:#999">(画像を生成できませんでした)</div>'}
+      </div>`;
+  }).join('');
+
+  const notes = savedEnsureNotes(col);
+  const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
+    <div style="margin-bottom:6px;font-size:11px"><b>${f.label}:</b> ${savedEscapeForTextarea(notes.summary[f.key]).replace(/\n/g, '<br>') || '(未記入)'}</div>`).join('');
+  const numberedHtml = arr => arr.map((v, i) => `
+    <div style="margin-bottom:6px;font-size:11px">${i + 1}. ${savedEscapeForTextarea(v).replace(/\n/g, '<br>') || '(未記入)'}</div>`).join('');
+
+  return `
+    <div style="font-family:sans-serif;color:#111;padding:24px;max-width:800px;margin:0 auto">
+      <h1 style="font-size:19px;margin-bottom:4px">${savedEscapeForTextarea(col.name)}</h1>
+      <div style="font-size:10px;color:#666;margin-bottom:20px">出力日時: ${new Date().toLocaleString('ja-JP')}</div>
+      ${chartsHtml}
+      <div style="break-inside:avoid;page-break-inside:avoid;margin-top:20px">
+        <h2 style="font-size:15px;margin-bottom:10px">分析メモ</h2>
+        <h3 style="font-size:12px;margin-bottom:6px">① 現状整理・傾向</h3>
+        ${summaryHtml}
+        <h3 style="font-size:12px;margin:14px 0 6px">② 分析内容</h3>
+        ${numberedHtml(notes.analysis)}
+        <h3 style="font-size:12px;margin:14px 0 6px">③ 対応策</h3>
+        ${numberedHtml(notes.actions)}
+      </div>
+    </div>`;
+}
+
+function savedExportCollectionPdf(collectionId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  const container = document.getElementById('print-pdf-container');
+  if (!container) return;
+  container.innerHTML = savedBuildPrintHtml(col);
+  savedToast('印刷ダイアログで「PDFとして保存」を選んでください');
+  setTimeout(() => window.print(), 100);
+}
+
+window.addEventListener('afterprint', () => {
+  const container = document.getElementById('print-pdf-container');
+  if (container) container.innerHTML = '';
+});
 
 // ── 共有リンク ──────────────────────────────────────────────────────────────
 // 日本語を含むJSONを安全にbase64化する(大きなデータでも引数展開の上限に当たらないようチャンク分割する)
