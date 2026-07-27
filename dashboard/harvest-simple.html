@@ -3284,17 +3284,36 @@ async function ensureMekakiRows() {
   return mekakiRows;
 }
 
+let mekakiViewMode = 'table'; // 'table' | 'weekly'
+let mekakiWeeklyCharts = [];
+let mekakiWeeklyGroups = null;
+
+function mekakiSetViewMode(mode) {
+  mekakiViewMode = mode;
+  renderMekakiTab();
+}
+
+function mekakiModeBarHtml() {
+  return `<div class="weekly-sort-bar" style="margin-bottom:12px">
+    <button class="sort-btn${mekakiViewMode === 'table' ? ' active' : ''}" onclick="mekakiSetViewMode('table')">一覧</button>
+    <button class="sort-btn${mekakiViewMode === 'weekly' ? ' active' : ''}" onclick="mekakiSetViewMode('weekly')">週別グラフ</button>
+  </div>`;
+}
+
 async function renderMekakiTab() {
   const section = document.getElementById('mekaki-section');
   if (!section) return;
-  if (mekakiRows) { renderMekakiSection(section); return; }
+  if (mekakiRows) {
+    if (mekakiViewMode === 'weekly') renderMekakiWeeklySection(section); else renderMekakiSection(section);
+    return;
+  }
 
   section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
 
   try {
     await ensureMekakiRows();
-    renderMekakiSection(section);
+    if (mekakiViewMode === 'weekly') renderMekakiWeeklySection(section); else renderMekakiSection(section);
   } catch(e) {
     section.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
   }
@@ -3303,6 +3322,7 @@ async function renderMekakiTab() {
 function renderMekakiSection(section) {
   section.innerHTML = `
     <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    ${mekakiModeBarHtml()}
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
         <thead>
@@ -3326,6 +3346,67 @@ function renderMekakiSection(section) {
       </table>
     </div>`;
   mekakiRenderTable();
+}
+
+// 週別(日〜土)にグループ化し、各週のコンテナ別芽かき量(2520換算)をまとめる
+function mekakiBuildWeeklyGroups() {
+  const groups = {};
+  mekakiRows.forEach(r => {
+    if (!r.startDate || r.converted == null) return;
+    const week = getSunSatWeek(`${r.startDate.getFullYear()}/${r.startDate.getMonth() + 1}/${r.startDate.getDate()}`);
+    if (!week) return;
+    (groups[week.key] ||= { label: week.label, rows: [] }).rows.push(r);
+  });
+  const keys = Object.keys(groups).sort().reverse(); // 新しい順(週別累計タブのデフォルトに合わせる)
+  return keys.map(k => groups[k]);
+}
+
+// 分析タブの芽かき量グラフと同じ拠点別配色(自社菌床は蛍光色)で塗り分ける
+function mekakiWeeklyChartConfig(rows) {
+  const categories = rows.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
+  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
+  return {
+    type: 'bar',
+    data: {
+      labels: rows.map(r => `${r.siteName}${r.no}`),
+      datasets: [
+        { label: '芽かき量(kg・2520換算)', data: rows.map(r => r.converted), backgroundColor: packColors.map(c => c.dark + 'cc') },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: tooltipDefaults },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { min: 0, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+function renderMekakiWeeklySection(section) {
+  mekakiWeeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  mekakiWeeklyCharts = [];
+
+  const groups = mekakiBuildWeeklyGroups();
+  mekakiWeeklyGroups = groups;
+
+  const cardsHtml = groups.length ? groups.map((g, idx) => `
+    <div class="weekly-chart-card">
+      <div class="weekly-chart-title">${g.label}<span class="sub">(${g.rows.length}コンテナ)</span></div>
+      <div class="chart-wrap" style="height:260px"><canvas id="mekaki-week-${idx}"></canvas></div>
+    </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px">芽かき量<span class="sub">週別・コンテナ別 芽かき実績(2520換算kg)</span></div>
+    ${mekakiModeBarHtml()}${analysisPackLegendHtml()}
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  groups.forEach((g, idx) => {
+    const canvas = document.getElementById(`mekaki-week-${idx}`);
+    if (canvas) mekakiWeeklyCharts.push(new Chart(canvas, mekakiWeeklyChartConfig(g.rows)));
+  });
 }
 
 // ── 菌床重量タブ ──────────────────────────────────────────────────────────────
@@ -4806,13 +4887,17 @@ function analysisWeightWeeklyChartConfig(items) {
   return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k].items));
 }
 
-function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
+// 芽かき量: 収穫量(パック品収穫量)と同じ拠点別配色(自社菌床は蛍光色)で塗り分ける
+function analysisMekakiChartConfig(items) {
+  const categories = items.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
   const mekakiValues = items.map(c => c.mekaki);
+  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
   return {
     data: {
       labels: items.map(c => `${c.siteName}${c.no}`),
       datasets: [
-        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: packColors.map(c => c.dark + 'cc'), yAxisID: 'y', order: 1 },
         analysisAvgLineDataset('芽かき量 平均', analysisAvg(mekakiValues), '#a78bfa', 'y', items.length),
       ],
     },
@@ -4820,7 +4905,7 @@ function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
       scales: {
-        x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
@@ -4971,7 +5056,7 @@ const ANALYSIS_CHART_CONFIGS = {
   weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisWeightPackLegendHtml },
   weightmonthly: { title: '月別 菌床重量平均(拠点別)', build: analysisWeightMonthlyChartConfig, legend: analysisWeightPackLegendHtml },
   weightweekly: { title: '週別 菌床重量平均(拠点別)', build: analysisWeightWeeklyChartConfig, legend: analysisWeightPackLegendHtml },
-  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
+  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisPackLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
