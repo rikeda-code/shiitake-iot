@@ -2986,6 +2986,30 @@ const STD_HOURS_BAR_SERIES = [
   },
 ];
 
+// 拠点サマリモード用：選択中拠点（拠点トグル連動）の前年実績時間を、栽培＋出荷の
+// 合算のみで月ごとに合算する。配送・栽培／配送・出荷は「時間_過去実績」に対応データが
+// 無いため対象外。上部グローバル業務区分トグルには連動させず、常に栽培＋出荷の
+// 固定合算とする（雇用形態区分の内訳データも存在しないため連動不可）
+function computePastYearHoursSummaryBar(months) {
+  return months.map(label => {
+    const ym = monthLabelToYm(label);
+    if (ym === null) return null;
+    const prevYm = ym - 100;
+    let sum = 0, any = false;
+    SITES.forEach(site => {
+      if (!siteFilter.has(site)) return;
+      const bySite = pastYearData && pastYearData[site];
+      if (!bySite) return;
+      ['栽培', '出荷'].forEach(role => {
+        const byYm = bySite[role];
+        const v = byYm ? byYm[prevYm] : undefined;
+        if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; }
+      });
+    });
+    return any ? Math.round(sum * 10) / 10 : null;
+  });
+}
+
 // 標準労働時間（月ごとに、その月に実績[実質勤務時間]があるスタッフのみを対象に合計）。
 // parseDuration()は0以下の値を既にnullとして返しているため、hours[mi] !== nullの
 // 判定だけで「実質勤務時間が0または未入力のスタッフを除外」の条件を満たせる
@@ -3563,12 +3587,14 @@ function renderStdHoursSiteView() {
 function renderStdHoursSummaryView() {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
-  const activeSites = SITES.filter(s => employees.some(e => e.base === s));
+  // 前年実績棒を追加するにあたり、当年実績の積み上げ棒・前年実績棒のいずれも
+  // 拠点トグルに連動させる（拠点トグルでOFFにした拠点は両方の集計から除外する）
+  const activeSites = SITES.filter(s => employees.some(e => e.base === s) && siteFilter.has(s));
   const cid = 'stdh_summary';
 
   content.innerHTML = `<div class="schart-shell">
     <div class="schart-section">
-      <div class="schart-header">3拠点サマリ</div>
+      <div class="schart-header">3拠点サマリ<span style="font-weight:400;font-size:0.75rem;color:var(--muted);margin-left:10px">※ 前年実績時間は栽培および出荷の合算時間で配送時間は含みません。</span></div>
       ${chartWrapHtml(cid, months.length, { heightPx: 360, inlineHeight: true, forceResponsive: true })}
     </div>
   </div>`;
@@ -3576,21 +3602,30 @@ function renderStdHoursSummaryView() {
   // 積み上げの視覚的な上下順序を「いなべ最上部→南丹最下部」にするため、
   // 予実＞比較＞拠点サマリと同様にデータセットの追加順を逆にする
   // （凡例の表示順は別途buildStdHoursChart側でactiveSitesの順に固定する）
-  const barDatasets = [];
+  const siteBarDatasets = [];
   [...activeSites].reverse().forEach(site => {
     const emps = employees.filter(e => e.base === site && e.workType && stdHoursRoleVisible(e));
     const data = STD_HOURS_BAR_SERIES[0].compute(emps, months); // 現時点では「当年稼働実績」のみ
-    barDatasets.push({
+    siteBarDatasets.push({
       type: 'bar', label: site, data,
       backgroundColor: (SITE_COLORS[site] || '#fff') + 'cc', borderColor: SITE_COLORS[site] || '#fff',
       borderWidth: 0, stack: 'actual',
     });
   });
 
+  const previousSeries = STD_HOURS_BAR_SERIES.find(s => s.key === 'previous');
+  const previousData = computePastYearHoursSummaryBar(months);
+  const previousDataset = {
+    type: 'bar', label: previousSeries.label, data: previousData,
+    backgroundColor: previousSeries.color + 'cc', borderColor: previousSeries.color, borderWidth: 0,
+    stack: 'previous', excludeFromFooterTotal: true,
+  };
+  const barDatasets = [previousDataset, ...siteBarDatasets];
+
   const allEmps = employees.filter(e => e.workType && stdHoursRoleVisible(e));
   const lineData = computeStdHoursLine(allEmps, months);
 
-  const sharedMax = computeSharedAxisMax([stackedMonthlyTotals(months, barDatasets), lineData], 100, 1.1);
+  const sharedMax = computeSharedAxisMax([stackedMonthlyTotals(months, siteBarDatasets), lineData, previousData], 100, 1.1);
 
   buildStdHoursChart(cid, months, barDatasets, lineData, sharedMax, { legendOrder: activeSites });
 }
