@@ -208,12 +208,8 @@
       .weekly-grid { grid-template-columns: 1fr; }
     }
 
-    /* 保存グラフのPDF出力: #print-pdf-container だけを印刷し、他の画面要素は一切出さない */
-    #print-pdf-container { display: none; }
-    @media print {
-      body > *:not(#print-pdf-container) { display: none !important; }
-      #print-pdf-container { display: block !important; }
-    }
+    /* 保存グラフのPDF出力用コンテナ。html2canvasで描画キャプチャするため画面外に配置(display:noneだとレイアウトされずキャプチャできない) */
+    #print-pdf-container { position: fixed; left: -99999px; top: 0; width: 800px; background: #fff; }
   </style>
 </head>
 <body>
@@ -6029,9 +6025,35 @@ function renderSavedTab() {
 
 // ── PDF出力 ────────────────────────────────────────────────────────────────
 // 巨大なコレクション(グラフ数が多い・温度など点数の多いデータ)はURL共有だと文字数が
-// 数十万字に達し実用的に送れないため、ブラウザの印刷機能(PDFとして保存)を使う。
-// jsPDF等でPDFを直接組み立てると日本語フォントが埋め込まれず文字化けするため、
-// DOMをそのままブラウザに描画・印刷させることで日本語表示を確実にしている。
+// 数十万字に達し実用的に送れないため、PDFとして直接ダウンロード保存できるようにする。
+// jsPDF単体でPDFを直接組み立てると日本語フォントが埋め込まれず文字化けするため、
+// html2canvasでDOMをブラウザにそのまま描画・画像化してからPDFに埋め込む(html2pdf.js)ことで
+// 日本語表示とグラフの見た目(配色・レイアウト)を確実に保っている。
+function waitForHtml2Pdf(ms = 15000) {
+  if (window.html2pdf) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    if (!document.getElementById('html2pdf-cdn-script')) {
+      const s = document.createElement('script');
+      s.id = 'html2pdf-cdn-script';
+      s.src = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js';
+      s.onerror = () => reject(new Error('html2pdf failed to load'));
+      document.head.appendChild(s);
+    }
+    const deadline = Date.now() + ms;
+    const poll = () => {
+      if (window.html2pdf) { resolve(); return; }
+      if (Date.now() > deadline) { reject(new Error('html2pdf load timeout')); return; }
+      setTimeout(poll, 100);
+    };
+    setTimeout(poll, 100);
+  });
+}
+
+// ファイル名に使えない文字(パス区切りなど)を含むコレクション名でもダウンロードできるようにする
+function savedSafeFilename(name) {
+  return String(name).replace(/[\\/:*?"<>|]/g, '_').trim() || 'saved-collection';
+}
+
 function savedBuildPrintHtml(col) {
   const chartsHtml = col.charts.map((chart, idx) => {
     const canvas = document.getElementById(`saved-chart-${idx}`);
@@ -6067,20 +6089,30 @@ function savedBuildPrintHtml(col) {
     </div>`;
 }
 
-function savedExportCollectionPdf(collectionId) {
+async function savedExportCollectionPdf(collectionId) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col) return;
   const container = document.getElementById('print-pdf-container');
   if (!container) return;
   container.innerHTML = savedBuildPrintHtml(col);
-  savedToast('印刷ダイアログで「PDFとして保存」を選んでください');
-  setTimeout(() => window.print(), 100);
+  savedToast('PDFを生成しています…');
+  try {
+    await waitForHtml2Pdf();
+    await window.html2pdf().from(container).set({
+      margin: 10,
+      filename: `${savedSafeFilename(col.name)}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
+    }).save();
+  } catch (e) {
+    console.error('[savedExportCollectionPdf] failed', e);
+    savedToast('PDF生成に失敗しました(通信環境をご確認ください)');
+  } finally {
+    container.innerHTML = '';
+  }
 }
-
-window.addEventListener('afterprint', () => {
-  const container = document.getElementById('print-pdf-container');
-  if (container) container.innerHTML = '';
-});
 
 // ── 共有リンク ──────────────────────────────────────────────────────────────
 // 日本語を含むJSONを安全にbase64化する(大きなデータでも引数展開の上限に当たらないようチャンク分割する)
