@@ -4806,13 +4806,17 @@ function analysisWeightWeeklyChartConfig(items) {
   return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k].items));
 }
 
-function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
+// 芽かき量: 収穫量(パック品収穫量)と同じ拠点別配色(自社菌床は蛍光色)で塗り分ける
+function analysisMekakiChartConfig(items) {
+  const categories = items.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
   const mekakiValues = items.map(c => c.mekaki);
+  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
   return {
     data: {
       labels: items.map(c => `${c.siteName}${c.no}`),
       datasets: [
-        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: packColors.map(c => c.dark + 'cc'), yAxisID: 'y', order: 1 },
         analysisAvgLineDataset('芽かき量 平均', analysisAvg(mekakiValues), '#a78bfa', 'y', items.length),
       ],
     },
@@ -4820,7 +4824,7 @@ function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
       scales: {
-        x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
@@ -4971,7 +4975,7 @@ const ANALYSIS_CHART_CONFIGS = {
   weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisWeightPackLegendHtml },
   weightmonthly: { title: '月別 菌床重量平均(拠点別)', build: analysisWeightMonthlyChartConfig, legend: analysisWeightPackLegendHtml },
   weightweekly: { title: '週別 菌床重量平均(拠点別)', build: analysisWeightWeeklyChartConfig, legend: analysisWeightPackLegendHtml },
-  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
+  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisPackLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
