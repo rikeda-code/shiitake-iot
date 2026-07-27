@@ -6000,8 +6000,8 @@ function renderSavedTab() {
     <div style="margin-bottom:16px">
       <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
     </div>
-    ${savedNotesHtml(activeCol)}
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">${chartsHtml}</div>`;
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:16px">${chartsHtml}</div>
+    ${savedNotesHtml(activeCol)}`;
 
   activeCol.charts.forEach((chart, idx) => {
     const canvasId = `saved-chart-${idx}`;
