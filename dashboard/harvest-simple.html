@@ -5932,17 +5932,19 @@ function savedNoteInput(collectionId, section, key, value) {
 
 function savedNotesHtml(col) {
   const notes = savedEnsureNotes(col);
-  const taStyle = 'width:100%;min-height:40px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:0.82rem;resize:vertical;font-family:inherit';
+  const cardStyle = 'background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:12px 14px';
+  const taStyle = 'width:100%;min-height:64px;background:#0f1117;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.95rem;line-height:1.5;resize:vertical;font-family:inherit';
+  const gridStyle = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px';
 
   const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
-    <div style="margin-bottom:8px">
-      <div style="font-size:0.75rem;color:#64748b;margin-bottom:4px">${f.label}</div>
+    <div style="${cardStyle}">
+      <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${f.label}</div>
       <textarea oninput="savedNoteInput('${col.id}','summary','${f.key}',this.value)" style="${taStyle}">${savedEscapeForTextarea(notes.summary[f.key])}</textarea>
     </div>`).join('');
 
   const numberedHtml = (arr, section) => arr.map((v, i) => `
-    <div style="margin-bottom:8px">
-      <div style="font-size:0.75rem;color:#64748b;margin-bottom:4px">${i + 1}</div>
+    <div style="${cardStyle}">
+      <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${i + 1}</div>
       <textarea oninput="savedNoteInput('${col.id}','${section}',${i},this.value)" style="${taStyle}">${savedEscapeForTextarea(v)}</textarea>
     </div>`).join('');
 
@@ -5951,15 +5953,15 @@ function savedNotesHtml(col) {
       <div style="color:#cbd5e1;font-size:0.9rem;font-weight:700;margin-bottom:12px">分析メモ</div>
       <div style="margin-bottom:16px">
         <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">① 現状整理・傾向</div>
-        ${summaryHtml}
+        <div style="${gridStyle}">${summaryHtml}</div>
       </div>
       <div style="margin-bottom:16px">
         <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">② 分析内容</div>
-        ${numberedHtml(notes.analysis, 'analysis')}
+        <div style="${gridStyle}">${numberedHtml(notes.analysis, 'analysis')}</div>
       </div>
       <div>
         <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">③ 対応策</div>
-        ${numberedHtml(notes.actions, 'actions')}
+        <div style="${gridStyle}">${numberedHtml(notes.actions, 'actions')}</div>
       </div>
     </div>`;
 }
