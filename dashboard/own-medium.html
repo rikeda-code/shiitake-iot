@@ -3151,6 +3151,21 @@ async function ensureMekakiRows() {
       // 日付新しい順
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
+  // 自社菌床コンテナのみに絞り込む:
+  // weeklyState.containerData（自社菌床ロットのみ含む）と拠点+号機+栽培開始日で照合
+  if (weeklyState && weeklyState.containerData && weeklyState.containerData.length > 0) {
+    mekakiRows = mekakiRows.filter(r => {
+      return weeklyState.containerData.some(c => {
+        if (c.siteName !== r.siteName) return false;
+        if (String(c.no) !== String(r.no)) return false;
+        const cStartD = parseDateStr(c.startDate);
+        if (cStartD && r.startDate) {
+          return Math.abs(cStartD - r.startDate) < 14 * 86400000;
+        }
+        return true;
+      });
+    });
+  }
 
   return mekakiRows;
 }
