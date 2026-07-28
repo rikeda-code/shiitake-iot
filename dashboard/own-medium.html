@@ -2573,12 +2573,10 @@ function renderLotTab() {
 function initTabs() {
   const tabsEl = document.getElementById('tabs');
 
-  // 散布図 tab (default)
+  // 散布図 tab
   const scatterBtn = document.createElement('button');
-  scatterBtn.className = 'tab-btn active';
+  scatterBtn.className = 'tab-btn';
   scatterBtn.textContent = '散布図';
-  scatterBtn.style.color = '#e879f9';
-  scatterBtn.style.borderBottomColor = '#e879f9';
   scatterBtn.addEventListener('click', () => {
     if (scatterTabActive) return;
     weeklyTabActive = false;
@@ -2598,8 +2596,6 @@ function initTabs() {
     updateTabVisibility();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
-  tabsEl.appendChild(scatterBtn);
-
   // 菌床重量 tab
   const weightBtn = document.createElement('button');
   weightBtn.className = 'tab-btn';
@@ -2623,8 +2619,6 @@ function initTabs() {
     updateTabVisibility();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
-  tabsEl.appendChild(weightBtn);
-
   // 芽かき量 tab
   const mekakiBtn = document.createElement('button');
   mekakiBtn.className = 'tab-btn';
@@ -2640,12 +2634,12 @@ function initTabs() {
     updateTabVisibility();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
-  tabsEl.appendChild(mekakiBtn);
-
-  // Standalone weekly tab
+  // Standalone weekly tab (default)
   const weeklyBtn = document.createElement('button');
-  weeklyBtn.className = 'tab-btn';
+  weeklyBtn.className = 'tab-btn active';
   weeklyBtn.textContent = 'ロット別累計収穫量';
+  weeklyBtn.style.color = '#94a3b8';
+  weeklyBtn.style.borderBottomColor = '#94a3b8';
   weeklyBtn.addEventListener('click', () => {
     if (weeklyTabActive) return;
     weeklyTabActive = true;
@@ -2666,7 +2660,7 @@ function initTabs() {
     updateTabVisibility();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
-  tabsEl.appendChild(weeklyBtn);
+  tabsEl.appendChild(weeklyBtn);  // 1st: ロット別累計収穫量
 
   // 分析 tab
   const analysisBtn = document.createElement('button');
@@ -2692,7 +2686,7 @@ function initTabs() {
     updateTabVisibility();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
-  tabsEl.appendChild(analysisBtn);
+  tabsEl.appendChild(analysisBtn);  // 2nd: 分析
 
   // 温度分析 tab
   const tempBtn = document.createElement('button');
@@ -2718,7 +2712,10 @@ function initTabs() {
     updateTabVisibility();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
-  tabsEl.appendChild(tempBtn);
+  tabsEl.appendChild(tempBtn);     // 3rd: 温度分析
+  tabsEl.appendChild(weightBtn);   // 4th: 菌床重量
+  tabsEl.appendChild(mekakiBtn);   // 5th: 芽かき量
+  tabsEl.appendChild(scatterBtn);  // 6th: 散布図
 }
 
 function closeDetail() {
@@ -3154,8 +3151,9 @@ async function ensureMekakiRows() {
       // 日付新しい順
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
-  // このページは自社菌床(菌床ロットあり)のコンテナのみを対象にする
-  mekakiRows = mekakiRows.filter(r => analysisFormatLot(r.lot) !== '—');
+  // このページは自社菌床のデータのみを対象にする
+  // siteName='自社菌床'、またはロットが自社菌床ロット形式(6A等)の行を対象とする
+  mekakiRows = mekakiRows.filter(r => r.siteName === '自社菌床' || analysisFormatLot(r.lot) !== '—');
 
   return mekakiRows;
 }
@@ -5152,7 +5150,7 @@ try { initTabs(); } catch(e) {
   document.getElementById('tabs').innerHTML =
     `<span style="color:#f87171;padding:12px;font-size:0.85rem">タブ初期化エラー: ${e.message}</span>`;
 }
-scatterTabActive = true;
+weeklyTabActive = true;
 try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
 
 loadWeeklySection().catch(() => {});
