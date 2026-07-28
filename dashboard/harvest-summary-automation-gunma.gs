@@ -14,10 +14,10 @@
  */
 
 const SUMMARY_SHEET_NAME = '収穫実績集計表';
-const TEMPLATE_ROW = 3;            // 関数の見本行
-const NEW_ROW = TEMPLATE_ROW + 1;  // 追加される行(4行目)
-const LAST_COL = 17;               // A~Q列
-const LOT_NAME_COL = 6;            // F列(号機)
+const TEMPLATE_ROW = 3;      // 関数の見本行
+const DATA_START_ROW = 4;   // 実データの先頭行
+const LAST_COL = 17;         // A~Q列
+const LOT_NAME_COL = 6;      // F列(号機)
 const KNOWN_SHEETS_PROPERTY = 'knownSheetNames';
 
 // ロットタブと判定する命名パターン(例:「17(7/22)L3」「3-17(7/19)L3」)。
@@ -85,26 +85,26 @@ function onChangeInstalled(e) {
 }
 
 function addSummaryRow_(summary, tabName) {
-  summary.insertRowAfter(TEMPLATE_ROW);
+  summary.insertRowBefore(DATA_START_ROW);
   const templateRange = summary.getRange(TEMPLATE_ROW, 1, 1, LAST_COL);
-  const newRowRange = summary.getRange(NEW_ROW, 1, 1, LAST_COL);
+  const newRowRange = summary.getRange(DATA_START_ROW, 1, 1, LAST_COL);
   templateRange.copyTo(newRowRange);
-  summary.getRange(NEW_ROW, LOT_NAME_COL).setValue(tabName);
+  summary.getRange(DATA_START_ROW, LOT_NAME_COL).setValue(tabName);
 }
 
 function removeSummaryRowsForTab_(summary, tabName) {
   const lastRow = summary.getLastRow();
-  if (lastRow < NEW_ROW) return;
-  const values = summary.getRange(NEW_ROW, LOT_NAME_COL, lastRow - TEMPLATE_ROW, 1).getValues();
+  if (lastRow < DATA_START_ROW) return;
+  const values = summary.getRange(DATA_START_ROW, LOT_NAME_COL, lastRow - DATA_START_ROW + 1, 1).getValues();
   for (let i = values.length - 1; i >= 0; i--) {
-    if (values[i][0] === tabName) summary.deleteRow(NEW_ROW + i);
+    if (values[i][0] === tabName) summary.deleteRow(DATA_START_ROW + i);
   }
 }
 
 function getExistingLotNames_(summary) {
   const lastRow = summary.getLastRow();
-  if (lastRow < NEW_ROW) return [];
-  return summary.getRange(NEW_ROW, LOT_NAME_COL, lastRow - TEMPLATE_ROW, 1)
+  if (lastRow < DATA_START_ROW) return [];
+  return summary.getRange(DATA_START_ROW, LOT_NAME_COL, lastRow - DATA_START_ROW + 1, 1)
       .getValues()
       .map(function (row) { return row[0]; })
       .filter(function (v) { return v !== ''; });
@@ -124,6 +124,26 @@ function createOnChangeTrigger() {
   PropertiesService.getScriptProperties().setProperty(
       KNOWN_SHEETS_PROPERTY,
       JSON.stringify(ss.getSheets().map(function (sheet) { return sheet.getName(); })));
+}
+
+/**
+ * 設定確認用。SUMMARY_SHEET_NAME に指定した名前のシートが実際に存在するかを
+ * チェックする。見つからない場合は現在のタブ一覧を表示するので、
+ * スクリプト冒頭の SUMMARY_SHEET_NAME をそれに合わせて修正すること。
+ */
+function checkSetup() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const summary = ss.getSheetByName(SUMMARY_SHEET_NAME);
+  const ui = SpreadsheetApp.getUi();
+  if (summary) {
+    ui.alert('OK: 「' + SUMMARY_SHEET_NAME + '」という集計タブが見つかりました。設定は正しく反映されています。');
+    return;
+  }
+  const names = ss.getSheets().map(function (s) { return s.getName(); }).join('\n');
+  ui.alert(
+      '「' + SUMMARY_SHEET_NAME + '」という名前のシートが見つかりません。\n' +
+      'スクリプト冒頭の SUMMARY_SHEET_NAME を、下の実際のタブ名に合わせて修正してください。\n\n' +
+      '現在のタブ一覧:\n' + names);
 }
 
 /**
@@ -176,6 +196,7 @@ function removeSummaryRowByName() {
 function onOpen() {
   SpreadsheetApp.getUi()
       .createMenu('収穫実績集計 自動化')
+      .addItem('設定を確認', 'checkSetup')
       .addItem('今開いているタブを集計表に追加', 'addSummaryRowForActiveSheet')
       .addItem('指定した名前の行を集計表から削除', 'removeSummaryRowByName')
       .addToUi();
