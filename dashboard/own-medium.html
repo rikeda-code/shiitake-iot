@@ -3154,16 +3154,33 @@ async function ensureMekakiRows() {
   return mekakiRows;
 }
 
+function applyMekakiJishaLot() {
+  if (!mekakiRows) return;
+  const containers = (weeklyState && weeklyState.containerData) || [];
+  if (!containers.length) return;
+  mekakiRows = mekakiRows.map(r => {
+    if (r.lot) return r;
+    const matched = containers.find(c => {
+      if (String(c.no) !== r.no) return false;
+      const cStartD = parseDateStr(c.startDate);
+      if (cStartD && r.startDate) return Math.abs(cStartD - r.startDate) < 14 * 86400000;
+      return true;
+    });
+    return matched ? { ...r, lot: matched.lot || '' } : r;
+  });
+}
+
 async function renderMekakiTab() {
   const section = document.getElementById('mekaki-section');
   if (!section) return;
-  if (mekakiRows) { renderMekakiSection(section); return; }
+  if (mekakiRows) { applyMekakiJishaLot(); renderMekakiSection(section); return; }
 
   section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
 
   try {
     await ensureMekakiRows();
+    applyMekakiJishaLot();
     renderMekakiSection(section);
   } catch(e) {
     section.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
