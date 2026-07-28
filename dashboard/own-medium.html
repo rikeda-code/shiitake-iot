@@ -3012,6 +3012,7 @@ let mekakiFilters = { site: '', hozon: '', lot: '' };
 
 function mekakiRenderTable() {
   const filtered = mekakiRows.filter(r =>
+    r.lot &&
     (!mekakiFilters.site  || r.siteName === mekakiFilters.site) &&
     (!mekakiFilters.hozon || r.hozon    === mekakiFilters.hozon) &&
     (!mekakiFilters.lot   || r.lot      === mekakiFilters.lot)
