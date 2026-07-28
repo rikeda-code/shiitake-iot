@@ -62,16 +62,20 @@ function onChangeInstalled(e) {
           .filter(function (name) { return currentNames.indexOf(name) === -1; })
           .forEach(function (name) { removeSummaryRowsForTab_(summary, name); });
     } else {
+      // 追加対象は「前回覚えていた名前に無かった=今回新しく現れたタブ」だけに限定する。
+      // 集計表のF列に載っているかどうかだけで判定すると、何らかの理由でF列に
+      // 載っていない古いタブまで「未追加」と誤認識し、大量に遡って追加してしまう。
       const existingNames = getExistingLotNames_(summary);
-      currentSheets.forEach(function (sheet) {
-        const name = sheet.getName();
-        if (!LOT_NAME_PATTERN.test(name)) return;
-        if (EXCLUDED_SHEET_NAMES.indexOf(name) !== -1) return;
-        if (TEMP_NAME_PATTERNS.some(function (re) { return re.test(name); })) return;
-        if (existingNames.indexOf(name) !== -1) return;
-        addSummaryRow_(summary, name);
-        existingNames.push(name);
-      });
+      currentNames
+          .filter(function (name) { return previousNames.indexOf(name) === -1; })
+          .forEach(function (name) {
+            if (!LOT_NAME_PATTERN.test(name)) return;
+            if (EXCLUDED_SHEET_NAMES.indexOf(name) !== -1) return;
+            if (TEMP_NAME_PATTERNS.some(function (re) { return re.test(name); })) return;
+            if (existingNames.indexOf(name) !== -1) return;
+            addSummaryRow_(summary, name);
+            existingNames.push(name);
+          });
     }
 
     props.setProperty(KNOWN_SHEETS_PROPERTY, JSON.stringify(currentNames));
