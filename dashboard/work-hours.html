@@ -4008,7 +4008,9 @@ async function fetchPlanSheet() {
 function colLetterToIndex(letter) {
   return letter.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
 }
+const THREE_SITE_MERGE_ACTIVE_FLAG_COL = colLetterToIndex('B');
 const THREE_SITE_MERGE_SITE_COL = colLetterToIndex('D');
+const THREE_SITE_MERGE_PRJ_COL = colLetterToIndex('E');
 const THREE_SITE_MERGE_DIV_COL = colLetterToIndex('F');
 const THREE_SITE_MERGE_NAME_COL = colLetterToIndex('H');
 // 群馬拠点が「安中」表記になる既知の表記ゆれ（人数_過去実績のCOUNT_ROW_SITE_ALIASと
@@ -4069,12 +4071,14 @@ function parseThreeSiteMergeSheet(json) {
     if (!name) return;
     const stdHours = cellNumber(row, stdColIdx);
     if (stdHours === null) return;
+    const activeFlag = cellRaw(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
+    const prj = cellText(row, THREE_SITE_MERGE_PRJ_COL);
     const maxByYm = {};
     monthCols.forEach(({ idx, ym }) => {
       const v = cellNumber(row, idx);
       if (v !== null) maxByYm[ym] = v;
     });
-    parsedRows.push({ site, div, name, stdHours, maxByYm });
+    parsedRows.push({ site, div, name, stdHours, maxByYm, activeFlag, prj });
   });
 
   return { rows: parsedRows, monthYms: monthCols.map(m => m.ym) };
@@ -6772,11 +6776,21 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
      時間・最大労働時間から補完した棒を追加する（拠点別モード・拠点サマリモードの
      栽培・出荷セクションが対象）。mergeDataがnull（シート取得失敗）の場合は常に
      null/[]を返すだけなので、既存の表示には一切影響しない ────────────────────── */
+  // B列が1（文字列"1"・数値1のいずれでも許容）かどうかを頑健に判定する
+  function isThreeSiteMergeActiveFlag(v) {
+    if (typeof v === 'string') v = v.trim();
+    return v === 1 || v === '1' || Number(v) === 1;
+  }
+
   // 拠点×業務区分(栽培/出荷)ごとの標準労働時間合計・最大労働時間合計(月別)を返す。
-  // site=nullなら3拠点合算（全拠点合計タブ・拠点サマリタブで使用）
+  // site=nullなら3拠点合算（全拠点合計タブ・拠点サマリタブで使用）。
+  // 集計対象は、D・F・H列によるマッチングに加えて、B列＝1（稼働フラグ）かつ
+  // E列が空でない（プロジェクト等の割当あり）行のみとする
   function threeSiteMergeAgg(div, site) {
     if (!mergeData) return null;
-    const matched = mergeData.rows.filter(r => r.div === div && (site == null || r.site === site));
+    const matched = mergeData.rows.filter(r =>
+      r.div === div && (site == null || r.site === site) &&
+      isThreeSiteMergeActiveFlag(r.activeFlag) && r.prj !== '');
     if (!matched.length) return null;
     const stdTotal = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
     if (stdTotal <= 0) return null;
