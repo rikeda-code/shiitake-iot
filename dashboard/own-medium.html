@@ -1360,13 +1360,22 @@ async function weeklyZoomRenderMekaki() {
   }
 
   const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+  const isJishaLotMekaki = lot => lot && /^\d+[A-Z]+$/.test(lot.trim());
   const rows = containers.map(c => {
     const no = c.no;
     const startD = c.startDate ? parseDateStr(c.startDate) : null;
+    const isJishaC = isJishaLotMekaki(c.lot);
     const match = mekakiRows.find(r => {
-      if (r.siteName !== c.siteName) return false;
-      const rno = r.gouki.replace(/\(.*\)/, '').trim();
-      if (rno !== String(no)) return false;
+      if (isJishaC) {
+        if (r.siteName !== '自社菌床') return false;
+        if (r.lot !== c.lot) return false;
+        const rno = r.gouki.replace(/\(.*\)/, '').trim();
+        if (rno !== String(no)) return false;
+      } else {
+        if (r.siteName !== c.siteName) return false;
+        const rno = r.gouki.replace(/\(.*\)/, '').trim();
+        if (rno !== String(no)) return false;
+      }
       if (startD && r.startDate) {
         return Math.abs(r.startDate - startD) < 14 * 86400000;
       }
@@ -2511,7 +2520,7 @@ function renderLotTab() {
     return;
   }
 
-  const html = lotKeys.map(lot => {
+  const html = lotKeys.map((lot, lotIdx) => {
     // Strip "自社" prefix for display
     const lotLabel = lot.replace(/^自社/, '');
     const cards = groups[lot].map(c => {
@@ -2540,15 +2549,25 @@ function renderLotTab() {
         </div>
       </div>`;
     }).join('');
-    return `<div style="margin-bottom:28px">
+    return `<div style="margin-bottom:40px">
       <div style="font-size:0.9rem;font-weight:700;color:#e2e8f0;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #2e3148">ロット ${lotLabel}</div>
       <div class="cards-grid">${cards}</div>
+      <div style="margin-top:16px;background:#13151f;border-radius:10px;padding:12px 16px">
+        <div style="font-size:0.78rem;color:#64748b;margin-bottom:8px">ロット別収穫累計 (g/菌床)</div>
+        <div style="height:240px"><canvas id="lot-chart-${lotIdx}"></canvas></div>
+      </div>
     </div>`;
   }).join('');
 
   section.innerHTML = `
     <div class="section-title">自社菌床 収穫状況<span class="sub">ロット別</span></div>
     ${html}`;
+
+  requestAnimationFrame(() => {
+    lotKeys.forEach((lot, lotIdx) => {
+      buildWeeklyLineChart(`lot-chart-${lotIdx}`, groups[lot], weeklyState.targetData || null);
+    });
+  });
 }
 
 function initTabs() {
@@ -3189,11 +3208,9 @@ function renderMekakiSection(section) {
 
 const WEIGHT_SHEET_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
 const WEIGHT_SITES = [
-  { name: 'いなべ',   sheetName: 'いなべ',   color: '#38bdf8' },
-  { name: '群馬',     sheetName: '群馬',     color: '#f97316' },
-  { name: '南丹',     sheetName: '南丹',     color: '#34d399' },
   { name: '自社菌床', sheetName: '自社菌床', color: '#f59e0b' },
 ];
+const WEIGHT_LOT_TAB = 99;
 let weightActiveSite = 0;
 let weightData = null; // { site, containers, error }[]
 
@@ -3339,24 +3356,114 @@ function drawWeightCharts(result) {
   });
 }
 
+function renderWeightLotContent(result) {
+  if (!result || result.error) return `<div style="color:#f87171;font-size:0.85rem;padding:16px">データ取得エラー</div>`;
+  if (!result.containers || result.containers.length === 0) return `<div style="color:#64748b;padding:16px">データなし</div>`;
+  const lotMap = {};
+  result.containers.forEach(c => {
+    const lot = c.lot || '不明';
+    if (!lotMap[lot]) lotMap[lot] = [];
+    lotMap[lot].push(c);
+  });
+  const lots = Object.keys(lotMap).sort();
+  return `
+    <div style="font-size:0.8rem;color:#64748b;margin-bottom:12px">ロット別 散水前後重量比較（平均値, g）</div>
+    <div style="height:${Math.max(280, 80 + lots.length * 44)}px;background:#13151f;border-radius:10px;padding:12px">
+      <canvas id="weight-lot-chart"></canvas>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;font-size:0.78rem;color:#64748b">
+      ${lots.map(lot => {
+        const cs = lotMap[lot];
+        return `<span style="color:#f59e0b;font-weight:600">${lot}</span>: ${cs.length}コンテナ`;
+      }).join(' / ')}
+    </div>`;
+}
+
+function drawWeightLotChart(result) {
+  if (!result || !result.containers || result.containers.length === 0) return;
+  const canvas = document.getElementById('weight-lot-chart');
+  if (!canvas) return;
+  const lotMap = {};
+  result.containers.forEach(c => {
+    const lot = c.lot || '不明';
+    if (!lotMap[lot]) lotMap[lot] = [];
+    lotMap[lot].push(c);
+  });
+  const lots = Object.keys(lotMap).sort();
+  const maxRound = Math.max(...result.containers.map(c => c.measurements.length), 1);
+  const ROUND_COLORS = ['#60a5facc','#34d399cc','#f59e0bcc','#c084fccc','#fb923ccc','#f87171cc'];
+  const datasets = [];
+  for (let r = 0; r < maxRound; r++) {
+    const beforeData = lots.map(lot => {
+      const cs = lotMap[lot].filter(c => c.measurements[r] != null);
+      if (!cs.length) return null;
+      return Math.round(cs.reduce((s, c) => s + (c.measurements[r].before ?? 0), 0) / cs.length);
+    });
+    const absorbData = lots.map(lot => {
+      const cs = lotMap[lot].filter(c => c.measurements[r] != null && c.measurements[r].before != null && c.measurements[r].after != null);
+      if (!cs.length) return null;
+      return Math.round(cs.reduce((s, c) => s + Math.max(0, c.measurements[r].after - c.measurements[r].before), 0) / cs.length);
+    });
+    if (beforeData.some(v => v != null)) {
+      datasets.push({ label: `${r+1}本目 散水前`, data: beforeData, backgroundColor: ROUND_COLORS[r] || '#8892a4cc', stack: `s${r}` });
+      datasets.push({ label: `${r+1}本目 吸水量`, data: absorbData, backgroundColor: (ROUND_COLORS[r] || '#8892a4cc').replace('cc','55'), stack: `s${r}` });
+    }
+  }
+  new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: lots, datasets },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${(ctx.parsed.x||0).toLocaleString()}g` },
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8892a4', callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#e2e8f0', font: { weight: 'bold' } }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
+
 function renderWeightSubTabs() {
   const section = document.getElementById('weight-section');
   if (!section || !weightData) return;
-  const site = WEIGHT_SITES[weightActiveSite];
-  const subTabHtml = WEIGHT_SITES.map((s, i) => {
-    const active = i === weightActiveSite;
-    return `<button onclick="weightSetSite(${i})" style="
+  const allTabs = [
+    ...WEIGHT_SITES.map((s, i) => ({ label: s.name, idx: i, color: s.color })),
+    { label: 'ロット別比較', idx: WEIGHT_LOT_TAB, color: '#a78bfa' },
+  ];
+  const subTabHtml = allTabs.map(t => {
+    const active = t.idx === weightActiveSite;
+    return `<button onclick="weightSetSite(${t.idx})" style="
       padding:8px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;
-      color:${active ? s.color : '#64748b'};
-      border-bottom:2px solid ${active ? s.color : 'transparent'};
-      transition:color 0.15s">${s.name}</button>`;
+      color:${active ? t.color : '#64748b'};
+      border-bottom:2px solid ${active ? t.color : 'transparent'};
+      transition:color 0.15s">${t.label}</button>`;
   }).join('');
+
+  let content;
+  if (weightActiveSite === WEIGHT_LOT_TAB) {
+    content = renderWeightLotContent(weightData[0]);
+  } else {
+    content = renderWeightSiteContent(weightData[weightActiveSite]);
+  }
 
   section.innerHTML = `
     <div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
     <div style="display:flex;gap:4px;border-bottom:1px solid #2e3148;margin-bottom:16px">${subTabHtml}</div>
-    <div id="weight-content">${renderWeightSiteContent(weightData[weightActiveSite])}</div>`;
-  requestAnimationFrame(() => drawWeightCharts(weightData[weightActiveSite]));
+    <div id="weight-content">${content}</div>`;
+
+  if (weightActiveSite === WEIGHT_LOT_TAB) {
+    requestAnimationFrame(() => drawWeightLotChart(weightData[0]));
+  } else {
+    requestAnimationFrame(() => drawWeightCharts(weightData[weightActiveSite]));
+  }
 }
 
 function weightSetSite(idx) {
