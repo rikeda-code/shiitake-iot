@@ -3151,9 +3151,6 @@ async function ensureMekakiRows() {
       // 日付新しい順
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
-  // このページは自社菌床のデータのみを対象にする
-  // siteName='自社菌床'、またはロットが自社菌床ロット形式(6A等)の行を対象とする
-  mekakiRows = mekakiRows.filter(r => r.siteName === '自社菌床' || analysisFormatLot(r.lot) !== '—');
 
   return mekakiRows;
 }
