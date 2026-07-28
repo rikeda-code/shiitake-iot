@@ -1353,6 +1353,7 @@ async function weeklyZoomRenderMekaki() {
           return { siteName, hozon, startStr, startDate, lot, gouki, m1, m2, m3, m4, m5, total, bedCount, converted };
         })
         .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+      mekakiRows = mekakiRows.filter(r => r.siteName === '自社菌床');
     } catch(e) {
       body.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
       return;
@@ -3152,20 +3153,13 @@ async function ensureMekakiRows() {
       .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
   // 自社菌床コンテナのみに絞り込む:
-  // weeklyState.containerData（自社菌床ロットのみ含む）と拠点+号機+栽培開始日で照合
+  // mekakiシートのsiteName='自社菌床'行のみ残し、lot+号機でcontainerDataと照合
+  mekakiRows = mekakiRows.filter(r => r.siteName === '自社菌床');
   if (weeklyState && weeklyState.containerData && weeklyState.containerData.length > 0) {
-    mekakiRows = mekakiRows.filter(r => {
-      return weeklyState.containerData.some(c => {
-        if (c.siteName !== r.siteName) return false;
-        const cno = String(c.no || extractContainerNo(c.name));
-        if (cno !== String(r.no)) return false;
-        const cStartD = parseDateStr(c.startDate);
-        if (cStartD && r.startDate) {
-          return Math.abs(cStartD - r.startDate) < 14 * 86400000;
-        }
-        return true;
-      });
-    });
+    const jishaLots = new Set(weeklyState.containerData.map(c => c.lot).filter(Boolean));
+    if (jishaLots.size > 0) {
+      mekakiRows = mekakiRows.filter(r => !r.lot || jishaLots.has(r.lot));
+    }
   }
 
   return mekakiRows;
