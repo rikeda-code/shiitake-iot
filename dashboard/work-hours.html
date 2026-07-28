@@ -6649,7 +6649,6 @@ function renderPlanCompareCharts(planData, prodData) {
     if (cb.checked) {
       planCmpSelected.add(i);
     } else {
-      if (planCmpSelected.size <= 1) { cb.checked = true; return; }
       planCmpSelected.delete(i);
     }
     syncDropdownLabel();
@@ -6662,9 +6661,7 @@ function renderPlanCompareCharts(planData, prodData) {
     renderContent();
   };
   document.getElementById('plancmp-clear').onclick = () => {
-    const sorted = [...planCmpSelected].sort((a, b) => a - b);
-    const keep = sorted[sorted.length - 1] ?? 0;
-    planCmpSelected = new Set([keep]);
+    planCmpSelected = new Set();
     syncCheckboxes();
     renderContent();
   };
@@ -7846,7 +7843,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (cb.checked) {
       planCmpSelected.add(i);
     } else {
-      if (planCmpSelected.size <= 1) { cb.checked = true; return; }
       planCmpSelected.delete(i);
     }
     syncDropdownLabel();
@@ -7859,9 +7855,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     renderContent();
   };
   document.getElementById('plancmp2-clear').onclick = () => {
-    const sorted = [...planCmpSelected].sort((a, b) => a - b);
-    const keep = sorted[sorted.length - 1] ?? 0;
-    planCmpSelected = new Set([keep]);
+    planCmpSelected = new Set();
     syncCheckboxes();
     renderContent();
   };
