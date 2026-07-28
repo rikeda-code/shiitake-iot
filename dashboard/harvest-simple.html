@@ -918,13 +918,21 @@ async function loadWeeklySection() {
     <div class="loading" style="height:60px">全拠点データを読み込み中...</div>`;
 
   try {
+    // 拠点単位でのサマリー取得失敗(シート共有設定の変更・シート名変更等)を握りつぶさず、
+    // どの拠点が失敗したか分かるようにする(でないと「特定の拠点だけグラフに出ない」原因が
+    // コンソールにも画面にも一切残らず切り分けられなくなる)。
+    const weeklySiteFetchErrors = [];
     const allSummaries = (await Promise.all(SITES.map(site =>
       fetchSummaryRows(site)
         .then(({ active, ended }) => [
           ...active.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: false })),
           ...ended.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: true })),
         ])
-        .catch(() => [])
+        .catch(e => {
+          console.error(`[weekly] ${site.name}のサマリー取得に失敗:`, e.message);
+          weeklySiteFetchErrors.push(site.name);
+          return [];
+        })
     ))).flat().filter(r => r.startDate);
 
     async function fetchWithLimit(items, fn, limit = 15) {
@@ -935,6 +943,7 @@ async function loadWeeklySection() {
       }
       return results;
     }
+    let weeklyContainerFetchErrorCount = 0;
     const [containerData, targetData] = await Promise.all([
       fetchWithLimit(allSummaries, async c => {
         try {
@@ -943,13 +952,18 @@ async function loadWeeklySection() {
           const sizeRows = parseSizeRowsFromTable(table, c.startDate);
           return { ...c, bedCount, rows, sizeRows, lot: sheetLot || c.lot || '' };
         } catch (e) {
+          weeklyContainerFetchErrorCount++;
+          console.error(`[weekly] ${c.siteName} ${c.name} のコンテナ取得に失敗:`, e.message);
           return { ...c, bedCount: null, rows: [] };
         }
       }),
       fetchTargetLine(),
     ]);
+    if (weeklyContainerFetchErrorCount > 0) {
+      console.warn(`[weekly] ${weeklyContainerFetchErrorCount}件のコンテナ取得に失敗しました`);
+    }
 
-    weeklyState = { containerData, targetData };
+    weeklyState = { containerData, targetData, siteFetchErrors: weeklySiteFetchErrors };
     await waitForChart();
     renderWeeklySection(section, weeklyState, 'site', 'desc');
 
@@ -963,13 +977,23 @@ async function loadWeeklySection() {
 let drillState = { site: null, person: null, subMode: 'week', sortOrder: 'desc' };
 
 function renderWeeklySection(section, state, groupMode, sortOrder) {
-  const { containerData, targetData } = state;
+  const { containerData, targetData, siteFetchErrors } = state;
   const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
   if (!valid.length) {
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
       <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
     return;
   }
+
+  // 一部拠点だけデータが取得できていない(シート共有設定の変更・一時的な通信エラー等)場合に
+  // 気づけるよう警告を表示する。色分けの見た目だけでは「特定拠点が全く出ていない」ことに
+  // 気づきにくいため明示する。
+  const sitesWithData = new Set(valid.map(c => c.siteName));
+  const missingSites = SITES.map(s => s.name).filter(name => !sitesWithData.has(name));
+  const weeklyWarningHtml = missingSites.length ? `
+    <div style="background:#3f1d1d;border:1px solid #7f1d1d;color:#fca5a5;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.85rem">
+      ⚠️ ${missingSites.join('・')}のデータを取得できませんでした${siteFetchErrors?.length ? '(シートの取得に失敗しています)' : ''}。ブラウザの開発者ツール(F12)のコンソールにエラー詳細を出力しています。更新ボタンで直らない場合、対象拠点のスプレッドシートの共有設定・シート名をご確認ください。
+    </div>` : '';
 
   if (groupMode === 'drill') {
     renderDrillSection(section, valid, targetData);
@@ -1073,6 +1097,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
 
   section.innerHTML = `
     <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+    ${weeklyWarningHtml}
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
       <div class="weekly-legend">${legendHtml}</div>
       ${sortBar}
