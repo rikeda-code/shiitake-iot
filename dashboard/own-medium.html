@@ -3157,7 +3157,8 @@ async function ensureMekakiRows() {
     mekakiRows = mekakiRows.filter(r => {
       return weeklyState.containerData.some(c => {
         if (c.siteName !== r.siteName) return false;
-        if (String(c.no) !== String(r.no)) return false;
+        const cno = String(c.no || extractContainerNo(c.name));
+        if (cno !== String(r.no)) return false;
         const cStartD = parseDateStr(c.startDate);
         if (cStartD && r.startDate) {
           return Math.abs(cStartD - r.startDate) < 14 * 86400000;
