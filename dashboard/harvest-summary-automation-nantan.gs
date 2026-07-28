@@ -1,39 +1,46 @@
 /**
- * 収穫実績集計表 新規タブ自動追加 Google Apps Script
+ * 収穫実績集計表(南丹) 新規タブ自動追加 Google Apps Script
  *
- * 「号機別収穫実績集計表」スプレッドシートに紐づけて設置する。
- * 号機ごとのタブ(例:「16(7/13)L3」)を新規追加・リネームすると、
- * 「収穫実績集計表1」シートの3行目(見本行)の下に1行追加し、
+ * 「26/南丹担当号機収穫管理」スプレッドシートに紐づけて設置する。
+ * 号機ごとのタブ(例:「1-9(7/28)L3」「3-8(6/29)志摩L3」)を新規追加・リネームすると、
+ * 「収穫実績集計表」シートの3行目(見本行)の下に1行追加し、
  * A~Q列に3行目と同じ関数を展開したうえで、F列に新規タブ名を記入する。
  * 逆に、追加されていたタブが削除されると、対応する集計行も自動的に削除する。
  *
- * セットアップ手順は docs/harvest-summary-automation-setup.md を参照。
+ * いなべ版(dashboard/harvest-summary-automation.gs)・群馬版
+ * (dashboard/harvest-summary-automation-gunma.gs)と同じ仕組みだが、
+ * シート名・タブ命名パターンが異なるため専用ファイルにしている。
+ * セットアップ手順は docs/harvest-summary-automation-setup.md を参照
+ * (このファイルを貼り付ける点以外は同じ手順)。
  */
 
-const SUMMARY_SHEET_NAME = '収穫実績集計表1';
+const SUMMARY_SHEET_NAME = '収穫実績集計表';
 const TEMPLATE_ROW = 3;            // 関数の見本行
 const NEW_ROW = TEMPLATE_ROW + 1;  // 追加される行(4行目)
 const LAST_COL = 17;               // A~Q列
 const LOT_NAME_COL = 6;            // F列(号機)
 const KNOWN_SHEETS_PROPERTY = 'knownSheetNames';
 
-// ロットタブと判定する命名パターン(例:「16(7/13)L3」「32(6/29)6志摩L3」)。
-// 号機番号 + (月/日) + 任意の文字列 + L数字 の形式のみを対象にする。
+// ロットタブと判定する命名パターン(例:「1-9(7/28)L3」「3-8(6/29)志摩L3」)。
+// 号機番号(ハイフン付きも可) + (月/日) + 任意の文字列 + L数字 の形式のみを対象にする。
 // これ以外の名前のタブ(管理用タブ、個人名タブ、テストタブなど)は
 // EXCLUDED_SHEET_NAMES に列挙しなくても自動的に対象外になる。
-const LOT_NAME_PATTERN = /^\d+\(\d{1,2}\/\d{1,2}\).*L\d+$/;
+const LOT_NAME_PATTERN = /^[\d-]+\(\d{1,2}\/\d{1,2}\).*L\d+$/;
 
 // 上記パターンに一致してしまうが除外したいシート名がある場合はここに追記する
 const EXCLUDED_SHEET_NAMES = [
   SUMMARY_SHEET_NAME,
-  'ファーム号機別収穫実績',
-  '転写（いなべ収穫管理表）保管用',
-  '転写（いなべ収穫管理表）',
-  'コンテナー一覧',
-  'いなべ原本',
+  'フォームの回答 1',
+  '群馬管理原本',
+  'いなべ管理原本',
+  '南丹管理原本',
+  '南丹原本',
+  '転写（南丹収穫管理表）',
+  '転写（南丹収穫管理表）保管用',
+  'シート名リスト',
 ];
 
-// シート複製直後の仮の名前(例:「いなべ原本のコピー」「シート2」)はまだ最終的な
+// シート複製直後の仮の名前(例:「南丹原本のコピー」「シート2」)はまだ最終的な
 // タブ名ではないため無視し、ユーザーがリネームした時点(OTHERイベント)で処理する
 const TEMP_NAME_PATTERNS = [/のコピー(\s*\d+)?$/, /^シート\d+$/, /^Copy of /];
 
@@ -161,7 +168,7 @@ function removeSummaryRowByName() {
     ui.alert('「' + SUMMARY_SHEET_NAME + '」シートが見つかりません。');
     return;
   }
-  const response = ui.prompt('削除するタブ名を入力してください(例: 16(7/13)L3)');
+  const response = ui.prompt('削除するタブ名を入力してください(例: 1-9(7/28)L3)');
   if (response.getSelectedButton() !== ui.Button.OK) return;
   const name = response.getResponseText().trim();
   if (!name) return;
