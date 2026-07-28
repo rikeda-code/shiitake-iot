@@ -858,7 +858,7 @@ async function loadWeeklySection() {
 
     weeklyState = { containerData, targetData };
     await waitForChart();
-    renderWeeklySection(section, weeklyState, 'week', 'desc');
+    renderWeeklySection(section, weeklyState, 'lot', 'desc');
 
   } catch (e) {
     console.error('[weekly] CATCH ERROR:', e.message, e.stack);
@@ -1540,7 +1540,7 @@ function weeklySetSizeMode(mode) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
   weeklySizeMode = weeklySizeMode === mode ? null : mode;
-  const groupMode = section.dataset.groupMode || 'week';
+  const groupMode = section.dataset.groupMode || 'lot';
   const sortOrder = section.dataset.sortOrder || 'desc';
   weeklySizeCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklySizeCharts = [];
@@ -1644,7 +1644,7 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
 function weeklySetSort(order) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
-  const groupMode = section.dataset.groupMode || 'week';
+  const groupMode = section.dataset.groupMode || 'lot';
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
   if (weeklySizeMode) {
