@@ -3188,9 +3188,53 @@ async function renderMekakiTab() {
   }
 }
 
+function renderMekakiLotChart() {
+  const canvas = document.getElementById('mekaki-lot-chart');
+  if (!canvas || !mekakiRows) return;
+  if (window._mekakiLotChartInstance) { window._mekakiLotChartInstance.destroy(); }
+  const filtered = mekakiRows.filter(r => r.lot);
+  const lotMap = {};
+  filtered.forEach(r => {
+    if (!lotMap[r.lot]) lotMap[r.lot] = [];
+    if (r.converted != null) lotMap[r.lot].push(r.converted);
+  });
+  const lots = Object.keys(lotMap).sort();
+  const avgs = lots.map(lot => {
+    const vals = lotMap[lot];
+    return vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null;
+  });
+  const palette = ['#38bdf8', '#34d399', '#f97316', '#facc15', '#f472b6', '#a78bfa', '#4ade80', '#fb7185', '#60a5fa', '#c084fc'];
+  const colors = lots.map((_, i) => palette[i % palette.length]);
+  window._mekakiLotChartInstance = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: lots,
+      datasets: [{
+        label: '芽かき量 平均(2520換算 kg)',
+        data: avgs,
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor: colors,
+        borderWidth: 1.5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults } },
+      scales: {
+        x: { ticks: { color: ctx => colors[ctx.index] || '#8892a4', font: { size: 14, weight: '700' } }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' }, title: { display: true, text: 'kg (2520換算)', color: '#64748b', font: { size: 10 } } },
+      },
+    },
+  });
+}
+
 function renderMekakiSection(section) {
   section.innerHTML = `
     <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    <div style="background:#13151f;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="font-size:0.82rem;color:#94a3b8;font-weight:600;margin-bottom:10px">ロット別 芽かき量（2520換算 kg 平均）</div>
+      <div style="position:relative;height:220px"><canvas id="mekaki-lot-chart"></canvas></div>
+    </div>
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
         <thead>
@@ -3214,6 +3258,7 @@ function renderMekakiSection(section) {
       </table>
     </div>`;
   mekakiRenderTable();
+  requestAnimationFrame(renderMekakiLotChart);
 }
 
 // ── 菌床重量タブ ──────────────────────────────────────────────────────────────
@@ -3521,11 +3566,11 @@ const ANALYSIS_SIZE_DEFS = [
 
 let analysisDataset = null; // built lazily, invalidated by refreshActiveTab()
 let analysisFilters = {
-  sites: new Set(SITES.map(s => s.name)),
+  sites: new Set(['自社菌床']),
   minDays: '', maxDays: '', dateFrom: '', dateTo: '',
 };
 let analysisSelected = new Set(); // Set<container.key>
-let analysisSubTab = 'container'; // 'container' | 'date' | 'correlation'
+let analysisSubTab = 'container'; // 'container' | 'date' | 'correlation' | 'weighttrend' | 'mekakitrend'
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
 let analysisDateSize = 'm'; // 日付タブの日別サイズ別グラフで表示するサイズ
 let analysisParetoSize = 'total'; // コンテナ別パレート図で集計対象にするサイズ('total'=全サイズ合計)
@@ -3682,6 +3727,13 @@ function analysisToggleSelect(key) {
 
 function analysisClearSelection() {
   analysisSelected.clear();
+  renderAnalysisTab();
+}
+
+function analysisToggleLot(lot) {
+  const lotContainers = (analysisDataset || []).filter(c => analysisFormatLot(c.lot) === lot);
+  const allSel = lotContainers.every(c => analysisSelected.has(c.key));
+  lotContainers.forEach(c => allSel ? analysisSelected.delete(c.key) : analysisSelected.add(c.key));
   renderAnalysisTab();
 }
 
@@ -4334,56 +4386,55 @@ async function renderAnalysisTab() {
 
   const candidates = analysisFilteredCandidates();
   const selected = candidates.filter(c => analysisSelected.has(c.key));
-  // フィルターから外れて見えなくなった選択も比較には残す
   const hiddenSelected = (analysisDataset || []).filter(c => analysisSelected.has(c.key) && !candidates.includes(c));
   const allSelected = [...selected, ...hiddenSelected];
 
-  const siteFilterHtml = [...SITES, { name: '自社菌床', color: '#f59e0b' }].map(s => `
-    <button class="sort-btn${analysisFilters.sites.has(s.name) ? ' active' : ''}"
-      style="${analysisFilters.sites.has(s.name) ? `color:${s.color};border-color:${s.color}` : ''}"
-      onclick="analysisToggleSite('${s.name}')">${s.name}</button>`).join('');
+  // 菌床ロット別チップ選択UIを構築
+  const allLots = [...new Set((analysisDataset || [])
+    .map(c => analysisFormatLot(c.lot)).filter(l => l !== '—'))].sort();
+  const lotColorMapFull = analysisBuildLotColorMap(analysisDataset || []);
+  const lotChipHtml = allLots.length ? allLots.map(lot => {
+    const lotContainers = (analysisDataset || []).filter(c => analysisFormatLot(c.lot) === lot);
+    const selCount = lotContainers.filter(c => analysisSelected.has(c.key)).length;
+    const isActive = selCount === lotContainers.length && lotContainers.length > 0;
+    const isPartial = selCount > 0 && selCount < lotContainers.length;
+    const color = lotColorMapFull[lot] || '#f59e0b';
+    return `<button class="sort-btn${isActive ? ' active' : ''}"
+      style="${isActive ? `color:${color};border-color:${color}` : isPartial ? `border-color:${color};opacity:0.7` : ''}"
+      onclick="analysisToggleLot('${lot}')">
+      ${lot}<span style="font-size:0.7rem;color:#64748b;margin-left:4px">${selCount}/${lotContainers.length}</span>
+    </button>`;
+  }).join('') : `<span style="font-size:0.82rem;color:#64748b">ロットデータなし</span>`;
 
-  const candidateListHtml = candidates.length ? candidates.map(c => {
-    const checked = analysisSelected.has(c.key);
-    const harvestStr = c.harvest != null ? `${Math.round(c.harvest).toLocaleString('ja-JP')}g/菌床` : '—';
-    const safeKey = c.key.replace(/'/g, "\\'");
-    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;${checked ? 'background:#22d3ee1a' : ''}" onmouseover="this.style.background='#22d3ee1a'" onmouseout="this.style.background='${checked ? '#22d3ee1a' : ''}'">
-      <input type="checkbox" ${checked ? 'checked' : ''} onchange="analysisToggleSelect('${safeKey}')">
-      <span style="color:${SITES.find(s => s.name === c.siteName)?.color || '#94a3b8'};font-weight:700;font-size:0.82rem">${c.siteName}</span>
-      <span style="font-size:0.85rem;color:#e2e8f0">${c.no}号機</span>
-      <span style="font-size:0.75rem;color:#64748b">${c.startDate || '—'} 開始・${c.days != null ? c.days + '日' : '—'}</span>
-      <span style="margin-left:auto;font-size:0.8rem;color:#94a3b8">${harvestStr}</span>
-    </label>`;
-  }).join('') : `<div style="padding:16px;color:#64748b;font-size:0.85rem">条件に一致するコンテナがありません</div>`;
-
-  // 相関図は「栽培日数」「栽培開始日」フィルターで栽培期間を絞れるよう、
-  // フィルターから外れた選択(hiddenSelected)は含めない(他タブは選択維持のため含める)
   const chartItems = analysisSubTab === 'correlation' ? selected : allSelected;
-
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
-  const rightHtml = !allSelected.length
-    ? `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">比較したいコンテナを上のリストから選択してください</div>`
-    : (analysisSubTab === 'date' ? renderAnalysisDateView()
-      : analysisSubTab === 'correlation'
-        ? (chartItems.length ? renderAnalysisCorrelationView(chartItems)
-          : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">現在の栽培期間フィルターに一致する選択コンテナがありません</div>`)
-      : renderAnalysisComparison(allSelected, lotColorMap));
+  const noSelMsg = `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">菌床ロットを選択してください</div>`;
+
+  const rightHtml = !allSelected.length ? noSelMsg
+    : analysisSubTab === 'date' ? renderAnalysisDateView()
+    : analysisSubTab === 'correlation'
+      ? (chartItems.length ? renderAnalysisCorrelationView(chartItems) : noSelMsg)
+    : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrend(allSelected)
+    : analysisSubTab === 'mekakitrend' ? renderAnalysisMekakiTrend(allSelected)
+    : renderAnalysisComparison(allSelected, lotColorMap);
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
     { key: 'date', label: '日付' },
     { key: 'correlation', label: '相関図' },
+    { key: 'weighttrend', label: '菌床重量傾向' },
+    { key: 'mekakitrend', label: '芽かき量傾向' },
   ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
     <div class="section-title">分析<span class="sub">コンテナ横断比較</span></div>
-    <div style="display:flex;gap:8px;margin-bottom:16px">${subTabHtml}</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">${subTabHtml}</div>
 
     <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
       <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end">
-        <div>
-          <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">拠点</div>
-          <div style="display:flex;gap:6px">${siteFilterHtml}</div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:0.72rem;color:#64748b;margin-bottom:6px">菌床ロット</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${lotChipHtml}</div>
         </div>
         <div>
           <div style="font-size:0.72rem;color:#64748b;margin-bottom:4px">栽培日数</div>
@@ -4410,23 +4461,113 @@ async function renderAnalysisTab() {
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;align-items:start">
-      <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:8px;max-height:560px;overflow-y:auto">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 8px;position:sticky;top:0;background:#1a1d27;z-index:1">
-          <span style="font-size:0.75rem;color:#64748b">候補 ${candidates.length}件</span>
-          <select onchange="analysisBulkAction(this, this.value)"
-            style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:4px 6px;font-size:0.78rem">
-            <option value="" selected>一括操作...</option>
-            <option value="selectAll">表示中を全選択</option>
-            <option value="deselectAll">表示中を全解除</option>
-          </select>
-        </div>
-        ${candidateListHtml}
-      </div>
-      <div>${rightHtml}</div>
-    </div>`;
+    <div>${rightHtml}</div>`;
 
-  if (chartItems.length) drawAnalysisCharts(chartItems, lotColorMap);
+  if (chartItems.length) {
+    drawAnalysisCharts(chartItems, lotColorMap);
+    if (analysisSubTab === 'weighttrend') drawAnalysisWeightTrendChart(allSelected, lotColorMap);
+    if (analysisSubTab === 'mekakitrend') drawAnalysisMekakiTrendChart(allSelected);
+  }
+}
+
+// ── 菌床重量傾向サブタブ ──────────────────────────────────────────────────
+function renderAnalysisWeightTrend(items) {
+  if (!items.length) return `<div style="padding:24px;color:#64748b">ロットを選択してください</div>`;
+  return `
+    <div style="background:#13151f;border-radius:12px;padding:16px">
+      <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向（初期重量 + 吸水量）</div>
+      <div style="position:relative;height:420px"><canvas id="analysis-weighttrend-canvas"></canvas></div>
+    </div>`;
+}
+
+function drawAnalysisWeightTrendChart(items, lotColorMap) {
+  const canvas = document.getElementById('analysis-weighttrend-canvas');
+  if (!canvas) return;
+  if (analysisCharts['weighttrend']) { analysisCharts['weighttrend'].destroy(); }
+  const lotColors = items.map(c => analysisLotColorFor(lotColorMap, c.lot));
+  const labels = items.map(c => `${analysisFormatLot(c.lot)} ${c.no}号機`);
+  const beforeValues = items.map(c => c.weightBefore);
+  const absorbValues = items.map(c => c.weightAbsorb);
+  const totals = items.map((c, i) => (beforeValues[i] ?? 0) + (absorbValues[i] ?? 0));
+  const lotTickColor = ctx => lotColors[ctx.index] || '#8892a4';
+  analysisCharts['weighttrend'] = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: '菌床初期重量(g)', data: beforeValues,
+          backgroundColor: lotColors.map(c => c + 'cc'), stack: 's' },
+        { label: '吸水量(g)', data: absorbValues,
+          backgroundColor: lotColors.map(c => c + '66'), stack: 's' },
+        analysisAvgLineDataset('合計 平均', analysisAvg(totals), '#94a3b8', 'y', items.length),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: { ...tooltipDefaults } },
+      scales: {
+        x: { stacked: true, ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
+
+// ── 芽かき量傾向サブタブ ──────────────────────────────────────────────────
+function renderAnalysisMekakiTrend(items) {
+  if (!items.length) return `<div style="padding:24px;color:#64748b">ロットを選択してください</div>`;
+  return `
+    <div style="background:#13151f;border-radius:12px;padding:16px">
+      <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">芽かき量傾向（2520換算 kg / ロット別）</div>
+      <div style="position:relative;height:420px"><canvas id="analysis-mekakitrend-canvas"></canvas></div>
+    </div>`;
+}
+
+function drawAnalysisMekakiTrendChart(items) {
+  const canvas = document.getElementById('analysis-mekakitrend-canvas');
+  if (!canvas || !mekakiRows) return;
+  if (analysisCharts['mekakitrend']) { analysisCharts['mekakitrend'].destroy(); }
+
+  const selectedLots = [...new Set(items.map(c => analysisFormatLot(c.lot)).filter(l => l !== '—'))].sort();
+  const lotColorMap = analysisBuildLotColorMap(items);
+
+  const lotGroups = {};
+  selectedLots.forEach(lot => { lotGroups[lot] = []; });
+  mekakiRows.forEach(r => {
+    const fl = analysisFormatLot(r.lot);
+    if (fl !== '—' && lotGroups[fl] !== undefined && r.converted != null) {
+      lotGroups[fl].push(r.converted);
+    }
+  });
+
+  const labels = selectedLots;
+  const avgData = selectedLots.map(lot => {
+    const vals = lotGroups[lot];
+    return vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null;
+  });
+  const colors = selectedLots.map(lot => lotColorMap[lot] || '#f59e0b');
+
+  analysisCharts['mekakitrend'] = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '芽かき量 平均(2520換算 kg)',
+        data: avgData,
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor: colors,
+        borderWidth: 1.5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: { ...tooltipDefaults } },
+      scales: {
+        x: { ticks: { color: ctx => colors[ctx.index] || '#8892a4', font: { size: 13, weight: '700' } }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
 }
 
 function renderAnalysisComparison(items, lotColorMap) {
