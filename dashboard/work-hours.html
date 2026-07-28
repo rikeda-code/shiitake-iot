@@ -6853,6 +6853,51 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return typeof maxTotal === 'number' ? maxTotal : agg.stdTotal;
   }
 
+  // agg（3拠点マージの標準労働時間・最大労働時間集計）から、「実績」棒と「標準工数」棒の
+  // 中間に表示する「標準労働時間」棒（新規・中央）用のデータセットを構築する。
+  // threeSiteMergeFutureDatasets()と異なり、実績データの有無（actualH）に関わらず
+  // 過去月・未来月問わず全ての月で同じ標準労働時間を表示する。最大労働時間データが
+  // ある月（現時点ではS列に値がある2026/12のみ）は、標準労働時間（下段）＋最大労働
+  // 時間までの差分（上段）の積み上げ表示にする（描画スタイル・ツールチップ処理は
+  // threeSiteMergeFutureDatasets()と共通化するため同じフラグを付与する）
+  function threeSiteMergeStdHoursDatasets(agg, opts) {
+    opts = opts || {};
+    if (!agg) return [];
+    const stdData = planMonths.map(() => agg.stdTotal);
+    const capData = planMonths.map((_, mi) => {
+      const maxTotal = agg.maxTotalByYm[mnum(planMonths[mi])];
+      if (typeof maxTotal !== 'number') return null;
+      const cap = Math.round((maxTotal - agg.stdTotal) * 10) / 10;
+      return cap > 0 ? cap : null;
+    });
+    const stdColor = opts.color || '#60a5fa';
+    const capColor = opts.capColor || '#fbbf24';
+    const stdOpacity = opts.stdOpacity || 'cc';
+    const capOpacity = opts.capOpacity || 'cc';
+    const stack = opts.stack || 'stdhours';
+    const suffix = opts.labelSuffix || '';
+    return [
+      {
+        type: 'bar', label: `標準労働時間${suffix}`, data: stdData,
+        backgroundColor: stdColor + stdOpacity, borderColor: stdColor, borderWidth: 0,
+        stack, yAxisID: 'y', order: 1, _threeSiteMergeFuture: true,
+      },
+      {
+        type: 'bar', label: `最大労働時間${suffix}`, data: capData,
+        backgroundColor: capColor + capOpacity, borderColor: capColor, borderWidth: 0,
+        stack, yAxisID: 'y', order: 1, _threeSiteMergeFuture: true, _threeSiteMergeCapSegment: true,
+      },
+    ];
+  }
+
+  // 軸MAX算出用：指定月(mi、planMonths基準)における「標準労働時間」棒（中央・新規）の
+  // 実効的な高さを返す（標準労働時間、最大労働時間データがある月はその値）
+  function threeSiteMergeStdHoursTotal(agg, mi) {
+    if (!agg) return null;
+    const maxTotal = agg.maxTotalByYm[mnum(planMonths[mi])];
+    return typeof maxTotal === 'number' ? maxTotal : agg.stdTotal;
+  }
+
   let planCmpChartInstances = {};
   function destroyCharts() {
     Object.values(planCmpChartInstances).forEach(c => c.destroy());
@@ -7218,15 +7263,20 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         // 高さ）で判定する必要がある。taskData/allActualHとも未スライスの同じ
         // planMonths基準のインデックスなので、ここで合計してからsl()する
         const stdMonthlyTotalsAll = planMonths.map((_, mi) => taskData.reduce((s, d) => s + (d[mi] || 0), 0));
-        // 3拠点マージ：未来月（allActualHがnullの月）の「実績工数」棒位置に、標準労働
-        // 時間・最大労働時間から補完した棒を追加する（3拠点合算）
         const allAgg = threeSiteMergeAgg(div, null);
-        const futureDs = threeSiteMergeFutureDatasets(allAgg, allActualH);
-        const futureTotals = planMonths.map((_, mi) => threeSiteMergeFutureTotal(allAgg, allActualH, mi));
+        // 栽培：実績棒（左）は未来月も空欄のまま（本来の実績のみ）とし、代わりに
+        // 標準労働時間棒（中央・新規）を過去/未来問わず全ての月に表示する。
+        // 出荷（今回対象外）は従来通り、未来月の実績棒位置に標準労働時間・最大労働
+        // 時間から補完した棒を表示する
+        const futureDs = div === '栽培' ? [] : threeSiteMergeFutureDatasets(allAgg, allActualH);
+        const futureTotals = div === '栽培' ? [] : planMonths.map((_, mi) => threeSiteMergeFutureTotal(allAgg, allActualH, mi));
+        const stdHoursDs = div === '栽培' ? threeSiteMergeStdHoursDatasets(allAgg, { stack: 'stdhours' }) : [];
+        const stdHoursTotals = div === '栽培' ? planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(allAgg, mi)) : [];
         const allYValues = [
           ...sl(allActualH).filter(v => v !== null),
           ...sl(stdMonthlyTotalsAll).filter(v => v !== null),
           ...sl(futureTotals).filter(v => v !== null),
+          ...sl(stdHoursTotals).filter(v => v !== null),
         ];
         const yMax = computeSharedAxisMax([allYValues], 100) || undefined;
         const volMax = computeSharedAxisMax([sl(volData).filter(v => v !== null)], 1000) || undefined;
@@ -7237,6 +7287,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             stack: 'actual', yAxisID: 'y', order: 1,
           },
           ...futureDs.map(ds => ({ ...ds, data: sl(ds.data) })),
+          ...stdHoursDs.map(ds => ({ ...ds, data: sl(ds.data) })),
           ...divRows.map((r, ri) => ({
             type: 'bar', label: r.task, data: sl(taskData[ri]),
             backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
@@ -7349,14 +7400,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         availSites.map(s => {
           const d = window._planCmpChartData2[`${s}-${div}`];
           if (!d) return [];
-          // 3拠点マージ：未来月（d.actualHがnullの月）の実効的な高さも軸MAX算出に含める
+          // 3拠点マージ：栽培は標準労働時間棒（中央・新規、全月表示）、出荷（今回対象外）
+          // は未来月（d.actualHがnullの月）の実効的な高さを、軸MAX算出に含める
           const agg = threeSiteMergeAgg(div, s);
           return [...planCmpSelected].flatMap(mi => {
             const stdTotal = d.divRows.reduce((sum, r) => {
               const res = calcRow(s, r, mi);
               return sum + (res.h !== null ? res.h : 0);
             }, 0);
-            return [stdTotal, d.actualH[mi], threeSiteMergeFutureTotal(agg, d.actualH, mi)];
+            const mergeTotal = div === '栽培'
+              ? threeSiteMergeStdHoursTotal(agg, mi)
+              : threeSiteMergeFutureTotal(agg, d.actualH, mi);
+            return [stdTotal, d.actualH[mi], mergeTotal];
           });
         })
       );
@@ -7388,10 +7443,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 1,
           stack: 'actual', yAxisID: 'y', order: 1,
         });
-        // 3拠点マージ：未来月（actualHがnullの月）の「実績工数」棒位置に、標準労働
-        // 時間・最大労働時間から補完した棒を追加する（この拠点分のみ）
-        threeSiteMergeFutureDatasets(threeSiteMergeAgg(div, site), actualH)
-          .forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
+        // 栽培：実績棒（左）は未来月も空欄のままとし、標準労働時間棒（中央・新規）を
+        // 過去/未来問わず全ての月に表示する（この拠点分のみ）。出荷（今回対象外）は
+        // 従来通り、未来月の実績棒位置に標準労働時間・最大労働時間から補完した棒を表示する
+        if (div === '栽培') {
+          threeSiteMergeStdHoursDatasets(threeSiteMergeAgg(div, site), { stack: 'stdhours' })
+            .forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
+        } else {
+          threeSiteMergeFutureDatasets(threeSiteMergeAgg(div, site), actualH)
+            .forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
+        }
         divRows.forEach((r, ri) => {
           const fullData = planMonths.map((_, mi) => {
             const res = calcRow(site, r, mi);
@@ -7626,16 +7687,23 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const vm = visMonths();
       const actualMonthlyTotals = vm.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
       const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
-      // 3拠点マージ：未来月（3拠点とも実績データが無い月）の「実績工数」棒位置に、標準
-      // 労働時間・最大労働時間から補完した棒を追加する（拠点別内訳ではなく3拠点合算の
-      // 1系列として追加。個別拠点の色分けとは別枠の「3拠点合計（見込み）」として表示する）
+      // 3拠点マージ：栽培は標準労働時間棒（中央・新規、拠点別内訳ではなく3拠点合算の
+      // 1系列として全月表示）、出荷（今回対象外）は従来通り、未来月（3拠点とも実績
+      // データが無い月）の「実績工数」棒位置に、標準労働時間・最大労働時間から補完した
+      // 棒を追加する（個別拠点の色分けとは別枠の「3拠点合計」として表示する）
       const summaryAgg = threeSiteMergeAgg(div, null);
-      const summaryActualHRaw = planMonths.map((_, mi) =>
-        availSites.reduce((s, site) => s + (window._planCmpChartData2[`${site}-${div}`]?.actualH[mi] ?? 0), 0) || null
-      );
-      const summaryFutureDs = threeSiteMergeFutureDatasets(summaryAgg, summaryActualHRaw, { labelSuffix: '（3拠点合計）' });
-      const summaryFutureTotals = sl(planMonths.map((_, mi) => threeSiteMergeFutureTotal(summaryAgg, summaryActualHRaw, mi)));
-      const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, summaryFutureTotals], 100);
+      let summaryFutureDs = [], summaryFutureTotals = [], summaryStdHoursDs = [], summaryStdHoursTotals = [];
+      if (div === '栽培') {
+        summaryStdHoursDs = threeSiteMergeStdHoursDatasets(summaryAgg, { stack: 'stdhours', labelSuffix: '（3拠点合計）' });
+        summaryStdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(summaryAgg, mi)));
+      } else {
+        const summaryActualHRaw = planMonths.map((_, mi) =>
+          availSites.reduce((s, site) => s + (window._planCmpChartData2[`${site}-${div}`]?.actualH[mi] ?? 0), 0) || null
+        );
+        summaryFutureDs = threeSiteMergeFutureDatasets(summaryAgg, summaryActualHRaw, { labelSuffix: '（3拠点合計）' });
+        summaryFutureTotals = sl(planMonths.map((_, mi) => threeSiteMergeFutureTotal(summaryAgg, summaryActualHRaw, mi)));
+      }
+      const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, summaryFutureTotals, summaryStdHoursTotals], 100);
       const volSumMax = y2Axis(div, volSummaryData);
 
       const actualCtx = document.getElementById(`plansum2-${div}-actual`)?.getContext('2d');
@@ -7716,9 +7784,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             stack: 'actual', order: 1, _actualGroup: true,
           });
         });
-        // 3拠点マージ：未来月の「実績工数」棒位置（stack:'actual'、拠点別バーと同じ
-        // スタック）に、3拠点合計の標準労働時間・最大労働時間から補完した棒を追加する
+        // 栽培：実績棒（左、拠点別積み上げ）の隣に標準労働時間棒（中央・新規、3拠点合計・
+        // 全月表示）を追加する。出荷（今回対象外）は従来通り、未来月の「実績工数」棒位置
+        // （stack:'actual'、拠点別バーと同じスタック）に補完した棒を追加する
         summaryFutureDs.forEach(fds => datasets.push({ ...fds, data: sl(fds.data) }));
+        summaryStdHoursDs.forEach(fds => datasets.push({ ...fds, data: sl(fds.data) }));
         divRows.forEach((r, ri) => {
           datasets.push({
             type: 'bar', label: r.task, data: stdByTask[ri],
