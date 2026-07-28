@@ -6804,21 +6804,28 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       return cap > 0 ? cap : null;
     });
     if (stdData.every(v => v === null) && capData.every(v => v === null)) return [];
-    const color = opts.color || '#60a5fa';
+    const stdColor = opts.color || '#60a5fa';
+    // 上段（最大労働時間までの差分）は、下段（標準労働時間）と別系統の色にして
+    // コントラストをはっきりさせる（同系色の濃淡だと見分けづらいため）
+    const capColor = opts.capColor || '#fbbf24';
     const stdOpacity = opts.stdOpacity || 'cc';
-    const capOpacity = opts.capOpacity || '40';
+    const capOpacity = opts.capOpacity || 'cc';
     const stack = opts.stack || 'actual';
     const suffix = opts.labelSuffix || '';
     return [
       {
         type: 'bar', label: `標準労働時間（見込み）${suffix}`, data: stdData,
-        backgroundColor: color + stdOpacity, borderColor: color, borderWidth: 0,
+        backgroundColor: stdColor + stdOpacity, borderColor: stdColor, borderWidth: 0,
         stack, yAxisID: 'y', order: 1, _threeSiteMergeFuture: true,
       },
       {
-        type: 'bar', label: `最大労働時間まで${suffix}`, data: capData,
-        backgroundColor: color + capOpacity, borderColor: color, borderWidth: 0,
-        stack, yAxisID: 'y', order: 1, _threeSiteMergeFuture: true,
+        // ラベルは「最大労働時間」（差分ではなく、その月の最大労働時間そのものを
+        // 指す名称）。ツールチップの表示数値は差分ではなく累計値にするため
+        // tooltipOpts()側で_threeSiteMergeCapSegmentフラグを見て特別処理する
+        // （積み上げ棒の描画データ自体＝差分は変更しない）
+        type: 'bar', label: `最大労働時間${suffix}`, data: capData,
+        backgroundColor: capColor + capOpacity, borderColor: capColor, borderWidth: 0,
+        stack, yAxisID: 'y', order: 1, _threeSiteMergeFuture: true, _threeSiteMergeCapSegment: true,
       },
     ];
   }
@@ -6853,6 +6860,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           const v = ctx.parsed.y;
           if (v === null || v === undefined) return null;
           if (ctx.dataset._volumeLine) return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} ${ctx.dataset._unit}`;
+          // 3拠点マージの「最大労働時間」セグメントは、積み上げ描画上は下段（標準労働
+          // 時間）との差分をデータ値として持つが、ツールチップにはその月の最大労働
+          // 時間の累計（標準労働時間＋差分）を表示する（描画上のデータ値は変更しない）
+          if (ctx.dataset._threeSiteMergeCapSegment) {
+            const stdDs = ctx.chart.data.datasets.find(d =>
+              d.stack === ctx.dataset.stack && d._threeSiteMergeFuture && !d._threeSiteMergeCapSegment);
+            const stdVal = stdDs ? stdDs.data[ctx.dataIndex] : null;
+            const total = (typeof stdVal === "number" ? stdVal : 0) + v;
+            return `${ctx.dataset.label}: ${total.toLocaleString("ja-JP")} h`;
+          }
           return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
         },
         afterLabel: showActualTotal ? function (ctx) {
