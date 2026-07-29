@@ -3558,7 +3558,7 @@ function renderWeightSubTabs() {
       return cStart && wc.startDate && Math.abs(cStart - wc.startDate) < 14 * 86400000;
     });
     return { ...wc, siteName: match?.siteName || null, lotDisp: analysisFormatLot(wc.lot) };
-  });
+  }).filter(c => c.siteName); // 拠点マッチしないコンテナは非表示
 
   // ロット→拠点→コンテナの順でカード描画
   const lotSortKey = lot => { const m = String(lot||'').match(/^(\d+)([A-Z]+)$/); return m ? [parseInt(m[1]),m[2]] : [999,lot||'']; };
