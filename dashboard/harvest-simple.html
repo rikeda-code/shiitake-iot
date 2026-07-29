@@ -1947,7 +1947,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       return Math.max(m, Math.round(r.dayNum || 0));
     }, 0);
     const startD = parseDateStr(c.startDate);
-    const fromStart = startD ? Math.round((cutoffDate - startD) / 86400000) : 0;
+    const fromStart = startD ? Math.round((today - startD) / 86400000) : 0;
     return Math.max(max, fromRows, fromStart);
   }, 0);
   const MAX_DAY = Math.max(65, maxDayInData);
@@ -1985,11 +1985,17 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     }
 
-    // Forward-fill only up to cutoffDay
+    // Forward-fill only up to cutoffDay。ただし進行中コンテナは、当日分の収穫データが
+    // まだ入力されていない間も「昨日までの累計線」のまま横に伸ばしておき、実データが
+    // 入力された時点で即座にそちらへ切り替わるようにする(上のforEachで既に実データが
+    // 入っている日は上書きされないので、ここは未入力の日を埋めるだけ)。
+    const startD = parseDateStr(c.startDate);
+    const activeTodayDay = (!c.isEnded && startD) ? Math.round((today - startD) / 86400000) : null;
+    const fillLimit = activeTodayDay != null ? Math.min(Math.max(cutoffDay, activeTodayDay), MAX_DAY) : cutoffDay;
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
       if (cumArr[i] !== null) { last = cumArr[i]; }
-      else if (last !== null && i <= cutoffDay) { cumArr[i] = last; }
+      else if (last !== null && i <= fillLimit) { cumArr[i] = last; }
     }
 
     // ラベル: 群馬3-12(6/15)L3 形式
