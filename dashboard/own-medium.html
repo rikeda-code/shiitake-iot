@@ -4571,7 +4571,16 @@ async function renderAnalysisTab() {
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
   const noSelMsg = `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">菌床ロットを選択してください</div>`;
 
-  const rightHtml = !allSelected.length ? noSelMsg
+  // まとめタブは選択状態に関わらず全候補を表示
+  const summaryItems = (() => {
+    const all = candidates.filter(c => analysisFormatLot(c.lot) !== '—');
+    const lotSK = lot => { const m=String(lot||'').match(/^(\d+)([A-Z]+)$/); return m?[parseInt(m[1]),m[2]]:[999,lot||'']; };
+    return all.sort((a,b) => { const[an,al]=lotSK(analysisFormatLot(a.lot)),[bn,bl]=lotSK(analysisFormatLot(b.lot)); return an!==bn?an-bn:al<bl?-1:al>bl?1:(parseDateStr(a.startDate)||0)-(parseDateStr(b.startDate)||0); });
+  })();
+
+  const rightHtml = analysisSubTab === 'summary'
+      ? renderAnalysisSummary(summaryItems)
+    : !allSelected.length ? noSelMsg
     : analysisSubTab === 'correlation'
       ? (chartItems.length ? renderAnalysisCorrelationView(chartItems) : noSelMsg)
     : renderAnalysisComparison(allSelected, lotColorMap);
@@ -4579,6 +4588,7 @@ async function renderAnalysisTab() {
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
     { key: 'correlation', label: '相関図' },
+    { key: 'summary', label: 'まとめ' },
   ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
@@ -4623,6 +4633,75 @@ async function renderAnalysisTab() {
     <div>${rightHtml}</div>`;
 
   if (chartItems.length) drawAnalysisCharts(chartItems, lotColorMap);
+}
+
+// ── まとめタブ ──────────────────────────────────────────────────────────────
+function renderAnalysisSummary(items) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const fmt = v => v != null ? v.toLocaleString() : '—';
+  const fmtF = (v, d=1) => v != null ? v.toFixed(d) : '—';
+
+  // day15時点の累計パック品率を sizeRows から計算
+  const packRateDay15 = c => {
+    if (!c.sizeRows || !c.sizeRows.length) return null;
+    const rows15 = c.sizeRows.filter(r => r.day <= 15);
+    if (!rows15.length) return null;
+    let m=0,l=0,xl=0,bg=0;
+    rows15.forEach(r => { m+=r.m; l+=r.l; xl+=r.xl; bg+=r.bg; });
+    const total = m+l+xl+bg;
+    return total > 0 ? +((m+l+xl)/total*100).toFixed(1) : null;
+  };
+
+  // 栽培状況
+  const statusStr = c => {
+    if (c.endDate) {
+      const ed = parseDateStr(c.endDate);
+      if (ed && ed < today) return '<span style="color:#64748b">栽培終了</span>';
+    }
+    if (c.days != null) return `<span style="color:#86efac">栽培${c.days}日目</span>`;
+    return '<span style="color:#64748b">—</span>';
+  };
+
+  const SITE_COLORS = { 'いなべ':'#60a5fa','群馬':'#fb923c','南丹':'#86efac' };
+
+  const rows = items.map(c => {
+    const siteColor = SITE_COLORS[c.siteName] || '#94a3b8';
+    const lot = analysisFormatLot(c.lot);
+    const weightAfter = (c.weightBefore != null && c.weightAbsorb != null)
+      ? +(c.weightBefore + c.weightAbsorb).toFixed(1) : null;
+    const pr15 = packRateDay15(c);
+    const prFinal = c.packRate;
+    const prCls = v => v == null ? '' : v >= 90 ? 'color:#86efac' : v >= 80 ? 'color:#93c5fd' : 'color:#f87171';
+    return `<tr style="border-bottom:1px solid #1e2235">
+      <td style="padding:5px 10px;color:#f59e0b;font-weight:700;white-space:nowrap">${lot}</td>
+      <td style="padding:5px 10px;color:${siteColor};font-weight:600;white-space:nowrap">${c.siteName}</td>
+      <td style="padding:5px 10px;color:#e2e8f0;text-align:center">${c.no}</td>
+      <td style="padding:5px 10px;white-space:nowrap">${statusStr(c)}</td>
+      <td style="padding:5px 10px;color:#cbd5e1;text-align:right">${fmt(c.weightBefore)}</td>
+      <td style="padding:5px 10px;color:#cbd5e1;text-align:right">${fmt(c.weightAbsorb)}</td>
+      <td style="padding:5px 10px;color:#cbd5e1;text-align:right">${fmt(weightAfter)}</td>
+      <td style="padding:5px 10px;color:#a78bfa;text-align:right">${c.mekaki != null ? fmtF(c.mekaki,2) : '—'}</td>
+      <td style="padding:5px 10px;color:#64748b;text-align:center">—</td>
+      <td style="padding:5px 10px;color:#60a5fa;text-align:right;font-weight:600">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>
+      <td style="padding:5px 10px;text-align:right;${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>
+      <td style="padding:5px 10px;text-align:right;${prCls(prFinal)}">${prFinal != null ? prFinal + '%' : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const th = (label, align='left') =>
+    `<th style="padding:6px 10px;color:#64748b;font-weight:600;font-size:0.78rem;text-align:${align};white-space:nowrap;border-bottom:2px solid #2e3148;background:#1a1d27">${label}</th>`;
+
+  return `<div style="overflow-x:auto;border-radius:10px;border:1px solid #2e3148">
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:980px">
+      <thead><tr>
+        ${th('ロット')}${th('拠点')}${th('No.','center')}${th('栽培状況')}
+        ${th('初期重量(g)','right')}${th('吸水量(g)','right')}${th('散水後重量(g)','right')}
+        ${th('芽かき量(kg)','right')}${th('芽の太さ','center')}
+        ${th('最終収穫量(g/床)','right')}${th('パック品率 day15','right')}${th('パック品率 終了時','right')}
+      </tr></thead>
+      <tbody>${rows || '<tr><td colspan="12" style="padding:24px;color:#64748b;text-align:center">データなし</td></tr>'}</tbody>
+    </table>
+  </div>`;
 }
 
 // ── 菌床重量傾向サブタブ ──────────────────────────────────────────────────
