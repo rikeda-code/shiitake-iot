@@ -761,12 +761,17 @@ function parseContainerRowsV2(table, startDateStr) {
         const v = parseFloat(cells[ci]?.v);
         if (!isNaN(v) && v > 0 && v < 10000) daily += v;
       }
-      // Parse rowDate from col2 YYYYMMDD for future-row cutoff
+      // Parse rowDate from col2 YYYYMMDD for future-row cutoff。
+      // 他拠点(Type A/B)と同様、日付が読み取れない行は「未来のプレースホルダー行」の
+      // 可能性があるため除外する。rowDate:nullのまま行を残すと、buildWeeklyLineChart側の
+      // 未来日カットオフ(r.rowDate && ...)がrowDate自体falsyで素通りしてしまい、
+      // まだ来ていない日のダミー行が累計線に紛れ込む恐れがある。
       const ds2 = String(cells[2]?.v ?? '');
       let rowDate = null;
       if (/^\d{8}$/.test(ds2)) {
         rowDate = new Date(parseInt(ds2.slice(0,4)), parseInt(ds2.slice(4,6))-1, parseInt(ds2.slice(6,8)));
       }
+      if (!rowDate) continue;
       rows.push({ dayNum, daily, rowDate });
     }
   } else {
@@ -1936,14 +1941,22 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
   const ctx = canvas.getContext('2d');
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const tomorrow = new Date(today.getTime() + 86400000);
+
+  // 行の除外判定: 終了済みコンテナは実際の終了日以降を除外、進行中コンテナは
+  // 「今日より後(=未来日)」の行だけを除外する(今日自身は含める)。
+  // 以前は「tomorrow」という中間変数を介した間接的な比較(rowDate >= tomorrow)にしていたが、
+  // 意図(今日は含めるが未来日は含めない)が読み取りにくく誤解を招きやすいため、
+  // 「today」を基準にした直接的な比較に統一した(挙動は同一)。
+  const isFutureRow = (r, endD) => {
+    if (!r.rowDate) return false;
+    return endD ? r.rowDate >= endD : r.rowDate > today;
+  };
 
   // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
   const maxDayInData = containers.reduce((max, c) => {
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || tomorrow;
     const fromRows = c.rows.reduce((m, r) => {
-      if (r.rowDate && r.rowDate >= cutoffDate) return m;
+      if (isFutureRow(r, endD)) return m;
       return Math.max(m, Math.round(r.dayNum || 0));
     }, 0);
     const startD = parseDateStr(c.startDate);
@@ -1960,12 +1973,10 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     let cumKg = 0;
     let cutoffDay = 0;
 
-    // ended containers: use endDate as cutoff; active: use tomorrow (今日分のデータも即座に反映されるように)
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || tomorrow;
 
     c.rows.forEach(r => {
-      if (r.rowDate && r.rowDate >= cutoffDate) return;
+      if (isFutureRow(r, endD)) return;
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
@@ -1974,9 +1985,10 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     });
 
-    // Fallback for Type C rows without rowDate: use startDate calculation
+    // Fallback: 有効な行が1件もカウントされなかった場合、startDateからの経過日数で代用する
     if (cutoffDay === 0) {
       const startD = parseDateStr(c.startDate);
+      const cutoffDate = endD || today;
       if (startD) {
         cutoffDay = Math.min(Math.round((cutoffDate - startD) / 86400000), MAX_DAY);
       } else {
