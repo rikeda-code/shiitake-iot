@@ -3697,22 +3697,34 @@ let stemGasLoaded = false;
 
 async function stemLoad() {
   if (!stemGasUrl || stemGasLoaded) return;
-  try {
-    const res = await fetch(stemGasUrl);
-    const data = await res.json();
-    Object.assign(stemThickness, data);
-    stemGasLoaded = true;
-    localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
-  } catch(e) { /* ignore */ }
+  // JSONPで読み込み（Workspace GASのCORS制限を回避）
+  return new Promise(resolve => {
+    const cbName = '_stemCb_' + Date.now();
+    const timeout = setTimeout(() => { delete window[cbName]; resolve(); }, 5000);
+    window[cbName] = data => {
+      clearTimeout(timeout);
+      delete window[cbName];
+      document.getElementById('_stemScript')?.remove();
+      Object.assign(stemThickness, data);
+      stemGasLoaded = true;
+      localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
+      resolve();
+    };
+    const script = document.createElement('script');
+    script.id = '_stemScript';
+    script.src = `${stemGasUrl}?callback=${cbName}`;
+    script.onerror = () => { clearTimeout(timeout); resolve(); };
+    document.head.appendChild(script);
+  });
 }
 
 function stemSave(key, val) {
   if (val) stemThickness[key] = val; else delete stemThickness[key];
   localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
   if (!stemGasUrl) return;
-  // imgタグでGETリクエスト送信（CORS制限を回避）
-  const img = new Image();
-  img.src = `${stemGasUrl}?action=save&key=${encodeURIComponent(key)}&value=${encodeURIComponent(val)}`;
+  // no-corsで送信（レスポンス不要なので問題なし）
+  fetch(`${stemGasUrl}?action=save&key=${encodeURIComponent(key)}&value=${encodeURIComponent(val)}`, { mode: 'no-cors' })
+    .catch(() => {});
 }
 
 function stemInput(key, val) {
