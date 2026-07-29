@@ -3621,7 +3621,8 @@ function buildAnalysisDataset() {
   const mekakiIndex = {};
   (mekakiRows || []).forEach(r => {
     if (!r.no) return;
-    const key = `${r.siteName}|${r.no}`;
+    const noNorm = r.no.replace(/号機$/, '').trim();
+    const key = `${r.siteName}|${noNorm}`;
     (mekakiIndex[key] ||= []).push(r);
   });
 
@@ -3661,7 +3662,8 @@ function buildAnalysisDataset() {
       const targetDate = parseDateStr(c.startDate);
       // 自社菌床コンテナはweightIndex/mekakiIndexが'自社菌床|no'でキーされているため
       const isJisha = analysisFormatLot(c.lot) !== '—';
-      const idxKey = isJisha ? `自社菌床|${c.no}` : `${c.siteName}|${c.no}`;
+      const noNorm = String(c.no || '').replace(/号機$/, '').trim();
+      const idxKey = isJisha ? `自社菌床|${noNorm}` : `${c.siteName}|${noNorm}`;
 
       // 菌床重量: 散水前重量(初期重量)と吸水量(散水後-散水前)を計測値ごとに平均する
       const wMatch = analysisClosestByDate(weightIndex[idxKey], targetDate);
