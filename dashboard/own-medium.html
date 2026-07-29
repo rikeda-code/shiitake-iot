@@ -3689,7 +3689,46 @@ let analysisFilters = {
   minDays: '', maxDays: '', dateFrom: '', dateTo: '',
 };
 let analysisSelected = new Set(); // Set<container.key>
-let analysisSubTab = 'container'; // 'container' | 'correlation'
+let analysisSubTab = 'container'; // 'container' | 'correlation' | 'summary'
+let analysisSummaryStatus = 'all'; // 'all' | 'active' | 'ended'
+let stemThickness = JSON.parse(localStorage.getItem('stemThickness') || '{}'); // key -> value
+let stemGasUrl = localStorage.getItem('stemGasUrl') || '';
+let stemGasLoaded = false;
+
+async function stemLoad() {
+  if (!stemGasUrl || stemGasLoaded) return;
+  try {
+    const res = await fetch(stemGasUrl);
+    const data = await res.json();
+    Object.assign(stemThickness, data);
+    stemGasLoaded = true;
+    localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
+  } catch(e) { /* ignore */ }
+}
+
+function stemSave(key, val) {
+  if (val) stemThickness[key] = val; else delete stemThickness[key];
+  localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
+  if (!stemGasUrl) return;
+  fetch(`${stemGasUrl}?action=save&key=${encodeURIComponent(key)}&value=${encodeURIComponent(val)}`)
+    .catch(() => {});
+}
+
+function stemInput(key, val) {
+  stemSave(key, val);
+  // update all inputs with same key across table
+  document.querySelectorAll(`[data-stem-key="${CSS.escape(key)}"]`).forEach(el => {
+    if (document.activeElement !== el) el.value = val;
+  });
+}
+
+function stemSetGasUrl(url) {
+  stemGasUrl = url.trim();
+  localStorage.setItem('stemGasUrl', stemGasUrl);
+  stemGasLoaded = false;
+  stemLoad();
+}
+
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
 let analysisDateSize = 'm'; // 日付タブの日別サイズ別グラフで表示するサイズ
 let analysisParetoSize = 'total'; // コンテナ別パレート図で集計対象にするサイズ('total'=全サイズ合計)
@@ -4575,11 +4614,12 @@ async function renderAnalysisTab() {
   const summaryItems = (() => {
     const all = candidates.filter(c => analysisFormatLot(c.lot) !== '—');
     const lotSK = lot => { const m=String(lot||'').match(/^(\d+)([A-Z]+)$/); return m?[parseInt(m[1]),m[2]]:[999,lot||'']; };
-    return all.sort((a,b) => { const[an,al]=lotSK(analysisFormatLot(a.lot)),[bn,bl]=lotSK(analysisFormatLot(b.lot)); return an!==bn?an-bn:al<bl?-1:al>bl?1:(parseDateStr(a.startDate)||0)-(parseDateStr(b.startDate)||0); });
+    // 新しいロット→古いロット（降順）
+    return all.sort((a,b) => { const[an,al]=lotSK(analysisFormatLot(a.lot)),[bn,bl]=lotSK(analysisFormatLot(b.lot)); return an!==bn?bn-an:al>bl?-1:al<bl?1:(parseDateStr(a.startDate)||0)-(parseDateStr(b.startDate)||0); });
   })();
 
   const rightHtml = analysisSubTab === 'summary'
-      ? renderAnalysisSummary(summaryItems)
+      ? renderAnalysisSummary(summaryItems, analysisSelected)
     : !allSelected.length ? noSelMsg
     : analysisSubTab === 'correlation'
       ? (chartItems.length ? renderAnalysisCorrelationView(chartItems) : noSelMsg)
@@ -4636,12 +4676,27 @@ async function renderAnalysisTab() {
 }
 
 // ── まとめタブ ──────────────────────────────────────────────────────────────
-function renderAnalysisSummary(items) {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const fmt = v => v != null ? v.toLocaleString() : '—';
-  const fmtF = (v, d=1) => v != null ? v.toFixed(d) : '—';
+function analysisSummarySetStatus(s) { analysisSummaryStatus = s; renderAnalysisTab(); }
 
-  // day15時点の累計パック品率を sizeRows から計算
+function renderAnalysisSummary(allCandidates, selectedKeys) {
+  stemLoad(); // 非同期でGASデータ取得（初回のみ）
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const isEnded = c => {
+    if (!c.endDate) return false;
+    const ed = parseDateStr(c.endDate);
+    return ed && ed < today;
+  };
+
+  // 選択連動: 選択があればそれに絞る
+  let items = selectedKeys && selectedKeys.size > 0
+    ? allCandidates.filter(c => selectedKeys.has(c.key))
+    : allCandidates;
+
+  // 栽培状況フィルター
+  if (analysisSummaryStatus === 'active') items = items.filter(c => !isEnded(c));
+  else if (analysisSummaryStatus === 'ended') items = items.filter(c => isEnded(c));
+
   const packRateDay15 = c => {
     if (!c.sizeRows || !c.sizeRows.length) return null;
     const rows15 = c.sizeRows.filter(r => r.day <= 15);
@@ -4652,56 +4707,85 @@ function renderAnalysisSummary(items) {
     return total > 0 ? +((m+l+xl)/total*100).toFixed(1) : null;
   };
 
-  // 栽培状況
-  const statusStr = c => {
-    if (c.endDate) {
-      const ed = parseDateStr(c.endDate);
-      if (ed && ed < today) return '<span style="color:#64748b">栽培終了</span>';
-    }
-    if (c.days != null) return `<span style="color:#86efac">栽培${c.days}日目</span>`;
-    return '<span style="color:#64748b">—</span>';
-  };
+  const statusStr = c => isEnded(c)
+    ? '<span style="color:#64748b;font-weight:700">栽培終了</span>'
+    : c.days != null ? `<span style="color:#86efac;font-weight:700">栽培${c.days}日目</span>`
+    : '<span style="color:#64748b">—</span>';
 
   const SITE_COLORS = { 'いなべ':'#60a5fa','群馬':'#fb923c','南丹':'#86efac' };
+  const prCls = v => v == null ? 'color:#64748b' : v >= 90 ? 'color:#86efac;font-weight:700' : v >= 80 ? 'color:#93c5fd;font-weight:700' : 'color:#f87171;font-weight:700';
+  const fmt = v => v != null ? Math.round(v).toLocaleString() : '—';
+
+  const TD = 'padding:4px 6px;font-size:0.88rem;font-weight:600;border-bottom:1px solid #1e2235';
+  const TDR = TD + ';text-align:right';
 
   const rows = items.map(c => {
     const siteColor = SITE_COLORS[c.siteName] || '#94a3b8';
     const lot = analysisFormatLot(c.lot);
     const weightAfter = (c.weightBefore != null && c.weightAbsorb != null)
-      ? +(c.weightBefore + c.weightAbsorb).toFixed(1) : null;
+      ? Math.round(c.weightBefore + c.weightAbsorb) : null;
     const pr15 = packRateDay15(c);
     const prFinal = c.packRate;
-    const prCls = v => v == null ? '' : v >= 90 ? 'color:#86efac' : v >= 80 ? 'color:#93c5fd' : 'color:#f87171';
+    const stemVal = stemThickness[c.key] || '';
+    const escKey = c.key.replace(/'/g, "\\'");
     return `<tr style="border-bottom:1px solid #1e2235">
-      <td style="padding:5px 10px;color:#f59e0b;font-weight:700;white-space:nowrap">${lot}</td>
-      <td style="padding:5px 10px;color:${siteColor};font-weight:600;white-space:nowrap">${c.siteName}</td>
-      <td style="padding:5px 10px;color:#e2e8f0;text-align:center">${c.no}</td>
-      <td style="padding:5px 10px;white-space:nowrap">${statusStr(c)}</td>
-      <td style="padding:5px 10px;color:#cbd5e1;text-align:right">${fmt(c.weightBefore)}</td>
-      <td style="padding:5px 10px;color:#cbd5e1;text-align:right">${fmt(c.weightAbsorb)}</td>
-      <td style="padding:5px 10px;color:#cbd5e1;text-align:right">${fmt(weightAfter)}</td>
-      <td style="padding:5px 10px;color:#a78bfa;text-align:right">${c.mekaki != null ? fmtF(c.mekaki,2) : '—'}</td>
-      <td style="padding:5px 10px;color:#64748b;text-align:center">—</td>
-      <td style="padding:5px 10px;color:#60a5fa;text-align:right;font-weight:600">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>
-      <td style="padding:5px 10px;text-align:right;${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>
-      <td style="padding:5px 10px;text-align:right;${prCls(prFinal)}">${prFinal != null ? prFinal + '%' : '—'}</td>
+      <td style="${TD};color:#f59e0b;white-space:nowrap">${lot}</td>
+      <td style="${TD};color:${siteColor};white-space:nowrap">${c.siteName}</td>
+      <td style="${TD};color:#e2e8f0;text-align:center">${c.no}</td>
+      <td style="${TD};white-space:nowrap">${statusStr(c)}</td>
+      <td style="${TDR};color:#93c5fd">${fmt(c.weightBefore)}</td>
+      <td style="${TDR};color:#7dd3fc">${fmt(c.weightAbsorb)}</td>
+      <td style="${TDR};color:#bfdbfe">${fmt(weightAfter)}</td>
+      <td style="${TDR};color:#c4b5fd">${c.mekaki != null ? c.mekaki.toFixed(1) : '—'}</td>
+      <td style="${TD};text-align:center;padding:2px 4px">
+        <input type="text" value="${stemVal}"
+          data-stem-key="${c.key.replace(/"/g,'&quot;')}"
+          onchange="stemInput('${escKey}', this.value)"
+          placeholder="例: 太"
+          style="width:64px;background:#0f1117;border:1px solid #2e3148;border-radius:5px;color:#fcd34d;font-size:0.85rem;font-weight:700;padding:3px 6px;text-align:center">
+      </td>
+      <td style="${TDR};color:#60a5fa">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>
+      <td style="${TDR};${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>
+      <td style="${TDR};${prCls(prFinal)}">${prFinal != null ? prFinal + '%' : '—'}</td>
     </tr>`;
   }).join('');
 
-  const th = (label, align='left') =>
-    `<th style="padding:6px 10px;color:#64748b;font-weight:600;font-size:0.78rem;text-align:${align};white-space:nowrap;border-bottom:2px solid #2e3148;background:#1a1d27">${label}</th>`;
+  const TH = 'padding:5px 6px;color:#64748b;font-weight:700;font-size:0.8rem;white-space:nowrap;border-bottom:2px solid #2e3148;background:#1a1d27';
+  const THR = TH + ';text-align:right';
 
-  return `<div style="overflow-x:auto;border-radius:10px;border:1px solid #2e3148">
-    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:980px">
-      <thead><tr>
-        ${th('ロット')}${th('拠点')}${th('No.','center')}${th('栽培状況')}
-        ${th('初期重量(g)','right')}${th('吸水量(g)','right')}${th('散水後重量(g)','right')}
-        ${th('芽かき量(kg)','right')}${th('芽の太さ','center')}
-        ${th('最終収穫量(g/床)','right')}${th('パック品率 day15','right')}${th('パック品率 終了時','right')}
-      </tr></thead>
-      <tbody>${rows || '<tr><td colspan="12" style="padding:24px;color:#64748b;text-align:center">データなし</td></tr>'}</tbody>
-    </table>
+  const statusBtns = ['all','active','ended'].map(s => {
+    const label = s==='all'?'全て':s==='active'?'栽培中':'栽培終了';
+    const active = analysisSummaryStatus === s;
+    return `<button class="sort-btn${active?' active':''}" onclick="analysisSummarySetStatus('${s}')">${label}</button>`;
+  }).join('');
+
+  const gasConfig = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-size:0.72rem;color:#64748b;white-space:nowrap">芽の太さ保存先(GAS URL)</span>
+    <input type="text" value="${stemGasUrl}" onchange="stemSetGasUrl(this.value)" placeholder="Google Apps Script Web App URL"
+      style="flex:1;min-width:280px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 8px;font-size:0.75rem">
+    <span style="font-size:0.7rem;color:#475569">${stemGasUrl ? '✓ 設定済み' : '未設定（このデバイスのみ保存）'}</span>
   </div>`;
+
+  return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-size:0.8rem;color:#64748b;font-weight:600">栽培状況：</span>
+      ${statusBtns}
+      <span style="font-size:0.8rem;color:#475569;margin-left:8px">${items.length}件</span>
+    </div>
+    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:10px 14px;margin-bottom:12px">
+      ${gasConfig}
+    </div>
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #2e3148">
+      <table style="width:100%;border-collapse:collapse;min-width:1000px">
+        <thead><tr>
+          <th style="${TH}">ロット</th><th style="${TH}">拠点</th><th style="${TH};text-align:center">No.</th><th style="${TH}">栽培状況</th>
+          <th style="${THR}">初期重量(g)</th><th style="${THR}">吸水量(g)</th><th style="${THR}">散水後重量(g)</th>
+          <th style="${THR}">芽かき量(kg)</th><th style="${TH};text-align:center">芽の太さ</th>
+          <th style="${THR}">最終収穫量(g/床)</th><th style="${THR}">パック品率 day15</th><th style="${THR}">パック品率 終了時</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="12" style="padding:24px;color:#64748b;text-align:center;font-size:0.9rem">データなし</td></tr>'}</tbody>
+      </table>
+    </div>`;
 }
 
 // ── 菌床重量傾向サブタブ ──────────────────────────────────────────────────
