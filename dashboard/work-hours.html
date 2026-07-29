@@ -7853,7 +7853,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
   main.innerHTML = `
     <div class="compare-shell">
-      <div class="compare-header-row" style="flex-wrap:wrap;gap:8px">
+      <div class="compare-header-row" style="flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
         <div class="chart-section-label" style="flex-shrink:0">📊 予定標準工数 vs 実績工数 比較
           <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">※ 左棒(赤)=実績　右棒(積み上げ)=予定標準</span>
         </div>
