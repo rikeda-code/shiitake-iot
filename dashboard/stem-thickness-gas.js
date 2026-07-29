@@ -4,18 +4,12 @@
  * 【セットアップ手順】
  * 1. 対象スプレッドシートを開く
  * 2. 拡張機能 → Apps Script
- * 3. このファイルの内容をコピーして貼り付け
- * 4. 上部の SHEET_ID を対象スプレッドシートのIDに変更
- *    (URLの /d/XXXXXXX/edit の XXXXXXX 部分)
- * 5. 「デプロイ」→「新しいデプロイ」
- * 6. 種類：「ウェブアプリ」を選択
- * 7. 次のユーザーとして実行：「自分」
- * 8. アクセスできるユーザー：「全員」
- * 9. 「デプロイ」→ 表示されたURLをコピー
- * 10. ダッシュボードのまとめタブ「芽の太さ保存先(GAS URL)」欄に貼り付け
+ * 3. このファイルの内容をコピーして貼り付け（SHEET_IDは変更不要）
+ * 4. 「デプロイ」→「既存のデプロイを管理」→ 鉛筆アイコン
+ *    → バージョン「新しいバージョン」→「デプロイ」
  */
 
-const SHEET_ID = 'YOUR_SPREADSHEET_ID_HERE'; // ← スプレッドシートIDに変更
+const SHEET_ID = '1xD3RJ3NaxFPERZGBNEL3gwn3Zg8hIsh7nyM-ekgwHUI';
 const SHEET_NAME = '芽の太さ';
 
 function getOrCreateSheet() {
@@ -24,50 +18,45 @@ function getOrCreateSheet() {
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
     sheet.getRange(1, 1, 1, 2).setValues([['キー', '芽の太さ']]);
-    sheet.getRange(1, 1, 1, 2).setFontWeight('bold');
   }
   return sheet;
 }
 
 function doGet(e) {
-  const callback = e.parameter.callback; // JSONP用（不要な場合は無視）
   const sheet = getOrCreateSheet();
 
-  // action=save のとき書き込みモード
+  // action=save のとき書き込み
   if (e.parameter.action === 'save') {
     const key = e.parameter.key || '';
     const value = e.parameter.value || '';
     if (key) {
       const data = sheet.getDataRange().getValues();
       let found = false;
-      for (let i = 1; i < data.length; i++) { // 1行目はヘッダー
+      for (let i = 1; i < data.length; i++) {
         if (String(data[i][0]) === key) {
-          if (value) {
-            sheet.getRange(i + 1, 2).setValue(value);
-          } else {
-            sheet.deleteRow(i + 1); // 値が空なら行削除
-          }
+          value ? sheet.getRange(i + 1, 2).setValue(value) : sheet.deleteRow(i + 1);
           found = true;
           break;
         }
       }
-      if (!found && value) {
-        sheet.appendRow([key, value]);
-      }
+      if (!found && value) sheet.appendRow([key, value]);
     }
-    const result = JSON.stringify({ ok: true });
-    return ContentService.createTextOutput(result)
-      .setMimeType(ContentService.MimeType.JSON);
   }
 
-  // デフォルト: 全データ取得
+  // 全データ取得（JSONP対応）
   const data = sheet.getDataRange().getValues();
   const result = {};
   for (let i = 1; i < data.length; i++) {
-    const k = String(data[i][0]);
-    const v = String(data[i][1]);
-    if (k && v) result[k] = v;
+    if (data[i][0] && data[i][1]) result[String(data[i][0])] = String(data[i][1]);
   }
-  return ContentService.createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
+
+  const json = JSON.stringify(result);
+  const callback = e.parameter.callback;
+  // callbackパラメータがあればJSONP形式で返す
+  const output = callback ? `${callback}(${json})` : json;
+  const mime = callback
+    ? ContentService.MimeType.JAVASCRIPT
+    : ContentService.MimeType.JSON;
+
+  return ContentService.createTextOutput(output).setMimeType(mime);
 }
