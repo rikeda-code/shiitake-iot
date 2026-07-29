@@ -4738,11 +4738,16 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
       <td style="${TDR};color:#bfdbfe">${fmt(weightAfter)}</td>
       <td style="${TDR};color:#c4b5fd">${c.mekaki != null ? c.mekaki.toFixed(1) : '—'}</td>
       <td style="${TD};text-align:center;padding:2px 4px">
-        <input type="text" value="${stemVal}"
-          data-stem-key="${c.key.replace(/"/g,'&quot;')}"
+        <select data-stem-key="${c.key.replace(/"/g,'&quot;')}"
           onchange="stemInput('${escKey}', this.value)"
-          placeholder="例: 太"
-          style="width:64px;background:#0f1117;border:1px solid #2e3148;border-radius:5px;color:#fcd34d;font-size:0.85rem;font-weight:700;padding:3px 6px;text-align:center">
+          style="background:#0f1117;border:1px solid #2e3148;border-radius:5px;color:#fcd34d;font-size:0.85rem;font-weight:700;padding:3px 6px;cursor:pointer;max-width:90px">
+          <option value="" ${stemVal===''?'selected':''}>—</option>
+          <option value="細い" ${stemVal==='細い'?'selected':''}>細い</option>
+          <option value="やや細い" ${stemVal==='やや細い'?'selected':''}>やや細い</option>
+          <option value="普通" ${stemVal==='普通'?'selected':''}>普通</option>
+          <option value="やや太い" ${stemVal==='やや太い'?'selected':''}>やや太い</option>
+          <option value="太い" ${stemVal==='太い'?'selected':''}>太い</option>
+        </select>
       </td>
       <td style="${TDR};color:#60a5fa">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>
       <td style="${TDR};${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>
