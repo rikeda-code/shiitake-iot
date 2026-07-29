@@ -4388,7 +4388,18 @@ async function renderAnalysisTab() {
   const candidates = analysisFilteredCandidates();
   const selected = candidates.filter(c => analysisSelected.has(c.key));
   const hiddenSelected = (analysisDataset || []).filter(c => analysisSelected.has(c.key) && !candidates.includes(c));
-  const allSelected = [...selected, ...hiddenSelected];
+  // 古いロット→新しいロット（数字昇順→アルファベット昇順）、同ロット内は栽培開始日昇順
+  const lotSortKey = lot => {
+    const m = String(lot || '').match(/^(\d+)([A-Z]+)$/);
+    return m ? [parseInt(m[1]), m[2]] : [999, lot || ''];
+  };
+  const allSelected = [...selected, ...hiddenSelected].sort((a, b) => {
+    const [an, al] = lotSortKey(analysisFormatLot(a.lot));
+    const [bn, bl] = lotSortKey(analysisFormatLot(b.lot));
+    if (an !== bn) return an - bn;
+    if (al !== bl) return al < bl ? -1 : 1;
+    return (parseDateStr(a.startDate) || 0) - (parseDateStr(b.startDate) || 0);
+  });
 
   // 菌床ロット別チップ選択UIを構築
   const allLots = [...new Set((analysisDataset || [])
