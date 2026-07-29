@@ -2274,8 +2274,8 @@ function updateTabVisibility() {
 }
 
 let scatterChart = null;
-let scatterMode = 'all'; // 'all' | 'month-all' | 'month-site'
-let scatterSite = 'all'; // 'all' | 'いなべ' | '群馬' | '南丹'
+let scatterSelectedSites = new Set(); // 空=全拠点
+let scatterSelectedLots  = new Set(); // 空=全ロット
 
 async function renderScatterTab() {
   const section = document.getElementById('scatter-section');
@@ -2303,126 +2303,124 @@ async function renderScatterTab() {
   renderScatterChart();
 }
 
+function scatterToggleSite(name) {
+  if (scatterSelectedSites.has(name)) scatterSelectedSites.delete(name);
+  else scatterSelectedSites.add(name);
+  renderScatterChart();
+}
+
+function scatterToggleLot(lot) {
+  if (scatterSelectedLots.has(lot)) scatterSelectedLots.delete(lot);
+  else scatterSelectedLots.add(lot);
+  renderScatterChart();
+}
+
+function scatterSelectAllLots(lots) {
+  lots.forEach(l => scatterSelectedLots.add(l));
+  renderScatterChart();
+}
+
+function scatterDeselectAllLots(lots) {
+  lots.forEach(l => scatterSelectedLots.delete(l));
+  renderScatterChart();
+}
+
 function renderScatterChart() {
   const section = document.getElementById('scatter-section');
   const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
-  const MONTH_COLORS = ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#38bdf8','#60a5fa','#a78bfa','#e879f9','#f472b6','#94a3b8','#fbbf24'];
+  const allData = (scatterEndedData || []).filter(r => r.harvest != null && r.days != null && r.days >= 20);
 
-  const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'avg': '平均' };
+  // 利用可能なロット一覧（自社菌床ロットのみ、新しい順）
+  const allLots = [...new Set(allData.map(r => {
+    const l = (r.lot || '').replace(/^自社/, '').trim();
+    return l;
+  }).filter(l => l && /^\d+[A-Z]+$/.test(l)))].sort().reverse();
 
-  const btnBar = Object.entries(modeLabels).map(([k, v]) =>
-    `<button class="sort-btn${scatterMode===k?' active':''}" onclick="scatterSetMode('${k}')" style="margin-right:6px">${v}</button>`
-  ).join('');
+  const allSiteNames = [...new Set(SITES.map(s => s.name))];
 
-  const showSiteFilter = scatterMode !== 'avg';
-  const siteFilterBtns = showSiteFilter ? [['all','全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) => {
-    const col = k === 'all' ? '' : `color:${SITE_COLORS[k]};border-color:${SITE_COLORS[k]}`;
-    const active = scatterSite === k ? 'active' : '';
-    return `<button class="sort-btn ${active}" onclick="scatterSetSite('${k}')" style="margin-right:6px;${active?col:''}">${v}</button>`;
-  }).join('') : '';
+  // フィルター適用
+  const siteActive = name => scatterSelectedSites.size === 0 || scatterSelectedSites.has(name);
+  const lotActive  = lot  => scatterSelectedLots.size  === 0 || scatterSelectedLots.has(lot);
 
-  const allData = scatterEndedData || [];
-
-  // 月一覧を事前収集してHTML生成
-  const monthBuckets = {};
-  allData.forEach(r => {
-    const sd = parseDateStr(r.startDate);
-    if (!sd) return;
-    const key = `${sd.getFullYear()}_${String(sd.getMonth()+1).padStart(2,'0')}`;
-    if (!monthBuckets[key]) monthBuckets[key] = [];
-    monthBuckets[key].push(r);
+  const filtered = allData.filter(r => {
+    if (!siteActive(r.siteName)) return false;
+    const lotKey = (r.lot || '').replace(/^自社/, '').trim();
+    if (!lotActive(lotKey)) return false;
+    return true;
   });
-  const sortedMonths = Object.keys(monthBuckets).sort().reverse();
 
-  const monthChartsHtml = sortedMonths.map(mk => {
-    const [yr, mo] = mk.split('_');
-    let canvasHtml;
-    if (scatterSite === 'all') {
-      canvasHtml = `<div style="position:relative;height:300px;background:#13151f;border-radius:12px;padding:16px"><canvas id="scatter-month-${mk}-all"></canvas></div>`;
-    } else {
-      const s = SITES.find(s => s.name === scatterSite);
-      canvasHtml = `
-        <div style="color:${s.color};font-size:0.8rem;font-weight:600;margin-bottom:6px">${s.name}</div>
-        <div style="position:relative;height:300px;background:#13151f;border-radius:12px;padding:16px"><canvas id="scatter-month-${mk}-${scatterSite}"></canvas></div>`;
-    }
-    return `
-      <div style="margin-bottom:40px">
-        <div style="color:#cbd5e1;font-size:0.9rem;font-weight:600;margin-bottom:12px">${yr}年${parseInt(mo)}月開始</div>
-        ${canvasHtml}
-      </div>`;
+  // ロットカラーマップ
+  const lotColorMap = {};
+  allLots.forEach((lot, i) => { lotColorMap[lot] = ANALYSIS_LOT_PALETTE[i % ANALYSIS_LOT_PALETTE.length]; });
+  const noLotColor = '#64748b';
+
+  // 拠点選択ボタン
+  const siteBtns = allSiteNames.map(name => {
+    const active = siteActive(name);
+    const col = SITE_COLORS[name] || '#94a3b8';
+    return `<button class="sort-btn${active?' active':''}" onclick="scatterToggleSite('${name}')"
+      style="${active ? `color:${col};border-color:${col}` : ''}">${name}</button>`;
   }).join('');
 
+  // ロット選択ボタン
+  const lotBtns = allLots.map(lot => {
+    const active = lotActive(lot);
+    const col = lotColorMap[lot] || noLotColor;
+    return `<button onclick="scatterToggleLot('${lot}')"
+      style="padding:3px 10px;border-radius:5px;border:1px solid ${active?col:'#2e3148'};
+      background:${active?col+'22':'transparent'};color:${active?col:'#475569'};
+      font-size:0.78rem;font-weight:700;cursor:pointer">${lot}</button>`;
+  }).join('');
+  const allLotsSelected = scatterSelectedLots.size === 0 || allLots.every(l => scatterSelectedLots.has(l));
+  const lotSelectAll = `<button onclick="scatterSelectedLots.clear();renderScatterChart()"
+    style="padding:3px 8px;border-radius:5px;border:1px solid #2e3148;background:${allLotsSelected?'#2e3148':'transparent'};
+    color:${allLotsSelected?'#e2e8f0':'#475569'};font-size:0.75rem;cursor:pointer">全て</button>`;
+
+  // ロット凡例チップ
+  const legendChips = allLots.filter(l => lotActive(l)).map(l =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;color:#94a3b8">
+      <span style="width:9px;height:9px;border-radius:2px;background:${lotColorMap[l]};display:inline-block"></span>${l}
+    </span>`).join('');
+
   section.innerHTML = `
-    <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数</span></div>
-    <div style="margin-bottom:10px">${btnBar}</div>
-    ${siteFilterBtns ? `<div style="margin-bottom:16px">${siteFilterBtns}</div>` : '<div style="margin-bottom:16px"></div>'}
-    <div style="position:relative;height:480px;background:#13151f;border-radius:12px;padding:16px">
-      <canvas id="scatter-canvas"></canvas>
+    <div class="section-title">散布図<span class="sub">収穫量 vs 栽培日数（収穫終了コンテナ）</span></div>
+    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+        <span style="font-size:0.75rem;color:#64748b;font-weight:600;white-space:nowrap">拠点：</span>
+        ${siteBtns}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <span style="font-size:0.75rem;color:#64748b;font-weight:600;white-space:nowrap">ロット：</span>
+        ${lotSelectAll}
+        ${lotBtns}
+      </div>
     </div>
-    ${monthChartsHtml ? `<div style="margin-top:40px">${monthChartsHtml}</div>` : ''}`;
+    ${legendChips ? `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;background:#13151f;border-radius:8px;padding:8px 12px;margin-bottom:12px">${legendChips}</div>` : ''}
+    <div style="position:relative;height:500px;background:#13151f;border-radius:12px;padding:16px">
+      <canvas id="scatter-canvas"></canvas>
+    </div>`;
 
-  // destroy old charts
   if (scatterChart) { scatterChart.destroy(); scatterChart = null; }
-  Object.values(scatterMonthCharts).forEach(c => c.destroy());
-  Object.keys(scatterMonthCharts).forEach(k => delete scatterMonthCharts[k]);
 
-  const data = scatterSite === 'all' ? allData : allData.filter(r => r.siteName === scatterSite);
-  let datasets = [];
-
-  if (scatterMode === 'all') {
-    for (const site of SITES) {
-      const pts = data.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
-      if (!pts.length) continue;
-      datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 });
-    }
-  } else if (scatterMode === 'month-all') {
-    const monthMap = {};
-    data.forEach(r => {
-      const sd = parseDateStr(r.startDate);
-      const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
-      if (!monthMap[key]) monthMap[key] = [];
-      monthMap[key].push({ x: r.days, y: Math.round(r.harvest), label: r.no });
-    });
-    Object.entries(monthMap).sort().forEach(([month, pts], i) => {
-      datasets.push({ label: `${month}月開始`, data: pts, backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length] + 'cc', pointRadius: 6, pointHoverRadius: 8 });
-    });
-  } else {
-    // 平均モード
-    for (const site of SITES) {
-      const siteData = allData.filter(r => r.siteName === site.name);
-      const monthMap = {};
-      siteData.forEach(r => {
-        const sd = parseDateStr(r.startDate);
-        const key = sd ? `${sd.getFullYear()}/${sd.getMonth()+1}` : '不明';
-        if (!monthMap[key]) monthMap[key] = [];
-        monthMap[key].push(r);
-      });
-      const pts = Object.entries(monthMap).sort().map(([month, rs]) => {
-        const avgH = Math.round(rs.reduce((s, r) => s + r.harvest, 0) / rs.length);
-        const avgD = Math.round(rs.reduce((s, r) => s + r.days, 0) / rs.length);
-        return { x: avgD, y: avgH, label: `${month}(${rs.length}件)` };
-      });
-      if (!pts.length) continue;
-      datasets.push({ label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 8, pointHoverRadius: 11 });
-    }
-  }
-
-  // x軸(栽培日数)は0始まり・データの最大値までにする(チャートごとに個別計算)
-  const scatterAxisMax = ds => ds.reduce((max, d) => (d.data || []).reduce((m, p) => Math.max(m, p.x), max), 0);
-  const buildScatterScales = ds => ({
-    x: {
-      title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 11 } },
-      min: 0, max: scatterAxisMax(ds),
-      ticks: { color: '#8892a4', font: { size: 10 } },
-      grid: { color: '#1e2235' },
-    },
-    y: {
-      title: { display: true, text: '収穫量 (g/菌床)', color: '#8892a4', font: { size: 11 } },
-      min: 0, max: 900,
-      ticks: { color: '#8892a4', font: { size: 10 } },
-      grid: { color: '#1e2235' },
-    },
+  // ロットごとにdatasets作成
+  const lotDatasets = {};
+  filtered.forEach(r => {
+    const lot = (r.lot || '').replace(/^自社/, '').trim();
+    const lotKey = (/^\d+[A-Z]+$/.test(lot) ? lot : '') || '—';
+    if (!lotDatasets[lotKey]) lotDatasets[lotKey] = [];
+    lotDatasets[lotKey].push({ x: r.days, y: Math.round(r.harvest), label: r.no, site: r.siteName });
   });
+
+  const datasets = Object.entries(lotDatasets)
+    .sort(([a], [b]) => a > b ? -1 : 1)
+    .map(([lot, pts]) => ({
+      label: lot === '—' ? 'その他' : lot,
+      data: pts,
+      backgroundColor: (lotColorMap[lot] || noLotColor) + 'cc',
+      pointRadius: 6, pointHoverRadius: 9,
+    }));
+
+  const xMax = filtered.reduce((m, r) => Math.max(m, r.days), 20);
 
   scatterChart = new Chart(document.getElementById('scatter-canvas'), {
     type: 'scatter',
@@ -2430,69 +2428,33 @@ function renderScatterChart() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } },
+        legend: { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 10, padding: 14 } },
         tooltip: {
           ...tooltipDefaults,
           callbacks: {
             label: ctx => {
               const p = ctx.raw;
-              if (scatterMode === 'avg')
-                return `${ctx.dataset.label} ${p.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
-              return `No.${p.label}  ${ctx.dataset.label}  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
+              return `${ctx.dataset.label} / No.${p.label} (${p.site})  ${p.x}日 / ${p.y.toLocaleString('ja-JP')} g/菌床`;
             },
           },
         },
       },
-      scales: buildScatterScales(datasets),
+      scales: {
+        x: {
+          title: { display: true, text: '栽培日数 (日)', color: '#8892a4', font: { size: 11 } },
+          min: 20, max: xMax + 2,
+          ticks: { color: '#8892a4', font: { size: 10 } },
+          grid: { color: '#1e2235' },
+        },
+        y: {
+          title: { display: true, text: '収穫量 (g/菌床)', color: '#8892a4', font: { size: 11 } },
+          min: 0, max: 900,
+          ticks: { color: '#8892a4', font: { size: 10 } },
+          grid: { color: '#1e2235' },
+        },
+      },
     },
   });
-
-  // 月別サブチャート（scatterSiteに応じて表示内容を切替）
-  sortedMonths.forEach(mk => {
-    const monthData = monthBuckets[mk] || [];
-    let subDatasets, canvasId, showLegend;
-    if (scatterSite === 'all') {
-      canvasId = `scatter-month-${mk}-all`;
-      showLegend = true;
-      subDatasets = SITES.map(site => {
-        const pts = monthData.filter(r => r.siteName === site.name).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
-        return pts.length ? { label: site.name, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 } : null;
-      }).filter(Boolean);
-    } else {
-      canvasId = `scatter-month-${mk}-${scatterSite}`;
-      showLegend = false;
-      const site = SITES.find(s => s.name === scatterSite);
-      const pts = monthData.filter(r => r.siteName === scatterSite).map(r => ({ x: r.days, y: Math.round(r.harvest), label: r.no }));
-      subDatasets = pts.length ? [{ label: scatterSite, data: pts, backgroundColor: site.color + 'cc', pointRadius: 6, pointHoverRadius: 8 }] : [];
-    }
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    scatterMonthCharts[mk] = new Chart(canvas, {
-      type: 'scatter',
-      data: { datasets: subDatasets },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: showLegend ? { labels: { color: '#8892a4', font: { size: 11 }, boxWidth: 12, padding: 14 } } : { display: false },
-          tooltip: {
-            ...tooltipDefaults,
-            callbacks: { label: ctx => `No.${ctx.raw.label}  ${ctx.dataset.label}  ${ctx.raw.x}日 / ${ctx.raw.y.toLocaleString('ja-JP')} g/菌床` },
-          },
-        },
-        scales: buildScatterScales(subDatasets),
-      },
-    });
-  });
-}
-
-function scatterSetMode(mode) {
-  scatterMode = mode;
-  renderScatterChart();
-}
-
-function scatterSetSite(site) {
-  scatterSite = site;
-  renderScatterChart();
 }
 
 function renderLotTab() {
