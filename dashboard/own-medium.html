@@ -3695,7 +3695,7 @@ let stemThickness = {}; // key: `${lot}|${siteName}|${no}` -> value
 let stemLoaded = false;
 
 async function loadStemThickness() {
-  if (stemLoaded) return;
+  if (stemLoaded) return false;
   try {
     const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent('芽の太さ')}&headers=1`;
     const res = await fetch(url);
@@ -3710,7 +3710,8 @@ async function loadStemThickness() {
       if (lot && site && no && val) stemThickness[`${lot}|${site}|${no}`] = val;
     });
     stemLoaded = true;
-  } catch(e) { /* ignore */ }
+    return true;
+  } catch(e) { return false; }
 }
 
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
@@ -4663,7 +4664,7 @@ async function renderAnalysisTab() {
 function analysisSummarySetStatus(s) { analysisSummaryStatus = s; renderAnalysisTab(); }
 
 function renderAnalysisSummary(allCandidates, selectedKeys) {
-  loadStemThickness().then(() => { if (stemLoaded) renderAnalysisTab(); }); // 非同期でスプレッドシートから取得（初回のみ）
+  loadStemThickness().then(loaded => { if (loaded) renderAnalysisTab(); }); // 初回のみ取得、新規ロード時だけ再描画
   const today = new Date(); today.setHours(0,0,0,0);
 
   const isEnded = c => {
