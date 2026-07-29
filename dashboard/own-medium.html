@@ -2265,7 +2265,7 @@ function updateTabVisibility() {
   if (tempTabActive) renderTempTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
-    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
+    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'lot';
     const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
     renderWeeklySection(section, weeklyState, groupMode, sortOrder);
   }
@@ -3229,36 +3229,93 @@ function renderMekakiLotChart() {
 }
 
 function renderMekakiSection(section) {
+  // Build card layout: lot → site → container (grouped by no+startDate)
+  const withLot = (mekakiRows || []).filter(r => r.lot);
+
+  const lotSortKey = lot => { const m = String(lot||'').match(/^(\d+)([A-Z]+)$/); return m ? [parseInt(m[1]),m[2]] : [999,lot||'']; };
+  const lots = [...new Set(withLot.map(r => r.lot))].sort((a,b) => { const [an,al]=lotSortKey(a),[bn,bl]=lotSortKey(b); return an!==bn?an-bn:al<bl?-1:1; });
+  const SITE_ORDER = ['いなべ','群馬','南丹'];
+  const LOT_COLORS = ['#38bdf8','#34d399','#f97316','#facc15','#f472b6','#a78bfa','#4ade80','#fb7185','#60a5fa','#c084fc','#2dd4bf','#fbbf24'];
+  const MEKAKI_CARD_PALETTE = {
+    'いなべ': { bar: '#60a5fa' },
+    '群馬':   { bar: '#fb923c' },
+    '南丹':   { bar: '#86efac' },
+  };
+  const lotColorMap = {};
+  lots.forEach((l,i) => { lotColorMap[l] = LOT_COLORS[i % LOT_COLORS.length]; });
+
+  let cardsHtml = '';
+  let chartTargets = [];
+  let cardIdx = 0;
+
+  lots.forEach(lot => {
+    const lotRows = withLot.filter(r => r.lot === lot);
+    const sites = [...new Set(lotRows.map(r => r.siteName).filter(Boolean))].sort((a,b) => SITE_ORDER.indexOf(a)-SITE_ORDER.indexOf(b));
+    const lotColor = lotColorMap[lot] || '#f59e0b';
+
+    cardsHtml += `<div style="margin-bottom:24px">
+      <div style="font-size:1rem;font-weight:700;color:${lotColor};margin-bottom:10px;padding:4px 0;border-bottom:2px solid ${lotColor}33">ロット ${lot}</div>`;
+
+    sites.forEach(site => {
+      const siteRows = lotRows.filter(r => r.siteName === site);
+      const siteColor = MEKAKI_SITE_COLORS[site] || '#94a3b8';
+      // Group by no (container number)
+      const noMap = {};
+      siteRows.forEach(r => { (noMap[r.no] ||= []).push(r); });
+      cardsHtml += `<div style="font-size:0.78rem;font-weight:600;color:${siteColor};margin:8px 0 6px">${site}</div>`;
+      cardsHtml += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">`;
+      Object.entries(noMap).forEach(([no, rows]) => {
+        rows.sort((a,b) => (parseDateStr(a.startDate)||0)-(parseDateStr(b.startDate)||0));
+        const r0 = rows[0];
+        const chartId = `mk-card-${cardIdx++}`;
+        chartTargets.push({ chartId, rows, site });
+        cardsHtml += `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <span style="color:#e2e8f0;font-weight:700;font-size:0.9rem">${no}号機</span>
+            <span style="color:#64748b;font-size:0.78rem">${r0.startStr} 開始</span>
+          </div>
+          <div style="height:180px"><canvas id="${chartId}"></canvas></div>
+        </div>`;
+      });
+      cardsHtml += `</div>`;
+    });
+    cardsHtml += `</div>`;
+  });
+
+  if (!lots.length) cardsHtml = `<div style="color:#64748b;padding:16px">データなし</div>`;
+
   section.innerHTML = `
-    <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    <div class="section-title">芽かき量<span class="sub">ロット × 拠点 × コンテナ</span></div>
     <div style="background:#13151f;border-radius:12px;padding:16px;margin-bottom:16px">
       <div style="font-size:0.82rem;color:#94a3b8;font-weight:600;margin-bottom:10px">ロット別 芽かき量（2520換算 kg 平均）</div>
       <div style="position:relative;height:220px"><canvas id="mekaki-lot-chart"></canvas></div>
     </div>
-    <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
-        <thead>
-          <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
-            ${mekakiFilterHeader('拠点', 'siteName')}
-            ${mekakiFilterHeader('保存条件', 'hozon')}
-            <th style="padding:6px 8px;color:#64748b;text-align:left">栽培開始</th>
-            ${mekakiFilterHeader('菌床ロット', 'lot')}
-            <th style="padding:6px 8px;color:#64748b;text-align:right">菌床本数</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:left">号機</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:right">1回目</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:right">2回目</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:right">3回目</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:right">4回目</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:right">5回目</th>
-            <th style="padding:6px 8px;color:#64748b;text-align:right">合計(kg)</th>
-            <th style="padding:6px 8px;color:#a78bfa;text-align:right">2520換算(kg)</th>
-          </tr>
-        </thead>
-        <tbody id="mekaki-tbody"></tbody>
-      </table>
-    </div>`;
-  mekakiRenderTable();
-  requestAnimationFrame(renderMekakiLotChart);
+    <div id="mekaki-content">${cardsHtml}</div>`;
+
+  requestAnimationFrame(() => {
+    renderMekakiLotChart();
+    chartTargets.forEach(({ chartId, rows, site }) => {
+      const canvas = document.getElementById(chartId);
+      if (!canvas) return;
+      const pal = MEKAKI_CARD_PALETTE[site] || { bar: '#a78bfa' };
+      // Each row has m1~m5 fields (1回目〜5回目 mekaki kg)
+      const r0 = rows[0];
+      const labels = ['1回目','2回目','3回目','4回目','5回目'];
+      const data = [r0.m1, r0.m2, r0.m3, r0.m4, r0.m5].map(v => v != null ? v : null);
+      new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels, datasets: [{ label: '2520換算 kg', data, backgroundColor: pal.bar + 'cc', borderColor: pal.bar, borderWidth: 1.5 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults } },
+          scales: {
+            x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+            y: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' }, title: { display: true, text: 'kg', color: '#64748b', font: { size: 9 } } },
+          },
+        },
+      });
+    });
+  });
 }
 
 // ── 菌床重量タブ ──────────────────────────────────────────────────────────────
@@ -3502,7 +3559,7 @@ function renderWeightSubTabs() {
       return cStart && wc.startDate && Math.abs(cStart - wc.startDate) < 14 * 86400000;
     });
     return { ...wc, siteName: match?.siteName || null, lotDisp: analysisFormatLot(wc.lot) };
-  });
+  }).filter(c => c.siteName); // 拠点マッチしないコンテナは非表示
 
   // ロット→拠点→コンテナの順でカード描画
   const lotSortKey = lot => { const m = String(lot||'').match(/^(\d+)([A-Z]+)$/); return m ? [parseInt(m[1]),m[2]] : [999,lot||'']; };
@@ -3567,11 +3624,17 @@ function renderWeightSubTabs() {
       const beforeData = c.measurements.map(m => m.before ?? 0);
       const absorbData = c.measurements.map(m =>
         (m.before != null && m.after != null) ? Math.max(0, m.after - m.before) : 0);
+      const WEIGHT_SITE_PALETTE = {
+        'いなべ': { before: '#60a5facc', absorb: '#bfdbfecc' },
+        '群馬':   { before: '#fb923ccc', absorb: '#fed7aacc' },
+        '南丹':   { before: '#86efaccc', absorb: '#d1fae5cc' },
+      };
+      const pal = WEIGHT_SITE_PALETTE[c.siteName] || { before: '#60a5facc', absorb: '#fa8072cc' };
       new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: { labels, datasets: [
-          { label: '散水前重量', data: beforeData, backgroundColor: '#60a5facc', stack: 's' },
-          { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc', stack: 's' },
+          { label: '散水前重量', data: beforeData, backgroundColor: pal.before, stack: 's' },
+          { label: '吸水量',     data: absorbData, backgroundColor: pal.absorb, stack: 's' },
         ]},
         options: {
           responsive: true, maintainAspectRatio: false,
