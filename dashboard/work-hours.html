@@ -6770,8 +6770,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   });
 
   /* ── 3拠点マージ：未来月（実績データがまだ無い月）の「実績工数」位置に、標準労働
-     時間・最大労働時間から補完した棒を追加する（拠点別モード・拠点サマリモードの
-     栽培・出荷セクションが対象）。mergeDataがnull（シート取得失敗）の場合は常に
+     時間・最大労働時間から補完した棒を追加する（拠点・業務別モード・3拠点サマリ
+     モード・拠点サマリモードの栽培・出荷セクションが対象）。mergeDataがnull（シート取得失敗）の場合は常に
      null/[]を返すだけなので、既存の表示には一切影響しない ────────────────────── */
   // B列が1（文字列"1"・数値1のいずれでも許容）かどうかを頑健に判定する
   function isThreeSiteMergeActiveFlag(v) {
@@ -6780,7 +6780,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   }
 
   // 拠点×業務区分(栽培/出荷)ごとの標準労働時間合計・最大労働時間合計(月別)を返す。
-  // site=nullなら3拠点合算（全拠点合計タブ・拠点サマリタブで使用）。
+  // site=nullなら3拠点合算（全拠点合計タブ・3拠点サマリタブ・拠点サマリタブで使用）。
   // 集計対象は、D・F・H列によるマッチングに加えて、B列＝1（稼働フラグ）かつ
   // E列が空でない（プロジェクト等の割当あり）行のみとする
   function threeSiteMergeAgg(div, site) {
@@ -7125,7 +7125,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function renderSiteTabBarFixed() {
     const el = document.getElementById('plancmp2-site-tabbar-fixed');
     if (!el) return;
-    // 'sitesummary'（拠点サマリ（新））も拠点タブで選択中拠点を切り替えられるようにする
+    // 'sitesummary'（拠点サマリ）も拠点タブで選択中拠点を切り替えられるようにする
     if (planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary') { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'flex';
     el.innerHTML = siteTabBarHtml();
@@ -7568,7 +7568,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     content.innerHTML = html;
   }
 
-  // ② 拠点サマリ
+  // ② 3拠点サマリ
   function renderSummaryView() {
     const content = document.getElementById('compare2-content');
     let html = `<div class="schart-header">3拠点サマリ</div>`;
@@ -7612,7 +7612,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         _volumeLine: true, _unit: DIV_UNIT[div],
       };
 
-      // 「拠点サマリ」の統合チャートでは、実績工数(拠点別)・予定標準工数(工程別)とも
+      // 「3拠点サマリ」の統合チャートでは、実績工数(拠点別)・予定標準工数(工程別)とも
       // 複数系列が積み上げ(スタック)表示されるため、軸MAXは各系列を個別に見るのではなく、
       // 月ごとの積み上げ合計（実際にグラフ上で到達する高さ）で判定する必要がある。
       // vm(表示中の月)基準でインデックスを揃える（actualBySite/stdByTaskは既にsl()済みのため）
@@ -7755,7 +7755,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
   }
 
-  // 拠点サマリ（新）：プレースホルダー実装。拠点タブ（いなべ/群馬/南丹/全拠点合計）に
+  // 拠点サマリ：プレースホルダー実装。拠点タブ（いなべ/群馬/南丹/全拠点合計）に
   // 連動し、選択中拠点（全拠点合計の場合は3拠点合算）分の「予定標準 vs 実績（統合・
   // 拠点別×工程別）」チャートのみを単独表示する。renderSummaryView()の-combinedチャート
   // と同じロジックをそのまま流用し、対象拠点をavailSites全体ではなく選択中拠点に絞り
@@ -7764,7 +7764,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function renderSiteSummaryView() {
     const content = document.getElementById('compare2-content');
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
-    const headerLabel = planCmpSiteTab === '全拠点合計' ? '3拠点サマリ' : planCmpSiteTab;
+    const headerLabel = planCmpSiteTab === '全拠点合計' ? '拠点サマリ' : planCmpSiteTab;
 
     let html = `<div class="schart-header">${headerLabel}
       <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">　※ プレースホルダー実装（上段の栽培＋出荷合算グラフは今後追加予定）</span>
@@ -7916,9 +7916,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
           <div class="transfer-toggle" id="plancmp2-subtabs">
-            <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
-            <button class="transfer-toggle-btn${planCmpSubtab === 'sitesummary' ? ' active' : ''}" data-tab="sitesummary">拠点サマリ（新）</button>
-            <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
+            <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点・業務別</button>
+            <button class="transfer-toggle-btn${planCmpSubtab === 'sitesummary' ? ' active' : ''}" data-tab="sitesummary">拠点サマリ</button>
+            <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">3拠点サマリ</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'table' ? ' active' : ''}" data-tab="table">表</button>
           </div>
         </div>
