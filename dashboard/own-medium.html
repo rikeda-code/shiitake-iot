@@ -3660,13 +3660,14 @@ function buildAnalysisDataset() {
       } : null;
 
       const targetDate = parseDateStr(c.startDate);
-      // 自社菌床コンテナはweightIndex/mekakiIndexが'自社菌床|no'でキーされているため
-      const isJisha = analysisFormatLot(c.lot) !== '—';
       const noNorm = String(c.no || '').replace(/号機$/, '').trim();
-      const idxKey = isJisha ? `自社菌床|${noNorm}` : `${c.siteName}|${noNorm}`;
+      // weightシートは'自社菌床'でsite.nameが登録されているため自社菌床キーを使用
+      const weightIdxKey = `自社菌床|${noNorm}`;
+      // mekakiシートは物理拠点名(いなべ/群馬/南丹)で登録されているため実拠点名キーを使用
+      const mekakiIdxKey = `${c.siteName}|${noNorm}`;
 
       // 菌床重量: 散水前重量(初期重量)と吸水量(散水後-散水前)を計測値ごとに平均する
-      const wMatch = analysisClosestByDate(weightIndex[idxKey], targetDate);
+      const wMatch = analysisClosestByDate(weightIndex[weightIdxKey], targetDate);
       let weightBefore = null, weightAbsorb = null;
       if (wMatch && wMatch.measurements.length) {
         const befores = wMatch.measurements.map(m => m.before).filter(v => v != null);
@@ -3677,7 +3678,7 @@ function buildAnalysisDataset() {
         if (absorbs.length) weightAbsorb = +(absorbs.reduce((a, b) => a + b, 0) / absorbs.length).toFixed(1);
       }
 
-      const mMatch = analysisClosestByDate(mekakiIndex[idxKey], targetDate);
+      const mMatch = analysisClosestByDate(mekakiIndex[mekakiIdxKey], targetDate);
       const mekaki = mMatch ? (mMatch.converted ?? mMatch.total ?? null) : null;
 
       return {
