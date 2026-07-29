@@ -3691,6 +3691,7 @@ let analysisFilters = {
 let analysisSelected = new Set(); // Set<container.key>
 let analysisSubTab = 'container'; // 'container' | 'correlation' | 'summary'
 let analysisSummaryStatus = 'all'; // 'all' | 'active' | 'ended'
+let summaryHiddenCols = new Set(JSON.parse(localStorage.getItem('summaryHiddenCols') || '[]'));
 let stemThickness = {}; // key: `${lot}|${siteName}|${no}` -> value
 let stemLoaded = false;
 
@@ -4663,6 +4664,31 @@ async function renderAnalysisTab() {
 // ── まとめタブ ──────────────────────────────────────────────────────────────
 function analysisSummarySetStatus(s) { analysisSummaryStatus = s; renderAnalysisTab(); }
 
+function summaryToggleCol(key) {
+  if (summaryHiddenCols.has(key)) summaryHiddenCols.delete(key);
+  else summaryHiddenCols.add(key);
+  localStorage.setItem('summaryHiddenCols', JSON.stringify([...summaryHiddenCols]));
+  renderAnalysisTab();
+}
+
+const SUMMARY_COLS = [
+  { key: 'lot',         label: 'ロット',           align: 'left',   always: true },
+  { key: 'batchDays',   label: '培養日数',          align: 'right' },
+  { key: 'hardness',    label: '硬度',              align: 'right' },
+  { key: 'ventilation', label: '換気時間(合計)',     align: 'right' },
+  { key: 'site',        label: '拠点',              align: 'left' },
+  { key: 'no',          label: 'No.',               align: 'center' },
+  { key: 'status',      label: '栽培状況',           align: 'left' },
+  { key: 'weightBefore',label: '初期重量(g)',        align: 'right' },
+  { key: 'weightAbsorb',label: '吸水量(g)',          align: 'right' },
+  { key: 'weightAfter', label: '散水後重量(g)',      align: 'right' },
+  { key: 'mekaki',      label: '芽かき量(kg)',       align: 'right' },
+  { key: 'stem',        label: '芽の太さ',            align: 'center' },
+  { key: 'harvest',     label: '最終収穫量(g/床)',   align: 'right' },
+  { key: 'pr15',        label: 'パック品率 day15',   align: 'right' },
+  { key: 'prFinal',     label: 'パック品率 終了時',  align: 'right' },
+];
+
 function renderAnalysisSummary(allCandidates, selectedKeys) {
   loadStemThickness().then(loaded => { if (loaded) renderAnalysisTab(); }); // 初回のみ取得、新規ロード時だけ再描画
   const today = new Date(); today.setHours(0,0,0,0);
@@ -4673,12 +4699,10 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
     return ed && ed < today;
   };
 
-  // 選択連動: 選択があればそれに絞る
   let items = selectedKeys && selectedKeys.size > 0
     ? allCandidates.filter(c => selectedKeys.has(c.key))
     : allCandidates;
 
-  // 栽培状況フィルター
   if (analysisSummaryStatus === 'active') items = items.filter(c => !isEnded(c));
   else if (analysisSummaryStatus === 'ended') items = items.filter(c => isEnded(c));
 
@@ -4701,8 +4725,12 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
   const prCls = v => v == null ? 'color:#64748b' : v >= 90 ? 'color:#86efac;font-weight:700' : v >= 80 ? 'color:#93c5fd;font-weight:700' : 'color:#f87171;font-weight:700';
   const fmt = v => v != null ? Math.round(v).toLocaleString() : '—';
 
-  const TD = 'padding:4px 6px;font-size:0.88rem;font-weight:600;border-bottom:1px solid #1e2235';
+  const visibleCols = SUMMARY_COLS.filter(col => col.always || !summaryHiddenCols.has(col.key));
+  const colCount = visibleCols.length;
+
+  const TD  = 'padding:4px 6px;font-size:0.88rem;font-weight:600;border-bottom:1px solid #1e2235';
   const TDR = TD + ';text-align:right';
+  const TDC = TD + ';text-align:center';
 
   const rows = items.map(c => {
     const siteColor = SITE_COLORS[c.siteName] || '#94a3b8';
@@ -4713,24 +4741,31 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
     const prFinal = c.packRate;
     const noNorm = String(c.no || '').replace(/号機$/, '').trim();
     const stemVal = stemThickness[`${c.lot}|${c.siteName}|${noNorm}`] || '—';
-    return `<tr style="border-bottom:1px solid #1e2235">
-      <td style="${TD};color:#f59e0b;white-space:nowrap">${lot}</td>
-      <td style="${TD};color:${siteColor};white-space:nowrap">${c.siteName}</td>
-      <td style="${TD};color:#e2e8f0;text-align:center">${c.no}</td>
-      <td style="${TD};white-space:nowrap">${statusStr(c)}</td>
-      <td style="${TDR};color:#93c5fd">${fmt(c.weightBefore)}</td>
-      <td style="${TDR};color:#7dd3fc">${fmt(c.weightAbsorb)}</td>
-      <td style="${TDR};color:#bfdbfe">${fmt(weightAfter)}</td>
-      <td style="${TDR};color:#c4b5fd">${c.mekaki != null ? c.mekaki.toFixed(1) : '—'}</td>
-      <td style="${TD};text-align:center;color:#fcd34d;font-weight:700">${stemVal}</td>
-      <td style="${TDR};color:#60a5fa">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>
-      <td style="${TDR};${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>
-      <td style="${TDR};${prCls(prFinal)}">${prFinal != null ? prFinal + '%' : '—'}</td>
-    </tr>`;
+    const cellMap = {
+      lot:          `<td style="${TD};color:#f59e0b;white-space:nowrap">${lot}</td>`,
+      batchDays:    `<td style="${TDR};color:#94a3b8">—</td>`,
+      hardness:     `<td style="${TDR};color:#94a3b8">—</td>`,
+      ventilation:  `<td style="${TDR};color:#94a3b8">—</td>`,
+      site:         `<td style="${TD};color:${siteColor};white-space:nowrap">${c.siteName}</td>`,
+      no:           `<td style="${TDC};color:#e2e8f0">${c.no}</td>`,
+      status:       `<td style="${TD};white-space:nowrap">${statusStr(c)}</td>`,
+      weightBefore: `<td style="${TDR};color:#93c5fd">${fmt(c.weightBefore)}</td>`,
+      weightAbsorb: `<td style="${TDR};color:#7dd3fc">${fmt(c.weightAbsorb)}</td>`,
+      weightAfter:  `<td style="${TDR};color:#bfdbfe">${fmt(weightAfter)}</td>`,
+      mekaki:       `<td style="${TDR};color:#c4b5fd">${c.mekaki != null ? c.mekaki.toFixed(1) : '—'}</td>`,
+      stem:         `<td style="${TDC};color:#fcd34d;font-weight:700">${stemVal}</td>`,
+      harvest:      `<td style="${TDR};color:#60a5fa">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>`,
+      pr15:         `<td style="${TDR};${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>`,
+      prFinal:      `<td style="${TDR};${prCls(prFinal)}">${prFinal != null ? prFinal + '%' : '—'}</td>`,
+    };
+    return `<tr style="border-bottom:1px solid #1e2235">${visibleCols.map(col => cellMap[col.key]).join('')}</tr>`;
   }).join('');
 
-  const TH = 'padding:5px 6px;color:#64748b;font-weight:700;font-size:0.8rem;white-space:nowrap;border-bottom:2px solid #2e3148;background:#1a1d27';
+  const TH  = 'padding:5px 6px;color:#64748b;font-weight:700;font-size:0.8rem;white-space:nowrap;border-bottom:2px solid #2e3148;background:#1a1d27';
   const THR = TH + ';text-align:right';
+  const THC = TH + ';text-align:center';
+  const thAlignMap = { left: TH, right: THR, center: THC };
+  const thead = visibleCols.map(col => `<th style="${thAlignMap[col.align] || TH}">${col.label}</th>`).join('');
 
   const statusBtns = ['all','active','ended'].map(s => {
     const label = s==='all'?'全て':s==='active'?'栽培中':'栽培終了';
@@ -4738,22 +4773,28 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
     return `<button class="sort-btn${active?' active':''}" onclick="analysisSummarySetStatus('${s}')">${label}</button>`;
   }).join('');
 
+  const colToggleBtns = SUMMARY_COLS.filter(col => !col.always).map(col => {
+    const hidden = summaryHiddenCols.has(col.key);
+    return `<button onclick="summaryToggleCol('${col.key}')"
+      style="padding:3px 8px;border-radius:5px;border:1px solid ${hidden?'#2e3148':'#4b5563'};
+      background:${hidden?'transparent':'#2e3148'};color:${hidden?'#475569':'#94a3b8'};
+      font-size:0.72rem;font-weight:600;cursor:pointer;white-space:nowrap">${hidden?'＋':'✓'} ${col.label}</button>`;
+  }).join('');
 
   return `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
       <span style="font-size:0.8rem;color:#64748b;font-weight:600">栽培状況：</span>
       ${statusBtns}
       <span style="font-size:0.8rem;color:#475569;margin-left:8px">${items.length}件</span>
     </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;align-items:center">
+      <span style="font-size:0.72rem;color:#475569;font-weight:600;white-space:nowrap">列表示：</span>
+      ${colToggleBtns}
+    </div>
     <div style="overflow-x:auto;border-radius:10px;border:1px solid #2e3148">
-      <table style="width:100%;border-collapse:collapse;min-width:1000px">
-        <thead><tr>
-          <th style="${TH}">ロット</th><th style="${TH}">拠点</th><th style="${TH};text-align:center">No.</th><th style="${TH}">栽培状況</th>
-          <th style="${THR}">初期重量(g)</th><th style="${THR}">吸水量(g)</th><th style="${THR}">散水後重量(g)</th>
-          <th style="${THR}">芽かき量(kg)</th><th style="${TH};text-align:center">芽の太さ</th>
-          <th style="${THR}">最終収穫量(g/床)</th><th style="${THR}">パック品率 day15</th><th style="${THR}">パック品率 終了時</th>
-        </tr></thead>
-        <tbody>${rows || '<tr><td colspan="12" style="padding:24px;color:#64748b;text-align:center;font-size:0.9rem">データなし</td></tr>'}</tbody>
+      <table style="width:100%;border-collapse:collapse;min-width:600px">
+        <thead><tr>${thead}</tr></thead>
+        <tbody>${rows || `<tr><td colspan="${colCount}" style="padding:24px;color:#64748b;text-align:center;font-size:0.9rem">データなし</td></tr>`}</tbody>
       </table>
     </div>`;
 }
