@@ -1943,13 +1943,17 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
   const today = new Date(); today.setHours(0,0,0,0);
 
   // 行の除外判定: 終了済みコンテナは実際の終了日以降を除外、進行中コンテナは
-  // 「今日より後(=未来日)」の行だけを除外する(今日自身は含める)。
-  // 以前は「tomorrow」という中間変数を介した間接的な比較(rowDate >= tomorrow)にしていたが、
-  // 意図(今日は含めるが未来日は含めない)が読み取りにくく誤解を招きやすいため、
-  // 「today」を基準にした直接的な比較に統一した(挙動は同一)。
+  // 「今日より後(=未来日)」の行を除外する。
+  // 加えて、当日の行は日付欄だけ先に用意されていて収穫量(daily)がまだ未入力の
+  // プレースホルダーである可能性があるため、当日かつdaily<=0(未入力扱い)の行も
+  // 除外し、実際に収穫量が入力されるまでは前日の累計値のまま線を伸ばさないようにする。
+  // (当日にdaily>0の実データが入れば通常通りその場で反映される)
   const isFutureRow = (r, endD) => {
     if (!r.rowDate) return false;
-    return endD ? r.rowDate >= endD : r.rowDate > today;
+    if (endD) return r.rowDate >= endD;
+    if (r.rowDate > today) return true;
+    if (r.rowDate.getTime() === today.getTime() && !(r.daily > 0)) return true;
+    return false;
   };
 
   // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
