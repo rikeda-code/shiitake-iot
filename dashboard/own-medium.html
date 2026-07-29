@@ -2265,7 +2265,7 @@ function updateTabVisibility() {
   if (tempTabActive) renderTempTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
-    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'week';
+    const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'lot';
     const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
     renderWeeklySection(section, weeklyState, groupMode, sortOrder);
   }
