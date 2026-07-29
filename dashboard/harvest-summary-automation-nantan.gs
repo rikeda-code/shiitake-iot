@@ -46,6 +46,30 @@ const EXCLUDED_SHEET_NAMES = [
 const TEMP_NAME_PATTERNS = [/のコピー(\s*\d+)?$/, /^シート\d+$/, /^Copy of /];
 
 /**
+ * タブ数が多く重いスプレッドシートでは "Service Spreadsheets failed" のような
+ * 一時的なエラーが起きることがあるため、数回リトライする。
+ */
+function withRetry_(fn, attempts) {
+  attempts = attempts || 3;
+  let lastError;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return fn();
+    } catch (err) {
+      lastError = err;
+      if (i < attempts - 1) Utilities.sleep(3000 * (i + 1));
+    }
+  }
+  throw lastError;
+}
+
+function getSheetNames_(ss) {
+  return withRetry_(function () {
+    return ss.getSheets().map(function (sheet) { return sheet.getName(); });
+  });
+}
+
+/**
  * インストール型 onChange トリガーから呼ばれる。
  * createOnChangeTrigger() を一度実行してトリガー登録しておくこと。
  */
@@ -61,8 +85,7 @@ function onChangeInstalled(e) {
   try {
     const props = PropertiesService.getScriptProperties();
     const previousNames = JSON.parse(props.getProperty(KNOWN_SHEETS_PROPERTY) || '[]');
-    const currentSheets = ss.getSheets();
-    const currentNames = currentSheets.map(function (sheet) { return sheet.getName(); });
+    const currentNames = getSheetNames_(ss);
 
     if (e.changeType === 'REMOVE_GRID') {
       // 削除されたタブ名 = 前回覚えていた名前のうち、今はもう存在しないもの
@@ -130,8 +153,7 @@ function createOnChangeTrigger() {
   ScriptApp.newTrigger('onChangeInstalled').forSpreadsheet(ss).onChange().create();
   // 現在のタブ一覧を記録しておく(次回イベント発生時の追加/削除判定の基準にする)
   PropertiesService.getScriptProperties().setProperty(
-      KNOWN_SHEETS_PROPERTY,
-      JSON.stringify(ss.getSheets().map(function (sheet) { return sheet.getName(); })));
+      KNOWN_SHEETS_PROPERTY, JSON.stringify(getSheetNames_(ss)));
 }
 
 /**
@@ -147,7 +169,7 @@ function checkSetup() {
     ui.alert('OK: 「' + SUMMARY_SHEET_NAME + '」という集計タブが見つかりました。設定は正しく反映されています。');
     return;
   }
-  const names = ss.getSheets().map(function (s) { return s.getName(); }).join('\n');
+  const names = getSheetNames_(ss).join('\n');
   ui.alert(
       '「' + SUMMARY_SHEET_NAME + '」という名前のシートが見つかりません。\n' +
       'スクリプト冒頭の SUMMARY_SHEET_NAME を、下の実際のタブ名に合わせて修正してください。\n\n' +
