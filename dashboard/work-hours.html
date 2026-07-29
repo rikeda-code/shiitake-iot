@@ -7755,19 +7755,23 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
   }
 
-  // 拠点サマリ：プレースホルダー実装。拠点タブ（いなべ/群馬/南丹/全拠点合計）に
-  // 連動し、選択中拠点（全拠点合計の場合は3拠点合算）分の「予定標準 vs 実績（統合・
-  // 拠点別×工程別）」チャートのみを単独表示する。renderSummaryView()の-combinedチャート
-  // と同じロジックをそのまま流用し、対象拠点をavailSites全体ではなく選択中拠点に絞り
-  // 込むだけにとどめている。上段の栽培＋出荷合算グラフは次フェーズで実装予定のため
-  // まだ用意しない（今回はこのプレースホルダーのみ）
+  // 拠点サマリ：拠点タブ（いなべ/群馬/南丹/全拠点合計）に連動し、選択中拠点
+  // （全拠点合計の場合は3拠点合算）について、上段＝栽培＋出荷の実績工数を積み
+  // 上げ表示するグラフ、下段＝div（栽培/出荷）ごとの「予定標準 vs 実績（統合・
+  // 拠点別×工程別）」チャート、を縦に並べて表示する。下段はrenderSummaryView()
+  // の-combinedチャートと同じロジックをそのまま流用し、対象拠点をavailSites
+  // 全体ではなく選択中拠点に絞り込むだけにとどめている
   function renderSiteSummaryView() {
     const content = document.getElementById('compare2-content');
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
     const headerLabel = planCmpSiteTab === '全拠点合計' ? '拠点サマリ' : planCmpSiteTab;
+    const totalSuffix = sitesToShow.length > 1 ? '（3拠点合計）' : '';
 
-    let html = `<div class="schart-header">${headerLabel}
-      <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">　※ プレースホルダー実装（上段の栽培＋出荷合算グラフは今後追加予定）</span>
+    let html = `<div class="schart-header">${headerLabel}</div>`;
+    html += `<div class="schart-section">
+      <div class="schart-header">栽培＋出荷（実績合算）${totalSuffix}</div>
+      <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（栽培・出荷 積み上げ）</div>
+      ${chartWrapHtml('plansitesum2-total-actual', visMonths().length, { heightPx: 260, inlineHeight: true, forceResponsive: true })}
     </div>`;
     divs.forEach(div => {
       const vm = visMonths();
@@ -7778,6 +7782,50 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       </div>`;
     });
     content.innerHTML = html;
+
+    // 上段：栽培＋出荷の実績工数（actualH）を月別に積み上げ表示する。既存div別
+    // チャートと同じwindow._planCmpChartData2[`${site}-${div}`].actualHを再利用し、
+    // 集計方法（選択中拠点分の合計→div別に積み上げ）だけを変えている
+    {
+      const vm = visMonths();
+      const actualTotalsByDiv = {};
+      divs.forEach(div => {
+        const actualBySite = sitesToShow.map(site => sl(window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null)));
+        actualTotalsByDiv[div] = vm.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
+      });
+      const totalMonthlyStacked = vm.map((_, mi) => divs.reduce((s, div) => s + (actualTotalsByDiv[div][mi] || 0), 0));
+      const totalMax = computeSharedAxisMax([totalMonthlyStacked], 100);
+
+      const totalCtx = document.getElementById('plansitesum2-total-actual')?.getContext('2d');
+      if (totalCtx) {
+        const totalDatasets = divs.map(div => ({
+          type: 'bar', label: div + totalSuffix, data: actualTotalsByDiv[div],
+          backgroundColor: (ROLE_TYPE_COLORS[div] || '#fff') + 'cc',
+          borderColor: ROLE_TYPE_COLORS[div] || '#fff', borderWidth: 0,
+          stack: 'total', order: 1,
+        }));
+        planCmpChartInstances['sitesum-total-actual'] = new Chart(totalCtx, {
+          data: { labels: vm, datasets: totalDatasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+              tooltip: tooltipOpts(false, true),
+            },
+            scales: {
+              x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+              y: {
+                stacked: true, position: 'left',
+                ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+                grid: { color: '#1e2235' }, suggestedMin: 0, max: totalMax,
+                title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+              },
+            },
+          },
+        });
+      }
+    }
 
     divs.forEach(div => {
       const divRows = rows.filter(r => r.div === div);
