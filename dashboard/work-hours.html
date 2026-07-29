@@ -7175,12 +7175,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           ${chartWrapHtml(`plancmp2-all-${div}`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         </div>`;
       });
-      html += `<div class="schart-section">
-        <div class="schart-header">全拠点合計 - 標準工数 vs 勤務時間
-          <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準（栽培+出荷・3拠点合計） vs 実勤務（雇用区分別積み上げ・3拠点合計）</span>
-        </div>
-        ${chartWrapHtml('plancmp2-all-total', vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
-      </div>`;
     } else {
       const site = planCmpSiteTab;
       divs.forEach(div => {
@@ -7191,12 +7185,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           ${chartWrapHtml(`plancmp2-${site}-${div}`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         </div>`;
       });
-      html += `<div class="schart-section">
-        <div class="schart-header">標準工数合計 vs 勤務時間合計
-          <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準（栽培+出荷） vs 実勤務（雇用区分別積み上げ）</span>
-        </div>
-        ${chartWrapHtml(`plancmp2-${site}-total`, vm.length, { heightPx: 280, inlineHeight: true, forceResponsive: true })}
-      </div>`;
     }
 
     content.innerHTML = html;
@@ -7289,76 +7277,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           },
         });
       });
-
-      // 全拠点合計: 各拠点データを集約して描画
-      const siteDataList = availSites.map(s => computeSiteTotalData(s));
-      const allStdTotalRaw = planMonths.map((_, mi) =>
-        siteDataList.reduce((sum, d) => sum + (d.stdTotalRaw[mi] ?? 0), 0) || null
-      );
-      const allActualData = {}, allForecastData = {};
-      EMP_SERIES.forEach(et => {
-        allActualData[et.label] = planMonths.map((_, mi) => {
-          const total = siteDataList.reduce((s, d) => s + (d.actualData[et.label][mi] ?? 0), 0);
-          return total > 0 ? Math.round(total * 10) / 10 : null;
-        });
-        allForecastData[et.label] = planMonths.map((m, mi) => {
-          if (mnum(m) <= ACTUAL_CUTOFF) return null;
-          const total = siteDataList.reduce((s, d) => s + (d.forecastData[et.label][mi] ?? 0), 0);
-          return total > 0 ? Math.round(total * 10) / 10 : null;
-        });
-      });
-
-      // 人数折れ線データ（全拠点合計）
-      const allActualCountData = {}, allForecastCountData = {};
-      EMP_SERIES.forEach(et => {
-        allActualCountData[et.label] = planMonths.map((_, mi) => {
-          const total = siteDataList.reduce((s, d) => s + (d.actualCountData[et.label][mi] ?? 0), 0);
-          return total > 0 ? total : null;
-        });
-        allForecastCountData[et.label] = planMonths.map((m, mi) => {
-          if (mnum(m) <= ACTUAL_CUTOFF) return null;
-          const total = siteDataList.reduce((s, d) => s + (d.forecastCountData[et.label][mi] ?? 0), 0);
-          return total > 0 ? Math.round(total * 10) / 10 : null;
-        });
-      });
-      const countMax = computeSharedAxisMax([
-        EMP_SERIES.flatMap(et => [
-          ...sl(allActualCountData[et.label]).filter(v => v !== null),
-          ...sl(allForecastCountData[et.label]).filter(v => v !== null),
-        ]),
-      ], 1) || undefined;
-      const countDatasets = EMP_SERIES.flatMap(et => [
-        {
-          type: 'line', label: `${et.label}人数（実績）`, data: sl(allActualCountData[et.label]),
-          borderColor: et.color, backgroundColor: 'transparent',
-          borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
-        },
-        {
-          type: 'line', label: `${et.label}人数（予想）`, data: sl(allForecastCountData[et.label]),
-          borderColor: et.color, backgroundColor: 'transparent',
-          borderWidth: 2, borderDash: [5, 4],
-          pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
-        },
-      ]);
-      const countScale = {
-        y2: {
-          position: 'right',
-          ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v} 人` },
-          grid: { drawOnChartArea: false },
-          suggestedMin: 0, max: countMax,
-          title: { display: true, text: '人', color: '#64748b', font: { size: 10 } },
-        },
-      };
-      renderTotalChart('plancmp2-all-total', allStdTotalRaw, allActualData, allForecastData,
-        { extraDatasets: countDatasets, extraScales: countScale });
     } else {
-      // 単拠点: 栽培・出荷チャート + 合計チャート
+      // 単拠点: 栽培・出荷チャート
       const site = planCmpSiteTab;
 
       // 軸MAXの統一（全拠点合計は対象外）：いなべ・群馬・南丹の3拠点間で、
-      // 同じチャート（栽培/出荷/標準工数合計）の左軸・右軸それぞれの最大値を揃えるため、
+      // 同じチャート（栽培/出荷）の左軸・右軸それぞれの最大値を揃えるため、
       // 現在表示中のsiteだけでなくavailSites(実拠点)全体からMAXを算出する
       const siteValueArraysAllSites = divs.map(div =>
         availSites.map(s => {
@@ -7440,51 +7364,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           },
         });
       });
-
-      // 「標準工数合計 vs 勤務時間合計」チャートも、いなべ・群馬・南丹の3拠点で
-      // 左軸(h)・右軸(人)を統一する（全拠点合計は対象外・従来通り自動スケール）。
-      // computeSiteTotalData()は全拠点分を1回だけ計算し、現拠点分はここから再利用する
-      // （site単体分を別途計算し直すと同じ処理を2重に行ってしまうため）
-      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
-      const siteTotalIdx = availSites.indexOf(site);
-      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
-      const totalYMax = computeSharedAxisMax(
-        allSitesTotalData.map(d => totalChartStackedValues(d.stdTotalRaw, d.actualData, d.forecastData)),
-        100
-      ) || undefined;
-      const siteCountMax = computeSharedAxisMax(
-        allSitesTotalData.map(d => EMP_SERIES.flatMap(et => [
-          ...sl(d.actualCountData[et.label]).filter(v => v !== null),
-          ...sl(d.forecastCountData[et.label]).filter(v => v !== null),
-        ])),
-        1
-      ) || undefined;
-      const siteCountDatasets = EMP_SERIES.flatMap(et => [
-        {
-          type: 'line', label: `${et.label}人数（実績）`, data: sl(actualCountData[et.label]),
-          borderColor: et.color, backgroundColor: 'transparent',
-          borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
-        },
-        {
-          type: 'line', label: `${et.label}人数（予想）`, data: sl(forecastCountData[et.label]),
-          borderColor: et.color, backgroundColor: 'transparent',
-          borderWidth: 2, borderDash: [5, 4],
-          pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
-          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
-        },
-      ]);
-      const siteCountScale = {
-        y2: {
-          position: 'right',
-          ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v} 人` },
-          grid: { drawOnChartArea: false },
-          suggestedMin: 0, max: siteCountMax,
-          title: { display: true, text: '人', color: '#64748b', font: { size: 10 } },
-        },
-      };
-      renderTotalChart(`plancmp2-${site}-total`, stdTotalRaw, actualData, forecastData,
-        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax });
     }
   }
 
@@ -7793,7 +7672,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     html += `<div class="schart-section">
       <div class="schart-header">栽培＋出荷 合算${totalSuffix} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（工程別）</span></div>
       <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・栽培＋出荷合算）</div>
-      ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 580, inlineHeight: true, forceResponsive: true })}
+      ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 630, inlineHeight: true, forceResponsive: true })}
+    </div>`;
+    html += `<div class="schart-section">
+      <div class="schart-header">栽培＋出荷 合算${totalSuffix} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（雇用形態別）</span></div>
+      ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 280, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
 
@@ -7825,6 +7708,20 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
     const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, stdHoursTotals], 100);
 
+    // 折れ線（収穫量・出荷量）：既存div別チャートと同じplanVolume()を使用し、栽培・出荷
+    // それぞれ右軸(y2)の折れ線として追加する（選択中拠点分。全拠点合計はこのモードでは
+    // 選択不可のため単一拠点分の集計で足りる）
+    const volDataByDiv = {};
+    divs.forEach(div => {
+      volDataByDiv[div] = sl(planMonths.map((_, mi) =>
+        sitesToShow.reduce((s, site) => {
+          const v = planVolume(site, div, mi);
+          return s + (v !== null ? v : 0);
+        }, 0) || null
+      ));
+    });
+    const volMax = computeSharedAxisMax([volDataByDiv['栽培'], volDataByDiv['出荷']], 1000) || undefined;
+
     const ctx = document.getElementById('plansitesum2-combined')?.getContext('2d');
     if (!ctx) return;
     const datasets = [];
@@ -7849,6 +7746,20 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         borderWidth: 0, stack: 'std', order: 2, _stdGroup: true,
       });
     });
+    datasets.push({
+      type: 'line', label: DIV_METRIC['栽培'], data: volDataByDiv['栽培'],
+      borderColor: '#94a3b8', backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
+      tension: 0.3, yAxisID: 'y2', order: 0,
+      _volumeLine: true, _unit: DIV_UNIT['栽培'],
+    });
+    datasets.push({
+      type: 'line', label: DIV_METRIC['出荷'], data: volDataByDiv['出荷'],
+      borderColor: '#c084fc', backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#c084fc',
+      tension: 0.3, yAxisID: 'y2', order: 0,
+      _volumeLine: true, _unit: DIV_UNIT['出荷'],
+    });
     planCmpChartInstances['sitesum-combined'] = new Chart(ctx, {
       data: { labels: vm, datasets },
       options: {
@@ -7866,9 +7777,63 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
             title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
           },
+          y2: {
+            position: 'right',
+            ticks: { color: '#64748b', font: { size: 10 }, callback: v => v.toLocaleString('ja-JP') },
+            grid: { drawOnChartArea: false },
+            suggestedMin: 0, max: volMax,
+            title: { display: true, text: 'kg', color: '#64748b', font: { size: 10 } },
+          },
         },
       },
     });
+
+    // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
+    // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
+    // 呼び出し先のcanvas IDと見出し文言のみ変更している
+    {
+      const site = planCmpSiteTab;
+      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
+      const siteTotalIdx = availSites.indexOf(site);
+      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
+      const totalYMax = computeSharedAxisMax(
+        allSitesTotalData.map(d => totalChartStackedValues(d.stdTotalRaw, d.actualData, d.forecastData)),
+        100
+      ) || undefined;
+      const siteCountMax = computeSharedAxisMax(
+        allSitesTotalData.map(d => EMP_SERIES.flatMap(et => [
+          ...sl(d.actualCountData[et.label]).filter(v => v !== null),
+          ...sl(d.forecastCountData[et.label]).filter(v => v !== null),
+        ])),
+        1
+      ) || undefined;
+      const siteCountDatasets = EMP_SERIES.flatMap(et => [
+        {
+          type: 'line', label: `${et.label}人数（実績）`, data: sl(actualCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
+        },
+        {
+          type: 'line', label: `${et.label}人数（予想）`, data: sl(forecastCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, borderDash: [5, 4],
+          pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
+        },
+      ]);
+      const siteCountScale = {
+        y2: {
+          position: 'right',
+          ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v} 人` },
+          grid: { drawOnChartArea: false },
+          suggestedMin: 0, max: siteCountMax,
+          title: { display: true, text: '人', color: '#64748b', font: { size: 10 } },
+        },
+      };
+      renderTotalChart(`plansitesum2-${site}-emp`, stdTotalRaw, actualData, forecastData,
+        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax });
+    }
   }
   let planCmpSubtab = 'site';
   function renderContent() {
