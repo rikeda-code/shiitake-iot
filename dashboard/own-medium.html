@@ -3692,52 +3692,52 @@ let analysisSelected = new Set(); // Set<container.key>
 let analysisSubTab = 'container'; // 'container' | 'correlation' | 'summary'
 let analysisSummaryStatus = 'all'; // 'all' | 'active' | 'ended'
 let stemThickness = JSON.parse(localStorage.getItem('stemThickness') || '{}'); // key -> value
-let stemGasUrl = localStorage.getItem('stemGasUrl') || '';
+// Gist設定: gistId + githubToken をlocalStorageに保持
+let stemGistId    = localStorage.getItem('stemGistId') || '';
+let stemGithubToken = localStorage.getItem('stemGithubToken') || '';
 let stemGasLoaded = false;
 
 async function stemLoad() {
-  if (!stemGasUrl || stemGasLoaded) return;
-  // JSONPで読み込み（Workspace GASのCORS制限を回避）
-  return new Promise(resolve => {
-    const cbName = '_stemCb_' + Date.now();
-    const timeout = setTimeout(() => { delete window[cbName]; resolve(); }, 5000);
-    window[cbName] = data => {
-      clearTimeout(timeout);
-      delete window[cbName];
-      document.getElementById('_stemScript')?.remove();
-      Object.assign(stemThickness, data);
-      stemGasLoaded = true;
-      localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
-      resolve();
-    };
-    const script = document.createElement('script');
-    script.id = '_stemScript';
-    script.src = `${stemGasUrl}?callback=${cbName}`;
-    script.onerror = () => { clearTimeout(timeout); resolve(); };
-    document.head.appendChild(script);
-  });
+  if (!stemGistId || stemGasLoaded) return;
+  try {
+    // raw URLはCORS完全フリー
+    const rawUrl = `https://gist.githubusercontent.com/rikeda-code/${stemGistId}/raw/stem-thickness.json`;
+    const res = await fetch(rawUrl + '?_=' + Date.now());
+    if (!res.ok) return;
+    const data = await res.json();
+    Object.assign(stemThickness, data);
+    stemGasLoaded = true;
+    localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
+  } catch(e) { /* ignore */ }
 }
 
-function stemSave(key, val) {
+async function stemSave(key, val) {
   if (val) stemThickness[key] = val; else delete stemThickness[key];
   localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
-  if (!stemGasUrl) return;
-  // no-corsで送信（レスポンス不要なので問題なし）
-  fetch(`${stemGasUrl}?action=save&key=${encodeURIComponent(key)}&value=${encodeURIComponent(val)}`, { mode: 'no-cors' })
-    .catch(() => {});
+  if (!stemGistId || !stemGithubToken) return;
+  // GitHub Gist APIで上書き保存
+  fetch(`https://api.github.com/gists/${stemGistId}`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `token ${stemGithubToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ files: { 'stem-thickness.json': { content: JSON.stringify(stemThickness, null, 2) } } }),
+  }).catch(() => {});
 }
 
 function stemInput(key, val) {
   stemSave(key, val);
-  // update all inputs with same key across table
   document.querySelectorAll(`[data-stem-key="${CSS.escape(key)}"]`).forEach(el => {
     if (document.activeElement !== el) el.value = val;
   });
 }
 
-function stemSetGasUrl(url) {
-  stemGasUrl = url.trim();
-  localStorage.setItem('stemGasUrl', stemGasUrl);
+function stemSetConfig(gistId, token) {
+  stemGistId = gistId.trim();
+  stemGithubToken = token.trim();
+  localStorage.setItem('stemGistId', stemGistId);
+  localStorage.setItem('stemGithubToken', stemGithubToken);
   stemGasLoaded = false;
   stemLoad();
 }
@@ -4777,11 +4777,16 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
     return `<button class="sort-btn${active?' active':''}" onclick="analysisSummarySetStatus('${s}')">${label}</button>`;
   }).join('');
 
-  const gasConfig = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span style="font-size:0.72rem;color:#64748b;white-space:nowrap">芽の太さ保存先(GAS URL)</span>
-    <input type="text" value="${stemGasUrl}" onchange="stemSetGasUrl(this.value)" placeholder="Google Apps Script Web App URL"
-      style="flex:1;min-width:280px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 8px;font-size:0.75rem">
-    <span style="font-size:0.7rem;color:#475569">${stemGasUrl ? '✓ 設定済み' : '未設定（このデバイスのみ保存）'}</span>
+  const isConfigured = stemGistId && stemGithubToken;
+  const gasConfig = `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+    <span style="font-size:0.72rem;color:#64748b;white-space:nowrap;font-weight:600">クロスデバイス同期:</span>
+    <input type="text" id="stem-gist-id" value="${stemGistId}" placeholder="Gist ID"
+      style="width:240px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:4px 8px;font-size:0.75rem">
+    <input type="password" id="stem-gh-token" value="${stemGithubToken}" placeholder="GitHub Token (gist権限)"
+      style="width:220px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:4px 8px;font-size:0.75rem">
+    <button onclick="stemSetConfig(document.getElementById('stem-gist-id').value, document.getElementById('stem-gh-token').value)"
+      class="sort-btn" style="font-size:0.75rem;padding:4px 12px">保存</button>
+    <span style="font-size:0.7rem;color:${isConfigured ? '#86efac' : '#475569'}">${isConfigured ? '✓ 設定済み' : '未設定（このデバイスのみ保存）'}</span>
   </div>`;
 
   return `
