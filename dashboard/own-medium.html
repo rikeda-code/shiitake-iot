@@ -3710,8 +3710,9 @@ function stemSave(key, val) {
   if (val) stemThickness[key] = val; else delete stemThickness[key];
   localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
   if (!stemGasUrl) return;
-  fetch(`${stemGasUrl}?action=save&key=${encodeURIComponent(key)}&value=${encodeURIComponent(val)}`)
-    .catch(() => {});
+  // imgタグでGETリクエスト送信（CORS制限を回避）
+  const img = new Image();
+  img.src = `${stemGasUrl}?action=save&key=${encodeURIComponent(key)}&value=${encodeURIComponent(val)}`;
 }
 
 function stemInput(key, val) {
