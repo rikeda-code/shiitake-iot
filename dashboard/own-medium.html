@@ -3298,9 +3298,10 @@ function renderMekakiSection(section) {
       const canvas = document.getElementById(chartId);
       if (!canvas) return;
       const pal = MEKAKI_CARD_PALETTE[site] || { bar: '#a78bfa' };
-      // Each row = one harvest round; label by round index
-      const labels = rows.map((r, i) => `${i+1}回目`);
-      const data = rows.map(r => r.converted != null ? r.converted : null);
+      // Each row has m1~m5 fields (1回目〜5回目 mekaki kg)
+      const r0 = rows[0];
+      const labels = ['1回目','2回目','3回目','4回目','5回目'];
+      const data = [r0.m1, r0.m2, r0.m3, r0.m4, r0.m5].map(v => v != null ? v : null);
       new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: { labels, datasets: [{ label: '2520換算 kg', data, backgroundColor: pal.bar + 'cc', borderColor: pal.bar, borderWidth: 1.5 }] },
