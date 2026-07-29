@@ -7125,7 +7125,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function renderSiteTabBarFixed() {
     const el = document.getElementById('plancmp2-site-tabbar-fixed');
     if (!el) return;
-    if (planCmpSubtab !== 'site') { el.style.display = 'none'; el.innerHTML = ''; return; }
+    // 'sitesummary'（拠点サマリ（新））も拠点タブで選択中拠点を切り替えられるようにする
+    if (planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary') { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'flex';
     el.innerHTML = siteTabBarHtml();
     el.querySelectorAll('.plancmp2-site-tab').forEach(btn => {
@@ -7754,11 +7755,132 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
   }
 
+  // 拠点サマリ（新）：プレースホルダー実装。拠点タブ（いなべ/群馬/南丹/全拠点合計）に
+  // 連動し、選択中拠点（全拠点合計の場合は3拠点合算）分の「予定標準 vs 実績（統合・
+  // 拠点別×工程別）」チャートのみを単独表示する。renderSummaryView()の-combinedチャート
+  // と同じロジックをそのまま流用し、対象拠点をavailSites全体ではなく選択中拠点に絞り
+  // 込むだけにとどめている。上段の栽培＋出荷合算グラフは次フェーズで実装予定のため
+  // まだ用意しない（今回はこのプレースホルダーのみ）
+  function renderSiteSummaryView() {
+    const content = document.getElementById('compare2-content');
+    const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
+    const headerLabel = planCmpSiteTab === '全拠点合計' ? '3拠点サマリ' : planCmpSiteTab;
+
+    let html = `<div class="schart-header">${headerLabel}
+      <span style="font-weight:400;font-size:0.8rem;color:var(--muted)">　※ プレースホルダー実装（上段の栽培＋出荷合算グラフは今後追加予定）</span>
+    </div>`;
+    divs.forEach(div => {
+      const vm = visMonths();
+      html += `<div class="schart-section">
+        <div class="schart-header">${div} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（工程別）</span></div>
+        <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・拠点別×工程別）</div>
+        ${chartWrapHtml(`plansitesum2-${div}-combined`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
+      </div>`;
+    });
+    content.innerHTML = html;
+
+    divs.forEach(div => {
+      const divRows = rows.filter(r => r.div === div);
+      const actualBySite = sitesToShow.map(site => sl(window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null)));
+      const stdByTask = divRows.map(r => sl(planMonths.map((_, mi) => {
+        const total = sitesToShow.reduce((s, site) => {
+          const res = calcRow(site, r, mi);
+          return s + (res.h !== null ? res.h : 0);
+        }, 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      })));
+
+      const volData = sl(planMonths.map((_, mi) =>
+        sitesToShow.reduce((s, site) => {
+          const v = planVolume(site, div, mi);
+          return s + (v !== null ? v : 0);
+        }, 0) || null
+      ));
+      const volDs = {
+        type: 'line', label: DIV_METRIC[div] + (sitesToShow.length > 1 ? '（計画・3拠点合計）' : '（計画）'), data: volData,
+        borderColor: '#94a3b8', backgroundColor: 'transparent',
+        borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
+        tension: 0.3, yAxisID: 'y2', order: 0,
+        _volumeLine: true, _unit: DIV_UNIT[div],
+      };
+
+      const vm = visMonths();
+      const actualMonthlyTotals = vm.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
+      const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
+
+      // 3拠点マージ：標準労働時間棒（中央、選択中拠点分。全拠点合計の場合は3拠点合算）を
+      // 過去/未来問わず全ての月に表示する（栽培・出荷共通の既存ロジックをそのまま流用）
+      const agg = threeSiteMergeAgg(div, sitesToShow.length > 1 ? null : sitesToShow[0]);
+      const stdHoursDs = threeSiteMergeStdHoursDatasets(agg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
+      const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(agg, mi)));
+      const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, stdHoursTotals], 100);
+      const volMax = y2Axis(div, volData);
+
+      const combinedCtx = document.getElementById(`plansitesum2-${div}-combined`)?.getContext('2d');
+      if (!combinedCtx) return;
+      const datasets = [];
+      // 積み上げ表示は配列の先頭が最下部・末尾が最上部になるため、視覚的な上下順序を
+      // 「いなべ→群馬→南丹（いなべが最上部）」にするには、拠点の追加順を逆にする
+      // （全拠点合計以外は対象拠点が1件のみのため、この並び順は実質影響しない）
+      [...sitesToShow].reverse().forEach(site => {
+        const si = sitesToShow.indexOf(site);
+        datasets.push({
+          type: 'bar', label: site, data: actualBySite[si],
+          backgroundColor: (SITE_COLORS[site] || '#fff') + 'cc',
+          borderColor: SITE_COLORS[site] || '#fff', borderWidth: 0,
+          stack: 'actual', order: 1, _actualGroup: true,
+        });
+      });
+      stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
+      divRows.forEach((r, ri) => {
+        datasets.push({
+          type: 'bar', label: r.task, data: stdByTask[ri],
+          backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+          borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+          borderWidth: 0, stack: 'std', order: 2, _stdGroup: true,
+        });
+      });
+      datasets.push({ ...volDs });
+      planCmpChartInstances[`sitesum-${div}-combined`] = new Chart(combinedCtx, {
+        data: { labels: visMonths(), datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              labels: {
+                color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
+                generateLabels: chart => {
+                  const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                  const siteItems = items.filter(item => sitesToShow.includes(item.text));
+                  const otherItems = items.filter(item => !sitesToShow.includes(item.text));
+                  siteItems.sort((a, b) => sitesToShow.indexOf(a.text) - sitesToShow.indexOf(b.text));
+                  return [...siteItems, ...otherItems];
+                },
+              },
+            },
+            tooltip: tooltipOpts(true, true),
+          },
+          scales: {
+            x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+            y: {
+              stacked: true, position: 'left',
+              ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+              grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
+              title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+            },
+            y2: volMax,
+          },
+        },
+      });
+    });
+  }
   let planCmpSubtab = 'site';
   function renderContent() {
     destroyCharts();
     renderSiteTabBarFixed();
-    if (planCmpSubtab === 'summary') renderSummaryView();
+    if (planCmpSubtab === 'sitesummary') renderSiteSummaryView();
+    else if (planCmpSubtab === 'summary') renderSummaryView();
     else if (planCmpSubtab === 'table') renderTableView();
     else renderSiteView();
   }
@@ -7795,6 +7917,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
           <div class="transfer-toggle" id="plancmp2-subtabs">
             <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点別</button>
+            <button class="transfer-toggle-btn${planCmpSubtab === 'sitesummary' ? ' active' : ''}" data-tab="sitesummary">拠点サマリ（新）</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">拠点サマリ</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'table' ? ' active' : ''}" data-tab="table">表</button>
           </div>
