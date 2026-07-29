@@ -3491,36 +3491,99 @@ function drawWeightLotChart(result) {
 function renderWeightSubTabs() {
   const section = document.getElementById('weight-section');
   if (!section || !weightData) return;
-  const allTabs = [
-    ...WEIGHT_SITES.map((s, i) => ({ label: s.name, idx: i, color: s.color })),
-    { label: 'ロット別比較', idx: WEIGHT_LOT_TAB, color: '#a78bfa' },
-  ];
-  const subTabHtml = allTabs.map(t => {
-    const active = t.idx === weightActiveSite;
-    return `<button onclick="weightSetSite(${t.idx})" style="
-      padding:8px 16px;border:none;background:none;cursor:pointer;font-size:0.85rem;
-      color:${active ? t.color : '#64748b'};
-      border-bottom:2px solid ${active ? t.color : 'transparent'};
-      transition:color 0.15s">${t.label}</button>`;
-  }).join('');
 
-  let content;
-  if (weightActiveSite === WEIGHT_LOT_TAB) {
-    content = renderWeightLotContent(weightData[0]);
-  } else {
-    content = renderWeightSiteContent(weightData[weightActiveSite]);
-  }
+  const allContainers = weightData[0]?.containers || [];
+  // weeklyState.containerDataと号機+開始日で照合し、拠点名を付与
+  const enriched = allContainers.map(wc => {
+    const noNorm = wc.containerNo.replace(/号機$/, '').trim();
+    const match = (weeklyState?.containerData || []).find(c => {
+      if (String(c.no).replace(/号機$/, '') !== noNorm) return false;
+      const cStart = parseDateStr(c.startDate);
+      return cStart && wc.startDate && Math.abs(cStart - wc.startDate) < 14 * 86400000;
+    });
+    return { ...wc, siteName: match?.siteName || null, lotDisp: analysisFormatLot(wc.lot) };
+  });
+
+  // ロット→拠点→コンテナの順でカード描画
+  const lotSortKey = lot => { const m = String(lot||'').match(/^(\d+)([A-Z]+)$/); return m ? [parseInt(m[1]),m[2]] : [999,lot||'']; };
+  const lots = [...new Set(enriched.map(c => c.lotDisp).filter(l => l && l !== '—'))].sort((a,b) => { const [an,al]=lotSortKey(a),[bn,bl]=lotSortKey(b); return an!==bn?an-bn:al<bl?-1:1; });
+  const SITE_ORDER = ['いなべ','群馬','南丹'];
+  const SITE_COLORS = { 'いなべ':'#38bdf8','群馬':'#f97316','南丹':'#34d399' };
+  const LOT_COLORS = ['#38bdf8','#34d399','#f97316','#facc15','#f472b6','#a78bfa','#4ade80','#fb7185','#60a5fa','#c084fc','#2dd4bf','#fbbf24'];
+  const lotColorMap = {};
+  lots.forEach((l,i) => { lotColorMap[l] = LOT_COLORS[i % LOT_COLORS.length]; });
+
+  let cardsHtml = '';
+  let chartTargets = [];
+  let cardIdx = 0;
+
+  lots.forEach(lot => {
+    const lotContainers = enriched.filter(c => c.lotDisp === lot);
+    const sites = [...new Set(lotContainers.map(c => c.siteName).filter(Boolean))].sort((a,b) => SITE_ORDER.indexOf(a)-SITE_ORDER.indexOf(b));
+    const noSite = lotContainers.filter(c => !c.siteName);
+    const lotColor = lotColorMap[lot] || '#f59e0b';
+
+    cardsHtml += `<div style="margin-bottom:24px">
+      <div style="font-size:1rem;font-weight:700;color:${lotColor};margin-bottom:10px;padding:4px 0;border-bottom:2px solid ${lotColor}33">ロット ${lot}</div>`;
+
+    const renderSiteGroup = (siteName, containers) => {
+      const siteColor = SITE_COLORS[siteName] || '#94a3b8';
+      const sorted = [...containers].sort((a,b) => b.startDate - a.startDate);
+      let siteHtml = siteName ? `<div style="font-size:0.78rem;font-weight:600;color:${siteColor};margin:8px 0 6px">${siteName}</div>` : '';
+      siteHtml += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">`;
+      sorted.forEach(c => {
+        const sd = c.startDate;
+        const dateStr = `${sd.getFullYear()}/${sd.getMonth()+1}/${sd.getDate()}`;
+        const chartId = `wc-card-${cardIdx++}`;
+        chartTargets.push({ chartId, c });
+        siteHtml += `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <span style="color:#e2e8f0;font-weight:700;font-size:0.9rem">${c.containerNo}号機</span>
+            <span style="color:#64748b;font-size:0.78rem">${dateStr} 開始</span>
+          </div>
+          <div style="height:180px"><canvas id="${chartId}"></canvas></div>
+        </div>`;
+      });
+      siteHtml += `</div>`;
+      return siteHtml;
+    };
+
+    sites.forEach(s => cardsHtml += renderSiteGroup(s, lotContainers.filter(c => c.siteName === s)));
+    if (noSite.length) cardsHtml += renderSiteGroup(null, noSite);
+    cardsHtml += `</div>`;
+  });
+
+  if (!lots.length) cardsHtml = `<div style="color:#64748b;padding:16px">データなし（2025.10以降）</div>`;
 
   section.innerHTML = `
-    <div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
-    <div style="display:flex;gap:4px;border-bottom:1px solid #2e3148;margin-bottom:16px">${subTabHtml}</div>
-    <div id="weight-content">${content}</div>`;
+    <div class="section-title">菌床重量<span class="sub">ロット × 拠点 × コンテナ</span></div>
+    <div id="weight-content">${cardsHtml}</div>`;
 
-  if (weightActiveSite === WEIGHT_LOT_TAB) {
-    requestAnimationFrame(() => drawWeightLotChart(weightData[0]));
-  } else {
-    requestAnimationFrame(() => drawWeightCharts(weightData[weightActiveSite]));
-  }
+  requestAnimationFrame(() => {
+    chartTargets.forEach(({ chartId, c }) => {
+      const canvas = document.getElementById(chartId);
+      if (!canvas) return;
+      const labels = c.measurements.map(m => `${m.idx}本目`);
+      const beforeData = c.measurements.map(m => m.before ?? 0);
+      const absorbData = c.measurements.map(m =>
+        (m.before != null && m.after != null) ? Math.max(0, m.after - m.before) : 0);
+      new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels, datasets: [
+          { label: '散水前重量', data: beforeData, backgroundColor: '#60a5facc', stack: 's' },
+          { label: '吸水量',     data: absorbData, backgroundColor: '#fa8072cc', stack: 's' },
+        ]},
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#8892a4', font: { size: 10 } } }, tooltip: { ...tooltipDefaults } },
+          scales: {
+            x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+            y: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+          },
+        },
+      });
+    });
+  });
 }
 
 function weightSetSite(idx) {
@@ -3570,7 +3633,7 @@ let analysisFilters = {
   minDays: '', maxDays: '', dateFrom: '', dateTo: '',
 };
 let analysisSelected = new Set(); // Set<container.key>
-let analysisSubTab = 'container'; // 'container' | 'date' | 'correlation' | 'weighttrend' | 'mekakitrend'
+let analysisSubTab = 'container'; // 'container' | 'correlation'
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
 let analysisDateSize = 'm'; // 日付タブの日別サイズ別グラフで表示するサイズ
 let analysisParetoSize = 'total'; // コンテナ別パレート図で集計対象にするサイズ('total'=全サイズ合計)
@@ -3731,6 +3794,25 @@ function analysisToggleSelect(key) {
 
 function analysisClearSelection() {
   analysisSelected.clear();
+  renderAnalysisTab();
+}
+
+function analysisSelectAllLots() {
+  (analysisDataset || []).forEach(c => analysisSelected.add(c.key));
+  renderAnalysisTab();
+}
+
+function analysisSelectByNumber(num) {
+  const lots = [...new Set((analysisDataset || []).map(c => analysisFormatLot(c.lot)).filter(l => l !== '—'))];
+  const target = lots.filter(l => l.match(/^(\d+)/)?.[1] === String(num));
+  const allSel = target.every(lot =>
+    (analysisDataset || []).filter(c => analysisFormatLot(c.lot) === lot).every(c => analysisSelected.has(c.key))
+  );
+  target.forEach(lot => {
+    (analysisDataset || []).filter(c => analysisFormatLot(c.lot) === lot).forEach(c =>
+      allSel ? analysisSelected.delete(c.key) : analysisSelected.add(c.key)
+    );
+  });
   renderAnalysisTab();
 }
 
@@ -4404,9 +4486,10 @@ async function renderAnalysisTab() {
     return (parseDateStr(a.startDate) || 0) - (parseDateStr(b.startDate) || 0);
   });
 
-  // 菌床ロット別チップ選択UIを構築
+  // 菌床ロット別チップ + 一括選択UI
   const allLots = [...new Set((analysisDataset || [])
     .map(c => analysisFormatLot(c.lot)).filter(l => l !== '—'))].sort();
+  const lotNums = [...new Set(allLots.map(l => l.match(/^(\d+)/)?.[1]).filter(Boolean))].sort();
   const lotColorMapFull = analysisBuildLotColorMap(analysisDataset || []);
   const lotChipHtml = allLots.length ? allLots.map(lot => {
     const lotContainers = (analysisDataset || []).filter(c => analysisFormatLot(c.lot) === lot);
@@ -4421,24 +4504,25 @@ async function renderAnalysisTab() {
     </button>`;
   }).join('') : `<span style="font-size:0.82rem;color:#64748b">ロットデータなし</span>`;
 
+  const numBtnHtml = lotNums.map(n => {
+    const nContainers = (analysisDataset || []).filter(c => analysisFormatLot(c.lot).startsWith(n));
+    const nSel = nContainers.filter(c => analysisSelected.has(c.key)).length;
+    const active = nSel === nContainers.length && nContainers.length > 0;
+    return `<button class="sort-btn${active ? ' active' : ''}" onclick="analysisSelectByNumber('${n}')" style="font-weight:700">${n}系</button>`;
+  }).join('');
+
   const chartItems = analysisSubTab === 'correlation' ? selected : allSelected;
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
   const noSelMsg = `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">菌床ロットを選択してください</div>`;
 
   const rightHtml = !allSelected.length ? noSelMsg
-    : analysisSubTab === 'date' ? renderAnalysisDateView()
     : analysisSubTab === 'correlation'
       ? (chartItems.length ? renderAnalysisCorrelationView(chartItems) : noSelMsg)
-    : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrend(allSelected)
-    : analysisSubTab === 'mekakitrend' ? renderAnalysisMekakiTrend(allSelected)
     : renderAnalysisComparison(allSelected, lotColorMap);
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
-    { key: 'date', label: '日付' },
     { key: 'correlation', label: '相関図' },
-    { key: 'weighttrend', label: '菌床重量傾向' },
-    { key: 'mekakitrend', label: '芽かき量傾向' },
   ].map(t => `<button class="sort-btn${analysisSubTab === t.key ? ' active' : ''}" onclick="analysisSetSubTab('${t.key}')">${t.label}</button>`).join('');
 
   section.innerHTML = `
@@ -4446,9 +4530,14 @@ async function renderAnalysisTab() {
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">${subTabHtml}</div>
 
     <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:14px 16px;margin-bottom:16px">
-      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end">
-        <div style="flex:1;min-width:200px">
-          <div style="font-size:0.72rem;color:#64748b;margin-bottom:6px">菌床ロット</div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+        <div style="flex:1;min-width:240px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-size:0.72rem;color:#64748b">菌床ロット</span>
+            <button class="sort-btn" onclick="analysisSelectAllLots()" style="font-size:0.72rem;padding:2px 8px">全選択</button>
+            ${analysisSelected.size ? `<button class="sort-btn" onclick="analysisClearSelection()" style="font-size:0.72rem;padding:2px 8px">解除(${analysisSelected.size})</button>` : ''}
+            ${numBtnHtml}
+          </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">${lotChipHtml}</div>
         </div>
         <div>
@@ -4472,17 +4561,12 @@ async function renderAnalysisTab() {
               style="background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:5px 6px;font-size:0.8rem">
           </div>
         </div>
-        ${analysisSelected.size ? `<button class="sort-btn" onclick="analysisClearSelection()" style="margin-left:auto">選択解除 (${analysisSelected.size})</button>` : ''}
       </div>
     </div>
 
     <div>${rightHtml}</div>`;
 
-  if (chartItems.length) {
-    drawAnalysisCharts(chartItems, lotColorMap);
-    if (analysisSubTab === 'weighttrend') drawAnalysisWeightTrendChart(allSelected, lotColorMap);
-    if (analysisSubTab === 'mekakitrend') drawAnalysisMekakiTrendChart(allSelected);
-  }
+  if (chartItems.length) drawAnalysisCharts(chartItems, lotColorMap);
 }
 
 // ── 菌床重量傾向サブタブ ──────────────────────────────────────────────────
@@ -4602,27 +4686,8 @@ function renderAnalysisComparison(items, lotColorMap) {
   }).join('');
 
   return `
-    <div style="overflow-x:auto;margin-bottom:20px">
-      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:720px">
-        <thead>
-          <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
-            <th style="padding:6px 8px;text-align:left;color:#64748b">コンテナ</th>
-            <th style="padding:6px 8px;text-align:left;color:#64748b">菌床ロット</th>
-            <th style="padding:6px 8px;text-align:left;color:#64748b">開始日</th>
-            <th style="padding:6px 8px;text-align:right;color:#64748b">栽培日数</th>
-            <th style="padding:6px 8px;text-align:right;color:#64748b">収穫量</th>
-            <th style="padding:6px 8px;text-align:right;color:#64748b">パック品率</th>
-            <th style="padding:6px 8px;text-align:right;color:#64748b">菌床重量</th>
-            <th style="padding:6px 8px;text-align:right;color:#64748b">芽かき量</th>
-            <th style="padding:6px 8px;text-align:right;color:#64748b">サイズ比率</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-
     ${analysisLotLegendHtml(lotColorMap)}
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:20px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫量・パック品率</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('harvest')"><canvas id="analysis-harvest-canvas"></canvas></div>
@@ -4648,6 +4713,25 @@ function renderAnalysisComparison(items, lotColorMap) {
         <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ比率</div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('ratio')"><canvas id="analysis-ratio-canvas"></canvas></div>
       </div>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:720px">
+        <thead>
+          <tr style="border-bottom:2px solid #2e3148;background:#1a1d27">
+            <th style="padding:6px 8px;text-align:left;color:#64748b">コンテナ</th>
+            <th style="padding:6px 8px;text-align:left;color:#64748b">菌床ロット</th>
+            <th style="padding:6px 8px;text-align:left;color:#64748b">開始日</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">栽培日数</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">収穫量</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">パック品率</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">菌床重量</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">芽かき量</th>
+            <th style="padding:6px 8px;text-align:right;color:#64748b">サイズ比率</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>`;
 }
 
