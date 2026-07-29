@@ -6844,6 +6844,21 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return typeof maxTotal === 'number' ? maxTotal : agg.stdTotal;
   }
 
+  // 拠点サマリモード用：栽培・出荷それぞれのthreeSiteMergeAgg()の結果を、div区別なく
+  // 1つの集計にまとめる（stdTotalは両divの合計、maxTotalByYmも月ごとに両divの値を合算）
+  function mergeThreeSiteMergeAggAcrossDivs(aggs) {
+    const valid = aggs.filter(Boolean);
+    if (!valid.length) return null;
+    const stdTotal = Math.round(valid.reduce((s, a) => s + a.stdTotal, 0) * 10) / 10;
+    const maxTotalByYm = {};
+    mergeData.monthYms.forEach(ym => {
+      let sum = 0, any = false;
+      valid.forEach(a => { const v = a.maxTotalByYm[ym]; if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; } });
+      if (any) maxTotalByYm[ym] = Math.round(sum * 10) / 10;
+    });
+    return { stdTotal, maxTotalByYm };
+  }
+
   let planCmpChartInstances = {};
   function destroyCharts() {
     Object.values(planCmpChartInstances).forEach(c => c.destroy());
@@ -7112,9 +7127,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
   }
 
-  // 拠点タブ(いなべ/群馬/南丹/全拠点合計)のHTML断片。固定エリア側(renderSiteTabBarFixed)から呼ぶ
+  // 拠点タブ(いなべ/群馬/南丹/全拠点合計)のHTML断片。固定エリア側(renderSiteTabBarFixed)から呼ぶ。
+  // 拠点サマリモード（'sitesummary'）は栽培+出荷を合算した拠点別サマリという性質上、
+  // 「全拠点合計」ボタンは対象外とし、いなべ/群馬/南丹の3拠点のみ表示する
   function siteTabBarHtml() {
-    return SITE_TABS.map(t =>
+    const tabs = planCmpSubtab === 'sitesummary' ? availSites : SITE_TABS;
+    return tabs.map(t =>
       `<button class="plancmp2-site-tab${planCmpSiteTab === t ? ' active' : ''}" data-site="${t}"
         style="padding:4px 14px;border-radius:6px;border:1px solid ${planCmpSiteTab === t ? '#38bdf8' : '#3a3f5c'};background:${planCmpSiteTab === t ? '#38bdf8' : 'transparent'};color:${planCmpSiteTab === t ? '#0f1117' : '#8892a4'};font-size:0.8rem;cursor:pointer;font-weight:${planCmpSiteTab === t ? '600' : '400'}">${t}</button>`
     ).join('');
@@ -7127,6 +7145,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (!el) return;
     // 'sitesummary'（拠点サマリ）も拠点タブで選択中拠点を切り替えられるようにする
     if (planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary') { el.style.display = 'none'; el.innerHTML = ''; return; }
+    // 拠点サマリモードには「全拠点合計」が存在しないため、他モードから切り替えた
+    // 直後にplanCmpSiteTabが「全拠点合計」のままだった場合は先頭拠点に切り替える
+    if (planCmpSubtab === 'sitesummary' && planCmpSiteTab === '全拠点合計') {
+      planCmpSiteTab = availSites[0];
+    }
     el.style.display = 'flex';
     el.innerHTML = siteTabBarHtml();
     el.querySelectorAll('.plancmp2-site-tab').forEach(btn => {
@@ -7755,172 +7778,96 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
   }
 
-  // 拠点サマリ：拠点タブ（いなべ/群馬/南丹/全拠点合計）に連動し、選択中拠点
-  // （全拠点合計の場合は3拠点合算）について、上段＝栽培＋出荷の実績工数を積み
-  // 上げ表示するグラフ、下段＝div（栽培/出荷）ごとの「予定標準 vs 実績（統合・
-  // 拠点別×工程別）」チャート、を縦に並べて表示する。下段はrenderSummaryView()
-  // の-combinedチャートと同じロジックをそのまま流用し、対象拠点をavailSites
-  // 全体ではなく選択中拠点に絞り込むだけにとどめている
+  // 拠点サマリ：拠点タブ（いなべ/群馬/南丹。全拠点合計はこのモードでは非表示）に
+  // 連動し、選択中拠点について、既存の「拠点・業務別」モード（全拠点合計時と同じ
+  // チャート構造：実績工数／標準労働時間＋最大労働時間／予定標準工数（工程別）の
+  // 3段積み上げ）を、栽培・出荷の区別なく1本のチャートに統合して表示する。
+  // 実績工数のみ、栽培・出荷の内訳がわかるよう暖色系2色の2セグメントに分ける
   function renderSiteSummaryView() {
     const content = document.getElementById('compare2-content');
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
-    const headerLabel = planCmpSiteTab === '全拠点合計' ? '拠点サマリ' : planCmpSiteTab;
     const totalSuffix = sitesToShow.length > 1 ? '（3拠点合計）' : '';
+    const vm = visMonths();
 
-    let html = `<div class="schart-header">${headerLabel}</div>`;
+    let html = `<div class="schart-header">${planCmpSiteTab}</div>`;
     html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷（実績合算）${totalSuffix}</div>
-      <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">実績工数（栽培・出荷 積み上げ）</div>
-      ${chartWrapHtml('plansitesum2-total-actual', visMonths().length, { heightPx: 260, inlineHeight: true, forceResponsive: true })}
+      <div class="schart-header">栽培＋出荷 合算${totalSuffix} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（工程別）</span></div>
+      <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・栽培＋出荷合算）</div>
+      ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
-    divs.forEach(div => {
-      const vm = visMonths();
-      html += `<div class="schart-section">
-        <div class="schart-header">${div} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（工程別）</span></div>
-        <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・拠点別×工程別）</div>
-        ${chartWrapHtml(`plansitesum2-${div}-combined`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
-      </div>`;
-    });
     content.innerHTML = html;
 
-    // 上段：栽培＋出荷の実績工数（actualH）を月別に積み上げ表示する。既存div別
-    // チャートと同じwindow._planCmpChartData2[`${site}-${div}`].actualHを再利用し、
-    // 集計方法（選択中拠点分の合計→div別に積み上げ）だけを変えている
-    {
-      const vm = visMonths();
-      const actualTotalsByDiv = {};
-      divs.forEach(div => {
-        const actualBySite = sitesToShow.map(site => sl(window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null)));
-        actualTotalsByDiv[div] = vm.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
-      });
-      const totalMonthlyStacked = vm.map((_, mi) => divs.reduce((s, div) => s + (actualTotalsByDiv[div][mi] || 0), 0));
-      const totalMax = computeSharedAxisMax([totalMonthlyStacked], 100);
-
-      const totalCtx = document.getElementById('plansitesum2-total-actual')?.getContext('2d');
-      if (totalCtx) {
-        const totalDatasets = divs.map(div => ({
-          type: 'bar', label: div + totalSuffix, data: actualTotalsByDiv[div],
-          backgroundColor: (ROLE_TYPE_COLORS[div] || '#fff') + 'cc',
-          borderColor: ROLE_TYPE_COLORS[div] || '#fff', borderWidth: 0,
-          stack: 'total', order: 1,
-        }));
-        planCmpChartInstances['sitesum-total-actual'] = new Chart(totalCtx, {
-          data: { labels: vm, datasets: totalDatasets },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-              legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
-              tooltip: tooltipOpts(false, true),
-            },
-            scales: {
-              x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
-              y: {
-                stacked: true, position: 'left',
-                ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
-                grid: { color: '#1e2235' }, suggestedMin: 0, max: totalMax,
-                title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
-              },
-            },
-          },
-        });
-      }
-    }
-
+    // 実績工数：栽培・出荷それぞれのactualHを選択中拠点分（全拠点合計時は3拠点合算）集計
+    const actualByDiv = {};
     divs.forEach(div => {
-      const divRows = rows.filter(r => r.div === div);
-      const actualBySite = sitesToShow.map(site => sl(window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null)));
-      const stdByTask = divRows.map(r => sl(planMonths.map((_, mi) => {
-        const total = sitesToShow.reduce((s, site) => {
-          const res = calcRow(site, r, mi);
-          return s + (res.h !== null ? res.h : 0);
-        }, 0);
-        return total > 0 ? Math.round(total * 10) / 10 : null;
-      })));
+      const actualBySite = sitesToShow.map(site => window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null));
+      actualByDiv[div] = sl(planMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
+    });
+    const actualMonthlyTotals = vm.map((_, mi) => divs.reduce((s, div) => s + (actualByDiv[div][mi] || 0), 0));
 
-      const volData = sl(planMonths.map((_, mi) =>
-        sitesToShow.reduce((s, site) => {
-          const v = planVolume(site, div, mi);
-          return s + (v !== null ? v : 0);
-        }, 0) || null
-      ));
-      const volDs = {
-        type: 'line', label: DIV_METRIC[div] + (sitesToShow.length > 1 ? '（計画・3拠点合計）' : '（計画）'), data: volData,
-        borderColor: '#94a3b8', backgroundColor: 'transparent',
-        borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
-        tension: 0.3, yAxisID: 'y2', order: 0,
-        _volumeLine: true, _unit: DIV_UNIT[div],
-      };
+    // 予定標準工数（工程別）：栽培・出荷のタスク行を区別せず1つの積み上げグループとして集計
+    const allDivRows = rows.filter(r => divs.includes(r.div));
+    const stdByTask = allDivRows.map(r => sl(planMonths.map((_, mi) => {
+      const total = sitesToShow.reduce((s, site) => {
+        const res = calcRow(site, r, mi);
+        return s + (res.h !== null ? res.h : 0);
+      }, 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    })));
+    const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
 
-      const vm = visMonths();
-      const actualMonthlyTotals = vm.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0));
-      const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
+    // 標準労働時間＋最大労働時間：栽培・出荷それぞれのthreeSiteMergeAgg()を合算してから
+    // threeSiteMergeStdHoursDatasets()に渡す（stdTotal・maxTotalByYmとも両div分の合計）
+    const siteForAgg = sitesToShow.length > 1 ? null : sitesToShow[0];
+    const mergedAgg = mergeThreeSiteMergeAggAcrossDivs(divs.map(div => threeSiteMergeAgg(div, siteForAgg)));
+    const stdHoursDs = threeSiteMergeStdHoursDatasets(mergedAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
+    const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAgg, mi)));
 
-      // 3拠点マージ：標準労働時間棒（中央、選択中拠点分。全拠点合計の場合は3拠点合算）を
-      // 過去/未来問わず全ての月に表示する（栽培・出荷共通の既存ロジックをそのまま流用）
-      const agg = threeSiteMergeAgg(div, sitesToShow.length > 1 ? null : sitesToShow[0]);
-      const stdHoursDs = threeSiteMergeStdHoursDatasets(agg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
-      const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(agg, mi)));
-      const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, stdHoursTotals], 100);
-      const volMax = y2Axis(div, volData);
+    const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, stdHoursTotals], 100);
 
-      const combinedCtx = document.getElementById(`plansitesum2-${div}-combined`)?.getContext('2d');
-      if (!combinedCtx) return;
-      const datasets = [];
-      // 積み上げ表示は配列の先頭が最下部・末尾が最上部になるため、視覚的な上下順序を
-      // 「いなべ→群馬→南丹（いなべが最上部）」にするには、拠点の追加順を逆にする
-      // （全拠点合計以外は対象拠点が1件のみのため、この並び順は実質影響しない）
-      [...sitesToShow].reverse().forEach(site => {
-        const si = sitesToShow.indexOf(site);
-        datasets.push({
-          type: 'bar', label: site, data: actualBySite[si],
-          backgroundColor: (SITE_COLORS[site] || '#fff') + 'cc',
-          borderColor: SITE_COLORS[site] || '#fff', borderWidth: 0,
-          stack: 'actual', order: 1, _actualGroup: true,
-        });
+    const ctx = document.getElementById('plansitesum2-combined')?.getContext('2d');
+    if (!ctx) return;
+    const datasets = [];
+    // 実績工数：栽培＝既存の実績棒と同じ赤、出荷＝オレンジの暖色系2色で内訳がわかるようにする
+    // （既存のROLE_TYPE_COLORS＝栽培緑/出荷黄は使わない）
+    datasets.push({
+      type: 'bar', label: '栽培（実績）', data: actualByDiv['栽培'],
+      backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 1,
+      stack: 'actual', order: 1, _actualGroup: true,
+    });
+    datasets.push({
+      type: 'bar', label: '出荷（実績）', data: actualByDiv['出荷'],
+      backgroundColor: '#fb923c99', borderColor: '#fb923c', borderWidth: 1,
+      stack: 'actual', order: 1, _actualGroup: true,
+    });
+    stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
+    allDivRows.forEach((r, ri) => {
+      datasets.push({
+        type: 'bar', label: r.task, data: stdByTask[ri],
+        backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+        borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+        borderWidth: 0, stack: 'std', order: 2, _stdGroup: true,
       });
-      stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
-      divRows.forEach((r, ri) => {
-        datasets.push({
-          type: 'bar', label: r.task, data: stdByTask[ri],
-          backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
-          borderColor: TASK_COLORS[ri % TASK_COLORS.length],
-          borderWidth: 0, stack: 'std', order: 2, _stdGroup: true,
-        });
-      });
-      datasets.push({ ...volDs });
-      planCmpChartInstances[`sitesum-${div}-combined`] = new Chart(combinedCtx, {
-        data: { labels: visMonths(), datasets },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              labels: {
-                color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
-                generateLabels: chart => {
-                  const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                  const siteItems = items.filter(item => sitesToShow.includes(item.text));
-                  const otherItems = items.filter(item => !sitesToShow.includes(item.text));
-                  siteItems.sort((a, b) => sitesToShow.indexOf(a.text) - sitesToShow.indexOf(b.text));
-                  return [...siteItems, ...otherItems];
-                },
-              },
-            },
-            tooltip: tooltipOpts(true, true),
-          },
-          scales: {
-            x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
-            y: {
-              stacked: true, position: 'left',
-              ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
-              grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
-              title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
-            },
-            y2: volMax,
+    });
+    planCmpChartInstances['sitesum-combined'] = new Chart(ctx, {
+      data: { labels: vm, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          tooltip: tooltipOpts(true, true),
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            stacked: true, position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
+            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
           },
         },
-      });
+      },
     });
   }
   let planCmpSubtab = 'site';
