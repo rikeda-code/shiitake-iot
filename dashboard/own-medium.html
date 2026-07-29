@@ -3691,55 +3691,26 @@ let analysisFilters = {
 let analysisSelected = new Set(); // Set<container.key>
 let analysisSubTab = 'container'; // 'container' | 'correlation' | 'summary'
 let analysisSummaryStatus = 'all'; // 'all' | 'active' | 'ended'
-let stemThickness = JSON.parse(localStorage.getItem('stemThickness') || '{}'); // key -> value
-// Gist設定: gistId + githubToken をlocalStorageに保持
-let stemGistId    = localStorage.getItem('stemGistId') || '';
-let stemGithubToken = localStorage.getItem('stemGithubToken') || '';
-let stemGasLoaded = false;
+let stemThickness = {}; // key: `${lot}|${siteName}|${no}` -> value
+let stemLoaded = false;
 
-async function stemLoad() {
-  if (!stemGistId || stemGasLoaded) return;
+async function loadStemThickness() {
+  if (stemLoaded) return;
   try {
-    // raw URLはCORS完全フリー
-    const rawUrl = `https://gist.githubusercontent.com/rikeda-code/${stemGistId}/raw/stem-thickness.json`;
-    const res = await fetch(rawUrl + '?_=' + Date.now());
-    if (!res.ok) return;
-    const data = await res.json();
-    Object.assign(stemThickness, data);
-    stemGasLoaded = true;
-    localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
+    const url = `https://docs.google.com/spreadsheets/d/${MEKAKI_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent('芽の太さ')}&headers=1`;
+    const res = await fetch(url);
+    const text = await res.text();
+    const json = JSON.parse(text.replace(/^[^\{]+/, '').replace(/\);?\s*$/, ''));
+    stemThickness = {};
+    (json.table?.rows || []).forEach(row => {
+      const lot  = String(row.c[0]?.v || '').trim();
+      const site = String(row.c[1]?.v || '').trim();
+      const no   = String(row.c[2]?.v || '').replace(/号機$/, '').trim();
+      const val  = String(row.c[3]?.v || '').trim();
+      if (lot && site && no && val) stemThickness[`${lot}|${site}|${no}`] = val;
+    });
+    stemLoaded = true;
   } catch(e) { /* ignore */ }
-}
-
-async function stemSave(key, val) {
-  if (val) stemThickness[key] = val; else delete stemThickness[key];
-  localStorage.setItem('stemThickness', JSON.stringify(stemThickness));
-  if (!stemGistId || !stemGithubToken) return;
-  // GitHub Gist APIで上書き保存
-  fetch(`https://api.github.com/gists/${stemGistId}`, {
-    method: 'PATCH',
-    headers: {
-      'Authorization': `token ${stemGithubToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ files: { 'stem-thickness.json': { content: JSON.stringify(stemThickness, null, 2) } } }),
-  }).catch(() => {});
-}
-
-function stemInput(key, val) {
-  stemSave(key, val);
-  document.querySelectorAll(`[data-stem-key="${CSS.escape(key)}"]`).forEach(el => {
-    if (document.activeElement !== el) el.value = val;
-  });
-}
-
-function stemSetConfig(gistId, token) {
-  stemGistId = gistId.trim();
-  stemGithubToken = token.trim();
-  localStorage.setItem('stemGistId', stemGistId);
-  localStorage.setItem('stemGithubToken', stemGithubToken);
-  stemGasLoaded = false;
-  stemLoad();
 }
 
 let analysisDateRange = { from: '', to: '' }; // 日付タブの対象期間(収穫日ベース)
@@ -4692,7 +4663,7 @@ async function renderAnalysisTab() {
 function analysisSummarySetStatus(s) { analysisSummaryStatus = s; renderAnalysisTab(); }
 
 function renderAnalysisSummary(allCandidates, selectedKeys) {
-  stemLoad(); // 非同期でGASデータ取得（初回のみ）
+  loadStemThickness().then(() => { if (stemLoaded) renderAnalysisTab(); }); // 非同期でスプレッドシートから取得（初回のみ）
   const today = new Date(); today.setHours(0,0,0,0);
 
   const isEnded = c => {
@@ -4739,8 +4710,8 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
       ? Math.round(c.weightBefore + c.weightAbsorb) : null;
     const pr15 = packRateDay15(c);
     const prFinal = c.packRate;
-    const stemVal = stemThickness[c.key] || '';
-    const escKey = c.key.replace(/'/g, "\\'");
+    const noNorm = String(c.no || '').replace(/号機$/, '').trim();
+    const stemVal = stemThickness[`${c.lot}|${c.siteName}|${noNorm}`] || '—';
     return `<tr style="border-bottom:1px solid #1e2235">
       <td style="${TD};color:#f59e0b;white-space:nowrap">${lot}</td>
       <td style="${TD};color:${siteColor};white-space:nowrap">${c.siteName}</td>
@@ -4750,18 +4721,7 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
       <td style="${TDR};color:#7dd3fc">${fmt(c.weightAbsorb)}</td>
       <td style="${TDR};color:#bfdbfe">${fmt(weightAfter)}</td>
       <td style="${TDR};color:#c4b5fd">${c.mekaki != null ? c.mekaki.toFixed(1) : '—'}</td>
-      <td style="${TD};text-align:center;padding:2px 4px">
-        <select data-stem-key="${c.key.replace(/"/g,'&quot;')}"
-          onchange="stemInput('${escKey}', this.value)"
-          style="background:#0f1117;border:1px solid #2e3148;border-radius:5px;color:#fcd34d;font-size:0.85rem;font-weight:700;padding:3px 6px;cursor:pointer;max-width:90px">
-          <option value="" ${stemVal===''?'selected':''}>—</option>
-          <option value="細い" ${stemVal==='細い'?'selected':''}>細い</option>
-          <option value="やや細い" ${stemVal==='やや細い'?'selected':''}>やや細い</option>
-          <option value="普通" ${stemVal==='普通'?'selected':''}>普通</option>
-          <option value="やや太い" ${stemVal==='やや太い'?'selected':''}>やや太い</option>
-          <option value="太い" ${stemVal==='太い'?'selected':''}>太い</option>
-        </select>
-      </td>
+      <td style="${TD};text-align:center;color:#fcd34d;font-weight:700">${stemVal}</td>
       <td style="${TDR};color:#60a5fa">${c.harvest != null ? Math.round(c.harvest).toLocaleString() : '—'}</td>
       <td style="${TDR};${prCls(pr15)}">${pr15 != null ? pr15 + '%' : '—'}</td>
       <td style="${TDR};${prCls(prFinal)}">${prFinal != null ? prFinal + '%' : '—'}</td>
@@ -4777,26 +4737,12 @@ function renderAnalysisSummary(allCandidates, selectedKeys) {
     return `<button class="sort-btn${active?' active':''}" onclick="analysisSummarySetStatus('${s}')">${label}</button>`;
   }).join('');
 
-  const isConfigured = stemGistId && stemGithubToken;
-  const gasConfig = `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-    <span style="font-size:0.72rem;color:#64748b;white-space:nowrap;font-weight:600">クロスデバイス同期:</span>
-    <input type="text" id="stem-gist-id" value="${stemGistId}" placeholder="Gist ID"
-      style="width:240px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:4px 8px;font-size:0.75rem">
-    <input type="password" id="stem-gh-token" value="${stemGithubToken}" placeholder="GitHub Token (gist権限)"
-      style="width:220px;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:4px 8px;font-size:0.75rem">
-    <button onclick="stemSetConfig(document.getElementById('stem-gist-id').value, document.getElementById('stem-gh-token').value)"
-      class="sort-btn" style="font-size:0.75rem;padding:4px 12px">保存</button>
-    <span style="font-size:0.7rem;color:${isConfigured ? '#86efac' : '#475569'}">${isConfigured ? '✓ 設定済み' : '未設定（このデバイスのみ保存）'}</span>
-  </div>`;
 
   return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       <span style="font-size:0.8rem;color:#64748b;font-weight:600">栽培状況：</span>
       ${statusBtns}
       <span style="font-size:0.8rem;color:#475569;margin-left:8px">${items.length}件</span>
-    </div>
-    <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:8px;padding:10px 14px;margin-bottom:12px">
-      ${gasConfig}
     </div>
     <div style="overflow-x:auto;border-radius:10px;border:1px solid #2e3148">
       <table style="width:100%;border-collapse:collapse;min-width:1000px">
