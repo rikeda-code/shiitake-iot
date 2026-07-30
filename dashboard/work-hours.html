@@ -8726,12 +8726,18 @@ function renderDecPlanContent(planData, mergeData) {
       const sum5  = isH
         ? (std6 !== null ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10 : null)
         : (jun !== null ? Math.round(((jun || 0) + (newV || 0)) * 10) / 10 : null);
-      // ⑥人数表：標準工数時間÷178h
+      // ⑥人数表：標準工数時間÷173.8h
       const dec6N = (dec !== null) ? Math.round(dec / 173.8) : null;
       const decVal = isH ? dec : dec6N;
-      const diff7 = (sum5 !== null && decVal !== null)
-        ? Math.round((sum5 - decVal) * 10) / 10
-        : null;
+      // 表1⑦（時間差分）を共通で算出し、表2⑦は表1⑦÷173.8
+      const hStd6 = stdHoursFromMerge(site);
+      const hNewV = newHireH(site);
+      const hOvV  = overtimeH(site);
+      const hSum5 = hStd6 !== null ? Math.round(((hStd6||0)+(hNewV||0)+(hOvV||0))*10)/10 : null;
+      const hDiff7 = (hSum5 !== null && dec !== null) ? hSum5 - dec : null;
+      const diff7 = isH
+        ? (hDiff7 !== null ? Math.round(hDiff7 * 10) / 10 : null)
+        : (hDiff7 !== null ? Math.round(hDiff7 / 173.8 * 10) / 10 : null);
 
       rows += `<tr>
         <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
@@ -8758,7 +8764,15 @@ function renderDecPlanContent(planData, mergeData) {
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
     const totDec6N = Math.round(totDec / 173.8);
     const totDecVal = isH ? totDec : totDec6N;
-    const totDiff = Math.round((totSum5 - totDecVal) * 10) / 10;
+    // 表1⑦（時間差分）を基に合計行の表2⑦を計算
+    const totHStd6 = SITES_ORD.reduce((s, site) => s + (stdHoursFromMerge(site) || 0), 0);
+    const totHNew  = SITES_ORD.reduce((s, site) => s + (newHireH(site) || 0), 0);
+    const totHOv   = SITES_ORD.reduce((s, site) => s + (overtimeH(site) || 0), 0);
+    const totHSum5 = Math.round((totHStd6 + totHNew + totHOv) * 10) / 10;
+    const totHDiff7 = Math.round((totHSum5 - totDec) * 10) / 10;
+    const totDiff = isH
+      ? Math.round((totSum5 - totDec) * 10) / 10
+      : Math.round(totHDiff7 / 173.8 * 10) / 10;
 
     rows += `<tr style="background:var(--surface2);font-weight:600;border-top:2px solid #3a3f5c">
       <td>合計</td>
@@ -8768,7 +8782,7 @@ function renderDecPlanContent(planData, mergeData) {
       <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : '—'}</td>
       <td style="text-align:right">${isH ? fmtH(totSum5) : Math.round(totSum5) + ' 名'}</td>
       <td style="text-align:right">${isH ? fmtH(Math.round(totDec * 10) / 10) : totDec6N + ' 名'}</td>
-      <td style="text-align:center">${isH ? fmtDiff(Math.round(totDiff * 10) / 10) : fmtDiffN(Math.round(totDiff))}</td>
+      <td style="text-align:center">${isH ? fmtDiff(Math.round(totDiff * 10) / 10) : fmtDiffN(totDiff !== null ? Math.round(totDiff) : null)}</td>
     </tr>`;
 
     return `
