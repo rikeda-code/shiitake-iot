@@ -5744,7 +5744,7 @@ function renderPlanCompareCharts(planData, prodData) {
     '#fde047','#fdba74','#dc2626','#fef08a','#e11d48',
   ];
 
-  const divs = ['栽培', '出荷'];
+  const divs = ['栽培', '出荷', '配送'];
 
   window._planCmpChartData = {};
   availSites.forEach(site => {
@@ -6830,7 +6830,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     '#fde047','#fdba74','#dc2626','#fef08a','#e11d48',
   ];
 
-  const divs = ['栽培', '出荷'];
+  const divs = ['栽培', '出荷', '配送'];
 
   window._planCmpChartData2 = {};
   availSites.forEach(site => {
@@ -8657,7 +8657,7 @@ function renderDecPlanContent(planData, mergeData) {
   // ⑥12月標準工数時間：生産計画エンジンから算出
   function stdHoursForMonth(site, mi) {
     if (mi < 0) return null;
-    const divRows = stdRows.filter(r => r.div === '栽培' || r.div === '出荷');
+    const divRows = stdRows.filter(r => r.div === '栽培' || r.div === '出荷' || r.div === '配送');
     if (!divRows.length) return null;
     let total = 0, hasVal = false;
     divRows.forEach(r => {
