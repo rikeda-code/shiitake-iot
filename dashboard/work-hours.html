@@ -8586,22 +8586,24 @@ function renderDecPlanContent(planData, mergeData) {
   const junIdx = planMonths.indexOf(JUN);
   const decIdx = planMonths.indexOf(DEC);
 
-  // ①6月実績：栽培・出荷のみ
+  // ①6月実績：栽培・出荷・配送
   function junActualH(site) {
     const ami = activeMonths.findIndex(m => normalizeMonth(m) === JUN);
     if (ami < 0) return null;
+    const wc = workTypeClass;
     const total = employees
-      .filter(e => e.base === site && (workTypeClass(e.workType) === 'wt-栽培' || workTypeClass(e.workType) === 'wt-出荷'))
+      .filter(e => e.base === site && (wc(e.workType) === 'wt-栽培' || wc(e.workType) === 'wt-出荷' || wc(e.workType) === 'wt-配送'))
       .reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
     return total > 0 ? Math.round(total * 10) / 10 : null;
   }
 
-  // ①6月人数：栽培・出荷のみ
+  // ①6月人数：栽培・出荷・配送
   function junActualN(site) {
     const ami = activeMonths.findIndex(m => normalizeMonth(m) === JUN);
     if (ami < 0) return null;
+    const wc = workTypeClass;
     return employees.filter(e => e.base === site &&
-      (workTypeClass(e.workType) === 'wt-栽培' || workTypeClass(e.workType) === 'wt-出荷') &&
+      (wc(e.workType) === 'wt-栽培' || wc(e.workType) === 'wt-出荷' || wc(e.workType) === 'wt-配送') &&
       (e.hours[ami] ?? 0) > 0).length || null;
   }
 
@@ -8689,7 +8691,7 @@ function renderDecPlanContent(planData, mergeData) {
 
   // 列ヘッダー：①〜⑦
   const COLS_H = [
-    '①<br>6月勤務実績<br>(栽培・出荷) h',
+    '①<br>6月勤務実績<br>(栽培・出荷・配送) h',
     '②<br>標準時間<br>(6月) h',
     '③<br>新加入見込み<br>(×173.8h)',
     '④<br>残業見込み<br>h',
