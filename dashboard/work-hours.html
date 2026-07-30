@@ -166,7 +166,8 @@
     main {
       flex: 1;
       min-height: 0;
-      overflow-y: scroll;
+      overflow-y: auto;
+      scrollbar-gutter: stable;
       padding: 0 32px 32px;
       display: flex;
       flex-direction: column;
@@ -535,7 +536,6 @@
     .prod-panel {
       flex: 1;
       min-height: 0;
-      overflow-y: auto;
       background: var(--surface2);
       border: 1px solid var(--border);
       border-top: 2px solid var(--border);
@@ -545,7 +545,15 @@
       flex-direction: column;
       gap: 16px;
     }
-    .prod-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+    /* flex:1;min-height:0を持たせない（自身の高さを内容に応じて自然に伸ばし、縦方向は
+       上位のmain要素にスクロールを委ねるため）。flex-shrink:0も必須：デフォルトの
+       flex-shrink:1のままだと、フレックスコンテナ(.prod-panel)の高さに収まるよう
+       自動的に縮められてしまい、結局縦方向がオーバーフローしてしまう。
+       overflow-x/yは既定でともにvisible（スクロールコンテナ化しない）。テーブル列が
+       実際に画面幅を超える場合のみ、JS（refreshProdTableWrapOverflow）がhas-hscroll
+       クラスを付与しoverflow-x:autoへ切り替える（詳細はJS側のコメント参照） */
+    .prod-table-wrap { flex-shrink: 0; overflow-x: visible; overflow-y: visible; }
+    .prod-table-wrap.has-hscroll { overflow-x: auto; }
 
     /* ── 比較タブ（サブタブ付き。ヘッダー行を固定し、下部のみスクロール） ── */
     .compare-shell {
@@ -742,6 +750,33 @@ const PAST_YEAR_COUNT_GID = '1654355403'; // 人数_過去実績
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
 // 読み取り用の定数・関数は該当Stageで追加する
+
+// .prod-table-wrapは通常overflow: visible（スクロールコンテナ化しないため、内側の
+// position:sticky（テーブルヘッダー）が上位のmain要素を基準に正しく機能する）。
+// CSSの仕様上、overflow-xとoverflow-yの一方だけを'visible'以外にすることはできず
+// （'visible'側が自動的に'auto'等へ格上げされる）、常時overflow-x:autoにすると
+// .prod-table-wrap自身がposition:stickyの基準スクロールコンテナになってしまい、
+// ヘッダーがmainではなくこの要素基準になって画面上部に固定されなくなる。そのため
+// テーブル列が実際に画面幅を超えて横オーバーフローする場合のみ、JSでhas-hscroll
+// クラスを付与しoverflow-x:autoへ切り替えて横スクロールを提供する（この場合のみ
+// sticky基準がこの要素に変わりヘッダー固定が機能しなくなるが、画面に収まる通常
+// ケースでは常にmain基準のsticky固定が正しく機能する）
+function refreshProdTableWrapOverflow() {
+  document.querySelectorAll('.prod-table-wrap').forEach(el => {
+    const needsHScroll = el.scrollWidth > el.clientWidth + 1;
+    el.classList.toggle('has-hscroll', needsHScroll);
+  });
+}
+let prodTableWrapRAF = null;
+function scheduleProdTableWrapRefresh() {
+  if (prodTableWrapRAF) return;
+  prodTableWrapRAF = requestAnimationFrame(() => {
+    prodTableWrapRAF = null;
+    refreshProdTableWrapOverflow();
+  });
+}
+new MutationObserver(scheduleProdTableWrapRefresh).observe(document.getElementById('main'), { childList: true, subtree: true });
+window.addEventListener('resize', scheduleProdTableWrapRefresh);
 
 const SITES = ['いなべ', '群馬', '南丹'];
 const SITE_COLORS = {
@@ -4338,7 +4373,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
     const siteColor = SITE_COLORS[site] || '#fff';
     html += `<div style="margin-bottom:28px">
       <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
-      <div style="overflow-x:auto"><table class="prod-table">
+      <div class="prod-table-wrap"><table class="prod-table">
         <thead><tr>
           <th class="th-left" style="min-width:60px">業務区分</th>
           <th class="th-left" style="min-width:130px">作業区分</th>
