@@ -8740,7 +8740,7 @@ function renderDecPlanContent(planData, mergeData) {
       <td style="text-align:center">${isH ? fmtDiff(totDiff) : fmtDiffN(Math.round(totDiff))}</td>
     </tr>`;
 
-    const chartId = isH ? 'dec-plan-chart-h' : 'dec-plan-chart-n';
+    // テーブルのみ返す（グラフは別途renderする）
     return `
       <div style="margin-bottom:28px">
         <div class="chart-section-label" style="margin-bottom:8px">${title}</div>
@@ -8782,7 +8782,7 @@ function renderDecPlanContent(planData, mergeData) {
       },
     });
 
-    // 表1グラフ（時間）
+    // 勤務時間グラフ
     const ctx1 = document.getElementById('dec-plan-chart-h');
     if (ctx1) {
       if (ctx1._chartInst) ctx1._chartInst.destroy();
@@ -8801,7 +8801,7 @@ function renderDecPlanContent(planData, mergeData) {
       });
     }
 
-    // 表2グラフ（人数）
+    // 人数グラフ
     const ctx2 = document.getElementById('dec-plan-chart-n');
     if (ctx2) {
       if (ctx2._chartInst) ctx2._chartInst.destroy();
@@ -8830,6 +8830,16 @@ function renderDecPlanContent(planData, mergeData) {
   main.innerHTML = `<div class="prod-panel" style="padding:20px">
     <div class="chart-section-label" style="font-size:1rem;margin-bottom:4px">📅 26/12向け計画</div>
     ${note}
+    <div style="display:flex;gap:24px;margin-bottom:28px;flex-wrap:wrap">
+      <div style="flex:1;min-width:300px">
+        <div class="chart-section-label" style="font-size:0.88rem;margin-bottom:6px">勤務時間</div>
+        <canvas id="dec-plan-chart-h" height="240"></canvas>
+      </div>
+      <div style="flex:1;min-width:300px">
+        <div class="chart-section-label" style="font-size:0.88rem;margin-bottom:6px">人数</div>
+        <canvas id="dec-plan-chart-n" height="240"></canvas>
+      </div>
+    </div>
     <div id="dec-plan-tables">
       ${buildTable('h')}
       ${buildTable('n')}
