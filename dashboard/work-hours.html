@@ -8630,7 +8630,7 @@ function renderDecPlanContent(planData, mergeData) {
     ).length || null;
   }
 
-  // ⑥12月標準時間：生産計画エンジンから算出
+  // ⑥12月標準工数時間：生産計画エンジンから算出
   function stdHoursForMonth(site, mi) {
     if (mi < 0) return null;
     const divRows = stdRows.filter(r => r.div === '栽培' || r.div === '出荷');
@@ -8665,7 +8665,7 @@ function renderDecPlanContent(planData, mergeData) {
     '③<br>新加入見込み<br>(×178h)',
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
-    '⑥<br>12月標準時間<br>h',
+    '⑥<br>12月標準工数時間<br>h',
     '⑦<br>差分<br>⑤−⑥ h',
   ];
   const COLS_N = [
@@ -8787,7 +8787,7 @@ function renderDecPlanContent(planData, mergeData) {
             { label: '②標準時間(6月)', data: SITES.map(s => stdHoursFromMerge(s) || 0), backgroundColor: '#60a5fa', stack: 'current' },
             { label: '③新加入見込み', data: SITES.map(s => newHireH(s) || 0), backgroundColor: '#4ade80', stack: 'current' },
             { label: '④残業見込み',   data: SITES.map(s => overtimeH(s) || 0),  backgroundColor: '#facc15', stack: 'current' },
-            { label: '⑥12月標準時間', data: SITES.map(s => stdHoursForMonth(s, decIdx) || 0), backgroundColor: '#a78bfa', stack: 'dec' },
+            { label: '⑥12月標準工数時間', data: SITES.map(s => stdHoursForMonth(s, decIdx) || 0), backgroundColor: '#a78bfa', stack: 'dec' },
           ],
         },
         options: baseOpts('時間 (h)'),
@@ -8817,7 +8817,7 @@ function renderDecPlanContent(planData, mergeData) {
     ※ ①6月実績は栽培・出荷のみ集計。　※ ②標準時間は3拠点マージシートR列（栽培・出荷div）の合計。<br>
     ※ ③新加入見込み：7月〜8月に技能実習生追加（いなべ3人・群馬2人・南丹1人）、1人178h。<br>
     ※ ④残業見込み：3拠点マージシートX列−R列の合計（栽培・出荷div）。内訳：社員・技能実習生 +30h、パート社保加入者は本人希望調査。<br>
-    ※ ⑤=②+③+④。　※ ⑥12月標準時間は生産計画×標準工数設定から算出。
+    ※ ⑤=②+③+④。　※ ⑥12月標準工数時間は生産計画×標準工数設定から算出。
   </div>`;
 
   main.innerHTML = `<div class="prod-panel" style="padding:20px">
