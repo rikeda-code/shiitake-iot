@@ -8629,9 +8629,9 @@ function renderDecPlanContent(planData, mergeData) {
     '①<br>6月人数<br>(栽培・出荷) 名',
     '②<br>標準人数<br>(6月)',
     '③<br>新加入見込み<br>名',
-    '④<br>残業見込み<br>(社員・実習生) 名',
-    '⑤<br>②+③+④<br>名',
-    '⑥<br>12月標準人数',
+    '④<br>残業見込み<br>名',
+    '⑤<br>①+③<br>名',
+    '⑥<br>12月標準人数<br>(÷178h)',
     '⑦<br>差分<br>⑤−⑥ 名',
   ];
 
@@ -8639,54 +8639,61 @@ function renderDecPlanContent(planData, mergeData) {
     const isH = type === 'h';
     const cols = isH ? COLS_H : COLS_N;
     const title = isH ? '表1　勤務時間' : '表2　人数';
-    const newKey = isH ? 'newHours' : 'newCount';
 
     let rows = '';
 
     SITES_ORD.forEach(site => {
       const jun   = isH ? junActualH(site) : junActualN(site);
-      const std6  = isH ? stdHoursFromMerge(site) : (mergeData ? mergeData.rows.filter(r => r.site === site).length || null : null);
+      const std6  = isH ? stdHoursFromMerge(site) : null; // 人数表②は空欄
       const dec   = stdHoursForMonth(site, decIdx);
       const newV  = isH ? newHireH(site) : newHireN(site);
-      const ovV   = isH ? overtimeH(site) : overtimeN(site);
-      const sum5  = std6 !== null
-        ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10
-        : null;
-      const diff7 = (sum5 !== null && dec !== null)
-        ? Math.round((sum5 - dec) * 10) / 10
+      const ovV   = isH ? overtimeH(site) : null; // 人数表④は空欄
+      // 時間表⑤=②+③+④、人数表⑤=①+③
+      const sum5  = isH
+        ? (std6 !== null ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10 : null)
+        : (jun !== null ? Math.round(((jun || 0) + (newV || 0)) * 10) / 10 : null);
+      // ⑥人数表：標準工数時間÷178h
+      const dec6N = (dec !== null) ? Math.round(dec / 178) : null;
+      const decVal = isH ? dec : dec6N;
+      const diff7 = (sum5 !== null && decVal !== null)
+        ? Math.round((sum5 - decVal) * 10) / 10
         : null;
 
       rows += `<tr>
         <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
         <td style="text-align:right">${isH ? fmtH(jun) : fmtN(jun)}</td>
-        <td style="text-align:right">${isH ? fmtH(std6) : (std6 !== null ? std6 + ' 名' : '—')}</td>
+        <td style="text-align:right">${isH ? fmtH(std6) : '—'}</td>
         <td style="text-align:right">${isH
           ? (newV !== null ? newHireN(site) + '名 × 178 = ' + fmtH(newV) : '—')
           : (newV !== null ? newV + ' 名' : '—')}</td>
-        <td style="text-align:right;color:#facc15;font-weight:600">${isH ? fmtH(ovV) : (ovV !== null ? ovV + ' 名' : '—')}</td>
+        <td style="text-align:right;color:#facc15;font-weight:600">${isH ? fmtH(ovV) : '—'}</td>
         <td style="text-align:right;font-weight:600">${isH ? fmtH(sum5) : (sum5 !== null ? Math.round(sum5) + ' 名' : '—')}</td>
-        <td style="text-align:right">${isH ? fmtH(dec) : (dec !== null ? Math.round(dec) + ' 名' : '—')}</td>
+        <td style="text-align:right">${isH ? fmtH(dec) : (dec6N !== null ? dec6N + ' 名' : '—')}</td>
         <td style="text-align:center">${isH ? fmtDiff(diff7) : fmtDiffN(diff7 !== null ? Math.round(diff7) : null)}</td>
       </tr>`;
     });
 
     // 合計行
     const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : junActualN(site)) || 0), 0);
-    const totStd6 = SITES_ORD.reduce((s, site) => s + ((isH ? stdHoursFromMerge(site) : (mergeData ? mergeData.rows.filter(r => r.site === site).length : 0)) || 0), 0);
+    const totStd6 = isH ? SITES_ORD.reduce((s, site) => s + (stdHoursFromMerge(site) || 0), 0) : 0;
     const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireH(site) : newHireN(site)) || 0), 0);
-    const totOv   = SITES_ORD.reduce((s, site) => s + ((isH ? overtimeH(site) : overtimeN(site)) || 0), 0);
-    const totSum5 = Math.round((totStd6 + totNew + totOv) * 10) / 10;
+    const totOv   = isH ? SITES_ORD.reduce((s, site) => s + (overtimeH(site) || 0), 0) : 0;
+    const totSum5 = isH
+      ? Math.round((totStd6 + totNew + totOv) * 10) / 10
+      : Math.round((totJun + totNew) * 10) / 10;
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
-    const totDiff = Math.round((totSum5 - totDec) * 10) / 10;
+    const totDec6N = Math.round(totDec / 178);
+    const totDecVal = isH ? totDec : totDec6N;
+    const totDiff = Math.round((totSum5 - totDecVal) * 10) / 10;
 
     rows += `<tr style="background:var(--surface2);font-weight:600;border-top:2px solid #3a3f5c">
       <td>合計</td>
       <td style="text-align:right">${isH ? fmtH(totJun) : fmtN(totJun)}</td>
-      <td style="text-align:right">${isH ? fmtH(totStd6) : Math.round(totStd6) + ' 名'}</td>
+      <td style="text-align:right">${isH ? fmtH(totStd6) : '—'}</td>
       <td style="text-align:right">${isH ? fmtH(totNew) : totNew + ' 名'}</td>
-      <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : Math.round(totOv) + ' 名'}</td>
+      <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : '—'}</td>
       <td style="text-align:right">${isH ? fmtH(totSum5) : Math.round(totSum5) + ' 名'}</td>
-      <td style="text-align:right">${isH ? fmtH(Math.round(totDec * 10) / 10) : Math.round(totDec) + ' 名'}</td>
+      <td style="text-align:right">${isH ? fmtH(Math.round(totDec * 10) / 10) : totDec6N + ' 名'}</td>
       <td style="text-align:center">${isH ? fmtDiff(totDiff) : fmtDiffN(Math.round(totDiff))}</td>
     </tr>`;
 
