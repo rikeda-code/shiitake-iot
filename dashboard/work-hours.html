@@ -4121,8 +4121,13 @@ function parseThreeSiteMergeSheet(json) {
     if (!name) return;
     const activeFlag = cellNumber(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
     if (activeFlag !== 1 && activeFlag !== 2) return; // B列が1・2以外は集計対象外
-    const stdHours = cellNumber(row, stdColIdx);
-    if (stdHours === null) return;
+    const stdHoursRaw = cellNumber(row, stdColIdx);
+    const stdHours = stdHoursRaw ?? 0; // R列が空の行も0として成立させる
+    // stdHoursOriginallyEmpty：R列が元々空だったかどうかのフラグ。比較（繁忙期見込み）
+    // タブのB=2新規要員機能（threeSiteMergeAgg）と、26/12計画タブのstdHoursFromMerge/
+    // overtimeH/overtimeNの両方から参照されている。変更する際は両方への影響を確認すること
+    const stdHoursOriginallyEmpty = stdHoursRaw === null;
+    if (stdHoursOriginallyEmpty) emptyStdHoursRows.push({ site, div, name, activeFlag });
     const xHours = cellNumber(row, X_COL);
     const prj = cellText(row, THREE_SITE_MERGE_PRJ_COL);
     const maxByYm = {};
@@ -4130,7 +4135,7 @@ function parseThreeSiteMergeSheet(json) {
       const v = cellNumber(row, idx);
       if (v !== null) maxByYm[ym] = v;
     });
-    parsedRows.push({ site, div, name, stdHours, xHours, maxByYm, activeFlag: activeFlag, prj });
+    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, xHours, maxByYm, activeFlag, prj });
   });
 
   if (emptyStdHoursRows.length) {
