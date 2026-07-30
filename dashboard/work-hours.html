@@ -4119,11 +4119,10 @@ function parseThreeSiteMergeSheet(json) {
     if (div !== '栽培' && div !== '出荷') return; // 配送・栽培／配送・出荷は対象外
     const name = cellText(row, THREE_SITE_MERGE_NAME_COL);
     if (!name) return;
-    const activeFlag = cellRaw(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
-    const stdHoursRaw = cellNumber(row, stdColIdx);
-    const stdHours = stdHoursRaw ?? 0; // R列が空の行も0として成立させる
-    const stdHoursOriginallyEmpty = stdHoursRaw === null;
-    if (stdHoursOriginallyEmpty) emptyStdHoursRows.push({ site, div, name, activeFlag });
+    const activeFlag = cellNumber(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
+    if (activeFlag !== 1 && activeFlag !== 2) return; // B列が1・2以外は集計対象外
+    const stdHours = cellNumber(row, stdColIdx);
+    if (stdHours === null) return;
     const xHours = cellNumber(row, X_COL);
     const prj = cellText(row, THREE_SITE_MERGE_PRJ_COL);
     const maxByYm = {};
@@ -4131,7 +4130,7 @@ function parseThreeSiteMergeSheet(json) {
       const v = cellNumber(row, idx);
       if (v !== null) maxByYm[ym] = v;
     });
-    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, xHours, maxByYm, activeFlag, prj });
+    parsedRows.push({ site, div, name, stdHours, xHours, maxByYm, activeFlag: activeFlag, prj });
   });
 
   if (emptyStdHoursRows.length) {
