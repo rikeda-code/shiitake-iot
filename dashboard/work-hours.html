@@ -7139,7 +7139,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       ...EMP_SERIES.map(et => ({
         type: 'bar', label: `${et.label}（予想）`, data: sl(forecastDataMap[et.label]),
         backgroundColor: et.color + '44', borderColor: et.color, borderWidth: 1,
-        stack: 'forecast', yAxisID: 'y', order: 1,
+        // 実績・予想は月ごとに排他（ACTUAL_CUTOFFで分かれる）ため、同じstack名に
+        // まとめても積み上げ結果は変わらない。stack名を分けたままだと、Chart.jsが
+        // 「実績」「予想」を別スロットとして幅を確保してしまい、月ごとに必ずどちらか
+        // が空スロットになって予定標準工数バーとの間に隙間ができるため統一する
+        stack: 'actual', yAxisID: 'y', order: 1,
       })),
       ...extraDatasets,
     ];
@@ -7171,7 +7175,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           },
         },
         scales: {
-          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          // barPercentage: 1.0で各棒（予定標準工数〔工程別〕／実績・予想）が自分の
+          // 枠内をフルに使うようにし、隣接する2本の棒の間の隙間を詰める
+          x: { stacked: true, barPercentage: 1.0, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
           y: { stacked: true, position: 'left', ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` }, grid: { color: '#1e2235' }, suggestedMin: 0, max: yMax, title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } } },
           ...extraScales,
         },
