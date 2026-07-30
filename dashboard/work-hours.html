@@ -8539,7 +8539,7 @@ let staffplanGranularity = 'monthly'; // 'monthly' | 'daily'（Stage 7で実装�
 // 26/12向け計画タブの編集可能値（セッション中メモリに保持）
 // ③新加入見込み：7月〜8月に技能実習生追加（固定計画）
 const DEC_PLAN_NEW_HIRE = { 'いなべ': 3, '群馬': 2, '南丹': 1 };
-const DEC_PLAN_NEW_HIRE_H = 178; // 1人あたり標準時間
+const DEC_PLAN_NEW_HIRE_H = 173.8; // 1人あたり標準時間
 
 let decPlanInputs = {};
 
@@ -8602,7 +8602,7 @@ function renderDecPlanContent(planData, mergeData) {
     return Math.round(siteRows.reduce((s, r) => s + (r.stdHours || 0), 0) * 10) / 10;
   }
 
-  // ③新加入見込み工数：1人178h × 固定人数計画
+  // ③新加入見込み工数：1人173.8h × 固定人数計画
   function newHireH(site) {
     const n = DEC_PLAN_NEW_HIRE[site] || 0;
     return n > 0 ? n * DEC_PLAN_NEW_HIRE_H : null;
@@ -8667,7 +8667,7 @@ function renderDecPlanContent(planData, mergeData) {
   const COLS_H = [
     '①<br>6月勤務実績<br>(栽培・出荷) h',
     '②<br>標準時間<br>(6月) h',
-    '③<br>新加入見込み<br>(×178h)',
+    '③<br>新加入見込み<br>(×173.8h)',
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
     '⑥<br>12月標準工数時間<br>h',
@@ -8701,7 +8701,7 @@ function renderDecPlanContent(planData, mergeData) {
         ? (std6 !== null ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10 : null)
         : (jun !== null ? Math.round(((jun || 0) + (newV || 0)) * 10) / 10 : null);
       // ⑥人数表：標準工数時間÷178h
-      const dec6N = (dec !== null) ? Math.round(dec / 178) : null;
+      const dec6N = (dec !== null) ? Math.round(dec / 173.8) : null;
       const decVal = isH ? dec : dec6N;
       const diff7 = (sum5 !== null && decVal !== null)
         ? Math.round((sum5 - decVal) * 10) / 10
@@ -8730,7 +8730,7 @@ function renderDecPlanContent(planData, mergeData) {
       ? Math.round((totStd6 + totNew + totOv) * 10) / 10
       : Math.round((totJun + totNew) * 10) / 10;
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
-    const totDec6N = Math.round(totDec / 178);
+    const totDec6N = Math.round(totDec / 173.8);
     const totDecVal = isH ? totDec : totDec6N;
     const totDiff = Math.round((totSum5 - totDecVal) * 10) / 10;
 
@@ -8810,7 +8810,7 @@ function renderDecPlanContent(planData, mergeData) {
           datasets: [
             { label: '①人数(B=1/2)',   data: SITES.map(s => mergeN(s) || 0),      backgroundColor: '#60a5fa', stack: 'current' },
             { label: '③新加入見込み', data: SITES.map(s => newHireN(s) || 0),    backgroundColor: '#4ade80', stack: 'current' },
-            { label: '⑥12月標準人数', data: SITES.map(s => { const d = stdHoursForMonth(s, decIdx); return d !== null ? Math.round(d / 178) : 0; }), backgroundColor: '#a78bfa', stack: 'dec' },
+            { label: '⑥12月標準人数', data: SITES.map(s => { const d = stdHoursForMonth(s, decIdx); return d !== null ? Math.round(d / 173.8) : 0; }), backgroundColor: '#a78bfa', stack: 'dec' },
           ],
         },
         options: baseOpts('人数 (名)'),
@@ -8820,7 +8820,7 @@ function renderDecPlanContent(planData, mergeData) {
 
   const note = `<div style="font-size:0.8rem;color:var(--muted);margin-bottom:16px">
     ※ ①6月実績は栽培・出荷のみ集計。　※ ②標準時間は3拠点マージシートR列（栽培・出荷div）の合計。<br>
-    ※ ③新加入見込み：7月〜8月に技能実習生追加（いなべ3人・群馬2人・南丹1人）、1人178h。<br>
+    ※ ③新加入見込み：7月〜8月に技能実習生追加（いなべ3人・群馬2人・南丹1人）、1人173.8h。<br>
     ※ ④残業見込み：3拠点マージシートX列−R列の合計（栽培・出荷div）。内訳：社員・技能実習生 +30h、パート社保加入者は本人希望調査。<br>
     ※ ⑤=②+③+④。　※ ⑥12月標準工数時間は生産計画×標準工数設定から算出。
   </div>`;
