@@ -8587,6 +8587,12 @@ function renderDecPlanContent(planData, mergeData) {
       (e.hours[ami] ?? 0) > 0).length || null;
   }
 
+  // 人数表①：3拠点マージシートB=1/2フィルタ済みの件数（B列ロジックを人数にも適用）
+  function mergeN(site) {
+    if (!mergeData) return null;
+    return mergeData.rows.filter(r => r.site === site).length || null;
+  }
+
   // ②標準工数合計：3拠点マージR列(栽培・出荷divのみ) per site
   // R列が空の行は、以前と同様この集計から除外する（②③④確認事項と同じ理由）
   function stdHoursFromMerge(site) {
@@ -8668,7 +8674,7 @@ function renderDecPlanContent(planData, mergeData) {
     '⑦<br>差分<br>⑤−⑥ h',
   ];
   const COLS_N = [
-    '①<br>6月人数<br>(栽培・出荷) 名',
+    '①<br>標準人数<br>(B=1/2) 名',
     '②<br>標準人数<br>(6月)',
     '③<br>新加入見込み<br>名',
     '④<br>残業見込み<br>名',
@@ -8685,7 +8691,7 @@ function renderDecPlanContent(planData, mergeData) {
     let rows = '';
 
     SITES_ORD.forEach(site => {
-      const jun   = isH ? junActualH(site) : junActualN(site);
+      const jun   = isH ? junActualH(site) : mergeN(site);
       const std6  = isH ? stdHoursFromMerge(site) : null; // 人数表②は空欄
       const dec   = stdHoursForMonth(site, decIdx);
       const newV  = isH ? newHireH(site) : newHireN(site);
@@ -8716,7 +8722,7 @@ function renderDecPlanContent(planData, mergeData) {
     });
 
     // 合計行
-    const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : junActualN(site)) || 0), 0);
+    const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : mergeN(site)) || 0), 0);
     const totStd6 = isH ? SITES_ORD.reduce((s, site) => s + (stdHoursFromMerge(site) || 0), 0) : 0;
     const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireH(site) : newHireN(site)) || 0), 0);
     const totOv   = isH ? SITES_ORD.reduce((s, site) => s + (overtimeH(site) || 0), 0) : 0;
@@ -8802,7 +8808,7 @@ function renderDecPlanContent(planData, mergeData) {
         data: {
           labels: SITES,
           datasets: [
-            { label: '①6月人数',      data: SITES.map(s => junActualN(s) || 0),  backgroundColor: '#60a5fa', stack: 'current' },
+            { label: '①人数(B=1/2)',   data: SITES.map(s => mergeN(s) || 0),      backgroundColor: '#60a5fa', stack: 'current' },
             { label: '③新加入見込み', data: SITES.map(s => newHireN(s) || 0),    backgroundColor: '#4ade80', stack: 'current' },
             { label: '⑥12月標準人数', data: SITES.map(s => { const d = stdHoursForMonth(s, decIdx); return d !== null ? Math.round(d / 178) : 0; }), backgroundColor: '#a78bfa', stack: 'dec' },
           ],
