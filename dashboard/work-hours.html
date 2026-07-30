@@ -6980,10 +6980,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
   ];
 
-  // 計画月ごとの実績工数を雇用区分でフィルタして返す
+  // 計画月ごとの実績工数を雇用区分でフィルタして返す。1段目（予定標準工数・工程別）が
+  // divs=['栽培','出荷']のタスク行のみを対象とするのに合わせ、workTypeも栽培・出荷限定
+  // （配送・栽培／配送・出荷は対象外）とする
   function workHoursByEmpForPlanMonths(site, empMatcher) {
     const { employees, months: activeMonths } = getActiveData();
-    const emps = employees.filter(e => e.base === site && e.workType && empMatcher(e));
+    const emps = employees.filter(e => e.base === site && divs.includes(e.workType) && empMatcher(e));
     return planMonths.map(planMonth => {
       const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
       if (ami < 0) return null;
@@ -6992,10 +6994,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
   }
 
-  // 計画月ごとの人数を雇用区分でフィルタして返す（工数>0の人を1人と数える）
+  // 計画月ごとの人数を雇用区分でフィルタして返す（工数>0の人を1人と数える）。
+  // workHoursByEmpForPlanMonths()と同様、栽培・出荷限定とする
   function headcountByEmpForPlanMonths(site, empMatcher) {
     const { employees, months: activeMonths } = getActiveData();
-    const emps = employees.filter(e => e.base === site && e.workType && empMatcher(e));
+    const emps = employees.filter(e => e.base === site && divs.includes(e.workType) && empMatcher(e));
     return planMonths.map(planMonth => {
       const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
       if (ami < 0) return null;
@@ -7102,20 +7105,32 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     ];
   }
 
+  // opts.taskBreakdown（[{label, data, color}, ...]、1段目のallDivRows/stdByTaskを
+  // そのまま流用）を渡すと「予定標準工数合計」を単一バーではなく、1段目と同じ
+  // 工程別内訳（TASK_COLORS）の積み上げバーとして描画する。個々のタスク明細は
+  // ツールチップには出さず、footer側の「予定標準合計」1行に集約する（tooltipの
+  // labelコールバックで_stdGroupを弾く）。taskBreakdown未指定時は従来通り単一バー。
   function renderTotalChart(canvasId, stdTotalRaw, actualDataMap, forecastDataMap, opts) {
     const ctx = document.getElementById(canvasId)?.getContext('2d');
     if (!ctx) return;
     const extraDatasets = (opts && opts.extraDatasets) || [];
     const extraScales   = (opts && opts.extraScales)   || {};
-    const stdTotalData = sl(stdTotalRaw);
+    const taskBreakdown = (opts && opts.taskBreakdown) || null;
     const allVals = totalChartStackedValues(stdTotalRaw, actualDataMap, forecastDataMap);
     const yMax = (opts && opts.yMaxOverride !== undefined) ? opts.yMaxOverride : (computeSharedAxisMax([allVals], 100) || undefined);
+    const stdDatasets = taskBreakdown
+      ? taskBreakdown.map(t => ({
+          type: 'bar', label: t.label, data: t.data,
+          backgroundColor: t.color + 'cc', borderColor: t.color, borderWidth: 0,
+          stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
+        }))
+      : [{
+          type: 'bar', label: '予定標準工数合計', data: sl(stdTotalRaw),
+          backgroundColor: '#38bdf866', borderColor: '#38bdf8', borderWidth: 1,
+          stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
+        }];
     const datasets = [
-      {
-        type: 'bar', label: '予定標準工数合計', data: stdTotalData,
-        backgroundColor: '#38bdf866', borderColor: '#38bdf8', borderWidth: 1,
-        stack: 'std', yAxisID: 'y', order: 2, _stdGroup: true,
-      },
+      ...stdDatasets,
       ...EMP_SERIES.map(et => ({
         type: 'bar', label: `${et.label}（実績）`, data: sl(actualDataMap[et.label]),
         backgroundColor: et.color + '99', borderColor: et.color, borderWidth: 0,
@@ -7139,6 +7154,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             callbacks: {
               label: ctx => {
                 if (ctx.parsed.y == null) return null;
+                // 工程別内訳バーの明細行はツールチップに出さない（footerの「予定標準合計」に集約）
+                if (ctx.dataset._stdGroup) return null;
                 if (ctx.dataset._countLine) return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ja-JP')} 人`;
                 return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString('ja-JP')} h`;
               },
@@ -7543,7 +7560,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     </div>`;
     html += `<div class="schart-section">
       <div class="schart-header">栽培＋出荷 合算（3拠点合計） <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（雇用形態別）</span></div>
-      ${chartWrapHtml('plansum2-emp', vm.length, { heightPx: 280, inlineHeight: true, forceResponsive: true })}
+      ${chartWrapHtml('plansum2-emp', vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
 
@@ -7654,11 +7671,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     }
 
     // 2段目：3拠点分のcomputeSiteTotalData()をmergeSiteTotalDataAcrossSitesで合算し、
-    // renderTotalChart()にそのまま渡す（renderTotalChart()自体は無変更）
+    // renderTotalChart()に渡す。「予定標準工数合計」バーは1段目で計算済みのallDivRows/
+    // stdByTaskをそのまま再利用し、工程別内訳（TASK_COLORS）の積み上げバーとして表示する
+    // （二重計算を避けるため、ここでのcalcRow()再計算は行わない）
     {
       const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
       const merged = mergeSiteTotalDataAcrossSites(allSitesTotalData);
       const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = merged;
+      const taskBreakdown = allDivRows.map((r, ri) => ({
+        label: r.task, data: stdByTask[ri], color: TASK_COLORS[ri % TASK_COLORS.length],
+      }));
       const totalYMax = computeSharedAxisMax(
         [totalChartStackedValues(stdTotalRaw, actualData, forecastData)],
         100
@@ -7695,7 +7717,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         },
       };
       renderTotalChart('plansum2-emp', stdTotalRaw, actualData, forecastData,
-        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax });
+        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax, taskBreakdown });
     }
   }
 
@@ -7718,7 +7740,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     </div>`;
     html += `<div class="schart-section">
       <div class="schart-header">栽培＋出荷 合算${totalSuffix} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（雇用形態別）</span></div>
-      ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 280, inlineHeight: true, forceResponsive: true })}
+      ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
 
@@ -7832,12 +7854,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
-    // 呼び出し先のcanvas IDと見出し文言のみ変更している
+    // 呼び出し先のcanvas IDと見出し文言のみ変更している。「予定標準工数合計」バーは
+    // 1段目で計算済みのallDivRows/stdByTaskをそのまま再利用し、工程別内訳
+    // （TASK_COLORS）の積み上げバーとして表示する（二重計算を避けるため、ここでの
+    // calcRow()再計算は行わない）
     {
       const site = planCmpSiteTab;
       const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
       const siteTotalIdx = availSites.indexOf(site);
       const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
+      const taskBreakdown = allDivRows.map((r, ri) => ({
+        label: r.task, data: stdByTask[ri], color: TASK_COLORS[ri % TASK_COLORS.length],
+      }));
       const totalYMax = computeSharedAxisMax(
         allSitesTotalData.map(d => totalChartStackedValues(d.stdTotalRaw, d.actualData, d.forecastData)),
         100
@@ -7874,7 +7902,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         },
       };
       renderTotalChart(`plansitesum2-${site}-emp`, stdTotalRaw, actualData, forecastData,
-        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax });
+        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax, taskBreakdown });
     }
   }
   let planCmpSubtab = 'site';
