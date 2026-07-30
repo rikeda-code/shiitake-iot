@@ -8498,9 +8498,12 @@ let staffplanGranularity = 'monthly'; // 'monthly' | 'daily'（Stage 7で実装�
    「新加入見込み」「残業込み時間」はユーザーが編集可能なセルとして実装。 */
 
 // 26/12向け計画タブの編集可能値（セッション中メモリに保持）
+// ③新加入見込み：7月〜8月に技能実習生追加（固定計画）
+const DEC_PLAN_NEW_HIRE = { 'いなべ': 3, '群馬': 2, '南丹': 1 };
+const DEC_PLAN_NEW_HIRE_H = 178; // 1人あたり標準時間
+
 let decPlanInputs = {
-  newHours: { 'いなべ': null, '群馬': null, '南丹': null }, // ③新加入見込み工数(h)
-  newCount:  { 'いなべ': null, '群馬': null, '南丹': null }, // ③新加入見込み人数
+  partOvertimeH: { 'いなべ': null, '群馬': null, '南丹': null }, // ④パート社保加入者の残業見込み(h) 本人希望調査
 };
 
 function renderDecPlanTab() {
@@ -8552,46 +8555,48 @@ function renderDecPlanContent(planData, mergeData) {
     if (!mergeData) return null;
     const siteRows = mergeData.rows.filter(r => r.site === site);
     if (!siteRows.length) return null;
-    const total = siteRows.reduce((s, r) => s + (r.stdHours || 0), 0);
-    return Math.round(total * 10) / 10;
+    return Math.round(siteRows.reduce((s, r) => s + (r.stdHours || 0), 0) * 10) / 10;
   }
 
-  // ③新加入見込み工数：3拠点マージR列の148〜153行目 per site
-  function newHireHoursFromMerge(site) {
-    if (!mergeData || !mergeData.newHireRows || !mergeData.newHireRows.length) return null;
-    const siteRows = mergeData.newHireRows.filter(r => r.site === site);
-    if (!siteRows.length) return null;
-    const total = siteRows.reduce((s, r) => s + (r.rVal || 0), 0);
-    return Math.round(total * 10) / 10;
+  // ③新加入見込み工数：1人178h × 固定人数計画
+  function newHireH(site) {
+    const n = DEC_PLAN_NEW_HIRE[site] || 0;
+    return n > 0 ? n * DEC_PLAN_NEW_HIRE_H : null;
   }
 
-  // ③新加入見込み人数：3拠点マージ148〜153行目の件数 per site
-  function newHireCountFromMerge(site) {
-    if (!mergeData || !mergeData.newHireRows) return null;
-    return mergeData.newHireRows.filter(r => r.site === site).length || null;
+  // ③新加入見込み人数：固定計画
+  function newHireN(site) {
+    return DEC_PLAN_NEW_HIRE[site] || null;
   }
 
-  // ④残業見込み工数：3拠点マージ (X列 - R列) の合計 per site（栽培・出荷div）
-  function overtimeHoursFromMerge(site) {
-    if (!mergeData) return null;
-    const siteRows = mergeData.rows.filter(r => r.site === site);
-    if (!siteRows.length) return null;
-    let total = 0;
-    siteRows.forEach(r => {
-      if (r.xHours !== null && r.stdHours !== null) {
-        total += Math.max(0, r.xHours - r.stdHours);
-      }
-    });
-    return Math.round(total * 10) / 10;
+  // ④残業見込み：社員・技能実習生 × 30h + パート社保加入者の手入力（栽培・出荷のみ）
+  const ami6 = activeMonths.findIndex(m => normalizeMonth(m) === JUN);
+  function overtimeH(site) {
+    if (ami6 < 0) return decPlanInputs.partOvertimeH[site] || null;
+    // 社員・技能実習生の人数（6月に勤務実績あり・栽培or出荷）
+    const seishain = employees.filter(e =>
+      e.base === site &&
+      (workTypeClass(e.workType) === 'wt-栽培' || workTypeClass(e.workType) === 'wt-出荷') &&
+      (e.hours[ami6] ?? 0) > 0 &&
+      ((e.employment || '').includes('社員') || (e.employment || '').includes('技能実習'))
+    ).length;
+    const base = seishain * 30;
+    const part = decPlanInputs.partOvertimeH[site] || 0;
+    return base + part > 0 ? Math.round((base + part) * 10) / 10 : null;
   }
 
-  // ④残業見込み人数：X > R の人数 per site（栽培・出荷div）
-  function overtimeCountFromMerge(site) {
-    if (!mergeData) return null;
-    return mergeData.rows.filter(r => r.site === site && r.xHours !== null && r.stdHours !== null && r.xHours > r.stdHours).length || null;
+  // ④残業見込み人数：社員・技能実習生数（パートは手入力なので加算しない）
+  function overtimeN(site) {
+    if (ami6 < 0) return null;
+    return employees.filter(e =>
+      e.base === site &&
+      (workTypeClass(e.workType) === 'wt-栽培' || workTypeClass(e.workType) === 'wt-出荷') &&
+      (e.hours[ami6] ?? 0) > 0 &&
+      ((e.employment || '').includes('社員') || (e.employment || '').includes('技能実習'))
+    ).length || null;
   }
 
-  // ⑥12月標準時間：生産計画エンジンから算出（既存ロジック）
+  // ⑥12月標準時間：生産計画エンジンから算出
   function stdHoursForMonth(site, mi) {
     if (mi < 0) return null;
     const divRows = stdRows.filter(r => r.div === '栽培' || r.div === '出荷');
@@ -8619,22 +8624,22 @@ function renderDecPlanContent(planData, mergeData) {
     return `<span style="color:${color};font-weight:600">${sign}${v} 名</span>`;
   }
 
-  function inputCell(isH, key, site) {
-    const val = decPlanInputs[key][site];
-    const step = isH ? 0.5 : 1;
-    return `<input type="number" step="${step}" min="0"
-      style="width:90px;background:var(--surface2);border:1px solid #3a3f5c;border-radius:4px;
-             color:var(--text);padding:2px 6px;font-size:0.88rem;text-align:right"
+  function partOvertimeInput(site) {
+    const val = decPlanInputs.partOvertimeH[site];
+    return `<input type="number" step="0.5" min="0"
+      style="width:80px;background:var(--surface2);border:1px solid #3a3f5c;border-radius:4px;
+             color:var(--text);padding:2px 6px;font-size:0.82rem;text-align:right"
       value="${val === null ? '' : val}"
-      placeholder="—"
-      oninput="window._decPlanInput('${key}','${site}',this.value)">`;
+      placeholder="パート"
+      title="パート社保加入者の残業見込み(h)"
+      oninput="window._decPlanInput('partOvertimeH','${site}',this.value)">`;
   }
 
   // 列ヘッダー：①〜⑦
   const COLS_H = [
     '①<br>6月勤務実績<br>(栽培・出荷) h',
     '②<br>標準時間<br>(6月) h',
-    '③<br>新加入見込み<br>h',
+    '③<br>新加入見込み<br>(×178h)',
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
     '⑥<br>12月標準時間<br>h',
@@ -8644,7 +8649,7 @@ function renderDecPlanContent(planData, mergeData) {
     '①<br>6月人数<br>(栽培・出荷) 名',
     '②<br>標準人数<br>(6月)',
     '③<br>新加入見込み<br>名',
-    '④<br>残業見込み<br>名',
+    '④<br>残業見込み<br>(社員・実習生) 名',
     '⑤<br>②+③+④<br>名',
     '⑥<br>12月標準人数',
     '⑦<br>差分<br>⑤−⑥ 名',
@@ -8661,11 +8666,8 @@ function renderDecPlanContent(planData, mergeData) {
       const jun   = isH ? junActualH(site) : junActualN(site);
       const std6  = isH ? stdHoursFromMerge(site) : (mergeData ? mergeData.rows.filter(r => r.site === site).length || null : null);
       const dec   = stdHoursForMonth(site, decIdx);
-      // ③：3拠点マージ148〜153行目より自動取得（手入力不要）
-      const newV  = isH ? newHireHoursFromMerge(site) : newHireCountFromMerge(site);
-      // ④：X列 - R列の合計
-      const ovV   = isH ? overtimeHoursFromMerge(site) : overtimeCountFromMerge(site);
-      // ⑤ = ②+③+④
+      const newV  = isH ? newHireH(site) : newHireN(site);
+      const ovV   = isH ? overtimeH(site) : overtimeN(site);
       const sum5  = std6 !== null
         ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10
         : null;
@@ -8673,12 +8675,21 @@ function renderDecPlanContent(planData, mergeData) {
         ? Math.round((sum5 - dec) * 10) / 10
         : null;
 
+      // ④セル：時間表はパート手入力欄付き
+      const ovCell = isH
+        ? `<td style="text-align:right;color:#facc15;font-weight:600">
+             ${fmtH(ovV)}<br><span style="font-size:0.78rem;font-weight:400;color:var(--muted)">うちパート:</span>${partOvertimeInput(site)}
+           </td>`
+        : `<td style="text-align:right;color:#facc15;font-weight:600">${ovV !== null ? ovV + ' 名' : '—'}</td>`;
+
       rows += `<tr>
         <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
         <td style="text-align:right">${isH ? fmtH(jun) : fmtN(jun)}</td>
         <td style="text-align:right">${isH ? fmtH(std6) : (std6 !== null ? std6 + ' 名' : '—')}</td>
-        <td style="text-align:right">${isH ? fmtH(newV) : (newV !== null ? newV + ' 名' : '—')}</td>
-        <td style="text-align:right;color:#facc15;font-weight:600">${isH ? fmtH(ovV) : (ovV !== null ? ovV + ' 名' : '—')}</td>
+        <td style="text-align:right">${isH
+          ? (newV !== null ? newHireN(site) + '名 × 178 = ' + fmtH(newV) : '—')
+          : (newV !== null ? newV + ' 名' : '—')}</td>
+        ${ovCell}
         <td style="text-align:right;font-weight:600">${isH ? fmtH(sum5) : (sum5 !== null ? Math.round(sum5) + ' 名' : '—')}</td>
         <td style="text-align:right">${isH ? fmtH(dec) : (dec !== null ? Math.round(dec) + ' 名' : '—')}</td>
         <td style="text-align:center">${isH ? fmtDiff(diff7) : fmtDiffN(diff7 !== null ? Math.round(diff7) : null)}</td>
@@ -8688,8 +8699,8 @@ function renderDecPlanContent(planData, mergeData) {
     // 合計行
     const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : junActualN(site)) || 0), 0);
     const totStd6 = SITES_ORD.reduce((s, site) => s + ((isH ? stdHoursFromMerge(site) : (mergeData ? mergeData.rows.filter(r => r.site === site).length : 0)) || 0), 0);
-    const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireHoursFromMerge(site) : newHireCountFromMerge(site)) || 0), 0);
-    const totOv   = SITES_ORD.reduce((s, site) => s + ((isH ? overtimeHoursFromMerge(site) : overtimeCountFromMerge(site)) || 0), 0);
+    const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireH(site) : newHireN(site)) || 0), 0);
+    const totOv   = SITES_ORD.reduce((s, site) => s + ((isH ? overtimeH(site) : overtimeN(site)) || 0), 0);
     const totSum5 = Math.round((totStd6 + totNew + totOv) * 10) / 10;
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
     const totDiff = Math.round((totSum5 - totDec) * 10) / 10;
@@ -8698,7 +8709,7 @@ function renderDecPlanContent(planData, mergeData) {
       <td>合計</td>
       <td style="text-align:right">${isH ? fmtH(totJun) : fmtN(totJun)}</td>
       <td style="text-align:right">${isH ? fmtH(totStd6) : Math.round(totStd6) + ' 名'}</td>
-      <td style="text-align:right">${isH ? fmtH(totNew) : fmtN(Math.round(totNew))}</td>
+      <td style="text-align:right">${isH ? fmtH(totNew) : totNew + ' 名'}</td>
       <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : Math.round(totOv) + ' 名'}</td>
       <td style="text-align:right">${isH ? fmtH(totSum5) : Math.round(totSum5) + ' 名'}</td>
       <td style="text-align:right">${isH ? fmtH(Math.round(totDec * 10) / 10) : Math.round(totDec) + ' 名'}</td>
@@ -8709,10 +8720,10 @@ function renderDecPlanContent(planData, mergeData) {
       <div style="margin-bottom:28px">
         <div class="chart-section-label" style="margin-bottom:8px">${title}</div>
         <div style="overflow-x:auto">
-          <table class="prod-table" style="min-width:820px;border-collapse:collapse">
+          <table class="prod-table" style="min-width:860px;border-collapse:collapse">
             <thead><tr>
               <th class="th-left" style="min-width:70px">拠点</th>
-              ${cols.map(c => `<th style="min-width:110px;text-align:right;line-height:1.4">${c}</th>`).join('')}
+              ${cols.map(c => `<th style="min-width:120px;text-align:right;line-height:1.4">${c}</th>`).join('')}
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -8722,7 +8733,8 @@ function renderDecPlanContent(planData, mergeData) {
 
   const note = `<div style="font-size:0.8rem;color:var(--muted);margin-bottom:16px">
     ※ ①6月実績は栽培・出荷のみ集計。　※ ②標準時間は3拠点マージシートR列（栽培・出荷div）の合計。<br>
-    ※ ③新加入見込みは3拠点マージシート148〜153行目のR列。　※ ④残業見込みはX列−R列の合計（栽培・出荷div）。<br>
+    ※ ③新加入見込み：7月〜8月に技能実習生追加（いなべ3人・群馬2人・南丹1人）、1人178h。<br>
+    ※ ④残業見込み：社員・技能実習生 +30h（自動集計）、パート社保加入者は本人希望調査（手入力）。<br>
     ※ ⑤=②+③+④。　※ ⑥12月標準時間は生産計画×標準工数設定から算出。
   </div>`;
 
@@ -8735,6 +8747,11 @@ function renderDecPlanContent(planData, mergeData) {
     </div>
   </div>`;
 
+  window._decPlanInput = (key, site, val) => {
+    const num = val === '' ? null : parseFloat(val);
+    decPlanInputs[key][site] = (num !== null && !isNaN(num)) ? num : null;
+    document.getElementById('dec-plan-tables').innerHTML = buildTable('h') + buildTable('n');
+  };
 }
 
 // Stage 1：GAS Webアプリ（疎通確認用）のURL。「26/生産計画」「ファーム勤務時間」どちらの
