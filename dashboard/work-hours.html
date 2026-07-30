@@ -8708,17 +8708,16 @@ function renderDecPlanContent(planData, mergeData) {
       // ⑥人数表：標準工数時間÷178h
       const dec6N = (dec !== null) ? Math.round(dec / 173.8) : null;
       const decVal = isH ? dec : dec6N;
-      const rawDiff = (sum5 !== null && decVal !== null) ? sum5 - decVal : null;
-      const diff7 = isH
-        ? (rawDiff !== null ? Math.round(rawDiff / 173.8 * 10) / 10 : null)
-        : (rawDiff !== null ? Math.round(rawDiff * 10) / 10 : null);
+      const diff7 = (sum5 !== null && decVal !== null)
+        ? Math.round((sum5 - decVal) * 10) / 10
+        : null;
 
       rows += `<tr>
         <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
         <td style="text-align:right">${isH ? fmtH(jun) : fmtN(jun)}</td>
         <td style="text-align:right">${isH ? fmtH(std6) : '—'}</td>
         <td style="text-align:right">${isH
-          ? (newV !== null ? newHireN(site) + '名 × 178 = ' + fmtH(newV) : '—')
+          ? (newV !== null ? newHireN(site) + '名 × 173.8 = ' + fmtH(newV) : '—')
           : (newV !== null ? newV + ' 名' : '—')}</td>
         <td style="text-align:right;color:#facc15;font-weight:600">${isH ? fmtH(ovV) : '—'}</td>
         <td style="text-align:right;font-weight:600">${isH ? fmtH(sum5) : (sum5 !== null ? Math.round(sum5) + ' 名' : '—')}</td>
@@ -8738,10 +8737,7 @@ function renderDecPlanContent(planData, mergeData) {
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
     const totDec6N = Math.round(totDec / 173.8);
     const totDecVal = isH ? totDec : totDec6N;
-    const totRawDiff = totSum5 - totDecVal;
-    const totDiff = isH
-      ? Math.round(totRawDiff / 173.8 * 10) / 10
-      : Math.round(totRawDiff * 10) / 10;
+    const totDiff = Math.round((totSum5 - totDecVal) * 10) / 10;
 
     rows += `<tr style="background:var(--surface2);font-weight:600;border-top:2px solid #3a3f5c">
       <td>合計</td>
