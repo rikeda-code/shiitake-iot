@@ -8697,13 +8697,9 @@ function renderDecPlanContent(planData, mergeData) {
       <td style="text-align:center">${isH ? fmtDiff(totDiff) : fmtDiffN(Math.round(totDiff))}</td>
     </tr>`;
 
-    // テーブルのみ返す（グラフは別途renderする）
     return `
       <div style="margin-bottom:28px">
         <div class="chart-section-label" style="margin-bottom:8px">${title}</div>
-        <div style="margin-bottom:16px;max-width:600px">
-          <canvas id="${chartId}" height="220"></canvas>
-        </div>
         <div style="overflow-x:auto">
           <table class="prod-table" style="min-width:860px;border-collapse:collapse">
             <thead><tr>
@@ -8712,9 +8708,6 @@ function renderDecPlanContent(planData, mergeData) {
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
-        </div>
-        <div style="margin-top:16px;max-width:600px">
-          <canvas id="${chartId}" height="220"></canvas>
         </div>
       </div>`;
   }
