@@ -4143,21 +4143,7 @@ function parseThreeSiteMergeSheet(json) {
     );
   }
 
-  // rows 148-153（シート行番号）：新加入見込み行
-  // headers=1でrows[0]=シート行2, slice(2)でdataRows[0]=シート行4
-  // シート行N → dataRows[N-4]
-  const newHireRows = [];
-  for (let sheetRow = 148; sheetRow <= 153; sheetRow++) {
-    const row = dataRows[sheetRow - 4];
-    if (!row) continue;
-    const siteLabel = cellText(row, THREE_SITE_MERGE_SITE_COL);
-    const site = THREE_SITE_MERGE_SITE_ALIAS[siteLabel];
-    if (!site) continue;
-    const rVal = cellNumber(row, stdColIdx);
-    newHireRows.push({ site, rVal });
-  }
-
-  return { rows: parsedRows, monthYms: monthCols.map(m => m.ym), newHireRows };
+  return { rows: parsedRows, monthYms: monthCols.map(m => m.ym) };
 }
 
 function parseProductionData(json) {
