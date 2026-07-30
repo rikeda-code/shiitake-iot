@@ -8639,6 +8639,7 @@ function renderDecPlanContent(planData, mergeData) {
     const isH = type === 'h';
     const cols = isH ? COLS_H : COLS_N;
     const title = isH ? '表1　勤務時間' : '表2　人数';
+    const newKey = isH ? 'newHours' : 'newCount';
 
     let rows = '';
 
