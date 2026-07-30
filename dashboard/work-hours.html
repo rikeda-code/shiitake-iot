@@ -8671,7 +8671,7 @@ function renderDecPlanContent(planData, mergeData) {
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
     '⑥<br>12月標準工数時間<br>h',
-    '⑦<br>差分<br>(⑤−⑥)÷173.8 名',
+    '⑦<br>差分<br>⑤−⑥ 名',
   ];
   const COLS_N = [
     '①<br>標準人数<br>(B=1/2) 名',
@@ -8703,10 +8703,9 @@ function renderDecPlanContent(planData, mergeData) {
       // ⑥人数表：標準工数時間÷178h
       const dec6N = (dec !== null) ? Math.round(dec / 173.8) : null;
       const decVal = isH ? dec : dec6N;
-      const rawDiff = (sum5 !== null && decVal !== null) ? sum5 - decVal : null;
-      const diff7 = isH
-        ? (rawDiff !== null ? Math.round(rawDiff / 173.8 * 10) / 10 : null)
-        : (rawDiff !== null ? Math.round(rawDiff * 10) / 10 : null);
+      const diff7 = (sum5 !== null && decVal !== null)
+        ? Math.round((sum5 - decVal) * 10) / 10
+        : null;
 
       rows += `<tr>
         <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
@@ -8733,10 +8732,7 @@ function renderDecPlanContent(planData, mergeData) {
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
     const totDec6N = Math.round(totDec / 173.8);
     const totDecVal = isH ? totDec : totDec6N;
-    const totRawDiff = totSum5 - totDecVal;
-    const totDiff = isH
-      ? Math.round(totRawDiff / 173.8 * 10) / 10
-      : Math.round(totRawDiff * 10) / 10;
+    const totDiff = Math.round((totSum5 - totDecVal) * 10) / 10;
 
     rows += `<tr style="background:var(--surface2);font-weight:600;border-top:2px solid #3a3f5c">
       <td>合計</td>
