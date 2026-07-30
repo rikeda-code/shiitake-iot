@@ -8671,7 +8671,7 @@ function renderDecPlanContent(planData, mergeData) {
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
     '⑥<br>12月標準工数時間<br>h',
-    '⑦<br>差分<br>⑤−⑥ 名',
+    '⑦<br>差分<br>⑤−⑥ h',
   ];
   const COLS_N = [
     '①<br>標準人数<br>(B=1/2) 名',
@@ -8718,7 +8718,7 @@ function renderDecPlanContent(planData, mergeData) {
         <td style="text-align:right;color:#facc15;font-weight:600">${isH ? fmtH(ovV) : '—'}</td>
         <td style="text-align:right;font-weight:600">${isH ? fmtH(sum5) : (sum5 !== null ? Math.round(sum5) + ' 名' : '—')}</td>
         <td style="text-align:right">${isH ? fmtH(dec) : (dec6N !== null ? dec6N + ' 名' : '—')}</td>
-        <td style="text-align:center">${fmtDiffN(diff7 !== null ? Math.round(diff7) : null)}</td>
+        <td style="text-align:center">${isH ? fmtDiff(diff7) : fmtDiffN(diff7 !== null ? Math.round(diff7) : null)}</td>
       </tr>`;
     });
 
@@ -8746,7 +8746,7 @@ function renderDecPlanContent(planData, mergeData) {
       <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : '—'}</td>
       <td style="text-align:right">${isH ? fmtH(totSum5) : Math.round(totSum5) + ' 名'}</td>
       <td style="text-align:right">${isH ? fmtH(Math.round(totDec * 10) / 10) : totDec6N + ' 名'}</td>
-      <td style="text-align:center">${fmtDiffN(Math.round(totDiff))}</td>
+      <td style="text-align:center">${isH ? fmtDiff(Math.round(totDiff * 10) / 10) : fmtDiffN(Math.round(totDiff))}</td>
     </tr>`;
 
     return `
