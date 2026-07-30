@@ -553,7 +553,7 @@
        実際に画面幅を超える場合のみ、JS（refreshProdTableWrapOverflow）がhas-hscroll
        クラスを付与しoverflow-x:autoへ切り替える（詳細はJS側のコメント参照） */
     .prod-table-wrap { flex-shrink: 0; overflow-x: visible; overflow-y: visible; }
-    .prod-table-wrap.has-hscroll { overflow-x: auto; }
+    .prod-table-wrap.has-hscroll { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 160px); }
 
     /* ── 比較タブ（サブタブ付き。ヘッダー行を固定し、下部のみスクロール） ── */
     .compare-shell {
@@ -753,14 +753,10 @@ const PAST_YEAR_COUNT_GID = '1654355403'; // 人数_過去実績
 
 // .prod-table-wrapは通常overflow: visible（スクロールコンテナ化しないため、内側の
 // position:sticky（テーブルヘッダー）が上位のmain要素を基準に正しく機能する）。
-// CSSの仕様上、overflow-xとoverflow-yの一方だけを'visible'以外にすることはできず
-// （'visible'側が自動的に'auto'等へ格上げされる）、常時overflow-x:autoにすると
-// .prod-table-wrap自身がposition:stickyの基準スクロールコンテナになってしまい、
-// ヘッダーがmainではなくこの要素基準になって画面上部に固定されなくなる。そのため
-// テーブル列が実際に画面幅を超えて横オーバーフローする場合のみ、JSでhas-hscroll
-// クラスを付与しoverflow-x:autoへ切り替えて横スクロールを提供する（この場合のみ
-// sticky基準がこの要素に変わりヘッダー固定が機能しなくなるが、画面に収まる通常
-// ケースでは常にmain基準のsticky固定が正しく機能する）
+// テーブル列が画面幅を超える場合はJSでhas-hscrollクラスを付与し、overflow-x:auto +
+// overflow-y:auto + max-height:calc(100vh-160px) へ切り替える。この場合ラッパー自体が
+// 縦横両スクロールコンテナとなり、th(position:sticky;top:0)がラッパー基準で固定され
+// 月ヘッダーが常に表示される。
 function refreshProdTableWrapOverflow() {
   document.querySelectorAll('.prod-table-wrap').forEach(el => {
     const needsHScroll = el.scrollWidth > el.clientWidth + 1;
