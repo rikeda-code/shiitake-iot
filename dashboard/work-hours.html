@@ -4648,6 +4648,12 @@ const TASK_METRIC_KEYS = {
   '納品書・伝票作成': null,
   '椎茸運搬(生在庫)': '合計(点数)',
   '椎茸運搬(製品)': '合計(点数)',
+  '付帯業': '合計(点数)',
+};
+
+// 特定の作業区分を適用する拠点を制限する（null = 全拠点）
+const TASK_SITE_FILTER = {
+  '付帯業': ['南丹'],
 };
 
 // cs数 = (合計点数 - バラ数) / pcsPerCs + バラ数
@@ -4712,6 +4718,7 @@ function createStdHoursEngine(records, prodMonths, displayMonths, originalCount,
   }
 
   function calcRow(site, r, mi) {
+    if (r.sites && !r.sites.includes(site)) return { h: null, containers: null };
     const v = r.val;
     if (v === null || v === undefined) return { h: null, containers: null };
     const mkey = r.metricKey || null;
@@ -4872,6 +4879,7 @@ function parseStdSettingsSheet(json) {
       unit: unitVal ? String(unitVal).trim() : '',
       metricKey: Object.prototype.hasOwnProperty.call(TASK_METRIC_KEYS, task) ? TASK_METRIC_KEYS[task] : null,
       note: noteVal ? String(noteVal).trim() : '',
+      sites: TASK_SITE_FILTER[task] || null,
     });
   }
 
