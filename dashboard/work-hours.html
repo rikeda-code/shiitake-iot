@@ -8592,10 +8592,16 @@ function renderDecPlanContent(planData, mergeData) {
       (e.hours[ami] ?? 0) > 0).length || null;
   }
 
-  // 人数表①：3拠点マージシートB=1/2フィルタ済みの件数（B列ロジックを人数にも適用）
+  // 人数表①：3拠点マージシートB=1のみの件数
   function mergeN(site) {
     if (!mergeData) return null;
-    return mergeData.rows.filter(r => r.site === site).length || null;
+    return mergeData.rows.filter(r => r.site === site && r.activeFlag === 1).length || null;
+  }
+
+  // 人数表③新加入見込み：B=2の件数
+  function b2N(site) {
+    if (!mergeData) return null;
+    return mergeData.rows.filter(r => r.site === site && r.activeFlag === 2).length || null;
   }
 
   // ②標準工数合計：3拠点マージR列(栽培・出荷divのみ) per site
@@ -8699,7 +8705,7 @@ function renderDecPlanContent(planData, mergeData) {
       const jun   = isH ? junActualH(site) : mergeN(site);
       const std6  = isH ? stdHoursFromMerge(site) : null; // 人数表②は空欄
       const dec   = stdHoursForMonth(site, decIdx);
-      const newV  = isH ? newHireH(site) : newHireN(site);
+      const newV  = isH ? newHireH(site) : b2N(site);
       const ovV   = isH ? overtimeH(site) : null; // 人数表④は空欄
       // 時間表⑤=②+③+④、人数表⑤=①+③
       const sum5  = isH
@@ -8729,7 +8735,7 @@ function renderDecPlanContent(planData, mergeData) {
     // 合計行
     const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : mergeN(site)) || 0), 0);
     const totStd6 = isH ? SITES_ORD.reduce((s, site) => s + (stdHoursFromMerge(site) || 0), 0) : 0;
-    const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireH(site) : newHireN(site)) || 0), 0);
+    const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireH(site) : b2N(site)) || 0), 0);
     const totOv   = isH ? SITES_ORD.reduce((s, site) => s + (overtimeH(site) || 0), 0) : 0;
     const totSum5 = isH
       ? Math.round((totStd6 + totNew + totOv) * 10) / 10
