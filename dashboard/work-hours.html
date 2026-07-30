@@ -6814,33 +6814,47 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return v === 1 || v === '1' || Number(v) === 1;
   }
 
-  // 拠点×業務区分(栽培/出荷)ごとの標準労働時間合計・最大労働時間合計(月別)を返す。
-  // site=nullなら3拠点合算（全拠点合計タブ・3拠点サマリタブ・拠点サマリタブで使用）。
-  // 集計対象は、D・F・H列によるマッチングに加えて、B列＝1（稼働フラグ）かつ
-  // E列が空でない（プロジェクト等の割当あり）行のみとする
+  // B列が2（文字列"2"・数値2のいずれでも許容。新規要員・追加待ちのステータス）
+  // かどうかを頑健に判定する
+  function isThreeSiteMergeNewStaffFlag(v) {
+    if (typeof v === 'string') v = v.trim();
+    return v === 2 || v === '2' || Number(v) === 2;
+  }
+
+  // 拠点×業務区分(栽培/出荷)ごとの標準労働時間合計・最大労働時間合計(月別)・
+  // 新規要員（B=2）の標準労働時間合計を返す。site=nullなら3拠点合算
+  // （全拠点合計タブ・3拠点サマリタブ・拠点サマリタブで使用）。
+  // 集計対象は、D・F・H列によるマッチングに加えて、E列が空でない
+  // （プロジェクト等の割当あり）行のみとし、B列＝1（稼働フラグ）の行はstdTotal・
+  // maxTotalByYmに、B列＝2（新規要員）の行はnewStaffTotalに、それぞれ別集計する
   function threeSiteMergeAgg(div, site) {
     if (!mergeData) return null;
-    const matched = mergeData.rows.filter(r =>
-      r.div === div && (site == null || r.site === site) &&
-      isThreeSiteMergeActiveFlag(r.activeFlag) && r.prj !== '');
-    if (!matched.length) return null;
-    const stdTotal = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
-    if (stdTotal <= 0) return null;
+    const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
+    const matched = mergeData.rows.filter(r => baseMatch(r) && isThreeSiteMergeActiveFlag(r.activeFlag));
+    const newStaffMatched = mergeData.rows.filter(r => baseMatch(r) && isThreeSiteMergeNewStaffFlag(r.activeFlag));
+    if (!matched.length && !newStaffMatched.length) return null;
+    const stdTotal = matched.length ? Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10 : 0;
+    const newStaffTotalRaw = newStaffMatched.length ? Math.round(newStaffMatched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10 : 0;
+    if (stdTotal <= 0 && newStaffTotalRaw <= 0) return null;
     const maxTotalByYm = {};
     mergeData.monthYms.forEach(ym => {
       let sum = 0, any = false;
       matched.forEach(r => { const v = r.maxByYm[ym]; if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; } });
       if (any) maxTotalByYm[ym] = Math.round(sum * 10) / 10;
     });
-    return { stdTotal, maxTotalByYm };
+    const newStaffTotal = newStaffTotalRaw > 0 ? newStaffTotalRaw : null;
+    return { stdTotal, maxTotalByYm, newStaffTotal };
   }
 
-  // agg（3拠点マージの標準労働時間・最大労働時間集計）から、「実績」棒と「標準工数」棒の
-  // 中間に表示する「標準労働時間」棒（新規・中央）用のデータセットを構築する。
-  // 実績データの有無に関わらず、過去月・未来月問わず全ての月で同じ標準労働時間を
-  // 表示する。最大労働時間データがある月（現時点ではS列に値がある2026/12のみ）は、
-  // 標準労働時間（下段）＋最大労働時間までの差分（上段）の積み上げ表示にする
-  // （_threeSiteMergeCapSegmentフラグを見てtooltipOpts()側で累計値表示に変換する）
+  // agg（3拠点マージの標準労働時間・最大労働時間・新規要員集計）から、「実績」棒と
+  // 「標準工数」棒の中間に表示する「標準労働時間」棒（新規・中央）用のデータセットを
+  // 構築する。実績データの有無に関わらず、過去月・未来月問わず全ての月で同じ標準
+  // 労働時間を表示する。最大労働時間データがある月（現時点ではS列に値がある2026/12
+  // のみ）は、標準労働時間（下段）＋最大労働時間までの差分（中段）の積み上げ表示に
+  // する（_threeSiteMergeCapSegmentフラグを見てtooltipOpts()側で累計値表示に変換
+  // する）。さらにagg.newStaffTotal（B列＝2の新規要員行の標準労働時間合計）がある
+  // 場合は、全月共通の固定値として最上段に積み上げる（newStaffTotalがnull/0の場合は
+  // データセット自体を追加しない）
   function threeSiteMergeStdHoursDatasets(agg, opts) {
     opts = opts || {};
     if (!agg) return [];
@@ -6857,7 +6871,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const capOpacity = opts.capOpacity || 'cc';
     const stack = opts.stack || 'stdhours';
     const suffix = opts.labelSuffix || '';
-    return [
+    const datasets = [
       {
         type: 'bar', label: `標準労働時間${suffix}`, data: stdData,
         backgroundColor: stdColor + stdOpacity, borderColor: stdColor, borderWidth: 0,
@@ -6869,18 +6883,31 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHours: true, _threeSiteMergeCapSegment: true,
       },
     ];
+    if (agg.newStaffTotal) {
+      const newStaffColor = opts.newStaffColor || '#94a3b8';
+      const newStaffOpacity = opts.newStaffOpacity || 'cc';
+      datasets.push({
+        type: 'bar', label: `新規要員${suffix}`, data: planMonths.map(() => agg.newStaffTotal),
+        backgroundColor: newStaffColor + newStaffOpacity, borderColor: newStaffColor, borderWidth: 0,
+        stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHours: true, _threeSiteMergeNewStaff: true,
+      });
+    }
+    return datasets;
   }
 
   // 軸MAX算出用：指定月(mi、planMonths基準)における「標準労働時間」棒（中央・新規）の
-  // 実効的な高さを返す（標準労働時間、最大労働時間データがある月はその値）
+  // 実効的な高さを返す（標準労働時間、最大労働時間データがある月はその値、さらに
+  // 新規要員セグメント分を加算した積み上げ全体の高さ）
   function threeSiteMergeStdHoursTotal(agg, mi) {
     if (!agg) return null;
     const maxTotal = agg.maxTotalByYm[mnum(planMonths[mi])];
-    return typeof maxTotal === 'number' ? maxTotal : agg.stdTotal;
+    const base = typeof maxTotal === 'number' ? maxTotal : agg.stdTotal;
+    return base + (agg.newStaffTotal || 0);
   }
 
   // 拠点サマリモード用：栽培・出荷それぞれのthreeSiteMergeAgg()の結果を、div区別なく
-  // 1つの集計にまとめる（stdTotalは両divの合計、maxTotalByYmも月ごとに両divの値を合算）
+  // 1つの集計にまとめる（stdTotalは両divの合計、maxTotalByYmも月ごとに両divの値を
+  // 合算、newStaffTotalも同様に両divの合計とする）
   function mergeThreeSiteMergeAggAcrossDivs(aggs) {
     const valid = aggs.filter(Boolean);
     if (!valid.length) return null;
@@ -6891,7 +6918,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       valid.forEach(a => { const v = a.maxTotalByYm[ym]; if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; } });
       if (any) maxTotalByYm[ym] = Math.round(sum * 10) / 10;
     });
-    return { stdTotal, maxTotalByYm };
+    const newStaffSum = valid.reduce((s, a) => s + (a.newStaffTotal || 0), 0);
+    const newStaffTotal = newStaffSum > 0 ? Math.round(newStaffSum * 10) / 10 : null;
+    return { stdTotal, maxTotalByYm, newStaffTotal };
   }
 
   let planCmpChartInstances = {};
