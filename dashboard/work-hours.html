@@ -4115,8 +4115,10 @@ function parseThreeSiteMergeSheet(json) {
     const siteLabel = cellText(row, THREE_SITE_MERGE_SITE_COL);
     const site = THREE_SITE_MERGE_SITE_ALIAS[siteLabel];
     if (!site) return;
-    const div = cellText(row, THREE_SITE_MERGE_DIV_COL);
-    if (div !== '栽培' && div !== '出荷') return; // 配送・栽培／配送・出荷は対象外
+    const divRaw = cellText(row, THREE_SITE_MERGE_DIV_COL);
+    // 配送・栽培／配送・出荷は「配送」として正規化して含める
+    const div = (divRaw === '配送・栽培' || divRaw === '配送・出荷') ? '配送' : divRaw;
+    if (div !== '栽培' && div !== '出荷' && div !== '配送') return;
     const name = cellText(row, THREE_SITE_MERGE_NAME_COL);
     if (!name) return;
     const activeFlag = cellNumber(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
@@ -5752,7 +5754,9 @@ function renderPlanCompareCharts(planData, prodData) {
       const divRows = rows.filter(r => r.div === div);
       const typeFilter = div === '栽培'
         ? wt => workTypeClass(wt) === 'wt-栽培'
-        : wt => workTypeClass(wt) === 'wt-出荷';
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
       window._planCmpChartData[`${site}-${div}`] = { divRows, actualH: workHoursForPlanMonths(site, typeFilter), div };
     });
   });
@@ -6838,7 +6842,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const divRows = rows.filter(r => r.div === div);
       const typeFilter = div === '栽培'
         ? wt => workTypeClass(wt) === 'wt-栽培'
-        : wt => workTypeClass(wt) === 'wt-出荷';
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
       window._planCmpChartData2[`${site}-${div}`] = { divRows, actualH: workHoursForPlanMonths(site, typeFilter), div };
     });
   });
@@ -7083,12 +7089,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
   ];
 
-  // 計画月ごとの実績工数を雇用区分でフィルタして返す。1段目（予定標準工数・工程別）が
-  // divs=['栽培','出荷']のタスク行のみを対象とするのに合わせ、workTypeも栽培・出荷限定
-  // （配送・栽培／配送・出荷は対象外）とする
+  // 計画月ごとの実績工数を雇用区分でフィルタして返す
   function workHoursByEmpForPlanMonths(site, empMatcher) {
     const { employees, months: activeMonths } = getActiveData();
-    const emps = employees.filter(e => e.base === site && divs.includes(e.workType) && empMatcher(e));
+    const allowedDivs = [...divs, '配送・栽培', '配送・出荷'];
+    const emps = employees.filter(e => e.base === site && allowedDivs.includes(e.workType) && empMatcher(e));
     return planMonths.map(planMonth => {
       const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
       if (ami < 0) return null;
