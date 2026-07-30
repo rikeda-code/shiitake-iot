@@ -8481,14 +8481,8 @@ let staffplanGranularity = 'monthly'; // 'monthly' | 'daily'（Stage 7で実装�
 
 // 26/12向け計画タブの編集可能値（セッション中メモリに保持）
 let decPlanInputs = {
-  // 新加入見込み工数(h)
-  newHours: { 'いなべ': 0, '群馬': 0, '南丹': 0 },
-  // 残業込み時間(h) ─ 未入力時は「標準時間+新加入見込み」を自動計算して表示
-  overtimeHours: { 'いなべ': null, '群馬': null, '南丹': null },
-  // 新加入見込み人数
-  newCount: { 'いなべ': 0, '群馬': 0, '南丹': 0 },
-  // 残業込み人数 ─ 未入力時は自動計算
-  overtimeCount: { 'いなべ': null, '群馬': null, '南丹': null },
+  newHours: { 'いなべ': null, '群馬': null, '南丹': null }, // ③新加入見込み工数(h)
+  newCount:  { 'いなべ': null, '群馬': null, '南丹': null }, // ③新加入見込み人数
 };
 
 function renderDecPlanTab() {
@@ -8516,27 +8510,32 @@ function renderDecPlanContent(planData) {
   const junIdx = planMonths.indexOf(JUN);
   const decIdx = planMonths.indexOf(DEC);
 
-  // 6月の実績勤務時間合計（雇用形態合算）
+  // ①6月実績：栽培・出荷のみ
   function junActualH(site) {
     const ami = activeMonths.findIndex(m => normalizeMonth(m) === JUN);
     if (ami < 0) return null;
-    const total = employees.filter(e => e.base === site && e.workType)
+    const total = employees
+      .filter(e => e.base === site && (workTypeClass(e.workType) === 'wt-栽培' || workTypeClass(e.workType) === 'wt-出荷'))
       .reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
     return total > 0 ? Math.round(total * 10) / 10 : null;
   }
 
-  // 6月の実績人数合計
+  // ①6月人数：栽培・出荷のみ
   function junActualN(site) {
     const ami = activeMonths.findIndex(m => normalizeMonth(m) === JUN);
     if (ami < 0) return null;
-    return employees.filter(e => e.base === site && e.workType && (e.hours[ami] ?? 0) > 0).length || null;
+    return employees.filter(e => e.base === site &&
+      (workTypeClass(e.workType) === 'wt-栽培' || workTypeClass(e.workType) === 'wt-出荷') &&
+      (e.hours[ami] ?? 0) > 0).length || null;
   }
 
-  // 指定月の標準工数合計（全divの行を合算）
+  // ②標準工数合計：栽培・出荷divの行のみ合算
   function stdHoursForMonth(site, mi) {
     if (mi < 0) return null;
+    const divRows = stdRows.filter(r => r.div === '栽培' || r.div === '出荷');
+    if (!divRows.length) return null;
     let total = 0, hasVal = false;
-    stdRows.forEach(r => {
+    divRows.forEach(r => {
       const res = engine.calcRow(site, r, mi);
       if (res.h !== null) { total += res.h; hasVal = true; }
     });
@@ -8558,109 +8557,106 @@ function renderDecPlanContent(planData) {
     return `<span style="color:${color};font-weight:600">${sign}${v} 名</span>`;
   }
 
-  function inputCell(type, site, onchange) {
-    const key = type === 'h' ? (site === '_overtime' ? 'overtimeHours' : 'newHours')
-                             : (site === '_overtime' ? 'overtimeCount' : 'newCount');
-    const realSite = site.replace('_overtime', '');
-    const val = decPlanInputs[key][realSite];
-    return `<input type="number" step="${type === 'h' ? 0.5 : 1}" min="0"
+  function inputCell(isH, key, site) {
+    const val = decPlanInputs[key][site];
+    const step = isH ? 0.5 : 1;
+    return `<input type="number" step="${step}" min="0"
       style="width:90px;background:var(--surface2);border:1px solid #3a3f5c;border-radius:4px;
              color:var(--text);padding:2px 6px;font-size:0.88rem;text-align:right"
       value="${val === null ? '' : val}"
-      placeholder="${val === null ? '自動' : ''}"
-      data-dec-input="${key}|${realSite}"
-      oninput="window._decPlanInput('${key}','${realSite}',this.value)">`;
+      placeholder="—"
+      oninput="window._decPlanInput('${key}','${site}',this.value)">`;
   }
 
-  const COLS_H = ['6月勤務実績 (h)', '標準時間 (6月)', '新加入見込み (h)', '残業込み時間 (h)', '12月標準時間 (h)', '差分 (残業込み−12月標準)'];
-  const COLS_N = ['6月人数 (名)', '標準人数 (6月)', '新加入見込み (名)', '残業込み人数 (名)', '12月標準人数', '差分 (残業込み−12月)'];
+  // 列ヘッダー：①〜⑦
+  const COLS_H = [
+    '①<br>6月勤務実績<br>(栽培・出荷) h',
+    '②<br>標準時間<br>(6月) h',
+    '③<br>新加入見込み<br>h',
+    '④<br>残業見込み<br>h',
+    '⑤<br>②+③+④<br>h',
+    '⑥<br>12月標準時間<br>h',
+    '⑦<br>差分<br>⑤−⑥ h',
+  ];
+  const COLS_N = [
+    '①<br>6月人数<br>(栽培・出荷) 名',
+    '②<br>標準人数<br>(6月)',
+    '③<br>新加入見込み<br>名',
+    '④<br>残業見込み<br>名',
+    '⑤<br>②+③+④<br>名',
+    '⑥<br>12月標準人数',
+    '⑦<br>差分<br>⑤−⑥ 名',
+  ];
 
   function buildTable(type) {
     const isH = type === 'h';
     const cols = isH ? COLS_H : COLS_N;
     const title = isH ? '表1　勤務時間' : '表2　人数';
+    const newKey = isH ? 'newHours' : 'newCount';
 
     let rows = '';
-    let totals = { jun: 0, std6: 0, new: 0, overtime: null, dec: 0, diff: null };
 
     SITES_ORD.forEach(site => {
-      const jun = isH ? junActualH(site) : junActualN(site);
-      const std6 = isH ? stdHoursForMonth(site, junIdx) : null; // 人数は標準工数設定に人数情報なし
-      const std6h = stdHoursForMonth(site, junIdx);
-      const dec = isH ? stdHoursForMonth(site, decIdx) : stdHoursForMonth(site, decIdx);
-      const newVal = isH ? (decPlanInputs.newHours[site] || 0) : (decPlanInputs.newCount[site] || 0);
-      const manualOvertime = isH ? decPlanInputs.overtimeHours[site] : decPlanInputs.overtimeCount[site];
-      const autoOvertime = isH
-        ? (jun !== null ? Math.round(((jun || 0) + newVal) * 10) / 10 : null)
-        : (jun !== null ? (jun || 0) + newVal : null);
-      const overtime = manualOvertime !== null ? manualOvertime : autoOvertime;
-      const diff = (overtime !== null && dec !== null) ? Math.round((overtime - dec) * 10) / 10 : null;
+      const jun   = isH ? junActualH(site) : junActualN(site);
+      const std6  = stdHoursForMonth(site, junIdx);
+      const dec   = stdHoursForMonth(site, decIdx);
+      const newV  = decPlanInputs[newKey][site];
+      // ④ = ① - ② (6月実績 - 標準時間 = 黄色の残業分)。負にはならない
+      const ovV   = (jun !== null && std6 !== null)
+        ? Math.max(0, Math.round((jun - std6) * 10) / 10)
+        : null;
+      // ⑤ = ②+③+④
+      const sum5  = std6 !== null
+        ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10
+        : null;
+      const diff7 = (sum5 !== null && dec !== null)
+        ? Math.round((sum5 - dec) * 10) / 10
+        : null;
 
-      totals.jun = totals.jun !== null ? totals.jun + (jun || 0) : null;
-      totals.std6 = isH && std6 !== null ? totals.std6 + std6 : totals.std6;
-      totals.new += newVal;
-      totals.dec = dec !== null ? totals.dec + (dec || 0) : totals.dec;
-
-      if (isH) {
-        rows += `<tr>
-          <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
-          <td style="text-align:right">${isH ? fmtH(jun) : fmtN(jun)}</td>
-          <td style="text-align:right">${isH ? fmtH(std6) : '—'}</td>
-          <td style="text-align:right;padding:4px 8px">${inputCell(type, site)}</td>
-          <td style="text-align:right;padding:4px 8px">${inputCell(type, '_overtime' + site, '')}</td>
-          <td style="text-align:right">${isH ? fmtH(dec) : fmtH(dec)}</td>
-          <td style="text-align:center">${fmtDiff(diff)}</td>
-        </tr>`;
-      } else {
-        rows += `<tr>
-          <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
-          <td style="text-align:right">${fmtN(jun)}</td>
-          <td style="text-align:right">—</td>
-          <td style="text-align:right;padding:4px 8px">${inputCell(type, site)}</td>
-          <td style="text-align:right;padding:4px 8px">${inputCell(type, '_overtime' + site, '')}</td>
-          <td style="text-align:right">${dec !== null ? Math.round(dec) + ' 名' : '—'}</td>
-          <td style="text-align:center">${fmtDiffN(diff)}</td>
-        </tr>`;
-      }
+      rows += `<tr>
+        <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
+        <td style="text-align:right">${isH ? fmtH(jun) : fmtN(jun)}</td>
+        <td style="text-align:right">${isH ? fmtH(std6) : (std6 !== null ? Math.round(std6) + ' 名' : '—')}</td>
+        <td style="text-align:right;padding:4px 8px">${inputCell(isH, newKey, site)}</td>
+        <td style="text-align:right;color:#facc15;font-weight:600">${isH ? fmtH(ovV) : (ovV !== null ? Math.round(ovV) + ' 名' : '—')}</td>
+        <td style="text-align:right;font-weight:600">${isH ? fmtH(sum5) : (sum5 !== null ? Math.round(sum5) + ' 名' : '—')}</td>
+        <td style="text-align:right">${isH ? fmtH(dec) : (dec !== null ? Math.round(dec) + ' 名' : '—')}</td>
+        <td style="text-align:center">${isH ? fmtDiff(diff7) : fmtDiffN(diff7 !== null ? Math.round(diff7) : null)}</td>
+      </tr>`;
     });
 
     // 合計行
-    const totalNew = isH ? decPlanInputs.newHours : decPlanInputs.newCount;
-    const totalNewVal = SITES_ORD.reduce((s, site) => s + ((totalNew[site]) || 0), 0);
-    const totalJun = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : junActualN(site)) || 0), 0);
-    const totalDec = SITES_ORD.reduce((s, site) => {
-      const v = stdHoursForMonth(site, decIdx);
-      return s + (v || 0);
-    }, 0);
-    const totalStd6 = isH ? SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, junIdx) || 0), 0) : null;
-    const totalOvertimeInputs = isH ? decPlanInputs.overtimeHours : decPlanInputs.overtimeCount;
-    const totalOvertime = SITES_ORD.reduce((s, site) => {
-      const manual = totalOvertimeInputs[site];
+    const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : junActualN(site)) || 0), 0);
+    const totStd6 = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, junIdx) || 0), 0);
+    const totNew  = SITES_ORD.reduce((s, site) => s + (decPlanInputs[newKey][site] || 0), 0);
+    const totOv   = SITES_ORD.reduce((s, site) => {
       const jun = isH ? junActualH(site) : junActualN(site);
-      const newV = (totalNew[site]) || 0;
-      const auto = jun !== null ? (jun || 0) + newV : 0;
-      return s + (manual !== null ? manual : auto);
+      const std6 = stdHoursForMonth(site, junIdx);
+      return s + ((jun !== null && std6 !== null) ? Math.max(0, jun - std6) : 0);
     }, 0);
-    const totalDiff = Math.round((totalOvertime - totalDec) * 10) / 10;
+    const totSum5 = Math.round((totStd6 + totNew + totOv) * 10) / 10;
+    const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
+    const totDiff = Math.round((totSum5 - totDec) * 10) / 10;
 
     rows += `<tr style="background:var(--surface2);font-weight:600;border-top:2px solid #3a3f5c">
       <td>合計</td>
-      <td style="text-align:right">${isH ? fmtH(totalJun) : fmtN(totalJun)}</td>
-      <td style="text-align:right">${isH ? fmtH(totalStd6) : '—'}</td>
-      <td style="text-align:right">${isH ? fmtH(totalNewVal) : fmtN(totalNewVal)}</td>
-      <td style="text-align:right">${isH ? fmtH(Math.round(totalOvertime * 10) / 10) : fmtN(Math.round(totalOvertime))}</td>
-      <td style="text-align:right">${isH ? fmtH(Math.round(totalDec * 10) / 10) : fmtH(Math.round(totalDec * 10) / 10)}</td>
-      <td style="text-align:center">${isH ? fmtDiff(totalDiff) : fmtDiffN(Math.round(totalDiff))}</td>
+      <td style="text-align:right">${isH ? fmtH(totJun) : fmtN(totJun)}</td>
+      <td style="text-align:right">${isH ? fmtH(totStd6) : Math.round(totStd6) + ' 名'}</td>
+      <td style="text-align:right">${isH ? fmtH(totNew) : fmtN(totNew)}</td>
+      <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : Math.round(totOv) + ' 名'}</td>
+      <td style="text-align:right">${isH ? fmtH(totSum5) : Math.round(totSum5) + ' 名'}</td>
+      <td style="text-align:right">${isH ? fmtH(Math.round(totDec * 10) / 10) : Math.round(totDec) + ' 名'}</td>
+      <td style="text-align:center">${isH ? fmtDiff(totDiff) : fmtDiffN(Math.round(totDiff))}</td>
     </tr>`;
 
     return `
-      <div style="margin-bottom:24px">
+      <div style="margin-bottom:28px">
         <div class="chart-section-label" style="margin-bottom:8px">${title}</div>
         <div style="overflow-x:auto">
-          <table class="prod-table" style="min-width:700px;border-collapse:collapse">
+          <table class="prod-table" style="min-width:820px;border-collapse:collapse">
             <thead><tr>
               <th class="th-left" style="min-width:70px">拠点</th>
-              ${cols.map(c => `<th style="min-width:130px;text-align:right">${c}</th>`).join('')}
+              ${cols.map(c => `<th style="min-width:110px;text-align:right;line-height:1.4">${c}</th>`).join('')}
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -8669,9 +8665,8 @@ function renderDecPlanContent(planData) {
   }
 
   const note = `<div style="font-size:0.8rem;color:var(--muted);margin-bottom:16px">
-    ※ 標準時間はスプレッドシート「標準工数設定」シートの設定値 × 生産計画から算出。<br>
-    ※ 新加入見込み・残業込み時間は手入力フィールド（残業込みは空欄で「6月実績＋新加入」を自動計算）。<br>
-    ※ 12月標準時間は計画データが入力されている場合のみ表示。
+    ※ ①6月実績は栽培・出荷のみ集計。　※ ②標準時間は標準工数設定（栽培・出荷div）× 生産計画から算出。<br>
+    ※ ③新加入見込み・④残業見込みは手入力。空欄=0として⑤を算出。　※ ⑤=②+③+④。
   </div>`;
 
   main.innerHTML = `<div class="prod-panel" style="padding:20px">
@@ -8686,9 +8681,7 @@ function renderDecPlanContent(planData) {
   window._decPlanInput = (key, site, val) => {
     const num = val === '' ? null : parseFloat(val);
     decPlanInputs[key][site] = (num !== null && !isNaN(num)) ? num : null;
-    // 表を再描画
     document.getElementById('dec-plan-tables').innerHTML = buildTable('h') + buildTable('n');
-    // 再描画後もinputイベントを再バインド（同じwindow._decPlanInputを使うので不要）
   };
 }
 
