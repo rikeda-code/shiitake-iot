@@ -207,6 +207,7 @@
       #weekly-section { margin: 0 16px 32px; }
       .weekly-grid { grid-template-columns: 1fr; }
     }
+
   </style>
 </head>
 <body>
@@ -231,6 +232,7 @@
 <section id="mekaki-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="temp-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="saved-section" style="display:none;margin:0 32px 40px;"></section>
 
 <!-- Weekly chart zoom modal -->
 <div id="weekly-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;display:none;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)closeWeeklyZoom()">
@@ -269,6 +271,24 @@
     <button onclick="tempCloseZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
     <div id="temp-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:12px"></div>
     <div style="position:relative;height:min(70vh,600px)"><canvas id="temp-zoom-canvas"></canvas></div>
+  </div>
+</div>
+
+<!-- 保存グラフ: コレクション選択モーダル -->
+<div id="saved-picker-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1200;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)savedPickerClose()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:380px;padding:20px;position:relative">
+    <button onclick="savedPickerClose()" style="position:absolute;top:10px;right:14px;background:none;border:none;color:#8892a4;font-size:1.3rem;cursor:pointer;line-height:1">×</button>
+    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin-bottom:12px">どのコレクションに保存しますか？</div>
+    <div id="saved-picker-list" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
+    <div style="border-top:1px solid #2e3148;padding-top:12px">
+      <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">新しいコレクションを作る</div>
+      <div style="display:flex;gap:6px">
+        <input id="saved-picker-newname" type="text" placeholder="コレクション名"
+          style="flex:1;background:#0f1117;border:1px solid #2e3148;border-radius:6px;color:#e2e8f0;padding:6px 8px;font-size:0.82rem"
+          onkeydown="if(event.key==='Enter')savedPickerCreateAndConfirm()">
+        <button class="sort-btn" onclick="savedPickerCreateAndConfirm()">作成して保存</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -741,12 +761,17 @@ function parseContainerRowsV2(table, startDateStr) {
         const v = parseFloat(cells[ci]?.v);
         if (!isNaN(v) && v > 0 && v < 10000) daily += v;
       }
-      // Parse rowDate from col2 YYYYMMDD for future-row cutoff
+      // Parse rowDate from col2 YYYYMMDD for future-row cutoff。
+      // 他拠点(Type A/B)と同様、日付が読み取れない行は「未来のプレースホルダー行」の
+      // 可能性があるため除外する。rowDate:nullのまま行を残すと、buildWeeklyLineChart側の
+      // 未来日カットオフ(r.rowDate && ...)がrowDate自体falsyで素通りしてしまい、
+      // まだ来ていない日のダミー行が累計線に紛れ込む恐れがある。
       const ds2 = String(cells[2]?.v ?? '');
       let rowDate = null;
       if (/^\d{8}$/.test(ds2)) {
         rowDate = new Date(parseInt(ds2.slice(0,4)), parseInt(ds2.slice(4,6))-1, parseInt(ds2.slice(6,8)));
       }
+      if (!rowDate) continue;
       rows.push({ dayNum, daily, rowDate });
     }
   } else {
@@ -857,6 +882,37 @@ let weeklyZoomGroups = null; // groupKeys → { label, containers }
 let weeklyZoomChart = null;
 let weeklySizeMode = null; // null | 'daily' | 'cumul'
 let weeklySizeCharts = [];
+let weeklyDrillPersonGroups = null; // 担当者別ドリルの一覧画面(拠点未選択時)のカード → { label, containers }
+let weeklyDrillZoomGroups = null;   // 担当者別ドリルの最終カード(拠点・担当者選択後)→ { label, containers }
+
+// 週別累計タブの各グラフ用「保存」ボタンの共通処理。containersをそのまま凍結して保存グラフに渡す
+function weeklySaveChart(title, containers) {
+  const frozenContainers = containers.map(c => ({
+    siteName: c.siteName, name: c.name, lot: c.lot, startDate: c.startDate, endDate: c.endDate,
+    isEnded: c.isEnded, bedCount: c.bedCount,
+    rows: (c.rows || []).map(r => ({ rowDate: r.rowDate ? r.rowDate.toISOString() : null, dayNum: r.dayNum, daily: r.daily })),
+  }));
+  savedOpenPicker({
+    kind: 'weekly', title: `週別累計: ${title}`,
+    items: frozenContainers,
+    targetData: weeklyState ? weeklyState.targetData : null,
+  });
+}
+
+function weeklySaveGroupChart(idx) {
+  if (!weeklyZoomGroups || !weeklyZoomGroups[idx]) return;
+  weeklySaveChart(weeklyZoomGroups[idx].label, weeklyZoomGroups[idx].containers);
+}
+
+function weeklySaveDrillPersonChart(idx) {
+  if (!weeklyDrillPersonGroups || !weeklyDrillPersonGroups[idx]) return;
+  weeklySaveChart(weeklyDrillPersonGroups[idx].label, weeklyDrillPersonGroups[idx].containers);
+}
+
+function weeklySaveDrillGroupChart(idx) {
+  if (!weeklyDrillZoomGroups || !weeklyDrillZoomGroups[idx]) return;
+  weeklySaveChart(weeklyDrillZoomGroups[idx].label, weeklyDrillZoomGroups[idx].containers);
+}
 
 async function loadWeeklySection() {
   const section = document.getElementById('weekly-section');
@@ -867,13 +923,21 @@ async function loadWeeklySection() {
     <div class="loading" style="height:60px">全拠点データを読み込み中...</div>`;
 
   try {
+    // 拠点単位でのサマリー取得失敗(シート共有設定の変更・シート名変更等)を握りつぶさず、
+    // どの拠点が失敗したか分かるようにする(でないと「特定の拠点だけグラフに出ない」原因が
+    // コンソールにも画面にも一切残らず切り分けられなくなる)。
+    const weeklySiteFetchErrors = [];
     const allSummaries = (await Promise.all(SITES.map(site =>
       fetchSummaryRows(site)
         .then(({ active, ended }) => [
           ...active.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: false })),
           ...ended.map(r => ({ ...r, siteName: site.name, siteId: site.id, isEnded: true })),
         ])
-        .catch(() => [])
+        .catch(e => {
+          console.error(`[weekly] ${site.name}のサマリー取得に失敗:`, e.message);
+          weeklySiteFetchErrors.push(site.name);
+          return [];
+        })
     ))).flat().filter(r => r.startDate);
 
     async function fetchWithLimit(items, fn, limit = 15) {
@@ -884,6 +948,7 @@ async function loadWeeklySection() {
       }
       return results;
     }
+    let weeklyContainerFetchErrorCount = 0;
     const [containerData, targetData] = await Promise.all([
       fetchWithLimit(allSummaries, async c => {
         try {
@@ -892,13 +957,18 @@ async function loadWeeklySection() {
           const sizeRows = parseSizeRowsFromTable(table, c.startDate);
           return { ...c, bedCount, rows, sizeRows, lot: sheetLot || c.lot || '' };
         } catch (e) {
+          weeklyContainerFetchErrorCount++;
+          console.error(`[weekly] ${c.siteName} ${c.name} のコンテナ取得に失敗:`, e.message);
           return { ...c, bedCount: null, rows: [] };
         }
       }),
       fetchTargetLine(),
     ]);
+    if (weeklyContainerFetchErrorCount > 0) {
+      console.warn(`[weekly] ${weeklyContainerFetchErrorCount}件のコンテナ取得に失敗しました`);
+    }
 
-    weeklyState = { containerData, targetData };
+    weeklyState = { containerData, targetData, siteFetchErrors: weeklySiteFetchErrors };
     await waitForChart();
     renderWeeklySection(section, weeklyState, 'site', 'desc');
 
@@ -912,13 +982,23 @@ async function loadWeeklySection() {
 let drillState = { site: null, person: null, subMode: 'week', sortOrder: 'desc' };
 
 function renderWeeklySection(section, state, groupMode, sortOrder) {
-  const { containerData, targetData } = state;
+  const { containerData, targetData, siteFetchErrors } = state;
   const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
   if (!valid.length) {
     section.innerHTML = `<div class="section-title">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
       <div class="error-msg" style="padding:16px 0">表示できるデータがありません</div>`;
     return;
   }
+
+  // 一部拠点だけデータが取得できていない(シート共有設定の変更・一時的な通信エラー等)場合に
+  // 気づけるよう警告を表示する。色分けの見た目だけでは「特定拠点が全く出ていない」ことに
+  // 気づきにくいため明示する。
+  const sitesWithData = new Set(valid.map(c => c.siteName));
+  const missingSites = SITES.map(s => s.name).filter(name => !sitesWithData.has(name));
+  const weeklyWarningHtml = missingSites.length ? `
+    <div style="background:#3f1d1d;border:1px solid #7f1d1d;color:#fca5a5;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.85rem">
+      ⚠️ ${missingSites.join('・')}のデータを取得できませんでした${siteFetchErrors?.length ? '(シートの取得に失敗しています)' : ''}。ブラウザの開発者ツール(F12)のコンソールにエラー詳細を出力しています。更新ボタンで直らない場合、対象拠点のスプレッドシートの共有設定・シート名をご確認ください。
+    </div>` : '';
 
   if (groupMode === 'drill') {
     renderDrillSection(section, valid, targetData);
@@ -1004,7 +1084,10 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
   const cardsHtml = groupKeys.map((k, idx) => `
     <div class="weekly-chart-card" style="cursor:pointer" onclick="openWeeklyZoom(${idx})">
-      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${groups[k].label}</div>
+        <button onclick="event.stopPropagation();weeklySaveGroupChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
       <div style="display:none">${
         groups[k].containers.map(c => {
           const color = analysisPackColorFor(analysisPackCategoryFor(c)).dark;
@@ -1019,6 +1102,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
 
   section.innerHTML = `
     <div class="section-title" style="margin-bottom:4px">週別 累計収穫量推移<span class="sub">全拠点・栽培開始週別 (g/菌床)</span></div>
+    ${weeklyWarningHtml}
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
       <div class="weekly-legend">${legendHtml}</div>
       ${sortBar}
@@ -1742,11 +1826,15 @@ function renderDrillSection(section, valid, targetData) {
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">${siteCards}</div>
       <div class="weekly-grid" style="margin-top:16px" id="drill-person-charts"></div>`;
     const allPersons = [...new Set(valid.map(c => c.person || '未設定'))].sort();
+    weeklyDrillPersonGroups = allPersons.map(p => ({ label: p, containers: valid.filter(c => (c.person || '未設定') === p) }));
     allPersons.forEach((p, idx) => {
-      const pContainers = valid.filter(c => (c.person || '未設定') === p);
+      const pContainers = weeklyDrillPersonGroups[idx].containers;
       const card = document.createElement('div');
       card.className = 'weekly-chart-card';
-      card.innerHTML = `<div class="weekly-chart-title">${p}</div><div class="chart-wrap" style="height:260px"><canvas id="drillp-${idx}"></canvas></div>`;
+      card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${p}</div>
+        <button onclick="weeklySaveDrillPersonChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div><div class="chart-wrap" style="height:260px"><canvas id="drillp-${idx}"></canvas></div>`;
       document.getElementById('drill-person-charts').appendChild(card);
       buildWeeklyLineChart(`drillp-${idx}`, pContainers, targetData);
     });
@@ -1801,9 +1889,14 @@ function renderDrillSection(section, valid, targetData) {
     if (sortOrd === 'desc') groupKeys.reverse();
   }
 
+  weeklyDrillZoomGroups = groupKeys.map(k => ({ label: groups[k].label, containers: groups[k].containers }));
+
   const cardsHtml = groupKeys.map((k, idx) => `
     <div class="weekly-chart-card">
-      <div class="weekly-chart-title">${groups[k].label}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${groups[k].label}</div>
+        <button onclick="weeklySaveDrillGroupChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
       <div class="chart-wrap" style="height:260px"><canvas id="wd-${idx}"></canvas></div>
     </div>`).join('');
 
@@ -1848,18 +1941,30 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
   const ctx = canvas.getContext('2d');
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const tomorrow = new Date(today.getTime() + 86400000);
+
+  // 行の除外判定: 終了済みコンテナは実際の終了日以降を除外、進行中コンテナは
+  // 「今日より後(=未来日)」の行を除外する。
+  // 加えて、当日の行は日付欄だけ先に用意されていて収穫量(daily)がまだ未入力の
+  // プレースホルダーである可能性があるため、当日かつdaily<=0(未入力扱い)の行も
+  // 除外し、実際に収穫量が入力されるまでは前日の累計値のまま線を伸ばさないようにする。
+  // (当日にdaily>0の実データが入れば通常通りその場で反映される)
+  const isFutureRow = (r, endD) => {
+    if (!r.rowDate) return false;
+    if (endD) return r.rowDate >= endD;
+    if (r.rowDate > today) return true;
+    if (r.rowDate.getTime() === today.getTime() && !(r.daily > 0)) return true;
+    return false;
+  };
 
   // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
   const maxDayInData = containers.reduce((max, c) => {
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || today;
     const fromRows = c.rows.reduce((m, r) => {
-      if (r.rowDate && r.rowDate >= cutoffDate) return m;
+      if (isFutureRow(r, endD)) return m;
       return Math.max(m, Math.round(r.dayNum || 0));
     }, 0);
     const startD = parseDateStr(c.startDate);
-    const fromStart = startD ? Math.round((cutoffDate - startD) / 86400000) : 0;
+    const fromStart = startD ? Math.round((today - startD) / 86400000) : 0;
     return Math.max(max, fromRows, fromStart);
   }, 0);
   const MAX_DAY = Math.max(65, maxDayInData);
@@ -1872,12 +1977,10 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     let cumKg = 0;
     let cutoffDay = 0;
 
-    // ended containers: use endDate as cutoff; active: use today
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || today;
 
     c.rows.forEach(r => {
-      if (r.rowDate && r.rowDate >= cutoffDate) return;
+      if (isFutureRow(r, endD)) return;
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
@@ -1886,9 +1989,10 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     });
 
-    // Fallback for Type C rows without rowDate: use startDate calculation
+    // Fallback: 有効な行が1件もカウントされなかった場合、startDateからの経過日数で代用する
     if (cutoffDay === 0) {
       const startD = parseDateStr(c.startDate);
+      const cutoffDate = endD || today;
       if (startD) {
         cutoffDay = Math.min(Math.round((cutoffDate - startD) / 86400000), MAX_DAY);
       } else {
@@ -1897,7 +2001,11 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     }
 
-    // Forward-fill only up to cutoffDay
+    // Forward-fill only up to cutoffDay(実データがある最後の日まで)。
+    // 当日分の実データがまだ無い場合は、当日の位置まで無理に線を伸ばさず、
+    // 昨日の実データの位置で線が止まったままにする(横に伸ばさない)。
+    // 実データが入力された時点でforEach側が直接cumArr[今日]を設定するため、
+    // その瞬間に即座にその値へ切り替わる。
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
       if (cumArr[i] !== null) { last = cumArr[i]; }
@@ -2287,7 +2395,7 @@ function refreshActiveTab() {
 }
 
 function updateTabVisibility() {
-  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive;
+  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive || savedTabActive;
   document.getElementById('main').style.display = anyAlt ? 'none' : '';
   document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
   document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
@@ -2296,10 +2404,12 @@ function updateTabVisibility() {
   document.getElementById('mekaki-section').style.display = mekakiTabActive ? '' : 'none';
   document.getElementById('analysis-section').style.display = analysisTabActive ? '' : 'none';
   document.getElementById('temp-section').style.display = tempTabActive ? '' : 'none';
+  document.getElementById('saved-section').style.display = savedTabActive ? '' : 'none';
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
   if (analysisTabActive) renderAnalysisTab();
   if (tempTabActive) renderTempTab();
+  if (savedTabActive) renderSavedTab();
   if (weeklyTabActive && weeklyState) {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'site';
@@ -2615,6 +2725,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2640,6 +2751,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = ''; b.style.borderBottomColor = '';
@@ -2659,7 +2771,7 @@ function initTabs() {
   mekakiBtn.addEventListener('click', () => {
     if (mekakiTabActive) return;
     weeklyTabActive = false; lotTabActive = false; scatterTabActive = false;
-    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false; tempTabActive = false;
+    weightTabActive = false; mekakiTabActive = true; analysisTabActive = false; tempTabActive = false; savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = ''; b.style.borderBottomColor = ''; });
     mekakiBtn.classList.add('active');
     mekakiBtn.style.color = '#a78bfa';
@@ -2682,6 +2794,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2708,6 +2821,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = true;
     tempTabActive = false;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2734,6 +2848,7 @@ function initTabs() {
     mekakiTabActive = false;
     analysisTabActive = false;
     tempTabActive = true;
+    savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.remove('active');
       b.style.color = '';
@@ -2746,6 +2861,34 @@ function initTabs() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
   tabsEl.appendChild(tempBtn);
+
+  // 保存グラフ tab
+  const savedBtn = document.createElement('button');
+  savedBtn.id = 'saved-tab-btn';
+  savedBtn.className = 'tab-btn';
+  savedBtn.textContent = '保存グラフ';
+  savedBtn.addEventListener('click', () => {
+    if (savedTabActive) return;
+    weeklyTabActive = false;
+    lotTabActive = false;
+    scatterTabActive = false;
+    weightTabActive = false;
+    mekakiTabActive = false;
+    analysisTabActive = false;
+    tempTabActive = false;
+    savedTabActive = true;
+    tabsEl.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.remove('active');
+      b.style.color = '';
+      b.style.borderBottomColor = '';
+    });
+    savedBtn.classList.add('active');
+    savedBtn.style.color = '#facc15';
+    savedBtn.style.borderBottomColor = '#facc15';
+    updateTabVisibility();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  tabsEl.appendChild(savedBtn);
 }
 
 function closeDetail() {
@@ -3187,17 +3330,36 @@ async function ensureMekakiRows() {
   return mekakiRows;
 }
 
+let mekakiViewMode = 'table'; // 'table' | 'weekly'
+let mekakiWeeklyCharts = [];
+let mekakiWeeklyGroups = null;
+
+function mekakiSetViewMode(mode) {
+  mekakiViewMode = mode;
+  renderMekakiTab();
+}
+
+function mekakiModeBarHtml() {
+  return `<div class="weekly-sort-bar" style="margin-bottom:12px">
+    <button class="sort-btn${mekakiViewMode === 'table' ? ' active' : ''}" onclick="mekakiSetViewMode('table')">一覧</button>
+    <button class="sort-btn${mekakiViewMode === 'weekly' ? ' active' : ''}" onclick="mekakiSetViewMode('weekly')">週別グラフ</button>
+  </div>`;
+}
+
 async function renderMekakiTab() {
   const section = document.getElementById('mekaki-section');
   if (!section) return;
-  if (mekakiRows) { renderMekakiSection(section); return; }
+  if (mekakiRows) {
+    if (mekakiViewMode === 'weekly') renderMekakiWeeklySection(section); else renderMekakiSection(section);
+    return;
+  }
 
   section.innerHTML = `<div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
 
   try {
     await ensureMekakiRows();
-    renderMekakiSection(section);
+    if (mekakiViewMode === 'weekly') renderMekakiWeeklySection(section); else renderMekakiSection(section);
   } catch(e) {
     section.innerHTML = `<div style="color:#f87171;padding:16px">取得エラー: ${e.message}</div>`;
   }
@@ -3206,6 +3368,7 @@ async function renderMekakiTab() {
 function renderMekakiSection(section) {
   section.innerHTML = `
     <div class="section-title">芽かき量<span class="sub">拠点別 芽かき実績</span></div>
+    ${mekakiModeBarHtml()}
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:0.82rem;min-width:900px">
         <thead>
@@ -3229,6 +3392,78 @@ function renderMekakiSection(section) {
       </table>
     </div>`;
   mekakiRenderTable();
+}
+
+// 週別(日〜土)にグループ化し、各週のコンテナ別芽かき量(2520換算)をまとめる
+function mekakiBuildWeeklyGroups() {
+  const groups = {};
+  mekakiRows.forEach(r => {
+    if (!r.startDate || r.converted == null) return;
+    const week = getSunSatWeek(`${r.startDate.getFullYear()}/${r.startDate.getMonth() + 1}/${r.startDate.getDate()}`);
+    if (!week) return;
+    (groups[week.key] ||= { label: week.label, rows: [] }).rows.push(r);
+  });
+  const keys = Object.keys(groups).sort().reverse(); // 新しい順(週別累計タブのデフォルトに合わせる)
+  return keys.map(k => groups[k]);
+}
+
+// 分析タブの芽かき量グラフと同じ拠点別配色(自社菌床は蛍光色)で塗り分ける
+function mekakiWeeklyChartConfig(rows) {
+  const categories = rows.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
+  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
+  return {
+    type: 'bar',
+    data: {
+      labels: rows.map(r => `${r.siteName}${r.no}`),
+      datasets: [
+        { label: '芽かき量(kg・2520換算)', data: rows.map(r => r.converted), backgroundColor: packColors.map(c => c.dark + 'cc') },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: tooltipDefaults },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { min: 0, max: 400, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+// 芽かき量タブの各週カード用「保存」ボタンの入口。そのままの拠点別配色データを凍結保存する
+function mekakiSaveWeeklyChart(idx) {
+  if (!mekakiWeeklyGroups || !mekakiWeeklyGroups[idx]) return;
+  const group = mekakiWeeklyGroups[idx];
+  const frozenRows = group.rows.map(r => ({ siteName: r.siteName, no: r.no, lot: r.lot, converted: r.converted }));
+  savedOpenPicker({ kind: 'mekaki-weekly', title: `芽かき量: ${group.label}`, items: frozenRows });
+}
+
+function renderMekakiWeeklySection(section) {
+  mekakiWeeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  mekakiWeeklyCharts = [];
+
+  const groups = mekakiBuildWeeklyGroups();
+  mekakiWeeklyGroups = groups;
+
+  const cardsHtml = groups.length ? groups.map((g, idx) => `
+    <div class="weekly-chart-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${g.label}<span class="sub">(${g.rows.length}コンテナ)</span></div>
+        <button onclick="mekakiSaveWeeklyChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
+      <div class="chart-wrap" style="height:260px"><canvas id="mekaki-week-${idx}"></canvas></div>
+    </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px">芽かき量<span class="sub">週別・コンテナ別 芽かき実績(2520換算kg)</span></div>
+    ${mekakiModeBarHtml()}${analysisPackLegendHtml()}
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  groups.forEach((g, idx) => {
+    const canvas = document.getElementById(`mekaki-week-${idx}`);
+    if (canvas) mekakiWeeklyCharts.push(new Chart(canvas, mekakiWeeklyChartConfig(g.rows)));
+  });
 }
 
 // ── 菌床重量タブ ──────────────────────────────────────────────────────────────
@@ -3422,6 +3657,23 @@ function drawWeightCharts(result) {
   });
 }
 
+let weightViewMode = 'site'; // 'site' | 'weekly'
+let weightWeeklyCharts = [];
+let weightWeeklyGroups = null;
+
+function weightModeBarHtml() {
+  return `<div class="weekly-sort-bar" style="margin-bottom:12px">
+    <button class="sort-btn${weightViewMode === 'site' ? ' active' : ''}" onclick="weightSetViewMode('site')">拠点別</button>
+    <button class="sort-btn${weightViewMode === 'weekly' ? ' active' : ''}" onclick="weightSetViewMode('weekly')">週別グラフ</button>
+  </div>`;
+}
+
+function weightSetViewMode(mode) {
+  weightViewMode = mode;
+  const section = document.getElementById('weight-section');
+  if (mode === 'weekly') renderWeightWeeklySection(section); else renderWeightSubTabs();
+}
+
 function renderWeightSubTabs() {
   const section = document.getElementById('weight-section');
   if (!section || !weightData) return;
@@ -3437,6 +3689,7 @@ function renderWeightSubTabs() {
 
   section.innerHTML = `
     <div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
+    ${weightModeBarHtml()}
     <div style="display:flex;gap:4px;border-bottom:1px solid #2e3148;margin-bottom:16px">${subTabHtml}</div>
     <div id="weight-content">${renderWeightSiteContent(weightData[weightActiveSite])}</div>`;
   requestAnimationFrame(() => drawWeightCharts(weightData[weightActiveSite]));
@@ -3445,6 +3698,136 @@ function renderWeightSubTabs() {
 function weightSetSite(idx) {
   weightActiveSite = idx;
   renderWeightSubTabs();
+}
+
+// 各コンテナの計測値(measurements)を平均して、菌床初期重量・吸水量を1つの値にまとめる
+// (分析タブのbuildAnalysisDatasetにおける菌床重量の集計と同じ考え方)
+function weightAverageMeasurements(measurements) {
+  const befores = (measurements || []).map(m => m.before).filter(v => v != null);
+  const absorbs = (measurements || [])
+    .filter(m => m.before != null && m.after != null)
+    .map(m => Math.max(0, m.after - m.before));
+  return {
+    weightBefore: befores.length ? +(befores.reduce((a, b) => a + b, 0) / befores.length).toFixed(1) : null,
+    weightAbsorb: absorbs.length ? +(absorbs.reduce((a, b) => a + b, 0) / absorbs.length).toFixed(1) : null,
+  };
+}
+
+// 週別累計タブと同じ栽培開始週(日〜土)でグルーピングし、各週のコンテナ別菌床重量をまとめる
+function weightBuildWeeklyGroups() {
+  const groups = {};
+  (weightData || []).forEach(({ site, containers }) => {
+    (containers || []).forEach(c => {
+      if (!c.startDate) return;
+      const { weightBefore, weightAbsorb } = weightAverageMeasurements(c.measurements);
+      if (weightBefore == null && weightAbsorb == null) return;
+      const week = getSunSatWeek(`${c.startDate.getFullYear()}/${c.startDate.getMonth() + 1}/${c.startDate.getDate()}`);
+      if (!week) return;
+      (groups[week.key] ||= { label: week.label, rows: [] }).rows.push({
+        siteName: site.name, containerNo: c.containerNo, lot: c.lot, weightBefore, weightAbsorb,
+      });
+    });
+  });
+  const keys = Object.keys(groups).sort().reverse(); // 新しい順(週別累計タブのデフォルトに合わせる)
+  return keys.map(k => groups[k]);
+}
+
+// 菌床重量タブの拠点別配色(WEIGHT_SITESの色をそのまま濃色=初期重量とし、淡色=吸水量を添える)。
+// 自社菌床はいなべ/群馬/南丹とは別シート由来のため独立したカテゴリとして扱う。
+const WEIGHT_WEEKLY_COLORS = {
+  'いなべ':   { dark: '#38bdf8', light: '#93c5fd' },
+  '群馬':     { dark: '#f97316', light: '#fdba74' },
+  '南丹':     { dark: '#34d399', light: '#86efac' },
+  '自社菌床': { dark: '#f59e0b', light: '#fcd34d' },
+};
+const WEIGHT_WEEKLY_DEFAULT_COLOR = { dark: '#94a3b8', light: '#cbd5e1' };
+
+function weightWeeklyColorFor(siteName) {
+  return WEIGHT_WEEKLY_COLORS[siteName] || WEIGHT_WEEKLY_DEFAULT_COLOR;
+}
+
+function weightWeeklyLegendHtml() {
+  const chips = Object.entries(WEIGHT_WEEKLY_COLORS).map(([name, { dark, light }]) => `
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:0.75rem;color:#94a3b8">
+      <span style="display:inline-flex">
+        <span style="width:10px;height:10px;background:${dark};display:inline-block;border-radius:2px 0 0 2px"></span>
+        <span style="width:10px;height:10px;background:${light};display:inline-block;border-radius:0 2px 2px 0"></span>
+      </span>${name}
+    </span>`).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#13151f;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <span style="font-size:0.75rem;color:#64748b;font-weight:600">拠点(濃色=初期重量/淡色=吸水量):</span>${chips}
+  </div>`;
+}
+
+function weightWeeklyChartConfig(rows) {
+  const colors = rows.map(r => weightWeeklyColorFor(r.siteName));
+  const tickColor = ctx => colors[ctx.index]?.dark || '#8892a4';
+  return {
+    data: {
+      labels: rows.map(r => `${r.siteName}${r.containerNo}`),
+      datasets: [
+        { type: 'bar', label: '散水前重量(初期重量)', data: rows.map(r => r.weightBefore), backgroundColor: colors.map(c => c.dark + 'cc'), stack: 's' },
+        { type: 'bar', label: '吸水量', data: rows.map(r => r.weightAbsorb), backgroundColor: colors.map(c => c.light + 'cc'), stack: 's' },
+      ],
+    },
+    plugins: [weightStackValuePlugin],
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toLocaleString() : '—'}g`,
+            footer: items => {
+              const total = items.reduce((s, i) => s + (i.parsed.y || 0), 0);
+              return `散水後: ${Math.round(total).toLocaleString()}g`;
+            },
+          },
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0', footerColor: '#6ee7b7',
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v.toLocaleString()}` }, grid: { color: '#1e2235' } },
+      },
+    },
+  };
+}
+
+// 菌床重量タブの各週カード用「保存」ボタンの入口
+function weightSaveWeeklyChart(idx) {
+  if (!weightWeeklyGroups || !weightWeeklyGroups[idx]) return;
+  const group = weightWeeklyGroups[idx];
+  savedOpenPicker({ kind: 'weight-weekly', title: `菌床重量: ${group.label}`, items: group.rows.map(r => ({ ...r })) });
+}
+
+function renderWeightWeeklySection(section) {
+  if (!section) return;
+  weightWeeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weightWeeklyCharts = [];
+
+  const groups = weightBuildWeeklyGroups();
+  weightWeeklyGroups = groups;
+
+  const cardsHtml = groups.length ? groups.map((g, idx) => `
+    <div class="weekly-chart-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="weekly-chart-title" style="margin-bottom:0">${g.label}<span class="sub">(${g.rows.length}コンテナ)</span></div>
+        <button onclick="weightSaveWeeklyChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
+      <div class="chart-wrap" style="height:260px"><canvas id="weight-week-${idx}"></canvas></div>
+    </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
+
+  section.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px">菌床重量<span class="sub">週別・コンテナ別 菌床重量(散水前重量+吸水量・g)</span></div>
+    ${weightModeBarHtml()}${weightWeeklyLegendHtml()}
+    <div class="weekly-grid">${cardsHtml}</div>`;
+
+  groups.forEach((g, idx) => {
+    const canvas = document.getElementById(`weight-week-${idx}`);
+    if (canvas) weightWeeklyCharts.push(new Chart(canvas, weightWeeklyChartConfig(g.rows)));
+  });
 }
 
 async function ensureWeightData() {
@@ -3463,13 +3846,16 @@ async function ensureWeightData() {
 async function renderWeightTab() {
   const section = document.getElementById('weight-section');
   if (!section) return;
-  if (weightData) { renderWeightSubTabs(); return; }
+  if (weightData) {
+    if (weightViewMode === 'weekly') renderWeightWeeklySection(section); else renderWeightSubTabs();
+    return;
+  }
 
   section.innerHTML = `<div class="section-title">菌床重量<span class="sub">2025.10〜 散水前後重量 (g)</span></div>
     <div style="padding:16px;color:#94a3b8">データ読み込み中...</div>`;
 
   await ensureWeightData();
-  renderWeightSubTabs();
+  if (weightViewMode === 'weekly') renderWeightWeeklySection(section); else renderWeightSubTabs();
 }
 
 // ── 分析タブ ──────────────────────────────────────────────────────────────
@@ -3838,16 +4224,25 @@ function renderAnalysisCorrelationView(items) {
       </div>
     </div>
     <div style="background:#13151f;border-radius:12px;padding:16px">
-      <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">相関図</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">相関図</div>
+        ${analysisSaveBtnHtml('correlation')}
+      </div>
       <div style="position:relative;height:480px;cursor:zoom-in" onclick="analysisOpenZoom('correlation')"><canvas id="analysis-correlation-canvas"></canvas></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-top:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">① 栽培前半(1〜20日)の相関図</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">① 栽培前半(1〜20日)の相関図</div>
+          ${analysisSaveBtnHtml('correlationFirst')}
+        </div>
         <div style="position:relative;height:360px;cursor:zoom-in" onclick="analysisOpenZoom('correlationFirst')"><canvas id="analysis-correlationFirst-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">② 栽培後半(21〜60日)の相関図</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">② 栽培後半(21〜60日)の相関図</div>
+          ${analysisSaveBtnHtml('correlationSecond')}
+        </div>
         <div style="position:relative;height:360px;cursor:zoom-in" onclick="analysisOpenZoom('correlationSecond')"><canvas id="analysis-correlationSecond-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4221,45 +4616,66 @@ function renderAnalysisDateView() {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 コンテナ別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 コンテナ別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('dailycontainer')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailycontainer')"><canvas id="analysis-dailycontainer-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
           <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(コンテナ別内訳・kg)</div>
-          <div style="display:flex;gap:4px" onclick="event.stopPropagation()">${sizeButtons}</div>
+          <div style="display:flex;align-items:center;gap:4px" onclick="event.stopPropagation()">${sizeButtons}${analysisSaveBtnHtml('dailysize')}</div>
         </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('dailysize')"><canvas id="analysis-dailysize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
           <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">構成比パレート図(コンテナ別)</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">${paretoSizeButtons}</div>
+          <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">${paretoSizeButtons}${analysisSaveBtnHtml('paretocontainer')}</div>
         </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretocontainer')"><canvas id="analysis-paretocontainer-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">構成比パレート図(サイズ別)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">構成比パレート図(サイズ別)</div>
+          ${analysisSaveBtnHtml('paretosize')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('paretosize')"><canvas id="analysis-paretosize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">該当期間 サイズ別収穫量(コンテナ別・kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">該当期間 サイズ別収穫量(コンテナ別・kg)</div>
+          ${analysisSaveBtnHtml('periodsize')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('periodsize')"><canvas id="analysis-periodsize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 サイズ別収穫量(全コンテナ合計・kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 サイズ別収穫量(全コンテナ合計・kg)</div>
+          ${analysisSaveBtnHtml('datesize')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('datesize')"><canvas id="analysis-datesize-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫前半(栽培1〜20日) サイズ別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">収穫前半(栽培1〜20日) サイズ別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('firsthalf')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('firsthalf')"><canvas id="analysis-firsthalf-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫後半(栽培21日〜) サイズ別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">収穫後半(栽培21日〜) サイズ別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('secondhalf')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('secondhalf')"><canvas id="analysis-secondhalf-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">日別 栽培日数帯別収穫量(kg)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">日別 栽培日数帯別収穫量(kg)</div>
+          ${analysisSaveBtnHtml('daybucket')}
+        </div>
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('daybucket')"><canvas id="analysis-daybucket-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4327,6 +4743,9 @@ async function renderAnalysisTab() {
   // 相関図は「栽培日数」「栽培開始日」フィルターで栽培期間を絞れるよう、
   // フィルターから外れた選択(hiddenSelected)は含めない(他タブは選択維持のため含める)
   const chartItems = analysisSubTab === 'correlation' ? selected : allSelected;
+  // グラフの横軸は「左が古い・右が新しい」の一般的な並びにする。
+  // 左側の候補一覧は新しい順のままにしておきたいため、グラフ表示用に別途昇順で並べ替える。
+  const chartOrderedSelected = [...allSelected].sort((a, b) => (parseDateStr(a.startDate) || 0) - (parseDateStr(b.startDate) || 0));
 
   const lotColorMap = allSelected.length ? analysisBuildLotColorMap(allSelected) : {};
   const rightHtml = !allSelected.length
@@ -4335,8 +4754,8 @@ async function renderAnalysisTab() {
       : analysisSubTab === 'correlation'
         ? (chartItems.length ? renderAnalysisCorrelationView(chartItems)
           : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">現在の栽培期間フィルターに一致する選択コンテナがありません</div>`)
-      : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrendView(allSelected)
-      : renderAnalysisComparison(allSelected, lotColorMap));
+      : analysisSubTab === 'weighttrend' ? renderAnalysisWeightTrendView(chartOrderedSelected)
+      : renderAnalysisComparison(chartOrderedSelected, lotColorMap));
 
   const subTabHtml = [
     { key: 'container', label: 'コンテナ別' },
@@ -4396,7 +4815,8 @@ async function renderAnalysisTab() {
       <div>${rightHtml}</div>
     </div>`;
 
-  if (chartItems.length) drawAnalysisCharts(chartItems, lotColorMap);
+  const drawItems = analysisSubTab === 'correlation' ? chartItems : chartOrderedSelected;
+  if (drawItems.length) drawAnalysisCharts(drawItems, lotColorMap);
 }
 
 function renderAnalysisComparison(items, lotColorMap) {
@@ -4438,28 +4858,46 @@ function renderAnalysisComparison(items, lotColorMap) {
     ${analysisLotLegendHtml(lotColorMap)}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">収穫量・パック品率</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">収穫量・パック品率</div>
+          ${analysisSaveBtnHtml('harvest')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('harvest')"><canvas id="analysis-harvest-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量(初期重量+吸水量)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">菌床重量(初期重量+吸水量)</div>
+          ${analysisSaveBtnHtml('weight')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('weight')"><canvas id="analysis-weight-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">芽かき量</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">芽かき量</div>
+          ${analysisSaveBtnHtml('mekaki')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('mekaki')"><canvas id="analysis-mekaki-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">パック品収穫量</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">パック品収穫量</div>
+          ${analysisSaveBtnHtml('pack')}
+        </div>
         ${analysisPackLegendHtml()}
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('pack')"><canvas id="analysis-pack-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ別収穫量(g/菌床)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">サイズ別収穫量(g/菌床)</div>
+          ${analysisSaveBtnHtml('size')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('size')"><canvas id="analysis-size-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">サイズ比率</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">サイズ比率</div>
+          ${analysisSaveBtnHtml('ratio')}
+        </div>
         <div style="position:relative;height:260px;cursor:zoom-in" onclick="analysisOpenZoom('ratio')"><canvas id="analysis-ratio-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4469,16 +4907,27 @@ function renderAnalysisWeightTrendView(items) {
   return `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">菌床重量傾向(拠点別)</div>
-        ${analysisPackLegendHtml()}
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">菌床重量傾向(拠点別)</div>
+          ${analysisSaveBtnHtml('weighttrend')}
+        </div>
+        ${analysisWeightPackLegendHtml()}
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weighttrend')"><canvas id="analysis-weighttrend-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">月別 菌床重量平均(初期重量+吸水量)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">月別 菌床重量平均(拠点別・初期重量+吸水量)</div>
+          ${analysisSaveBtnHtml('weightmonthly')}
+        </div>
+        ${analysisWeightPackLegendHtml()}
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightmonthly')"><canvas id="analysis-weightmonthly-canvas"></canvas></div>
       </div>
       <div style="background:#13151f;border-radius:12px;padding:16px">
-        <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">週別 菌床重量平均(初期重量+吸水量)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">週別 菌床重量平均(拠点別・初期重量+吸水量)</div>
+          ${analysisSaveBtnHtml('weightweekly')}
+        </div>
+        ${analysisWeightPackLegendHtml()}
         <div style="position:relative;height:280px;cursor:zoom-in" onclick="analysisOpenZoom('weightweekly')"><canvas id="analysis-weightweekly-canvas"></canvas></div>
       </div>
     </div>`;
@@ -4589,23 +5038,30 @@ function analysisWeightTrendChartConfig(items) {
 }
 
 // 月別/週別の菌床重量平均グラフの共通処理: グループごとに初期重量・吸水量の平均を積み上げる
+// 期間(月・週)ごと×拠点別に、初期重量・吸水量の平均をグループ化した積み上げ棒グラフ。
+// 拠点(カテゴリ)ごとにstack idを分けることで、期間内で拠点別のグループ棒として並べる。
 function analysisWeightGroupChartConfig(labels, groupItemsList) {
-  const beforeAvgs = groupItemsList.map(g => analysisAvg(g.map(c => c.weightBefore)));
-  const absorbAvgs = groupItemsList.map(g => analysisAvg(g.map(c => c.weightAbsorb)));
+  const categoriesSet = new Set();
+  groupItemsList.forEach(items => items.forEach(c => categoriesSet.add(analysisPackCategoryFor(c))));
+  const categories = Object.keys(ANALYSIS_PACK_CATEGORY_COLORS).filter(cat => categoriesSet.has(cat));
+
+  const datasets = [];
+  categories.forEach(cat => {
+    const color = analysisPackColorFor(cat);
+    const beforeData = groupItemsList.map(items => analysisAvg(items.filter(c => analysisPackCategoryFor(c) === cat).map(c => c.weightBefore)));
+    const absorbData = groupItemsList.map(items => analysisAvg(items.filter(c => analysisPackCategoryFor(c) === cat).map(c => c.weightAbsorb)));
+    datasets.push({ type: 'bar', label: `${cat} 初期重量平均(g)`, data: beforeData, backgroundColor: color.dark + 'cc', stack: `s-${cat}`, order: 1 });
+    datasets.push({ type: 'bar', label: `${cat} 吸水量平均(g)`, data: absorbData, backgroundColor: color.light + 'cc', stack: `s-${cat}`, order: 1 });
+  });
+
   return {
-    data: {
-      labels,
-      datasets: [
-        { type: 'bar', label: '菌床初期重量 平均(g)', data: beforeAvgs, backgroundColor: '#60a5facc', stack: 's', order: 1 },
-        { type: 'bar', label: '吸水量 平均(g)', data: absorbAvgs, backgroundColor: '#fa8072cc', stack: 's', order: 1 },
-      ],
-    },
+    data: { labels, datasets },
     plugins: [weightStackValuePlugin],
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      plugins: { legend: { display: false }, tooltip: tooltipDefaults },
       scales: {
-        x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
+        x: { ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { stacked: true, min: 0, max: 2500, ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
@@ -4639,13 +5095,17 @@ function analysisWeightWeeklyChartConfig(items) {
   return analysisWeightGroupChartConfig(labels, keys.map(k => groups[k].items));
 }
 
-function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
+// 芽かき量: 収穫量(パック品収穫量)と同じ拠点別配色(自社菌床は蛍光色)で塗り分ける
+function analysisMekakiChartConfig(items) {
+  const categories = items.map(analysisPackCategoryFor);
+  const packColors = categories.map(cat => analysisPackColorFor(cat));
   const mekakiValues = items.map(c => c.mekaki);
+  const tickColor = ctx => packColors[ctx.index]?.dark || '#8892a4';
   return {
     data: {
       labels: items.map(c => `${c.siteName}${c.no}`),
       datasets: [
-        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: lotColors.map(c => c + 'cc'), yAxisID: 'y', order: 1 },
+        { type: 'bar', label: '芽かき量(kg・2520換算)', data: mekakiValues, backgroundColor: packColors.map(c => c.dark + 'cc'), yAxisID: 'y', order: 1 },
         analysisAvgLineDataset('芽かき量 平均', analysisAvg(mekakiValues), '#a78bfa', 'y', items.length),
       ],
     },
@@ -4653,7 +5113,7 @@ function analysisMekakiChartConfig(items, lotColors, lotTickColor) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
       scales: {
-        x: { ticks: { color: lotTickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
+        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: '#1e2235' } },
         y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 } }, grid: { color: '#1e2235' } },
       },
     },
@@ -4745,6 +5205,20 @@ function analysisPackLegendHtml() {
   </div>`;
 }
 
+// 菌床重量系グラフ用: 拠点・菌床ロットの色分け(濃色=初期重量/淡色=吸水量)
+function analysisWeightPackLegendHtml() {
+  const chips = Object.entries(ANALYSIS_PACK_CATEGORY_COLORS).map(([cat, { dark, light }]) => `
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:0.75rem;color:#94a3b8">
+      <span style="display:inline-flex">
+        <span style="width:10px;height:10px;background:${dark};display:inline-block;border-radius:2px 0 0 2px"></span>
+        <span style="width:10px;height:10px;background:${light};display:inline-block;border-radius:0 2px 2px 0"></span>
+      </span>${cat}
+    </span>`).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#13151f;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <span style="font-size:0.75rem;color:#64748b;font-weight:600">拠点・菌床ロット(濃色=初期重量/淡色=吸水量):</span>${chips}
+  </div>`;
+}
+
 function analysisPackChartConfig(items) {
   const categories = items.map(analysisPackCategoryFor);
   const packColors = categories.map(cat => analysisPackColorFor(cat));
@@ -4787,10 +5261,10 @@ function analysisPackChartConfig(items) {
 const ANALYSIS_CHART_CONFIGS = {
   harvest: { title: '収穫量・パック品率', build: analysisHarvestChartConfig, legend: analysisLotLegendHtml },
   weight: { title: '菌床重量(初期重量+吸水量)', build: analysisWeightChartConfig, legend: analysisLotLegendHtml },
-  weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisPackLegendHtml },
-  weightmonthly: { title: '月別 菌床重量平均', build: analysisWeightMonthlyChartConfig },
-  weightweekly: { title: '週別 菌床重量平均', build: analysisWeightWeeklyChartConfig },
-  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisLotLegendHtml },
+  weighttrend: { title: '菌床重量傾向(拠点別)', build: analysisWeightTrendChartConfig, legend: analysisWeightPackLegendHtml },
+  weightmonthly: { title: '月別 菌床重量平均(拠点別)', build: analysisWeightMonthlyChartConfig, legend: analysisWeightPackLegendHtml },
+  weightweekly: { title: '週別 菌床重量平均(拠点別)', build: analysisWeightWeeklyChartConfig, legend: analysisWeightPackLegendHtml },
+  mekaki: { title: '芽かき量', build: analysisMekakiChartConfig, legend: analysisPackLegendHtml },
   pack: { title: 'パック品収穫量', build: analysisPackChartConfig, legend: analysisPackLegendHtml },
   size: { title: 'サイズ別収穫量(g/菌床)', build: analysisSizeChartConfig, legend: analysisLotLegendHtml },
   ratio: { title: 'サイズ比率', build: analysisRatioChartConfig, legend: analysisLotLegendHtml },
@@ -4840,6 +5314,24 @@ function analysisOpenZoom(key) {
 function analysisCloseZoom() {
   document.getElementById('analysis-zoom-modal').style.display = 'none';
   if (analysisZoomChartInstance) { analysisZoomChartInstance.destroy(); analysisZoomChartInstance = null; }
+}
+
+function analysisSaveBtnHtml(key) {
+  return `<button onclick="event.stopPropagation();analysisSaveChart('${key}')" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>`;
+}
+
+// 分析タブの各グラフ用「保存」ボタンの入口。表示中のitems/lotColorMapをそのまま凍結してコレクション選択モーダルを開く
+function analysisSaveChart(key) {
+  if (!analysisZoomState) return;
+  const cfg = ANALYSIS_CHART_CONFIGS[key];
+  if (!cfg) return;
+  savedOpenPicker({
+    kind: 'analysis',
+    configKey: key,
+    title: cfg.title,
+    items: JSON.parse(JSON.stringify(analysisZoomState.items)),
+    lotColorMap: JSON.parse(JSON.stringify(analysisZoomState.lotColorMap)),
+  });
 }
 
 // ── 温度分析タブ ──────────────────────────────────────────────────────────────
@@ -4980,8 +5472,18 @@ function tempFormatDayHour(x) {
   return `${day}日${hour}:00`;
 }
 
-function tempChartConfig(items) {
-  const datasets = items.map(c => tempLineDataset(c)).filter(d => d.data.length);
+// 保存グラフ用: 保存時点でtempFilterPoints済みのpointsをそのまま使い、再フィルタしない
+function tempLineDatasetFrozen(c) {
+  const color = tempColorFor(c);
+  return {
+    type: 'line', label: `${c.siteName}${c.no}`,
+    data: c.points.map(p => ({ x: p.x, y: p.temp })),
+    borderColor: color, backgroundColor: color, pointRadius: 0, borderWidth: 1.5, tension: 0.15,
+  };
+}
+
+function tempChartConfig(items, frozen = false) {
+  const datasets = items.map(c => (frozen ? tempLineDatasetFrozen(c) : tempLineDataset(c))).filter(d => d.data.length);
   return {
     type: 'line',
     data: { datasets },
@@ -5128,7 +5630,10 @@ async function renderTempTab() {
     bodyHtml = groups.length
       ? `<div class="weekly-grid">${groups.map((g, idx) => `
         <div class="weekly-chart-card" style="cursor:zoom-in" onclick="tempOpenZoomGroup(${idx})">
-          <div class="weekly-chart-title">${g.label}<span class="sub">(${g.items.length}コンテナ)</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div class="weekly-chart-title" style="margin-bottom:0">${g.label}<span class="sub">(${g.items.length}コンテナ)</span></div>
+            <button onclick="event.stopPropagation();tempSaveGroupChart(${idx})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+          </div>
           <div class="chart-wrap" style="height:260px"><canvas id="temp-group-${idx}"></canvas></div>
         </div>`).join('')}</div>`
       : `<div style="padding:24px;color:#64748b;font-size:0.85rem">対象データがありません</div>`;
@@ -5173,7 +5678,10 @@ async function renderTempTab() {
         <div>
           ${tempSelected.size ? `<button class="sort-btn" onclick="tempClearSelection()" style="margin-bottom:10px">選択解除 (${tempSelected.size})</button>` : ''}
           <div style="background:#13151f;border-radius:12px;padding:16px">
-            <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600;margin-bottom:10px">温度推移</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+              <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">温度推移</div>
+              ${selected.length ? `<button onclick="tempSaveContainerChart()" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>` : ''}
+            </div>
             ${analysisPackLegendHtml()}
             ${selected.length
               ? `<div style="position:relative;height:480px;cursor:zoom-in" onclick="tempOpenZoomContainer()"><canvas id="temp-container-canvas"></canvas></div>`
@@ -5215,6 +5723,578 @@ function tempCloseZoom() {
   if (tempZoomChartInstance) { tempZoomChartInstance.destroy(); tempZoomChartInstance = null; }
 }
 
+// 温度分析タブの各グラフ用「保存」ボタンの入口。現在のtempFiltersをその場で焼き込んで凍結保存する
+function tempSaveChart(title, items) {
+  const frozenItems = items.map(c => ({
+    key: c.key, siteName: c.siteName, no: c.no, name: c.name, startDate: c.startDate, lot: c.lot,
+    points: tempFilterPoints(c.points).map(p => ({ x: p.x, temp: p.temp })),
+  }));
+  savedOpenPicker({ kind: 'temp', title: `温度分析: ${title}`, items: frozenItems });
+}
+
+function tempSaveGroupChart(idx) {
+  if (!tempCurrentGroups || !tempCurrentGroups[idx]) return;
+  tempSaveChart(tempCurrentGroups[idx].label, tempCurrentGroups[idx].items);
+}
+
+function tempSaveContainerChart() {
+  if (!tempCurrentSelected || !tempCurrentSelected.length) return;
+  tempSaveChart('コンテナ指定比較', tempCurrentSelected);
+}
+
+// ── 保存グラフタブ ────────────────────────────────────────────────────────────
+// 分析タブ・温度分析タブの各グラフの📌ボタンから凍結保存されたスナップショットを、
+// 名前付きコレクション単位でまとめて閲覧・共有できるようにする。
+
+const SAVED_COLLECTIONS_KEY = 'savedChartCollections';
+
+function savedCollectionsLoad() {
+  try {
+    const raw = localStorage.getItem(SAVED_COLLECTIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+
+// 保存に成功すればtrue、失敗(主に容量超過)すればfalseを返す。
+// 呼び出し側は失敗時に必ずロールバック+ユーザーへの通知を行うこと(でないと「見た目は保存済みだが
+// リロードすると消えている」という事故につながる)。
+function savedCollectionsPersist() {
+  try {
+    localStorage.setItem(SAVED_COLLECTIONS_KEY, JSON.stringify(savedCollections));
+    return true;
+  } catch (e) {
+    // 容量超過時は、再取得可能なgvizキャッシュ(5分間の一時キャッシュ)を解放して1回だけ再試行する
+    try {
+      clearGvizCache();
+      localStorage.setItem(SAVED_COLLECTIONS_KEY, JSON.stringify(savedCollections));
+      return true;
+    } catch (e2) {
+      console.error('[savedCollectionsPersist] failed', e2);
+      return false;
+    }
+  }
+}
+
+function savedGenId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+let savedCollections = savedCollectionsLoad();
+let savedActiveCollectionId = savedCollections[0]?.id || null;
+let savedTabActive = false;
+let savedTabCharts = [];
+let savedPickerPending = null; // 保存待ちのスナップショット { kind, configKey?, title, items, lotColorMap? }
+
+function savedToast(message) {
+  const el = document.createElement('div');
+  el.textContent = message;
+  el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1d27;border:1px solid #2e3148;color:#e2e8f0;padding:10px 18px;border-radius:8px;font-size:0.85rem;z-index:2000;box-shadow:0 4px 16px rgba(0,0,0,0.4)';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
+// 分析/温度分析タブの📌ボタンの共通入口。どのコレクションに保存するかをモーダルで選ばせる
+function savedOpenPicker(snapshot) {
+  savedPickerPending = snapshot;
+  const listEl = document.getElementById('saved-picker-list');
+  listEl.innerHTML = savedCollections.length
+    ? savedCollections.map(col => `
+      <button class="sort-btn" style="display:block;width:100%;text-align:left;margin-bottom:6px"
+        onclick="savedPickerConfirm('${col.id}')">${col.name}<span style="color:#64748b;font-size:0.75rem"> (${col.charts.length}件)</span></button>`).join('')
+    : `<div style="color:#64748b;font-size:0.82rem;padding:6px 0 12px">まだコレクションがありません。下から新規作成してください。</div>`;
+  document.getElementById('saved-picker-newname').value = '';
+  document.getElementById('saved-picker-modal').style.display = 'flex';
+}
+
+function savedPickerClose() {
+  document.getElementById('saved-picker-modal').style.display = 'none';
+  savedPickerPending = null;
+}
+
+function savedPickerConfirm(collectionId, isNewCollection = false) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col || !savedPickerPending) return;
+  col.charts.push({ id: savedGenId(), savedAt: new Date().toISOString(), ...savedPickerPending });
+  if (!savedCollectionsPersist()) {
+    // 保存に失敗したのに見た目だけ保存済みになる事故を防ぐため、メモリ上の変更も取り消す
+    col.charts.pop();
+    if (isNewCollection) savedCollections = savedCollections.filter(c => c.id !== collectionId);
+    savedPickerClose();
+    savedToast('保存に失敗しました(ブラウザの保存容量が上限です)。不要な保存グラフを削除してからお試しください');
+    if (savedTabActive) renderSavedTab();
+    return;
+  }
+  savedActiveCollectionId = col.id;
+  savedPickerClose();
+  savedToast(`「${col.name}」に保存しました`);
+  if (savedTabActive) renderSavedTab();
+}
+
+function savedPickerCreateAndConfirm() {
+  const input = document.getElementById('saved-picker-newname');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  const col = { id: savedGenId(), name, createdAt: new Date().toISOString(), charts: [] };
+  savedCollections.push(col);
+  savedPickerConfirm(col.id, true);
+}
+
+function savedChartRemove(collectionId, chartId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  const prevCharts = col.charts;
+  col.charts = col.charts.filter(ch => ch.id !== chartId);
+  if (!savedCollectionsPersist()) { col.charts = prevCharts; savedToast('削除を保存できませんでした'); }
+  renderSavedTab();
+}
+
+function savedCollectionCreate() {
+  const name = prompt('新しいコレクション名を入力してください');
+  if (!name || !name.trim()) return;
+  const col = { id: savedGenId(), name: name.trim(), createdAt: new Date().toISOString(), charts: [] };
+  savedCollections.push(col);
+  if (!savedCollectionsPersist()) {
+    savedCollections = savedCollections.filter(c => c.id !== col.id);
+    savedToast('コレクションを作成できませんでした(ブラウザの保存容量が上限です)');
+    return;
+  }
+  savedActiveCollectionId = col.id;
+  renderSavedTab();
+}
+
+function savedCollectionRename(id) {
+  const col = savedCollections.find(c => c.id === id);
+  if (!col) return;
+  const name = prompt('コレクション名を変更', col.name);
+  if (!name || !name.trim()) return;
+  const prevName = col.name;
+  col.name = name.trim();
+  if (!savedCollectionsPersist()) { col.name = prevName; savedToast('名前の変更を保存できませんでした'); }
+  renderSavedTab();
+}
+
+function savedCollectionDelete(id) {
+  const col = savedCollections.find(c => c.id === id);
+  if (!col) return;
+  if (!confirm(`コレクション「${col.name}」を削除しますか？(${col.charts.length}件のグラフも削除されます)`)) return;
+  const prevCollections = savedCollections;
+  savedCollections = savedCollections.filter(c => c.id !== id);
+  if (!savedCollectionsPersist()) { savedCollections = prevCollections; savedToast('削除を保存できませんでした'); return; }
+  if (savedActiveCollectionId === id) savedActiveCollectionId = savedCollections[0]?.id || null;
+  renderSavedTab();
+}
+
+function savedSetActiveCollection(id) {
+  savedActiveCollectionId = id;
+  renderSavedTab();
+}
+
+// 保存済みスナップショットからChart.js設定を再構築する。kindごとに既存のビルダー関数をそのまま再利用する
+function savedBuildChartConfig(chart) {
+  if (chart.kind === 'analysis') {
+    const cfg = ANALYSIS_CHART_CONFIGS[chart.configKey];
+    if (!cfg) return null;
+    const lotColorMap = chart.lotColorMap || {};
+    const lotColors = chart.items.map(c => analysisLotColorFor(lotColorMap, c.lot));
+    const lotTickColor = ctx => lotColors[ctx.index] || '#8892a4';
+    return cfg.build(chart.items, lotColors, lotTickColor);
+  }
+  if (chart.kind === 'temp') {
+    return tempChartConfig(chart.items, true);
+  }
+  if (chart.kind === 'mekaki-weekly') {
+    return mekakiWeeklyChartConfig(chart.items);
+  }
+  if (chart.kind === 'weight-weekly') {
+    return weightWeeklyChartConfig(chart.items);
+  }
+  return null;
+}
+
+// JSON化でISO文字列になったrowDateを、buildWeeklyLineChartが比較に使うDateオブジェクトへ戻す
+function weeklyReviveContainers(items) {
+  return items.map(c => ({
+    ...c,
+    rows: (c.rows || []).map(r => ({ ...r, rowDate: r.rowDate ? new Date(r.rowDate) : null })),
+  }));
+}
+
+// ── 分析メモ ────────────────────────────────────────────────────────────
+// コレクションごとに、①現状整理・傾向 ②分析内容(1〜5) ③対応策(1〜5)を書き込める欄を持たせる
+const SAVED_NOTE_SUMMARY_FIELDS = [
+  { key: 'harvest', label: '収穫量' },
+  { key: 'temp', label: '温度' },
+  { key: 'weight', label: '菌床重量' },
+  { key: 'mekaki', label: '芽かき重量' },
+  { key: 'packRate', label: 'パック品率' },
+];
+
+function savedEnsureNotes(col) {
+  if (!col.notes) {
+    col.notes = {
+      summary: Object.fromEntries(SAVED_NOTE_SUMMARY_FIELDS.map(f => [f.key, ''])),
+      analysis: ['', '', '', '', ''],
+      actions: ['', '', '', '', ''],
+    };
+  }
+  // 共有で読み込んだコレクション等、フィールドが一部欠けている場合を補う
+  SAVED_NOTE_SUMMARY_FIELDS.forEach(f => { if (col.notes.summary[f.key] == null) col.notes.summary[f.key] = ''; });
+  if (!Array.isArray(col.notes.analysis)) col.notes.analysis = ['', '', '', '', ''];
+  if (!Array.isArray(col.notes.actions)) col.notes.actions = ['', '', '', '', ''];
+  return col.notes;
+}
+
+// textareaの初期値としてinnerHTMLに埋め込むため、タグとして解釈されうる文字をエスケープする
+function savedEscapeForTextarea(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+let savedNotesSaveTimer = null;
+// 入力の都度renderSavedTab()で再描画するとテキストエリアのフォーカス・カーソル位置が失われるため、
+// ここではメモリ上のデータだけ更新し、保存はデバウンスしてlocalStorageへ書き込む(DOMは触らない)
+function savedNoteInput(collectionId, section, key, value) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  const notes = savedEnsureNotes(col);
+  if (section === 'summary') notes.summary[key] = value;
+  else notes[section][key] = value;
+  clearTimeout(savedNotesSaveTimer);
+  savedNotesSaveTimer = setTimeout(() => {
+    if (!savedCollectionsPersist()) savedToast('メモの保存に失敗しました(ブラウザの保存容量が上限です)');
+  }, 500);
+}
+
+// 入力量に応じてテキストエリアの高さを自動で伸ばす(内部スクロールで隠れて見えなくなるのを防ぐ)
+function savedAutoGrowTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function savedNotesHtml(col) {
+  const notes = savedEnsureNotes(col);
+  const cardStyle = 'background:#1a1d27;border:1px solid #2e3148;border-radius:10px;padding:12px 14px';
+  const taStyle = 'width:100%;min-height:64px;background:#0f1117;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.95rem;line-height:1.5;resize:none;overflow-y:hidden;font-family:inherit';
+  const gridStyle = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px';
+
+  const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
+    <div style="${cardStyle}">
+      <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${f.label}</div>
+      <textarea oninput="savedNoteInput('${col.id}','summary','${f.key}',this.value);savedAutoGrowTextarea(this)" style="${taStyle}">${savedEscapeForTextarea(notes.summary[f.key])}</textarea>
+    </div>`).join('');
+
+  const numberedHtml = (arr, section) => arr.map((v, i) => `
+    <div style="${cardStyle}">
+      <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${i + 1}</div>
+      <textarea oninput="savedNoteInput('${col.id}','${section}',${i},this.value);savedAutoGrowTextarea(this)" style="${taStyle}">${savedEscapeForTextarea(v)}</textarea>
+    </div>`).join('');
+
+  return `
+    <div style="background:#13151f;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#cbd5e1;font-size:0.9rem;font-weight:700;margin-bottom:12px">分析メモ</div>
+      <div style="margin-bottom:16px">
+        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">① 現状整理・傾向</div>
+        <div style="${gridStyle}">${summaryHtml}</div>
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">② 分析内容</div>
+        <div style="${gridStyle}">${numberedHtml(notes.analysis, 'analysis')}</div>
+      </div>
+      <div>
+        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">③ 対応策</div>
+        <div style="${gridStyle}">${numberedHtml(notes.actions, 'actions')}</div>
+      </div>
+    </div>`;
+}
+
+function renderSavedTab() {
+  const section = document.getElementById('saved-section');
+  if (!section) return;
+
+  savedTabCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+  savedTabCharts = [];
+
+  if (!savedActiveCollectionId && savedCollections.length) savedActiveCollectionId = savedCollections[0].id;
+  const activeCol = savedCollections.find(c => c.id === savedActiveCollectionId) || null;
+
+  const collectionTabsHtml = savedCollections.map(col => `
+    <span style="display:inline-flex;align-items:center;gap:2px">
+      <button class="sort-btn${col.id === savedActiveCollectionId ? ' active' : ''}" onclick="savedSetActiveCollection('${col.id}')">${col.name}<span style="color:#64748b;font-size:0.72rem"> (${col.charts.length})</span></button>
+      <button title="名前変更" onclick="savedCollectionRename('${col.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.85rem;padding:2px 4px">✏️</button>
+      <button title="削除" onclick="savedCollectionDelete('${col.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.85rem;padding:2px 4px">🗑</button>
+    </span>`).join('');
+
+  const headerHtml = `
+    <div class="section-title" style="margin-bottom:12px">保存グラフ<span class="sub">お気に入りのグラフをコレクションにまとめて保存・共有</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px">
+      ${collectionTabsHtml}
+      <button class="sort-btn" onclick="savedCollectionCreate()">＋ 新規コレクション</button>
+    </div>`;
+
+  if (!activeCol) {
+    section.innerHTML = `${headerHtml}
+      <div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">
+        保存されたグラフはありません。分析タブ・温度分析タブの各グラフにある📌ボタンから保存できます。
+      </div>`;
+    return;
+  }
+
+  const chartsHtml = activeCol.charts.length ? activeCol.charts.map((chart, idx) => `
+    <div style="background:#13151f;border-radius:12px;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
+        <div>
+          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">${chart.title}</div>
+          <div style="color:#64748b;font-size:0.7rem;margin-top:2px">${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存</div>
+        </div>
+        <button title="削除" onclick="savedChartRemove('${activeCol.id}','${chart.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem">🗑</button>
+      </div>
+      <div style="position:relative;height:280px"><canvas id="saved-chart-${idx}"></canvas></div>
+    </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">このコレクションにはまだグラフがありません。</div>`;
+
+  section.innerHTML = `${headerHtml}
+    <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
+      <button class="sort-btn" onclick="savedExportCollectionPdf('${activeCol.id}')">🖨 PDFとして保存</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:16px">${chartsHtml}</div>
+    ${savedNotesHtml(activeCol)}`;
+
+  section.querySelectorAll('textarea').forEach(savedAutoGrowTextarea);
+
+  activeCol.charts.forEach((chart, idx) => {
+    const canvasId = `saved-chart-${idx}`;
+    if (!document.getElementById(canvasId)) return;
+    if (chart.kind === 'weekly') {
+      const revived = weeklyReviveContainers(chart.items);
+      const built = buildWeeklyLineChart(canvasId, revived, chart.targetData, true);
+      if (built) savedTabCharts.push(built);
+      return;
+    }
+    const cfg = savedBuildChartConfig(chart);
+    if (!cfg) return;
+    savedTabCharts.push(new Chart(document.getElementById(canvasId), cfg));
+  });
+}
+
+// ── PDF出力 ────────────────────────────────────────────────────────────────
+// 巨大なコレクション(グラフ数が多い・温度など点数の多いデータ)はURL共有だと文字数が
+// 数十万字に達し実用的に送れないため、PDFとして直接ダウンロード保存できるようにする。
+// html2canvasでDOM全体を画像化する方式は、画面外配置や画像の読み込みタイミングに起因して
+// 白紙PDFになる不具合が繰り返し発生したため採用しない。代わりに、グラフはすでに生成済みの
+// PNG画像(canvas.toDataURL)をjsPDFで直接埋め込み、日本語テキスト(タイトル・メモ)は
+// ブラウザのCanvas 2D(fillText)でラスタライズしてから画像として埋め込む。
+// jsPDFのネイティブテキスト描画は日本語フォントが埋め込まれず文字化けするため使わない。
+function waitForJsPDF(ms = 15000) {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    if (!document.getElementById('jspdf-cdn-script')) {
+      const s = document.createElement('script');
+      s.id = 'jspdf-cdn-script';
+      s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
+      s.onerror = () => reject(new Error('jsPDF failed to load'));
+      document.head.appendChild(s);
+    }
+    const deadline = Date.now() + ms;
+    const poll = () => {
+      if (window.jspdf && window.jspdf.jsPDF) { resolve(); return; }
+      if (Date.now() > deadline) { reject(new Error('jsPDF load timeout')); return; }
+      setTimeout(poll, 100);
+    };
+    setTimeout(poll, 100);
+  });
+}
+
+// ファイル名に使えない文字(パス区切りなど)を含むコレクション名でもダウンロードできるようにする
+function savedSafeFilename(name) {
+  return String(name).replace(/[\\/:*?"<>|]/g, '_').trim() || 'saved-collection';
+}
+
+// テキストをオフスクリーンcanvasにラスタライズしてPNG化する(日本語対応・折り返し込み)
+function savedTextToImage(text, { fontSize = 14, fontWeight = 'normal', color = '#111111', maxWidthPx = 760, lineHeight = 1.4 } = {}) {
+  const scale = 2; // 高解像度化(retina対応)
+  const font = `${fontWeight} ${fontSize}px sans-serif`;
+  const measureCanvas = document.createElement('canvas');
+  const measureCtx = measureCanvas.getContext('2d');
+  measureCtx.font = font;
+
+  const lines = [];
+  String(text ?? '').split('\n').forEach(paragraph => {
+    let line = '';
+    for (const ch of paragraph) {
+      const test = line + ch;
+      if (line && measureCtx.measureText(test).width > maxWidthPx) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = test;
+      }
+    }
+    lines.push(line);
+  });
+  if (!lines.length) lines.push('');
+
+  const lineHeightPx = Math.ceil(fontSize * lineHeight);
+  const heightPx = lineHeightPx * lines.length;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(maxWidthPx * scale);
+  canvas.height = Math.ceil(heightPx * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'top';
+  lines.forEach((line, i) => ctx.fillText(line, 0, i * lineHeightPx));
+
+  return { dataUrl: canvas.toDataURL('image/png'), widthPx: maxWidthPx, heightPx };
+}
+
+async function savedExportCollectionPdf(collectionId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  savedToast('PDFを生成しています…');
+  try {
+    await waitForJsPDF();
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 36;
+    const contentWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const ensureSpace = neededHeight => {
+      if (y + neededHeight > pageHeight - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+    };
+    const addTextBlock = (text, opts) => {
+      if (!text) return;
+      const { dataUrl, widthPx, heightPx } = savedTextToImage(text, { maxWidthPx: contentWidth, ...opts });
+      ensureSpace(heightPx + 6);
+      pdf.addImage(dataUrl, 'PNG', margin, y, widthPx, heightPx);
+      y += heightPx + 6;
+    };
+
+    addTextBlock(col.name, { fontSize: 20, fontWeight: 'bold', color: '#111111' });
+    addTextBlock(`出力日時: ${new Date().toLocaleString('ja-JP')}`, { fontSize: 10, color: '#666666' });
+    y += 6;
+
+    // 画面の保存グラフ一覧と同じく、グラフをグリッド状(2列)に並べて項目別に見比べやすくする
+    const gridCols = 2;
+    const gridGap = 12;
+    const colWidth = (contentWidth - gridGap * (gridCols - 1)) / gridCols;
+    for (let i = 0; i < col.charts.length; i += gridCols) {
+      const rowCells = col.charts.slice(i, i + gridCols).map((chart, colIdx) => {
+        const idx = i + colIdx;
+        const canvas = document.getElementById(`saved-chart-${idx}`);
+        const title = savedTextToImage(chart.title, { fontSize: 11, fontWeight: 'bold', maxWidthPx: colWidth });
+        const timestamp = savedTextToImage(`${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存`, { fontSize: 8, color: '#666666', maxWidthPx: colWidth });
+        const imgH = canvas && canvas.width && canvas.height ? colWidth * (canvas.height / canvas.width) : 0;
+        return { canvas, title, timestamp, imgH };
+      });
+      const rowHeight = Math.max(...rowCells.map(c => c.title.heightPx + 2 + c.timestamp.heightPx + 4 + c.imgH));
+      ensureSpace(rowHeight + 16);
+      rowCells.forEach((cell, colIdx) => {
+        const x = margin + colIdx * (colWidth + gridGap);
+        let cellY = y;
+        pdf.addImage(cell.title.dataUrl, 'PNG', x, cellY, cell.title.widthPx, cell.title.heightPx);
+        cellY += cell.title.heightPx + 2;
+        pdf.addImage(cell.timestamp.dataUrl, 'PNG', x, cellY, cell.timestamp.widthPx, cell.timestamp.heightPx);
+        cellY += cell.timestamp.heightPx + 4;
+        if (cell.canvas && cell.imgH) {
+          pdf.addImage(cell.canvas.toDataURL('image/png', 1.0), 'PNG', x, cellY, colWidth, cell.imgH);
+        }
+      });
+      y += rowHeight + 16;
+    }
+
+    const notes = savedEnsureNotes(col);
+    addTextBlock('分析メモ', { fontSize: 15, fontWeight: 'bold' });
+    addTextBlock('① 現状整理・傾向', { fontSize: 12, fontWeight: 'bold' });
+    SAVED_NOTE_SUMMARY_FIELDS.forEach(f => addTextBlock(`${f.label}: ${notes.summary[f.key] || '(未記入)'}`, { fontSize: 10 }));
+    addTextBlock('② 分析内容', { fontSize: 12, fontWeight: 'bold' });
+    notes.analysis.forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
+    addTextBlock('③ 対応策', { fontSize: 12, fontWeight: 'bold' });
+    notes.actions.forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
+
+    pdf.save(`${savedSafeFilename(col.name)}.pdf`);
+  } catch (e) {
+    console.error('[savedExportCollectionPdf] failed', e);
+    savedToast('PDF生成に失敗しました(通信環境をご確認ください)');
+  }
+}
+
+// ── 共有リンク ──────────────────────────────────────────────────────────────
+// 日本語を含むJSONを安全にbase64化する(大きなデータでも引数展開の上限に当たらないようチャンク分割する)
+function savedTextToBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+function savedBase64ToText(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function savedShareCollection(collectionId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col) return;
+  const payload = { name: col.name, charts: col.charts, notes: col.notes };
+  const encoded = savedTextToBase64(JSON.stringify(payload));
+  // base64の+//=がそのままだと、チャットアプリのリンクプレビュー生成やコピー経路で
+  // 文字化けし、受け取った側で確認ダイアログすら出ないまま静かに読み込みが失敗することがある。
+  // URLエンコードして%XXだけの安全な文字列にすることでこれを防ぐ。
+  const url = `${location.origin}${location.pathname}#sharedCollection=${encodeURIComponent(encoded)}`;
+  if (url.length > 8000) {
+    savedToast('リンクが長いため、一部の共有ツールでは送れない可能性があります');
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url).then(
+      () => savedToast('共有リンクをコピーしました'),
+      () => prompt('このリンクをコピーしてください', url),
+    );
+  } else {
+    prompt('このリンクをコピーしてください', url);
+  }
+}
+
+// ページ読み込み時、共有リンク(#sharedCollection=...)があれば新規コレクションとして取り込む(自分のローカル保存分は保持したまま追加)。
+// 取り込んで保存グラフタブに切り替えた場合はtrueを返す(呼び出し側でデフォルトタブ表示をスキップするため)
+function savedImportFromHash() {
+  const m = location.hash.match(/^#sharedCollection=(.+)$/);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  let payload;
+  try { payload = JSON.parse(savedBase64ToText(decodeURIComponent(m[1]))); }
+  catch (e) { console.error('[savedImportFromHash] parse error', e); return false; }
+  if (!payload || !Array.isArray(payload.charts)) return false;
+  if (!confirm(`共有されたコレクション「${payload.name}」(${payload.charts.length}件のグラフ)を読み込みますか？`)) return false;
+  const col = {
+    id: savedGenId(),
+    name: payload.name || '共有コレクション',
+    createdAt: new Date().toISOString(),
+    charts: payload.charts.map(ch => ({ ...ch, id: savedGenId() })),
+    notes: payload.notes,
+  };
+  savedCollections.push(col);
+  savedCollectionsPersist();
+  savedActiveCollectionId = col.id;
+  savedOpenTab();
+  return true;
+}
+
+// 保存グラフタブへ切り替える(共有リンク読み込み後などに使用)
+function savedOpenTab() {
+  const btn = document.getElementById('saved-tab-btn');
+  if (btn) btn.click();
+}
+
 window.addEventListener('error', e => {
   console.error('[global error]', e.message, e.filename, e.lineno);
   const el = document.getElementById('main');
@@ -5236,8 +6316,12 @@ try { initTabs(); } catch(e) {
   document.getElementById('tabs').innerHTML =
     `<span style="color:#f87171;padding:12px;font-size:0.85rem">タブ初期化エラー: ${e.message}</span>`;
 }
-scatterTabActive = true;
-try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
+let sharedCollectionImported = false;
+try { sharedCollectionImported = savedImportFromHash(); } catch(e) { console.error('[savedImportFromHash error]', e); }
+if (!sharedCollectionImported) {
+  scatterTabActive = true;
+  try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
+}
 
 loadWeeklySection().catch(() => {});
 
