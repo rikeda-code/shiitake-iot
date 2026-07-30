@@ -8740,13 +8740,9 @@ function renderDecPlanContent(planData, mergeData) {
       <td style="text-align:center">${isH ? fmtDiff(totDiff) : fmtDiffN(Math.round(totDiff))}</td>
     </tr>`;
 
-    // テーブルのみ返す（グラフは別途renderする）
     return `
       <div style="margin-bottom:28px">
         <div class="chart-section-label" style="margin-bottom:8px">${title}</div>
-        <div style="margin-bottom:16px;max-width:600px">
-          <canvas id="${chartId}" height="220"></canvas>
-        </div>
         <div style="overflow-x:auto">
           <table class="prod-table" style="min-width:860px;border-collapse:collapse">
             <thead><tr>
@@ -8755,9 +8751,6 @@ function renderDecPlanContent(planData, mergeData) {
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
-        </div>
-        <div style="margin-top:16px;max-width:600px">
-          <canvas id="${chartId}" height="220"></canvas>
         </div>
       </div>`;
   }
@@ -8831,13 +8824,17 @@ function renderDecPlanContent(planData, mergeData) {
     <div class="chart-section-label" style="font-size:1rem;margin-bottom:4px">📅 26/12向け計画</div>
     ${note}
     <div style="display:flex;gap:24px;margin-bottom:28px;flex-wrap:wrap">
-      <div style="flex:1;min-width:300px">
+      <div style="flex:1;min-width:300px;height:260px;position:relative">
         <div class="chart-section-label" style="font-size:0.88rem;margin-bottom:6px">勤務時間</div>
-        <canvas id="dec-plan-chart-h" height="240"></canvas>
+        <div style="height:230px;position:relative">
+          <canvas id="dec-plan-chart-h"></canvas>
+        </div>
       </div>
-      <div style="flex:1;min-width:300px">
+      <div style="flex:1;min-width:300px;height:260px;position:relative">
         <div class="chart-section-label" style="font-size:0.88rem;margin-bottom:6px">人数</div>
-        <canvas id="dec-plan-chart-n" height="240"></canvas>
+        <div style="height:230px;position:relative">
+          <canvas id="dec-plan-chart-n"></canvas>
+        </div>
       </div>
     </div>
     <div id="dec-plan-tables">
