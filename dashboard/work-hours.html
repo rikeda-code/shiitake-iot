@@ -4478,8 +4478,16 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
         return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
       });
       const color = div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)';
+      // 小計・総合計行は、通常行（業務区分＝col-site＋作業区分＋計算根拠の3つの個別<td>）と
+      // 同じ3列構成にする。以前はcolspan="3"で1セルに結合していたが、col-siteクラスが
+      // position:sticky;left:0を持つため、通常行の1列分しかstickyにならない業務区分列と
+      // 幅がズレ、横スクロール時に位置がズレて見える不具合があった。col-siteクラスは
+      // 業務区分に相当する1列目のみに付与し（sticky再発防止のため他の2列には付与しない）、
+      // 3列とも同じ背景色・境界線なしスタイルにして見た目上は結合セルのまま見えるようにする
       html += `<tr style="font-weight:600;background:#1a1f35">
-        <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
+        <td class="col-site" style="border-right:none"></td>
+        <td style="background:var(--surface);border-left:none;border-right:none"></td>
+        <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
       totals.forEach(t => {
         html += t !== null
           ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
@@ -4494,7 +4502,9 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
       return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     });
     html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
-      <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+      <td class="col-site" style="border-right:none"></td>
+      <td style="background:var(--surface);border-left:none;border-right:none"></td>
+      <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
     grandTotals.forEach(t => {
       html += t !== null
         ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
@@ -5249,10 +5259,16 @@ function renderStdHoursTable(prodData) {
         return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
       });
       const color = div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)';
+      // 小計・総合計行は、通常行（業務区分＝col-site＋作業区分＋計算根拠の3つの個別<td>）と
+      // 同じ3列構成にする。以前はcolspan="3"で1セルに結合していたが、col-siteクラスが
+      // position:sticky;left:0を持つため、通常行の1列分しかstickyにならない業務区分列と
+      // 幅がズレ、横スクロール時に位置がズレて見える不具合があった。col-siteクラスは
+      // 業務区分に相当する1列目のみに付与し（sticky再発防止のため他の2列には付与しない）、
+      // 3列とも同じ背景色・境界線なしスタイルにして見た目上は結合セルのまま見えるようにする
       html += `<tr style="font-weight:600;background:#1a1f35">
-        <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:var(--muted)">
-          ${div} 小計
-        </td>`;
+        <td class="col-site" style="border-right:none"></td>
+        <td style="background:var(--surface);border-left:none;border-right:none"></td>
+        <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
       totals.forEach((t, mi) => {
         if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
         html += t !== null
@@ -5268,7 +5284,9 @@ function renderStdHoursTable(prodData) {
       return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     });
     html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
-      <td class="col-site" colspan="3" style="text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+      <td class="col-site" style="border-right:none"></td>
+      <td style="background:var(--surface);border-left:none;border-right:none"></td>
+      <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
     grandTotals.forEach((t, mi) => {
       if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
       html += t !== null
