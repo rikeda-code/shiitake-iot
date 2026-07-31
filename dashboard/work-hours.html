@@ -635,6 +635,13 @@
        縦横両方向にstickyな「隅のセル」となる。z-indexは通常th(2)・col-siteのtd(1)の
        いずれよりも上にして、スクロール時に他のセルが透けて重なって見えないようにする */
     .prod-table th.col-site { position: sticky; left: 0; z-index: 3; }
+    /* 作業区分・計算根拠の見出しセルも同様に横方向のstickyを持たせ、業務区分と合わせて
+       3列を隅のセルとして固定する。left値は列幅がtable-layout:autoで内容により変動する
+       ため固定値を書けず、JS（updateProdStickyColumnOffsets）が実測してCSS変数
+       --prod-col1-w（業務区分列幅）・--prod-col12-w（業務区分+作業区分の合計幅）を
+       table要素に設定する。フォールバック値は初期描画前のちらつき防止用の目安 */
+    .prod-table th.col-work { position: sticky; left: var(--prod-col1-w, 60px); z-index: 3; }
+    .prod-table th.col-basis { position: sticky; left: var(--prod-col12-w, 190px); z-index: 3; }
     .prod-table td {
       padding: 5px 12px;
       border: 1px solid var(--border);
@@ -648,6 +655,18 @@
       background: var(--surface);
       z-index: 1;
       vertical-align: top;
+    }
+    .prod-table td.col-work {
+      position: sticky;
+      left: var(--prod-col1-w, 60px);
+      background: var(--surface);
+      z-index: 1;
+    }
+    .prod-table td.col-basis {
+      position: sticky;
+      left: var(--prod-col12-w, 190px);
+      background: var(--surface);
+      z-index: 1;
     }
     .prod-table td.col-cat {
       font-weight: 600;
@@ -768,12 +787,31 @@ function refreshProdTableWrapOverflow() {
     el.classList.toggle('has-hscroll', needsHScroll);
   });
 }
+// 業務区分(col-site)・作業区分(col-work)・計算根拠(col-basis)の3列を横方向に
+// sticky化する際、col-work/col-basisのleft値は「その左側にある列の実際の幅」に
+// 一致させる必要がある。table-layout:auto（既定）のため列幅は内容によって変動し、
+// CSSに固定値を書くとズレが再発するため、見出し行のth.col-site/th.col-workの
+// offsetWidthを都度実測し、CSS変数--prod-col1-w・--prod-col12-wとしてtable要素に
+// 設定する（見出し行は常に1行のみでrowspanの影響を受けないため計測に使う）
+function updateProdStickyColumnOffsets() {
+  document.querySelectorAll('.prod-table-wrap table.prod-table').forEach(table => {
+    const headRow = table.querySelector('thead tr');
+    const thSite = headRow && headRow.querySelector('th.col-site');
+    const thWork = headRow && headRow.querySelector('th.col-work');
+    if (!thSite || !thWork) return;
+    const col1w = thSite.offsetWidth;
+    const col12w = col1w + thWork.offsetWidth;
+    table.style.setProperty('--prod-col1-w', `${col1w}px`);
+    table.style.setProperty('--prod-col12-w', `${col12w}px`);
+  });
+}
 let prodTableWrapRAF = null;
 function scheduleProdTableWrapRefresh() {
   if (prodTableWrapRAF) return;
   prodTableWrapRAF = requestAnimationFrame(() => {
     prodTableWrapRAF = null;
     refreshProdTableWrapOverflow();
+    updateProdStickyColumnOffsets();
   });
 }
 new MutationObserver(scheduleProdTableWrapRefresh).observe(document.getElementById('main'), { childList: true, subtree: true });
@@ -4419,8 +4457,8 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
       <div class="prod-table-wrap"><table class="prod-table">
         <thead><tr>
           <th class="th-left col-site" style="min-width:60px">業務区分</th>
-          <th class="th-left" style="min-width:130px">作業区分</th>
-          <th class="th-left" style="min-width:140px">計算根拠</th>
+          <th class="th-left col-work" style="min-width:130px">作業区分</th>
+          <th class="th-left col-basis" style="min-width:140px">計算根拠</th>
           ${planMonths.map(m => `<th>${m}</th>`).join('')}
           <th class="th-left" style="min-width:130px">計算方法</th>
         </tr></thead><tbody>`;
@@ -4460,8 +4498,8 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
       }
 
       html += `<tr>${divCell}
-        <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
-        <td class="col-metric" style="font-size:0.75rem">${statusIcon} <span style="color:var(--muted)">${basisDesc}</span></td>`;
+        <td class="col-metric col-work" style="font-size:0.82rem">${r.task}</td>
+        <td class="col-metric col-basis" style="font-size:0.75rem">${statusIcon} <span style="color:var(--muted)">${basisDesc}</span></td>`;
 
       monthData.forEach(d => {
         if (d.h !== null) {
@@ -4486,13 +4524,13 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
       // 小計・総合計行は、通常行（業務区分＝col-site＋作業区分＋計算根拠の3つの個別<td>）と
       // 同じ3列構成にする。以前はcolspan="3"で1セルに結合していたが、col-siteクラスが
       // position:sticky;left:0を持つため、通常行の1列分しかstickyにならない業務区分列と
-      // 幅がズレ、横スクロール時に位置がズレて見える不具合があった。col-siteクラスは
-      // 業務区分に相当する1列目のみに付与し（sticky再発防止のため他の2列には付与しない）、
+      // 幅がズレ、横スクロール時に位置がズレて見える不具合があった。col-site/col-work/
+      // col-basisクラスは、通常行と同じ列に同じクラスを付与することでsticky位置を揃え、
       // 3列とも同じ背景色・境界線なしスタイルにして見た目上は結合セルのまま見えるようにする
       html += `<tr style="font-weight:600;background:#1a1f35">
         <td class="col-site" style="border-right:none"></td>
-        <td style="background:var(--surface);border-left:none;border-right:none"></td>
-        <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
+        <td class="col-work" style="background:var(--surface);border-left:none;border-right:none"></td>
+        <td class="col-basis" style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
       totals.forEach(t => {
         html += t !== null
           ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
@@ -4508,8 +4546,8 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
     });
     html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
       <td class="col-site" style="border-right:none"></td>
-      <td style="background:var(--surface);border-left:none;border-right:none"></td>
-      <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+      <td class="col-work" style="background:var(--surface);border-left:none;border-right:none"></td>
+      <td class="col-basis" style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
     grandTotals.forEach(t => {
       html += t !== null
         ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
@@ -5184,8 +5222,8 @@ function renderStdHoursTable(prodData) {
       <div class="prod-table-wrap"><table class="prod-table">
         <thead><tr>
           <th class="th-left col-site" style="min-width:60px">業務区分</th>
-          <th class="th-left" style="min-width:130px">作業区分</th>
-          <th class="th-left" style="min-width:140px">計算根拠</th>
+          <th class="th-left col-work" style="min-width:130px">作業区分</th>
+          <th class="th-left col-basis" style="min-width:140px">計算根拠</th>
           ${months.map(m => `<th>${m}</th>`).join('')}
           <th class="th-left" style="min-width:130px">計算方法</th>
         </tr></thead><tbody>`;
@@ -5237,8 +5275,8 @@ function renderStdHoursTable(prodData) {
       }
 
       html += `<tr>${divCell}
-        <td class="col-metric" style="font-size:0.82rem">${r.task}</td>
-        <td class="col-metric" style="font-size:0.75rem">
+        <td class="col-metric col-work" style="font-size:0.82rem">${r.task}</td>
+        <td class="col-metric col-basis" style="font-size:0.75rem">
           ${statusIcon} <span style="color:var(--muted)">${basisDesc}</span>
         </td>`;
 
@@ -5267,13 +5305,13 @@ function renderStdHoursTable(prodData) {
       // 小計・総合計行は、通常行（業務区分＝col-site＋作業区分＋計算根拠の3つの個別<td>）と
       // 同じ3列構成にする。以前はcolspan="3"で1セルに結合していたが、col-siteクラスが
       // position:sticky;left:0を持つため、通常行の1列分しかstickyにならない業務区分列と
-      // 幅がズレ、横スクロール時に位置がズレて見える不具合があった。col-siteクラスは
-      // 業務区分に相当する1列目のみに付与し（sticky再発防止のため他の2列には付与しない）、
+      // 幅がズレ、横スクロール時に位置がズレて見える不具合があった。col-site/col-work/
+      // col-basisクラスは、通常行と同じ列に同じクラスを付与することでsticky位置を揃え、
       // 3列とも同じ背景色・境界線なしスタイルにして見た目上は結合セルのまま見えるようにする
       html += `<tr style="font-weight:600;background:#1a1f35">
         <td class="col-site" style="border-right:none"></td>
-        <td style="background:var(--surface);border-left:none;border-right:none"></td>
-        <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
+        <td class="col-work" style="background:var(--surface);border-left:none;border-right:none"></td>
+        <td class="col-basis" style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
       totals.forEach((t, mi) => {
         if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
         html += t !== null
@@ -5290,8 +5328,8 @@ function renderStdHoursTable(prodData) {
     });
     html += `<tr style="font-weight:700;background:#141827;border-top:2px solid #3a3f5c">
       <td class="col-site" style="border-right:none"></td>
-      <td style="background:var(--surface);border-left:none;border-right:none"></td>
-      <td style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
+      <td class="col-work" style="background:var(--surface);border-left:none;border-right:none"></td>
+      <td class="col-basis" style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
     grandTotals.forEach((t, mi) => {
       if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
       html += t !== null
