@@ -630,6 +630,11 @@
       z-index: 2;
     }
     .prod-table th.th-left { text-align: left; }
+    /* 業務区分の見出しセルは、データ行の1列目(td.col-site、position:sticky;left:0)と
+       同じ横方向のstickyを持たせる。thは元々top:0の縦方向stickyを持つため、これにより
+       縦横両方向にstickyな「隅のセル」となる。z-indexは通常th(2)・col-siteのtd(1)の
+       いずれよりも上にして、スクロール時に他のセルが透けて重なって見えないようにする */
+    .prod-table th.col-site { position: sticky; left: 0; z-index: 3; }
     .prod-table td {
       padding: 5px 12px;
       border: 1px solid var(--border);
@@ -4413,7 +4418,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
       <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
       <div class="prod-table-wrap"><table class="prod-table">
         <thead><tr>
-          <th class="th-left" style="min-width:60px">業務区分</th>
+          <th class="th-left col-site" style="min-width:60px">業務区分</th>
           <th class="th-left" style="min-width:130px">作業区分</th>
           <th class="th-left" style="min-width:140px">計算根拠</th>
           ${planMonths.map(m => `<th>${m}</th>`).join('')}
@@ -5178,7 +5183,7 @@ function renderStdHoursTable(prodData) {
       <div class="schart-header" style="color:${siteColor};margin-bottom:6px">📍 ${site}</div>
       <div class="prod-table-wrap"><table class="prod-table">
         <thead><tr>
-          <th class="th-left" style="min-width:60px">業務区分</th>
+          <th class="th-left col-site" style="min-width:60px">業務区分</th>
           <th class="th-left" style="min-width:130px">作業区分</th>
           <th class="th-left" style="min-width:140px">計算根拠</th>
           ${months.map(m => `<th>${m}</th>`).join('')}
