@@ -840,6 +840,10 @@ let siteFilter = new Set(SITES); // Set<string>：選択中の拠点（初期値
 let compareSubtab = 'site';        // 比較タブのサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ（更新ボタン押下後も保持）
 let empChartSubtab = 'site';       // サマリー「雇用形態別（グラフ）」のサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ
 
+let planCmpSubtab = 'site';        // 比較（繁忙期見込み）タブのサブタブ状態：'site'/'sitesummary'/'summary'/'table'（更新ボタン押下後も保持）
+let planCmpSiteTab = null;         // 比較（繁忙期見込み）タブの選択中拠点（更新ボタン押下後も保持）。
+                                    // nullの場合はrenderPlanCompareCharts2()側でavailSites[0]に初期化される
+
 let periodStartMonth = null;       // 集計期間フィルターの開始月（allData.monthsの値と同じ文字列。全タブ共通のグローバルな絞り込み）
 let periodMonthCount = 12;         // 集計期間フィルターの表示月数（1〜12）
 
@@ -870,6 +874,8 @@ function saveSessionState() {
       // チェックを外していた区分まで復元時に再度チェックされてしまう
       empTypeAllKnown: empTypeFilter ? Object.keys(empTypeColorMap) : null,
       transferMode,
+      planCmpSubtab,
+      planCmpSiteTab,
     }));
   } catch (e) { /* sessionStorageが使えない環境等は無視して継続 */ }
 }
@@ -5677,6 +5683,14 @@ function renderActiveTabContent(summarySubtab) {
     renderPlanCompareTab2();
   } else if (activeMode === 'staffplan') {
     renderStaffingPlanTab();
+  } else if (activeMode === 'plan') {
+    renderPlanTab();
+  } else if (activeMode === 'planstdhours') {
+    renderPlanStdHoursTab();
+  } else if (activeMode === 'decplan') {
+    renderDecPlanTab();
+  } else if (activeMode === 'yojitsustdset') {
+    renderYojitsuStdSetTab();
   }
   renderTransferAlerts();
 }
@@ -7115,8 +7129,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   }
 
   // ① 拠点別
-  let planCmpSiteTab = availSites[0] || 'いなべ';
+  // planCmpSiteTabはグローバル変数（restoreSessionStateBeforeFirstLoad()で復元される）。
+  // 未設定、または現在のavailSitesに存在しない値（例：拠点構成が変わった場合）の
+  // ときのみ初期値を設定する。ここでlet宣言してしまうとローカルにシャドーイングされ、
+  // 復元された値が反映されなくなるため、代入のみ行う（グローバルのlet宣言はトップレベルにある）
   const SITE_TABS = [...availSites, '全拠点合計'];
+  if (!planCmpSiteTab || !SITE_TABS.includes(planCmpSiteTab)) {
+    planCmpSiteTab = availSites[0] || 'いなべ';
+  }
 
   // 月の数値比較用ヘルパー（renderSiteView内で共用）
   const mnum = m => { const [y, mo] = m.split('/').map(Number); return y * 100 + mo; };
@@ -7321,6 +7341,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       btn.onclick = () => {
         planCmpSiteTab = btn.dataset.site;
         renderContent();
+        saveSessionState();
       };
     });
   }
@@ -8018,7 +8039,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax, taskBreakdown });
     }
   }
-  let planCmpSubtab = 'site';
+  // planCmpSubtabはグローバル変数（restoreSessionStateBeforeFirstLoad()で復元される）。
+  // ここでlet宣言してしまうとローカルにシャドーイングされ、復元された値が反映されなく
+  // なるため、宣言はトップレベルのみとし、ここでは代入しない（有効な4値のいずれか
+  // であることだけ保証する。restoreSessionStateBeforeFirstLoad()経由以外で不正な値が
+  // 入ることは想定しないが、念のため無効値の場合のみ既定値'site'にフォールバックする）
+  if (!['site', 'sitesummary', 'summary', 'table'].includes(planCmpSubtab)) planCmpSubtab = 'site';
   function renderContent() {
     destroyCharts();
     renderSiteTabBarFixed();
@@ -8132,6 +8158,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       document.querySelectorAll('#plancmp2-subtabs .transfer-toggle-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       renderContent();
+      saveSessionState();
     };
   });
 
@@ -8981,6 +9008,8 @@ let restoredSummarySubtab = null;
   if (s.empChartSubtab) empChartSubtab = s.empChartSubtab;
   if (s.stdHoursSubtab) stdHoursSubtab = s.stdHoursSubtab;
   if (s.stdHoursMetric) stdHoursMetric = s.stdHoursMetric;
+  if (s.planCmpSubtab) planCmpSubtab = s.planCmpSubtab;
+  if (s.planCmpSiteTab) planCmpSiteTab = s.planCmpSiteTab;
   if (s.summarySubtab) restoredSummarySubtab = s.summarySubtab;
   if (s.periodStartMonth) periodStartMonth = s.periodStartMonth;
   if (typeof s.periodMonthCount === 'number') periodMonthCount = s.periodMonthCount;
