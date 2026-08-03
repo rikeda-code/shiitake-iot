@@ -292,6 +292,15 @@
   </div>
 </div>
 
+<!-- 保存グラフ: グラフ拡大表示モーダル -->
+<div id="saved-zoom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1100;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto" onclick="if(event.target===this)savedCloseZoom()">
+  <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:1100px;padding:24px;position:relative;margin:auto">
+    <button onclick="savedCloseZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
+    <div id="saved-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:12px"></div>
+    <div style="position:relative;height:min(70vh,600px)"><canvas id="saved-zoom-canvas"></canvas></div>
+  </div>
+</div>
+
 <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto" onclick="if(event.target===this)closeDetail()">
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;max-width:480px;margin:48px auto;padding:28px 32px;position:relative">
     <button onclick="closeDetail()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.2rem;cursor:pointer">✕</button>
@@ -1174,6 +1183,38 @@ function weeklyZoomRender() {
 
   // サイズ別: コンテナごとに縦並び
   const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+
+  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
+  if (!validContainers.length) {
+    body.innerHTML = '<div style="color:#8892a4;padding:16px">サイズデータがありません</div>';
+    return;
+  }
+
+  body.innerHTML = validContainers.map((c, i) => {
+    const siteColor = siteColors[c.siteName] || '#8892a4';
+    return `<div style="margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:0.85rem;font-weight:600">
+          <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
+        </div>
+        <button onclick="weeklyZoomSaveSizeChart(${i})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
+      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
+        <canvas id="wzs-${i}"></canvas>
+      </div>
+    </div>`;
+  }).join('');
+
+  validContainers.forEach((c, i) => {
+    const canvas = document.getElementById(`wzs-${i}`);
+    if (!canvas) return;
+    weeklyZoomSubCharts.push(new Chart(canvas, weeklyZoomSizeChartConfig(c.sizeRows, weeklyZoomMode)));
+  });
+}
+
+// 週別累計ズームの「サイズ別日次/サイズ別累計」で使うグラフ構成。
+// ライブ表示と保存グラフ(kind:'weekly-size')の両方から呼び出す共通ロジック。
+function weeklyZoomSizeChartConfig(sizeRows, mode) {
   const chartOpts = {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: {
@@ -1185,89 +1226,80 @@ function weeklyZoomRender() {
       y: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
     },
   };
+  const labels = sizeRows.map(r => `day${r.day}`);
 
-  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
-  if (!validContainers.length) {
-    body.innerHTML = '<div style="color:#8892a4;padding:16px">サイズデータがありません</div>';
-    return;
+  if (mode === 'daily') {
+    const datasets = [
+      { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+      { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+      { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+      { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+    ];
+    return { type: 'bar', data: { labels, datasets }, options: chartOpts };
   }
 
-  body.innerHTML = validContainers.map((c, i) => {
-    const siteColor = siteColors[c.siteName] || '#8892a4';
-    return `<div style="margin-bottom:24px">
-      <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">
-        <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
-      </div>
-      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
-        <canvas id="wzs-${i}"></canvas>
-      </div>
-    </div>`;
-  }).join('');
+  let cm=0,cl=0,cxl=0,cbg=0;
+  const packRateData = sizeRows.map(r => {
+    cm+=r.m; cl+=r.l; cxl+=r.xl; cbg+=r.bg;
+    const total = cm+cl+cxl+cbg;
+    return total > 0 ? +(((cm+cl+cxl)/total)*100).toFixed(1) : null;
+  });
+  // reset accumulators for dataset generation
+  cm=0; cl=0; cxl=0; cbg=0;
+  const datasets = [
+    { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    {
+      label: '累計パック品率(%)',
+      data: packRateData,
+      type: 'line',
+      yAxisID: 'yRate',
+      borderColor: '#f43f5e',
+      backgroundColor: '#f43f5e',
+      borderWidth: 2.5,
+      pointRadius: 4,
+      pointBackgroundColor: '#f43f5e',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 1.5,
+      pointHoverRadius: 6,
+      fill: false,
+      tension: 0.3,
+      stack: undefined,
+      order: 0,
+    },
+  ];
+  const comboOpts = {
+    ...chartOpts,
+    scales: {
+      ...chartOpts.scales,
+      yRate: {
+        type: 'linear',
+        position: 'right',
+        min: 0,
+        max: 100,
+        ticks: { color: '#f43f5e', font: { size: 9 }, callback: v => `${v}%` },
+        grid: { drawOnChartArea: false },
+      },
+    },
+  };
+  return { type: 'bar', data: { labels, datasets }, options: comboOpts };
+}
 
-  validContainers.forEach((c, i) => {
-    const canvas = document.getElementById(`wzs-${i}`);
-    if (!canvas) return;
-    const sizeRows = c.sizeRows;
-    const labels = sizeRows.map(r => `day${r.day}`);
-    let datasets;
-    if (weeklyZoomMode === 'daily') {
-      datasets = [
-        { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
-        { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
-        { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
-        { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
-      ];
-    } else {
-      let cm=0,cl=0,cxl=0,cbg=0;
-      const packRateData = sizeRows.map(r => {
-        cm+=r.m; cl+=r.l; cxl+=r.xl; cbg+=r.bg;
-        const total = cm+cl+cxl+cbg;
-        return total > 0 ? +(((cm+cl+cxl)/total)*100).toFixed(1) : null;
-      });
-      // reset accumulators for dataset generation
-      cm=0; cl=0; cxl=0; cbg=0;
-      datasets = [
-        { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        {
-          label: '累計パック品率(%)',
-          data: packRateData,
-          type: 'line',
-          yAxisID: 'yRate',
-          borderColor: '#f43f5e',
-          backgroundColor: '#f43f5e',
-          borderWidth: 2.5,
-          pointRadius: 4,
-          pointBackgroundColor: '#f43f5e',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 1.5,
-          pointHoverRadius: 6,
-          fill: false,
-          tension: 0.3,
-          stack: undefined,
-          order: 0,
-        },
-      ];
-      const comboOpts = {
-        ...chartOpts,
-        scales: {
-          ...chartOpts.scales,
-          yRate: {
-            type: 'linear',
-            position: 'right',
-            min: 0,
-            max: 100,
-            ticks: { color: '#f43f5e', font: { size: 9 }, callback: v => `${v}%` },
-            grid: { drawOnChartArea: false },
-          },
-        },
-      };
-      weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: comboOpts }));
-      return;
-    }
-    weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts }));
+// 週別累計ズームの「サイズ別日次/サイズ別累計」のコンテナ別グラフを保存グラフに追加する
+function weeklyZoomSaveSizeChart(containerIdx) {
+  if (!weeklyZoomGroups || !weeklyZoomGroups[weeklyZoomCurrentIdx]) return;
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
+  const c = validContainers[containerIdx];
+  if (!c) return;
+  const modeLabel = weeklyZoomMode === 'daily' ? 'サイズ別日次' : 'サイズ別累計';
+  savedOpenPicker({
+    kind: 'weekly-size',
+    sizeMode: weeklyZoomMode,
+    title: `${modeLabel}: ${c.siteName}${c.name}`,
+    items: { sizeRows: c.sizeRows.map(r => ({ ...r })) },
   });
 }
 
@@ -3713,18 +3745,37 @@ function weightAverageMeasurements(measurements) {
   };
 }
 
+// 同じ号機・同じ栽培開始日の計測ブロックが複数ある場合(再測定など)、出現順を
+// 1回目・2回目...の測定セッションとして扱い、1本の積み上げ棒にまとめるための集計。
+// 散水前重量(初期重量)は最初のセッションの値を採用し、各セッションの吸水量を
+// 段階ごとの積み上げ量として返す。
+function weightAggregateContainerGroup(entries) {
+  const sessions = entries.map(e => weightAverageMeasurements(e.measurements));
+  return {
+    weightBefore: sessions[0]?.weightBefore ?? null,
+    absorbStages: sessions.map(s => s.weightAbsorb),
+  };
+}
+
 // 週別累計タブと同じ栽培開始週(日〜土)でグルーピングし、各週のコンテナ別菌床重量をまとめる
 function weightBuildWeeklyGroups() {
   const groups = {};
   (weightData || []).forEach(({ site, containers }) => {
+    // 号機・栽培開始日が同一の計測ブロックをまとめてから1行として扱う
+    const byContainer = {};
     (containers || []).forEach(c => {
       if (!c.startDate) return;
-      const { weightBefore, weightAbsorb } = weightAverageMeasurements(c.measurements);
-      if (weightBefore == null && weightAbsorb == null) return;
-      const week = getSunSatWeek(`${c.startDate.getFullYear()}/${c.startDate.getMonth() + 1}/${c.startDate.getDate()}`);
+      const key = `${c.containerNo}|${c.startDate.getTime()}`;
+      (byContainer[key] ||= []).push(c);
+    });
+    Object.values(byContainer).forEach(entries => {
+      const { weightBefore, absorbStages } = weightAggregateContainerGroup(entries);
+      if (weightBefore == null && !absorbStages.some(v => v != null)) return;
+      const startDate = entries[0].startDate;
+      const week = getSunSatWeek(`${startDate.getFullYear()}/${startDate.getMonth() + 1}/${startDate.getDate()}`);
       if (!week) return;
       (groups[week.key] ||= { label: week.label, rows: [] }).rows.push({
-        siteName: site.name, containerNo: c.containerNo, lot: c.lot, weightBefore, weightAbsorb,
+        siteName: site.name, containerNo: entries[0].containerNo, lot: entries[0].lot, weightBefore, absorbStages,
       });
     });
   });
@@ -3762,12 +3813,23 @@ function weightWeeklyLegendHtml() {
 function weightWeeklyChartConfig(rows) {
   const colors = rows.map(r => weightWeeklyColorFor(r.siteName));
   const tickColor = ctx => colors[ctx.index]?.dark || '#8892a4';
+  // 同じ号機・同じ栽培開始日で再測定されたコンテナは吸水量が複数段になる(1回目・2回目...)。
+  // 段数はコンテナごとに異なりうるため、この週の中で最大の段数だけ吸水量データセットを積む。
+  const maxStages = rows.reduce((m, r) => Math.max(m, (r.absorbStages || []).length), 1);
+  const absorbAlphas = ['cc', '80', '55', '33'];
+  const absorbDatasets = Array.from({ length: maxStages }, (_, i) => ({
+    type: 'bar',
+    label: maxStages > 1 ? `${i + 1}回目吸水量` : '吸水量',
+    data: rows.map(r => (r.absorbStages || [])[i] ?? null),
+    backgroundColor: colors.map(c => c.light + (absorbAlphas[i] || absorbAlphas[absorbAlphas.length - 1])),
+    stack: 's',
+  }));
   return {
     data: {
       labels: rows.map(r => `${r.siteName}${r.containerNo}`),
       datasets: [
         { type: 'bar', label: '散水前重量(初期重量)', data: rows.map(r => r.weightBefore), backgroundColor: colors.map(c => c.dark + 'cc'), stack: 's' },
-        { type: 'bar', label: '吸水量', data: rows.map(r => r.weightAbsorb), backgroundColor: colors.map(c => c.light + 'cc'), stack: 's' },
+        ...absorbDatasets,
       ],
     },
     plugins: [weightStackValuePlugin],
@@ -5908,6 +5970,9 @@ function savedBuildChartConfig(chart) {
   if (chart.kind === 'weight-weekly') {
     return weightWeeklyChartConfig(chart.items);
   }
+  if (chart.kind === 'weekly-size') {
+    return weeklyZoomSizeChartConfig(chart.items.sizeRows, chart.sizeMode);
+  }
   return null;
 }
 
@@ -6006,6 +6071,50 @@ function savedNotesHtml(col) {
     </div>`;
 }
 
+// 保存グラフの種類ごとにグループ化するためのキー・表示名。
+// 「analysis」種別はconfigKeyごとに全く別のグラフ内容になるため、configKey込みでグループ分けする。
+const SAVED_KIND_LABELS = {
+  weekly: '週別累計', temp: '温度分析',
+  'mekaki-weekly': '芽かき量(週別)', 'weight-weekly': '菌床重量(週別)',
+};
+function savedChartGroupKey(chart) {
+  if (chart.kind === 'analysis') return `analysis:${chart.configKey}`;
+  if (chart.kind === 'weekly-size') return `weekly-size:${chart.sizeMode}`;
+  return chart.kind;
+}
+function savedChartGroupLabel(chart) {
+  if (chart.kind === 'analysis') {
+    const cfg = ANALYSIS_CHART_CONFIGS[chart.configKey];
+    return cfg ? `分析: ${cfg.title}` : '分析';
+  }
+  if (chart.kind === 'weekly-size') {
+    return chart.sizeMode === 'daily' ? 'サイズ別日次(週別累計)' : 'サイズ別累計(週別累計)';
+  }
+  return SAVED_KIND_LABELS[chart.kind] || chart.kind;
+}
+
+let savedZoomChart = null;
+function savedOpenZoom(collectionId, chartIdx) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  const chart = col?.charts[chartIdx];
+  if (!chart) return;
+  document.getElementById('saved-zoom-title').textContent = chart.title;
+  document.getElementById('saved-zoom-modal').style.display = 'flex';
+  if (savedZoomChart) { try { savedZoomChart.destroy(); } catch (e) {} savedZoomChart = null; }
+  if (chart.kind === 'weekly') {
+    const revived = weeklyReviveContainers(chart.items);
+    savedZoomChart = buildWeeklyLineChart('saved-zoom-canvas', revived, chart.targetData, true);
+    return;
+  }
+  const cfg = savedBuildChartConfig(chart);
+  if (!cfg) return;
+  savedZoomChart = new Chart(document.getElementById('saved-zoom-canvas'), cfg);
+}
+function savedCloseZoom() {
+  document.getElementById('saved-zoom-modal').style.display = 'none';
+  if (savedZoomChart) { try { savedZoomChart.destroy(); } catch (e) {} savedZoomChart = null; }
+}
+
 function renderSavedTab() {
   const section = document.getElementById('saved-section');
   if (!section) return;
@@ -6038,16 +6147,32 @@ function renderSavedTab() {
     return;
   }
 
-  const chartsHtml = activeCol.charts.length ? activeCol.charts.map((chart, idx) => `
-    <div style="background:#13151f;border-radius:12px;padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
-        <div>
-          <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">${chart.title}</div>
-          <div style="color:#64748b;font-size:0.7rem;margin-top:2px">${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存</div>
-        </div>
-        <button title="削除" onclick="savedChartRemove('${activeCol.id}','${chart.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem">🗑</button>
+  // 同じ種類のグラフを1行にまとめ、行ごとにどんな種類のグラフかラベル表示する。
+  // (元のcharts配列の並び順=canvas idのidxは維持したまま、表示上だけグループ化する)
+  const savedGroupsMap = {};
+  activeCol.charts.forEach((chart, idx) => {
+    const key = savedChartGroupKey(chart);
+    (savedGroupsMap[key] ||= { label: savedChartGroupLabel(chart), items: [] }).items.push({ chart, idx });
+  });
+
+  const chartsHtml = activeCol.charts.length ? Object.values(savedGroupsMap).map(group => `
+    <div style="margin-bottom:20px">
+      <div style="color:#94a3b8;font-size:0.8rem;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+        <span style="width:8px;height:8px;border-radius:50%;background:#38bdf8;display:inline-block"></span>${group.label}<span style="color:#64748b;font-weight:400">(${group.items.length}件)</span>
       </div>
-      <div style="position:relative;height:280px"><canvas id="saved-chart-${idx}"></canvas></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">
+        ${group.items.map(({ chart, idx }) => `
+          <div style="background:#13151f;border-radius:12px;padding:16px;cursor:pointer" onclick="savedOpenZoom('${activeCol.id}',${idx})">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
+              <div>
+                <div style="color:#cbd5e1;font-size:0.85rem;font-weight:600">${chart.title}</div>
+                <div style="color:#64748b;font-size:0.7rem;margin-top:2px">${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存</div>
+              </div>
+              <button title="削除" onclick="event.stopPropagation();savedChartRemove('${activeCol.id}','${chart.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem">🗑</button>
+            </div>
+            <div style="position:relative;height:280px"><canvas id="saved-chart-${idx}"></canvas></div>
+          </div>`).join('')}
+      </div>
     </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">このコレクションにはまだグラフがありません。</div>`;
 
   section.innerHTML = `${headerHtml}
@@ -6055,7 +6180,7 @@ function renderSavedTab() {
       <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
       <button class="sort-btn" onclick="savedExportCollectionPdf('${activeCol.id}')">🖨 PDFとして保存</button>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:16px">${chartsHtml}</div>
+    <div style="margin-bottom:16px">${chartsHtml}</div>
     ${savedNotesHtml(activeCol)}`;
 
   section.querySelectorAll('textarea').forEach(savedAutoGrowTextarea);
