@@ -1183,6 +1183,38 @@ function weeklyZoomRender() {
 
   // サイズ別: コンテナごとに縦並び
   const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+
+  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
+  if (!validContainers.length) {
+    body.innerHTML = '<div style="color:#8892a4;padding:16px">サイズデータがありません</div>';
+    return;
+  }
+
+  body.innerHTML = validContainers.map((c, i) => {
+    const siteColor = siteColors[c.siteName] || '#8892a4';
+    return `<div style="margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:0.85rem;font-weight:600">
+          <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
+        </div>
+        <button onclick="weeklyZoomSaveSizeChart(${i})" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+      </div>
+      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
+        <canvas id="wzs-${i}"></canvas>
+      </div>
+    </div>`;
+  }).join('');
+
+  validContainers.forEach((c, i) => {
+    const canvas = document.getElementById(`wzs-${i}`);
+    if (!canvas) return;
+    weeklyZoomSubCharts.push(new Chart(canvas, weeklyZoomSizeChartConfig(c.sizeRows, weeklyZoomMode)));
+  });
+}
+
+// 週別累計ズームの「サイズ別日次/サイズ別累計」で使うグラフ構成。
+// ライブ表示と保存グラフ(kind:'weekly-size')の両方から呼び出す共通ロジック。
+function weeklyZoomSizeChartConfig(sizeRows, mode) {
   const chartOpts = {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: {
@@ -1194,89 +1226,80 @@ function weeklyZoomRender() {
       y: { stacked: true, ticks: { color: '#8892a4', font: { size: 9 }, callback: v => `${v}kg` }, grid: { color: '#1e2235' } },
     },
   };
+  const labels = sizeRows.map(r => `day${r.day}`);
 
-  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
-  if (!validContainers.length) {
-    body.innerHTML = '<div style="color:#8892a4;padding:16px">サイズデータがありません</div>';
-    return;
+  if (mode === 'daily') {
+    const datasets = [
+      { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
+      { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
+      { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
+      { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
+    ];
+    return { type: 'bar', data: { labels, datasets }, options: chartOpts };
   }
 
-  body.innerHTML = validContainers.map((c, i) => {
-    const siteColor = siteColors[c.siteName] || '#8892a4';
-    return `<div style="margin-bottom:24px">
-      <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">
-        <span style="color:${siteColor}">${c.siteName}</span> ${c.name}
-      </div>
-      <div style="position:relative;height:220px;background:#13151f;border-radius:10px;padding:12px">
-        <canvas id="wzs-${i}"></canvas>
-      </div>
-    </div>`;
-  }).join('');
+  let cm=0,cl=0,cxl=0,cbg=0;
+  const packRateData = sizeRows.map(r => {
+    cm+=r.m; cl+=r.l; cxl+=r.xl; cbg+=r.bg;
+    const total = cm+cl+cxl+cbg;
+    return total > 0 ? +(((cm+cl+cxl)/total)*100).toFixed(1) : null;
+  });
+  // reset accumulators for dataset generation
+  cm=0; cl=0; cxl=0; cbg=0;
+  const datasets = [
+    { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
+    {
+      label: '累計パック品率(%)',
+      data: packRateData,
+      type: 'line',
+      yAxisID: 'yRate',
+      borderColor: '#f43f5e',
+      backgroundColor: '#f43f5e',
+      borderWidth: 2.5,
+      pointRadius: 4,
+      pointBackgroundColor: '#f43f5e',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 1.5,
+      pointHoverRadius: 6,
+      fill: false,
+      tension: 0.3,
+      stack: undefined,
+      order: 0,
+    },
+  ];
+  const comboOpts = {
+    ...chartOpts,
+    scales: {
+      ...chartOpts.scales,
+      yRate: {
+        type: 'linear',
+        position: 'right',
+        min: 0,
+        max: 100,
+        ticks: { color: '#f43f5e', font: { size: 9 }, callback: v => `${v}%` },
+        grid: { drawOnChartArea: false },
+      },
+    },
+  };
+  return { type: 'bar', data: { labels, datasets }, options: comboOpts };
+}
 
-  validContainers.forEach((c, i) => {
-    const canvas = document.getElementById(`wzs-${i}`);
-    if (!canvas) return;
-    const sizeRows = c.sizeRows;
-    const labels = sizeRows.map(r => `day${r.day}`);
-    let datasets;
-    if (weeklyZoomMode === 'daily') {
-      datasets = [
-        { label: 'M',   data: sizeRows.map(r => r.m),  backgroundColor: '#3b82f6cc', stack: 's' },
-        { label: 'L',   data: sizeRows.map(r => r.l),  backgroundColor: '#10b981cc', stack: 's' },
-        { label: '2L',  data: sizeRows.map(r => r.xl), backgroundColor: '#f59e0bcc', stack: 's' },
-        { label: '袋品', data: sizeRows.map(r => r.bg), backgroundColor: '#8b5cf6cc', stack: 's' },
-      ];
-    } else {
-      let cm=0,cl=0,cxl=0,cbg=0;
-      const packRateData = sizeRows.map(r => {
-        cm+=r.m; cl+=r.l; cxl+=r.xl; cbg+=r.bg;
-        const total = cm+cl+cxl+cbg;
-        return total > 0 ? +(((cm+cl+cxl)/total)*100).toFixed(1) : null;
-      });
-      // reset accumulators for dataset generation
-      cm=0; cl=0; cxl=0; cbg=0;
-      datasets = [
-        { label: 'M',   data: sizeRows.map(r=>{cm+=r.m; return +cm.toFixed(2);}),  backgroundColor: '#3b82f6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        { label: 'L',   data: sizeRows.map(r=>{cl+=r.l; return +cl.toFixed(2);}),  backgroundColor: '#10b981cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        { label: '2L',  data: sizeRows.map(r=>{cxl+=r.xl; return +cxl.toFixed(2);}), backgroundColor: '#f59e0bcc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        { label: '袋品', data: sizeRows.map(r=>{cbg+=r.bg; return +cbg.toFixed(2);}), backgroundColor: '#8b5cf6cc', stack: 's', type: 'bar', yAxisID: 'y', order: 1 },
-        {
-          label: '累計パック品率(%)',
-          data: packRateData,
-          type: 'line',
-          yAxisID: 'yRate',
-          borderColor: '#f43f5e',
-          backgroundColor: '#f43f5e',
-          borderWidth: 2.5,
-          pointRadius: 4,
-          pointBackgroundColor: '#f43f5e',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 1.5,
-          pointHoverRadius: 6,
-          fill: false,
-          tension: 0.3,
-          stack: undefined,
-          order: 0,
-        },
-      ];
-      const comboOpts = {
-        ...chartOpts,
-        scales: {
-          ...chartOpts.scales,
-          yRate: {
-            type: 'linear',
-            position: 'right',
-            min: 0,
-            max: 100,
-            ticks: { color: '#f43f5e', font: { size: 9 }, callback: v => `${v}%` },
-            grid: { drawOnChartArea: false },
-          },
-        },
-      };
-      weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: comboOpts }));
-      return;
-    }
-    weeklyZoomSubCharts.push(new Chart(canvas, { type: 'bar', data: { labels, datasets }, options: chartOpts }));
+// 週別累計ズームの「サイズ別日次/サイズ別累計」のコンテナ別グラフを保存グラフに追加する
+function weeklyZoomSaveSizeChart(containerIdx) {
+  if (!weeklyZoomGroups || !weeklyZoomGroups[weeklyZoomCurrentIdx]) return;
+  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
+  const c = validContainers[containerIdx];
+  if (!c) return;
+  const modeLabel = weeklyZoomMode === 'daily' ? 'サイズ別日次' : 'サイズ別累計';
+  savedOpenPicker({
+    kind: 'weekly-size',
+    sizeMode: weeklyZoomMode,
+    title: `${modeLabel}: ${c.siteName}${c.name}`,
+    items: { sizeRows: c.sizeRows.map(r => ({ ...r })) },
   });
 }
 
@@ -5947,6 +5970,9 @@ function savedBuildChartConfig(chart) {
   if (chart.kind === 'weight-weekly') {
     return weightWeeklyChartConfig(chart.items);
   }
+  if (chart.kind === 'weekly-size') {
+    return weeklyZoomSizeChartConfig(chart.items.sizeRows, chart.sizeMode);
+  }
   return null;
 }
 
@@ -6052,12 +6078,17 @@ const SAVED_KIND_LABELS = {
   'mekaki-weekly': '芽かき量(週別)', 'weight-weekly': '菌床重量(週別)',
 };
 function savedChartGroupKey(chart) {
-  return chart.kind === 'analysis' ? `analysis:${chart.configKey}` : chart.kind;
+  if (chart.kind === 'analysis') return `analysis:${chart.configKey}`;
+  if (chart.kind === 'weekly-size') return `weekly-size:${chart.sizeMode}`;
+  return chart.kind;
 }
 function savedChartGroupLabel(chart) {
   if (chart.kind === 'analysis') {
     const cfg = ANALYSIS_CHART_CONFIGS[chart.configKey];
     return cfg ? `分析: ${cfg.title}` : '分析';
+  }
+  if (chart.kind === 'weekly-size') {
+    return chart.sizeMode === 'daily' ? 'サイズ別日次(週別累計)' : 'サイズ別累計(週別累計)';
   }
   return SAVED_KIND_LABELS[chart.kind] || chart.kind;
 }
