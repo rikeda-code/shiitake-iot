@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>出荷・在庫・収穫予測ダッシュボード - いなべ</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:        #0f1117;
+    --surface:   #1a1d27;
+    --surface-2: #212533;
+    --border:    #2e3148;
+    --text:      #e2e8f0;
+    --muted:     #8892a4;
+    --m:         #3987e5; /* size M   - blue   */
+    --l:         #d95926; /* size L   - orange */
+    --xl:        #199e70; /* size 2L  - aqua   */
+    --bag:       #c98500; /* size 袋  - yellow */
+    --good:      #0ca30c;
+    --warn:      #fab219;
+    --critical:  #e66767;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px;
+  }
+  header h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: 0.02em; }
+  header .subtitle { font-size: 0.83rem; color: var(--muted); margin-top: 4px; }
+  #last-updated { font-size: 0.78rem; color: var(--muted); }
+  #refresh-btn {
+    background: var(--border); border: none; color: var(--text);
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    transition: background 0.2s;
+  }
+  #refresh-btn:hover { background: #3a3f5c; }
+  #refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+  main { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 26px; max-width: 1180px; margin: 0 auto; }
+
+  .section-title { font-size: 1rem; font-weight: 600; }
+  .section-title .sub { color: var(--muted); font-size: 0.78rem; font-weight: 400; margin-left: 8px; }
+
+  /* ── KPI cards ── */
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .kpi-card {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--card-color, var(--muted));
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .kpi-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .kpi-size { font-size: 0.95rem; font-weight: 700; color: var(--card-color); }
+  .kpi-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .kpi-badge.ok { background: rgba(12,163,12,0.16); color: #6fe36f; }
+  .kpi-badge.warn { background: rgba(230,103,103,0.18); color: var(--critical); }
+  .kpi-rows { display: flex; flex-direction: column; gap: 5px; }
+  .kpi-row { display: flex; justify-content: space-between; font-size: 0.82rem; }
+  .kpi-row .l { color: var(--muted); }
+  .kpi-row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .kpi-row .v.crit { color: var(--critical); }
+
+  /* ── Tabs ── */
+  .tabs-size { display: flex; gap: 2px; background: var(--surface); border-radius: 8px; padding: 3px; width: fit-content; }
+  .tab-size {
+    padding: 7px 20px; border-radius: 6px; font-size: 0.88rem; cursor: pointer;
+    color: var(--muted); border: none; background: transparent; white-space: nowrap;
+    transition: background 0.12s, color 0.12s;
+  }
+  .tab-size:hover { color: var(--text); }
+  .tab-size.active { background: var(--surface-2); color: var(--tab-color); font-weight: 700; }
+  .size-panel { display: none; flex-direction: column; gap: 16px; }
+  .size-panel.active { display: flex; }
+
+  /* ── Chart ── */
+  .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px 8px; }
+  .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+  .chart-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; }
+  .leg-item { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); }
+  .leg-sw { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+  .leg-sw.line { height: 3px; border-radius: 2px; }
+  canvas { width: 100%; display: block; }
+  .chart-note { font-size: 0.72rem; color: var(--muted); margin: 8px 2px 4px; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  thead th {
+    background: var(--surface-2); padding: 8px 12px; text-align: right; font-size: 0.72rem;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 500;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  thead th:first-child, thead th:nth-child(2) { text-align: left; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr.today { background: rgba(57,135,229,0.08); }
+  tbody tr.shortage td.needed { color: var(--critical); font-weight: 700; }
+  td { padding: 6px 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td:first-child, td:nth-child(2) { text-align: left; font-variant-numeric: normal; }
+  td.src { color: var(--muted); font-size: 0.76rem; }
+
+  .footer {
+    font-size: 0.75rem; color: var(--muted); line-height: 1.7; padding-top: 4px;
+    border-top: 1px solid var(--border); margin-top: 4px;
+  }
+  .footer a { color: #7aa8e0; }
+  .state-msg { padding: 40px; text-align: center; color: var(--muted); font-size: 0.9rem; }
+  .state-msg.error { color: var(--critical); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🍄 出荷・在庫・収穫予測ダッシュボード</h1>
+    <div class="subtitle">いなべ拠点 ／ サイズ別（M・L・2L・袋）</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="state-msg" id="state-msg">データを読み込み中...</div>
+</main>
+
+<script>
+/* ===================== Config ===================== */
+// 在庫データ: 椎茸在庫管理表(いなべ) / 「椎茸在庫」タブ
+const INVENTORY_SHEET_ID = '1ecjNSdIIT3BzQpUIq5T25v1IjEV8eYwZpC1XwU5bacE';
+const INVENTORY_TAB = '椎茸在庫';
+// 未加工在庫(生椎茸, kg)= 49〜52行目 / 製品在庫(kg, サイズ別)= 60〜63行目 (シート行番号, 1始まり)
+const INV_RAW_ROW     = { '2L': 49, 'L': 50, 'M': 51, '袋': 52 };
+const INV_PRODUCT_ROW = { '2L': 60, 'L': 61, 'M': 62, '袋': 63 };
+
+// 出荷データ: いなべ 2026年8月度出荷・販売予実管理表
+const SHIPMENT_SHEET_ID = '1QYpetBd-GV64V8JnG4e0scOOItm-wMTZCJ-smQ-dWlU';
+const SHIPMENT_TAB_FIX  = '出荷計画表(8月度)修正';        // 該当週の1週間前以前の予測に使用
+const SHIPMENT_TAB_LIVE = '出荷計画表(8月度)随時更新';    // 月曜時点の直近1週間の予測に使用
+// サイズ別出荷計画(kg) = 修正:500〜503行目 / 随時更新:487〜490行目
+const SHIP_FIX_ROW  = { 'M': 500, 'L': 501, '2L': 502, '袋': 503 };
+const SHIP_LIVE_ROW = { 'M': 487, 'L': 488, '2L': 489, '袋': 490 };
+// ↑ 月が変わったらタブ名(8月度→9月度等)と上記行番号をシートの実態に合わせて更新してください。
+
+const SIZES = ['M', 'L', '2L', '袋'];
+const SIZE_COLOR = { M: 'var(--m)', L: 'var(--l)', '2L': 'var(--xl)', '袋': 'var(--bag)' };
+const SIZE_COLOR_HEX = { M: '#3987e5', L: '#d95926', '2L': '#199e70', '袋': '#c98500' };
+const HISTORY_DAYS = 7;   // チャートに表示する過去日数
+const HORIZON_DAYS = 30;  // 在庫予測・必要収穫量を計算する最大日数
+const WEEKDAY_JP = ['日', '月', '火', '水', '木', '金', '土'];
+
+let charts = {};
+
+/* ===================== Data helpers ===================== */
+async function fetchSheet(sheetId, sheetName, range) {
+  let url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=0`;
+  if (range) url += `&range=${encodeURIComponent(range)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
+    const text = await res.text();
+    const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+    if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || `シート取得エラー: ${sheetName}`);
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function gvizToDate(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  if (typeof v === 'string') {
+    const m = v.match(/^Date\((\d+),(\d+),(\d+)\)/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
+    return null;
+  }
+  if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+  return null;
+}
+
+function dateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+function getMonday(d) { const day = d.getDay(); const diff = (day + 6) % 7; const r = new Date(d); r.setDate(d.getDate() - diff); r.setHours(0, 0, 0, 0); return r; }
+function fmtMD(d) { return `${d.getMonth() + 1}/${d.getDate()}`; }
+function fmtKg(n) { return (Math.round(n * 10) / 10).toLocaleString('ja-JP', { minimumFractionDigits: 0, maximumFractionDigits: 1 }); }
+
+function buildDateColMap(headerRow) {
+  const map = new Map();
+  const cells = headerRow?.c || [];
+  cells.forEach((cell, idx) => {
+    const d = gvizToDate(cell);
+    if (d && !isNaN(d.getTime())) map.set(dateKey(d), { col: idx, date: d });
+  });
+  return map;
+}
+
+function cellNum(row, idx) {
+  if (idx == null) return null;
+  const v = row?.c?.[idx]?.v;
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+
+function latestOnOrBefore(map, targetDate) {
+  let best = null;
+  for (const entry of map.values()) {
+    if (entry.date <= targetDate && (!best || entry.date > best.date)) best = entry;
+  }
+  return best;
+}
+
+function maxDateIn(map) {
+  let best = null;
+  for (const entry of map.values()) { if (!best || entry.date > best) best = entry.date; }
+  return best;
+}
+
+/* ===================== Load & compute ===================== */
+async function loadAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  const main = document.getElementById('main');
+  const existingHasContent = !!document.getElementById('cards-grid');
+  if (!existingHasContent) main.innerHTML = '<div class="state-msg" id="state-msg">データを読み込み中...</div>';
+
+  try {
+    const [invTable, fixTable, liveTable] = await Promise.all([
+      fetchSheet(INVENTORY_SHEET_ID, INVENTORY_TAB),
+      fetchSheet(SHIPMENT_SHEET_ID, SHIPMENT_TAB_FIX, 'A1:BV503'),
+      fetchSheet(SHIPMENT_SHEET_ID, SHIPMENT_TAB_LIVE, 'A1:BV490'),
+    ]);
+
+    const invDateCol = buildDateColMap(invTable.rows[0]);
+    const fixDateCol = buildDateColMap(fixTable.rows[0]);
+    const liveDateCol = buildDateColMap(liveTable.rows[0]);
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayKey = dateKey(today);
+
+    // ── 現在庫 ──
+    const invEntry = invDateCol.get(todayKey) || latestOnOrBefore(invDateCol, today);
+    const currentStock = {};
+    SIZES.forEach(size => {
+      const rawRowIdx = INV_RAW_ROW[size] - 1;
+      const prodRowIdx = INV_PRODUCT_ROW[size] - 1;
+      const col = invEntry ? invEntry.col : null;
+      const raw = cellNum(invTable.rows[rawRowIdx], col) || 0;
+      const prod = cellNum(invTable.rows[prodRowIdx], col) || 0;
+      currentStock[size] = { raw, product: prod, total: raw + prod, asOf: invEntry ? invEntry.date : null };
+    });
+
+    // ── 出荷計画（修正/随時更新の使い分け） ──
+    const weekStart = getMonday(today);
+    const weekEnd = addDays(weekStart, 6);
+
+    function shipmentOn(d, size) {
+      const key = dateKey(d);
+      const inCurrentWeek = d >= weekStart && d <= weekEnd;
+      const fixCol = fixDateCol.get(key)?.col;
+      const liveCol = liveDateCol.get(key)?.col;
+      const fixVal = cellNum(fixTable.rows[SHIP_FIX_ROW[size] - 1], fixCol);
+      const liveVal = cellNum(liveTable.rows[SHIP_LIVE_ROW[size] - 1], liveCol);
+      let val, source;
+      if (inCurrentWeek) {
+        if (liveVal != null) { val = liveVal; source = '随時更新'; }
+        else if (fixVal != null) { val = fixVal; source = '修正'; }
+        else { val = null; source = null; }
+      } else {
+        if (fixVal != null) { val = fixVal; source = '修正'; }
+        else if (liveVal != null) { val = liveVal; source = '随時更新'; }
+        else { val = null; source = null; }
+      }
+      return { val: val ?? 0, hasData: val != null, source };
+    }
+
+    const maxPlanDate = [maxDateIn(fixDateCol), maxDateIn(liveDateCol)].filter(Boolean)
+      .reduce((a, b) => (a > b ? a : b), today);
+    const horizonEnd = new Date(Math.min(maxPlanDate.getTime(), addDays(today, HORIZON_DAYS).getTime()));
+
+    // ── 過去(表示用) + 未来(予測) の日次系列 ──
+    const series = {};
+    SIZES.forEach(size => {
+      const days = [];
+      let cursor = addDays(today, -HISTORY_DAYS);
+      while (cursor <= horizonEnd) {
+        const isFuture = cursor >= today;
+        const { val: ship, hasData, source } = shipmentOn(cursor, size);
+        days.push({ date: new Date(cursor), shipment: ship, hasData, source, isFuture });
+        cursor = addDays(cursor, 1);
+      }
+      // 在庫予測 & 必要収穫量（本日〜予測期間末）
+      let running = currentStock[size].total;
+      let cumulativeNeeded = 0;
+      days.forEach(day => {
+        if (day.isFuture) {
+          running -= day.shipment;
+          let needed = 0;
+          if (running < 0) { needed = -running; running = 0; }
+          day.projected = running;
+          day.needed = needed;
+          cumulativeNeeded += needed;
+        } else {
+          day.projected = null;
+          day.needed = 0;
+        }
+      });
+      series[size] = { days, cumulativeNeeded, currentTotal: currentStock[size].total };
+    });
+
+    render({ currentStock, series, today, weekStart, weekEnd, horizonEnd, maxPlanDate });
+    document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+  } catch (e) {
+    document.getElementById('main').innerHTML =
+      `<div class="state-msg error">データ取得エラー: ${(e.message || String(e))}<br>
+       <span style="font-size:0.78rem">Googleアカウントでログインし、対象シートの閲覧権限があるかご確認ください。</span></div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ===================== Render ===================== */
+function render(ctx) {
+  const { currentStock, series, today, weekStart, weekEnd, horizonEnd, maxPlanDate } = ctx;
+  const main = document.getElementById('main');
+
+  const cards = SIZES.map(size => {
+    const s = currentStock[size];
+    const ser = series[size];
+    const todayRow = ser.days.find(d => dateKey(d.date) === dateKey(today));
+    const next7 = ser.days.filter(d => d.date > today && d.date <= addDays(today, 6)).reduce((sum, d) => sum + d.shipment, 0);
+    const shortage = ser.cumulativeNeeded > 0.05;
+    return `
+    <div class="kpi-card" style="--card-color:${SIZE_COLOR_HEX[size]}">
+      <div class="kpi-head">
+        <span class="kpi-size">${size}</span>
+        <span class="kpi-badge ${shortage ? 'warn' : 'ok'}">${shortage ? '⚠️ 収穫要' : '✅ 充足'}</span>
+      </div>
+      <div class="kpi-rows">
+        <div class="kpi-row"><span class="l">在庫合計 (未加工+製品)</span><span class="v">${fmtKg(s.total)} kg</span></div>
+        <div class="kpi-row"><span class="l">　未加工 / 製品</span><span class="v">${fmtKg(s.raw)} / ${fmtKg(s.product)} kg</span></div>
+        <div class="kpi-row"><span class="l">本日出荷 (${fmtMD(today)})</span><span class="v">${fmtKg(todayRow ? todayRow.shipment : 0)} kg</span></div>
+        <div class="kpi-row"><span class="l">今後7日間の出荷計画</span><span class="v">${fmtKg(next7)} kg</span></div>
+        <div class="kpi-row"><span class="l">必要収穫量（予測期間累計）</span><span class="v ${shortage ? 'crit' : ''}">${fmtKg(ser.cumulativeNeeded)} kg</span></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const tabs = SIZES.map((size, i) => `<button class="tab-size ${i === 0 ? 'active' : ''}" style="--tab-color:${SIZE_COLOR_HEX[size]}" data-size="${size}" onclick="selectSize('${size}')">${size}</button>`).join('');
+
+  const panels = SIZES.map((size, i) => `
+    <div class="size-panel ${i === 0 ? 'active' : ''}" id="panel-${size}">
+      <div class="chart-wrap">
+        <div class="chart-head">
+          <span class="chart-label">${size} ／ 日次出荷量・在庫予測</span>
+          <div class="legend">
+            <span class="leg-item"><span class="leg-sw" style="background:${SIZE_COLOR_HEX[size]}"></span>出荷量(kg)</span>
+            <span class="leg-item"><span class="leg-sw line" style="background:${SIZE_COLOR_HEX[size]}"></span>在庫予測(kg)</span>
+            <span class="leg-item"><span class="leg-sw" style="background:#e66767;border-radius:50%"></span>不足発生日</span>
+          </div>
+        </div>
+        <canvas id="chart-${size}" height="110"></canvas>
+        <div class="chart-note">現在庫（${fmtMD(currentStock[size].asOf || today)}時点）を起点に、出荷計画分を差し引いた在庫の推移予測です。在庫がゼロを下回る日は不足分＝必要収穫量として表示します。</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>日付</th><th>曜日</th><th>出荷量(kg)</th><th>予測在庫(kg)</th><th>必要収穫量(kg)</th><th>参照シート</th>
+          </tr></thead>
+          <tbody>${renderRows(series[size].days, today)}</tbody>
+        </table>
+      </div>
+    </div>`).join('');
+
+  main.innerHTML = `
+    <div class="cards-grid" id="cards-grid">${cards}</div>
+    <div>
+      <div class="tabs-size">${tabs}</div>
+      ${panels}
+    </div>
+    <div class="footer">
+      本日: ${today.toLocaleDateString('ja-JP')}（${WEEKDAY_JP[today.getDay()]}）／ 今週(月曜起点): ${fmtMD(weekStart)}〜${fmtMD(weekEnd)} は「随時更新」シートを優先使用、それ以外は「修正」シートを使用。
+      出荷計画はシートの入力値をそのまま使用しています（未入力の日は0と表示される場合があります／${fmtMD(maxPlanDate)}以降は列自体が未作成のため対象外）。予測は在庫＝現在庫－出荷計画の単純積み上げで、新規収穫分は加味していません（不足＝必要収穫量として表示）。<br>
+      データソース：
+      <a href="https://docs.google.com/spreadsheets/d/${INVENTORY_SHEET_ID}/edit" target="_blank" rel="noopener">椎茸在庫管理表(いなべ)</a>／
+      <a href="https://docs.google.com/spreadsheets/d/${SHIPMENT_SHEET_ID}/edit" target="_blank" rel="noopener">いなべ出荷・販売予実管理表</a>
+    </div>`;
+
+  SIZES.forEach(size => drawChart(size, series[size].days, today));
+}
+
+function renderRows(days, today) {
+  return days.filter(d => d.isFuture || dateKey(d.date) === dateKey(today)).map(d => {
+    const isToday = dateKey(d.date) === dateKey(today);
+    const shortage = d.needed > 0.05;
+    return `<tr class="${isToday ? 'today' : ''} ${shortage ? 'shortage' : ''}">
+      <td>${fmtMD(d.date)}</td>
+      <td>${WEEKDAY_JP[d.date.getDay()]}</td>
+      <td>${d.hasData ? fmtKg(d.shipment) : '—'}</td>
+      <td>${d.projected != null ? fmtKg(d.projected) : '—'}</td>
+      <td class="needed">${d.needed > 0.05 ? fmtKg(d.needed) : '-'}</td>
+      <td class="src">${d.source || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function selectSize(size) {
+  document.querySelectorAll('.tab-size').forEach(b => b.classList.toggle('active', b.dataset.size === size));
+  document.querySelectorAll('.size-panel').forEach(p => p.classList.toggle('active', p.id === `panel-${size}`));
+  const c = charts[size];
+  if (c) c.resize();
+}
+
+function drawChart(size, days, today) {
+  const canvas = document.getElementById(`chart-${size}`);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (charts[size]) charts[size].destroy();
+
+  const labels = days.map(d => `${fmtMD(d.date)}(${WEEKDAY_JP[d.date.getDay()]})`);
+  const shipmentData = days.map(d => d.hasData ? d.shipment : null);
+  const projectedData = days.map(d => d.projected);
+  const barColors = days.map(d => d.isFuture ? SIZE_COLOR_HEX[size] : `${SIZE_COLOR_HEX[size]}66`);
+  const pointColors = days.map(d => (d.needed > 0.05) ? '#e66767' : SIZE_COLOR_HEX[size]);
+  const todayIdx = days.findIndex(d => dateKey(d.date) === dateKey(today));
+
+  charts[size] = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: '出荷量(kg)',
+          data: shipmentData,
+          backgroundColor: barColors,
+          borderRadius: 3,
+          order: 2,
+          yAxisID: 'y',
+        },
+        {
+          type: 'line',
+          label: '在庫予測(kg)',
+          data: projectedData,
+          borderColor: SIZE_COLOR_HEX[size],
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          spanGaps: true,
+          tension: 0.15,
+          order: 1,
+          yAxisID: 'y',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1e2235',
+          borderColor: '#3a3f5c',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#a0aec0',
+          callbacks: {
+            label: (c) => {
+              const d = days[c.dataIndex];
+              if (c.dataset.type === 'bar') return `出荷量: ${d.hasData ? fmtKg(d.shipment) : '—'} kg${d.source ? ' (' + d.source + ')' : ''}`;
+              if (d.projected == null) return null;
+              return `予測在庫: ${fmtKg(d.projected)} kg` + (d.needed > 0.05 ? ` ／ 必要収穫量: +${fmtKg(d.needed)} kg` : '');
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 60, minRotation: 60 }, grid: { color: '#20232f' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#20232f' }, beginAtZero: true },
+      },
+    },
+    plugins: [{
+      id: 'todayLine',
+      afterDraw(chart) {
+        if (todayIdx < 0) return;
+        const xScale = chart.scales.x;
+        const { top, bottom } = chart.chartArea;
+        const xPos = xScale.getPixelForValue(todayIdx);
+        const c = chart.ctx;
+        c.save();
+        c.setLineDash([4, 4]);
+        c.strokeStyle = '#8892a4';
+        c.lineWidth = 1;
+        c.beginPath();
+        c.moveTo(xPos, top);
+        c.lineTo(xPos, bottom);
+        c.stroke();
+        c.setLineDash([]);
+        c.fillStyle = '#8892a4';
+        c.font = '10px sans-serif';
+        c.fillText('本日', xPos + 4, top + 10);
+        c.restore();
+      },
+    }],
+  });
+}
+
+loadAll();
+</script>
+</body>
+</html>
