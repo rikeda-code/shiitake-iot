@@ -81,6 +81,7 @@
 
   /* ── Chart ── */
   .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px 8px; }
+  .chart-canvas-wrap { position: relative; height: 320px; }
   .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
   .chart-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -184,9 +185,16 @@ function gvizToDate(cell) {
   if (typeof v === 'string') {
     const m = v.match(/^Date\((\d+),(\d+),(\d+)\)/);
     if (m) return new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
-    return null;
   }
   if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+  // gvizが列を文字列型と推定した場合、v/fが "2026/8/4" や "8/4/2026" 等の書式文字列になることがあるため救済する
+  const candidates = [v, cell.f].filter(s => typeof s === 'string' && s.trim());
+  for (const s of candidates) {
+    let m = s.match(/^(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (m) return new Date(parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]));
+  }
   return null;
 }
 
@@ -208,9 +216,13 @@ function buildDateColMap(headerRow) {
 
 function cellNum(row, idx) {
   if (idx == null) return null;
-  const v = row?.c?.[idx]?.v;
+  const cell = row?.c?.[idx];
+  if (!cell) return null;
+  let v = cell.v;
+  if (v == null || v === '') v = cell.f; // 列がstring型と推定された場合の救済
   if (v == null || v === '') return null;
-  const n = typeof v === 'number' ? v : parseFloat(v);
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v).replace(/,/g, '').trim()); // 桁区切りカンマを除去してから数値化
   return isNaN(n) ? null : n;
 }
 
@@ -246,6 +258,11 @@ async function loadAll() {
     const invDateCol = buildDateColMap(invTable.rows[0]);
     const fixDateCol = buildDateColMap(fixTable.rows[0]);
     const liveDateCol = buildDateColMap(liveTable.rows[0]);
+
+    // 日付ヘッダーが1件も解析できない場合、全項目が0kgのまま表示されてしまい
+    // 「充足」と誤認しかねないため、無言でゼロ表示にせず明示的にエラーにする。
+    if (invDateCol.size === 0) throw new Error('椎茸在庫シートの日付ヘッダーを解析できませんでした（1行目の列構成が変更された可能性があります）');
+    if (fixDateCol.size === 0 && liveDateCol.size === 0) throw new Error('出荷計画シートの日付ヘッダーを解析できませんでした（1行目の列構成が変更された可能性があります）');
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const todayKey = dateKey(today);
@@ -371,7 +388,7 @@ function render(ctx) {
             <span class="leg-item"><span class="leg-sw" style="background:#e66767;border-radius:50%"></span>不足発生日</span>
           </div>
         </div>
-        <canvas id="chart-${size}" height="110"></canvas>
+        <div class="chart-canvas-wrap"><canvas id="chart-${size}"></canvas></div>
         <div class="chart-note">現在庫（${fmtMD(currentStock[size].asOf || today)}時点）を起点に、出荷計画分を差し引いた在庫の推移予測です。在庫がゼロを下回る日は不足分＝必要収穫量として表示します。</div>
       </div>
       <div class="table-wrap">
