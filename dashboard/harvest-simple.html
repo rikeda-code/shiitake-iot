@@ -2053,6 +2053,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     return {
       label: `${c.siteName} ${c.name}`,
       containerLabel,
+      bedCount,
       data: cumArr,
       borderColor: color,
       backgroundColor: 'transparent',
@@ -2094,7 +2095,11 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
           ...tooltipDefaults,
           callbacks: {
             title: items => `栽培${items[0].label}日目`,
-            label: c => c.raw !== null ? `${c.dataset.label}: ${c.raw}g/菌床` : null,
+            label: c => {
+              if (c.raw === null) return null;
+              const bed = c.dataset.bedCount;
+              return `${c.dataset.label}${bed ? `(${bed.toLocaleString('ja-JP')}菌床)` : ''}: ${c.raw}g/菌床`;
+            },
           },
         },
       },
