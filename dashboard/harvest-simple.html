@@ -2055,8 +2055,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     const wateringDays = new Set(
       sd ? wateringDatesForContainer(c).map(d => Math.round((d - sd) / 86400000)).filter(d => d >= 0 && d <= MAX_DAY) : []
     );
-    const pointRadiusArr = xLabels.map((_, i) => wateringDays.has(i) ? 5 : 0);
-    const pointColorArr = xLabels.map((_, i) => wateringDays.has(i) ? '#38bdf8' : color);
+    const pointRadiusArr = xLabels.map((_, i) => wateringDays.has(i) ? 3.5 : 0);
     const pointBorderArr = xLabels.map((_, i) => wateringDays.has(i) ? 1.5 : 0);
 
     return {
@@ -2070,7 +2069,7 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       borderWidth: c.isEnded ? 1 : 1.5,
       borderDash: c.isEnded ? [4, 3] : [],
       pointRadius: pointRadiusArr,
-      pointBackgroundColor: pointColorArr,
+      pointBackgroundColor: color,
       pointBorderColor: '#fff',
       pointBorderWidth: pointBorderArr,
       pointHoverRadius: 6,
