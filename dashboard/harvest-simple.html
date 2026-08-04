@@ -3639,14 +3639,26 @@ function parseWateringRows(table) {
   const result = [];
   rows.forEach(row => {
     const cells = row?.c || [];
-    const dVal = cells[3]?.v != null ? String(cells[3].v).trim() : '';
-    if (dVal === '') return;
-    const date = parseWateringDate(cells[2]);
+    const cCell = cells[2];
+    const dCell = cells[3];
+    const cVal = cCell?.v != null ? String(cCell.v).trim() : '';
+    const dVal = dCell?.v != null ? String(dCell.v).trim() : '';
+    if (cVal === '' && dVal === '') return;
+
+    // 本来はC列=注水日・D列=号機だが、行によってはC/D列の中身が入れ替わっている
+    // (号機のはずの値が日付シリアル値になっている等)ケースがあるため、両列を試して
+    // 「日付として解釈できた方を注水日、もう片方を号機」として扱う。
+    let date = parseWateringDate(cCell);
+    let containerNo = dVal;
     if (!date) {
-      console.warn('[watering] 注水日を解釈できない行をスキップ:', cells[2]?.v, 'no=', dVal);
+      const altDate = parseWateringDate(dCell);
+      if (altDate) { date = altDate; containerNo = cVal; }
+    }
+    if (!date || containerNo === '') {
+      console.warn('[watering] 注水日/号機を解釈できない行をスキップ:', cVal, dVal);
       return;
     }
-    result.push({ containerNo: dVal, date });
+    result.push({ containerNo, date });
   });
   return result;
 }
