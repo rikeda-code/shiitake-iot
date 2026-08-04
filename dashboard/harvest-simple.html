@@ -3610,6 +3610,30 @@ function parseWeightRows(table) {
 const WATERING_SHEET_NAMES = { 'いなべ': 'いなべ 注水', '群馬': '群馬 注水', '南丹': '南丹 注水' };
 let wateringData = null; // { [siteName]: { [containerNo]: Date[] } }
 
+// 注水日欄が「5/26」等の区切りありでなく、「504」「524」のように区切り無しの
+// 数値(MDD/MMDD)で入力されている行があるため、通常のgvizToDateだけでは
+// 実際の日付シリアル値(4万台の数値)と誤認して不正な日付になってしまう。
+// 現実的な日付シリアル値でない小さい数値は、区切り無しMDD/MMDD表記として救済する。
+function parseWateringDate(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  if (typeof v === 'number' && Number.isInteger(v) && v >= 101 && v <= 1231) {
+    const s = String(v);
+    const month = s.length <= 3 ? parseInt(s.slice(0, s.length - 2), 10) : parseInt(s.slice(0, 2), 10);
+    const day = parseInt(s.slice(-2), 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return new Date(new Date().getFullYear(), month - 1, day);
+    }
+  }
+  // セルがテキスト書式で「5/26」のように年無しで入っている場合、gvizToDateの
+  // 素のnew Date(文字列)フォールバックは年の解釈が不安定なため、年を明示的に
+  // 補うparseDateMDを先に試す(Date(y,m,d)形式は元々こちらにマッチしないので
+  // gvizToDate側の処理に影響しない)。
+  const md = parseDateMD(v, cell.f);
+  if (md) return md;
+  return gvizToDate(cell);
+}
+
 function parseWateringRows(table) {
   const rows = table.rows || [];
   const result = [];
@@ -3617,8 +3641,11 @@ function parseWateringRows(table) {
     const cells = row?.c || [];
     const dVal = cells[3]?.v != null ? String(cells[3].v).trim() : '';
     if (dVal === '') return;
-    const date = gvizToDate(cells[2]);
-    if (!date) return;
+    const date = parseWateringDate(cells[2]);
+    if (!date) {
+      console.warn('[watering] 注水日を解釈できない行をスキップ:', cells[2]?.v, 'no=', dVal);
+      return;
+    }
     result.push({ containerNo: dVal, date });
   });
   return result;
