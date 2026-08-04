@@ -747,10 +747,12 @@ function parseContainerRowsV2(table, startDateStr) {
         }
       }
       if (!rowDate) continue;
+      // 1日あたり収穫量(kg)が現実的にありえない大きさ(列ズレで日付シリアル値等を
+      // 拾ってしまった場合)は弾く
       const v13 = parseFloat(cells[13]?.v);
-      const daily = (!isNaN(v13) && v13 > 0) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
+      const daily = (!isNaN(v13) && v13 > 0 && v13 < 1000) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
         const v = parseFloat(cells[ci]?.v);
-        return s + (isNaN(v) || v < 0 ? 0 : v);
+        return s + (isNaN(v) || v < 0 || v >= 1000 ? 0 : v);
       }, 0);
       if (!startD) continue;
       const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
@@ -797,10 +799,13 @@ function parseContainerRowsV2(table, startDateStr) {
         if (rowDate) break;
       }
       if (!rowDate) continue;
+      // 実際の1日あたり収穫量(kg)は現実的に1000kgを超えることはないため、
+      // 列がずれて日付シリアル値(4万台等)を拾ってしまった場合はこの上限で弾く
+      // (注水シートで実際に確認された「列ズレで巨大な数値を誤読する」問題と同種の対策)
       let daily = 0;
       for (const offset of [12, 11, 13, 10]) {
         const v = parseFloat(cells[dayCol + offset]?.v);
-        if (!isNaN(v) && v >= 0) { daily = v; break; }
+        if (!isNaN(v) && v >= 0 && v < 1000) { daily = v; break; }
       }
       rows.push({ rowDate, dayNum: dayIdx + 1, daily });
     }
