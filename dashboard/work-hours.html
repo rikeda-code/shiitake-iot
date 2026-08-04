@@ -3148,14 +3148,23 @@ function computeStdHoursLine(emps, months) {
 // （拠点。nullなら全拠点）で絞り込んだ従業員だけに適用したもの。予実＞比較（繁忙期
 // 見込み）タブで、過去月（実績が既に確定している月）の「標準労働時間」棒に使う
 // （3拠点マージのB=1・B=2集計は将来月の見込み値のため、過去月には使わない）。
+// 整理済み_M側の業務区分は細分表記（配送・栽培／配送・出荷等）のため、3拠点マージ側の
+// 正規化済みバケット（栽培/出荷/配送）とはworkTypeClass()を介して対応付ける
+// （renderPlanCompareCharts2内の実績工数集計・window._planCmpChartData2と同じ判定方法。
+// e.workType === divの直接比較では配送・栽培／配送・出荷が一致しない）。
 // 引数monthsは呼び出し側（比較タブ）の計画月ラベル（"2025/12"形式）。整理済み_Mの
 // 月インデックスとは一致しない可能性があるため、workHoursForPlanMonths()と同様に
 // normalizeMonth()でカレンダー月を突き合わせてhours配列をmonths基準に並べ替えてから
 // computeStdHoursLine()に渡す
 function computeStdHoursLineForDivSite(div, site, months) {
   const { employees, months: activeMonths } = getActiveData();
+  const typeFilter = div === '栽培'
+    ? wt => workTypeClass(wt) === 'wt-栽培'
+    : div === '配送'
+      ? wt => workTypeClass(wt) === 'wt-配送'
+      : wt => workTypeClass(wt) === 'wt-出荷';
   const emps = employees
-    .filter(e => e.workType === div && (site == null || e.base === site))
+    .filter(e => typeFilter(e.workType) && (site == null || e.base === site))
     .map(e => ({
       ...e,
       hours: months.map(planMonth => {
