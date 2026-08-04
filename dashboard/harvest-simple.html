@@ -3612,7 +3612,14 @@ function parseWeightRows(table) {
 
 // ── 注水日データ(週別累計グラフのデータポイント用) ─────────────────────────────
 // 菌床重量と同じスプレッドシート内の「{拠点} 注水」シートから、C列=注水日・D列=号機を読む。
-const WATERING_SHEET_NAMES = { 'いなべ': 'いなべ 注水', '群馬': '群馬 注水', '南丹': '南丹 注水' };
+// シート名の「注水」前のスペースが全角/半角どちらか実物と食い違うと別のシート
+// (概要メモ等)を誤って取得してしまうため、両方の候補を用意して実際にパースできた
+// 方を採用する。
+const WATERING_SHEET_NAME_CANDIDATES = {
+  'いなべ': ['いなべ 注水', 'いなべ　注水'],
+  '群馬': ['群馬 注水', '群馬　注水'],
+  '南丹': ['南丹 注水', '南丹　注水'],
+};
 let wateringData = null; // { [siteName]: { [containerNo]: Date[] } }
 
 // 注水日欄が「5/26」等の区切りありでなく、「504」「524」のように区切り無しの
@@ -3671,16 +3678,24 @@ function parseWateringRows(table) {
 async function ensureWateringData() {
   if (wateringData) return wateringData;
   const result = {};
-  await Promise.all(Object.entries(WATERING_SHEET_NAMES).map(async ([siteName, sheetName]) => {
-    try {
-      const table = await fetchWeightSheet(sheetName);
-      const byContainer = {};
-      parseWateringRows(table).forEach(r => { (byContainer[r.containerNo] ||= []).push(r.date); });
-      result[siteName] = byContainer;
-    } catch (e) {
-      console.error(`[watering] ${siteName}の注水データ取得に失敗:`, e.message);
-      result[siteName] = {};
+  await Promise.all(Object.entries(WATERING_SHEET_NAME_CANDIDATES).map(async ([siteName, candidates]) => {
+    const byContainer = {};
+    for (const sheetName of candidates) {
+      try {
+        const table = await fetchWeightSheet(sheetName);
+        const rows = parseWateringRows(table);
+        if (rows.length > 0) {
+          rows.forEach(r => { (byContainer[r.containerNo] ||= []).push(r.date); });
+          break; // このシート名で読み取れたので他の候補は試さない
+        }
+      } catch (e) {
+        console.warn(`[watering] ${siteName}: シート「${sheetName}」の取得に失敗:`, e.message);
+      }
     }
+    if (Object.keys(byContainer).length === 0) {
+      console.error(`[watering] ${siteName}の注水データを取得できませんでした(候補シート名: ${candidates.join(' / ')})`);
+    }
+    result[siteName] = byContainer;
   }));
   wateringData = result;
   return wateringData;
