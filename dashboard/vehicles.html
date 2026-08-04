@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>社用車管理アプリ</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2e3148;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --accent: #38bdf8;
+      --ok: #34d399;
+      --warn: #f59e0b;
+      --danger: #f87171;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    header {
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
+    header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+    #last-updated { font-size: 0.8rem; color: var(--muted); }
+    .btn {
+      background: var(--border);
+      border: none;
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #3a3f5c; }
+    .btn-primary { background: var(--accent); color: #0f1117; font-weight: 600; }
+    .btn-primary:hover { background: #5fc9fb; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    main { padding: 28px 32px; display: flex; flex-direction: column; gap: 28px; max-width: 1100px; margin: 0 auto; }
+    section.panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .panel-header h2 { font-size: 1.05rem; font-weight: 600; }
+    .panel-body { padding: 20px 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+    .table-wrap { overflow-x: auto; }
+    .mono { font-variant-numeric: tabular-nums; }
+    .loading, .error-msg, .empty-msg { color: var(--muted); font-size: 0.9rem; padding: 8px 0; }
+    .error-msg { color: var(--danger); }
+    .section-title { font-size: 0.95rem; font-weight: 600; margin: 24px 0 12px; }
+    .chart-wrap { height: 320px; position: relative; margin-bottom: 8px; }
+
+    .top-tabs-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      overflow-x: auto;
+    }
+    .tabs { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
+    .tab-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .tab-btn.active { color: #0f1117; background: var(--accent); border-color: var(--accent); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .card {
+      background: #12141d;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .card h3 { font-size: 0.95rem; display: flex; align-items: center; gap: 6px; }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-left: auto;
+    }
+    .badge-ok { background: rgba(52,211,153,0.15); color: var(--ok); }
+    .badge-warn { background: rgba(245,158,11,0.15); color: var(--warn); }
+    .badge-danger { background: rgba(248,113,113,0.15); color: var(--danger); }
+    .badge-muted { background: rgba(136,146,164,0.15); color: var(--muted); }
+    .metric-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
+    .metric-row .label { color: var(--muted); }
+    .metric-row.highlight { font-size: 0.95rem; font-weight: 700; padding: 6px 0; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); margin: 4px 0; }
+    .metric-row.highlight .label { color: var(--text); font-weight: 600; }
+    .forecast-note { font-size: 0.78rem; color: var(--muted); margin: 6px 0; }
+    .forecast-chart { height: 240px; position: relative; margin-top: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; }
+    .field label { color: var(--muted); }
+    .field input {
+      background: #0f1117;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 9px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      width: 100%;
+    }
+    .vehicle-meta { font-size: 0.8rem; color: var(--muted); padding: 16px 24px 0; }
+    .vehicle-meta strong { color: var(--text); }
+    .save-row { display: flex; align-items: center; gap: 12px; padding: 4px 24px 20px; flex-wrap: wrap; }
+    .save-row .field { flex: 1; min-width: 180px; }
+    #save-status { font-size: 0.82rem; color: var(--muted); }
+    .setup-notice {
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.3);
+      color: var(--warn);
+      font-size: 0.8rem;
+      padding: 10px 16px;
+      border-radius: 8px;
+      margin: 16px 24px 0;
+    }
+    @media (max-width: 640px) {
+      header, main { padding: 16px; }
+      .top-tabs-bar { padding: 0 16px; }
+      .panel-body, .panel-header, .save-row, .vehicle-meta { padding-left: 16px; padding-right: 16px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🚗 社用車管理アプリ</h1>
+    <div class="subtitle">安中ファーム 走行日報 連携</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated"></span>
+    <button class="btn" onclick="loadAll()">↻ 更新</button>
+  </div>
+</header>
+<div class="top-tabs-bar">
+  <div class="tabs" id="top-tabs"></div>
+</div>
+<main id="main">
+  <section class="panel">
+    <div class="panel-header"><h2 id="panel-title">車両別の走行距離</h2></div>
+    <div class="vehicle-meta" id="vehicle-meta"></div>
+    <div class="panel-body" id="content-body">
+      <div class="loading">データを読み込み中...</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const SHEET_ID = '1EX7zHd0GPbjIPyPITDAag8O-exZdKqsm8w2gO7fLQY0';
+const LOG_SHEET_NAME = '安中ファーム';
+const MASTER_SHEET_NAME = '車両マスタ';
+
+// Apps Script Web App URL that receives 車検/オイル/タイヤ交換の書き込みリクエスト。
+// 未設定の間は保存ボタンが無効になり、案内が表示されます。
+// セットアップ手順: docs/vehicle-app-setup.md 参照。
+const MAINTENANCE_API_URL = 'https://script.google.com/a/macros/10-ff.com/s/AKfycbxdwrV7GTD8E8qoZaaLcqstRDB6w5dGZLf2R56CGEwBr_8t1vtOJ0Vik4IfT2FzZKD4zw/exec';
+
+// 交換目安(参考値・必要に応じて変更してください)
+const OIL_INTERVAL_KM = 10000;
+const OIL_INTERVAL_DAYS = 365;
+const TIRE_INTERVAL_KM = 30000;
+const TIRE_INTERVAL_DAYS = 1460;
+const FORECAST_WINDOW_DAYS = 30;
+
+let logRowsByVehicle = {};
+let logRawRows = [];
+let masterByVehicle = {};
+let vehicleOrder = [];
+let activeTab = 'summary';
+
+const VEHICLE_COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#f97316', '#f472b6', '#fbbf24', '#60a5fa', '#4ade80', '#f87171', '#c084fc'];
+function colorForVehicle(id) {
+  const idx = vehicleOrder.indexOf(id);
+  return VEHICLE_COLORS[(idx >= 0 ? idx : 0) % VEHICLE_COLORS.length];
+}
+const MONTH_COLORS = ['#38bdf8', '#f97316', '#a78bfa', '#34d399', '#f472b6'];
+
+async function fetchSheet(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  return json.table;
+}
+
+function buildColMap(table, labelMap) {
+  const colMap = {};
+  table.cols.forEach((c, i) => {
+    const label = (c.label || '').replace(/\s/g, '');
+    Object.keys(labelMap).forEach(key => {
+      if (labelMap[key].some(needle => label.includes(needle))) colMap[key] = i;
+    });
+  });
+  return colMap;
+}
+
+function cellText(cell) {
+  if (cell == null) return '';
+  if (typeof cell.v === 'string' && cell.v.startsWith('Date(')) {
+    return cell.f || cell.v;
+  }
+  return cell.f != null ? cell.f : (cell.v != null ? String(cell.v) : '');
+}
+
+function cellDate(cell) {
+  if (cell == null) return null;
+  if (typeof cell.v === 'string' && cell.v.startsWith('Date(')) {
+    const m = cell.v.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/);
+    if (m) {
+      const [, y, mo, d, h, mi, s] = m.map(Number);
+      return new Date(y, mo, d, h || 0, mi || 0, s || 0);
+    }
+  }
+  const f = cell.f || (typeof cell.v === 'string' ? cell.v : '');
+  const m2 = String(f).match(/(\d{4})\/(\d{1,2})\/(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (m2) {
+    const [, y, mo, d, h, mi] = m2.map(Number);
+    return new Date(y, mo - 1, d, h || 0, mi || 0);
+  }
+  return null;
+}
+
+function cellNumber(cell) {
+  if (cell == null) return null;
+  if (typeof cell.v === 'number') return cell.v;
+  const n = parseFloat(String(cell.f || cell.v || '').replace(/[^\d.-]/g, ''));
+  return isNaN(n) ? null : n;
+}
+
+async function loadLogSheet() {
+  const table = await fetchSheet(LOG_SHEET_NAME);
+  const colMap = buildColMap(table, {
+    reportedAt: ['報告日時'],
+    vehicleId: ['管理番号'],
+    plate: ['登録番号'],
+    name: ['車名'],
+    site: ['拠点'],
+    kind: ['区分'],
+    odo: ['走行距離'],
+    increment: ['増分'],
+  });
+
+  const latest = {};
+  const rows = [];
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const vehicleId = colMap.vehicleId != null ? cellText(cells[colMap.vehicleId]).trim() : '';
+    if (!vehicleId) return;
+    const reportedAt = colMap.reportedAt != null ? cellDate(cells[colMap.reportedAt]) : null;
+    const odo = colMap.odo != null ? cellNumber(cells[colMap.odo]) : null;
+    const increment = colMap.increment != null ? cellNumber(cells[colMap.increment]) : null;
+    const kind = colMap.kind != null ? cellText(cells[colMap.kind]).trim() : '';
+    const record = {
+      vehicleId,
+      plate: colMap.plate != null ? cellText(cells[colMap.plate]).trim() : '',
+      name: colMap.name != null ? cellText(cells[colMap.name]).trim() : '',
+      site: colMap.site != null ? cellText(cells[colMap.site]).trim() : '',
+      kind,
+      odo,
+      reportedAt,
+    };
+    const prev = latest[vehicleId];
+    if (!prev || (reportedAt && (!prev.reportedAt || reportedAt > prev.reportedAt))) {
+      latest[vehicleId] = record;
+    }
+    rows.push({ vehicleId, reportedAt, increment, kind });
+  });
+  return { latest, rows };
+}
+
+async function loadMasterSheet() {
+  try {
+    const table = await fetchSheet(MASTER_SHEET_NAME);
+    const colMap = buildColMap(table, {
+      vehicleId: ['管理番号'],
+      shakenDate: ['車検満了日', '車検'],
+      oilDate: ['オイル交換日'],
+      oilOdo: ['オイル交換時走行距離', 'オイル交換走行距離'],
+      tireDate: ['タイヤ交換日'],
+      tireOdo: ['タイヤ交換時走行距離', 'タイヤ交換走行距離'],
+      updatedBy: ['更新者'],
+      updatedAt: ['更新日時'],
+    });
+    const map = {};
+    (table.rows || []).forEach(row => {
+      const cells = row.c || [];
+      const vehicleId = colMap.vehicleId != null ? cellText(cells[colMap.vehicleId]).trim() : '';
+      if (!vehicleId) return;
+      map[vehicleId] = {
+        shakenDate: colMap.shakenDate != null ? cellDate(cells[colMap.shakenDate]) : null,
+        oilDate: colMap.oilDate != null ? cellDate(cells[colMap.oilDate]) : null,
+        oilOdo: colMap.oilOdo != null ? cellNumber(cells[colMap.oilOdo]) : null,
+        tireDate: colMap.tireDate != null ? cellDate(cells[colMap.tireDate]) : null,
+        tireOdo: colMap.tireOdo != null ? cellNumber(cells[colMap.tireOdo]) : null,
+        updatedBy: colMap.updatedBy != null ? cellText(cells[colMap.updatedBy]).trim() : '',
+        updatedAt: colMap.updatedAt != null ? cellDate(cells[colMap.updatedAt]) : null,
+      };
+    });
+    return map;
+  } catch (e) {
+    // 車両マスタタブがまだ存在しない場合は空扱いにする
+    return {};
+  }
+}
+
+function formatDate(d) {
+  if (!d) return '-';
+  return d.toLocaleDateString('ja-JP');
+}
+function formatDateTime(d) {
+  if (!d) return '-';
+  return d.toLocaleString('ja-JP');
+}
+function toDateInputValue(d) {
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function daysBetween(a, b) {
+  return Math.round((a - b) / 86400000);
+}
+
+function dateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function dateLabel(key) {
+  const [, m, d] = key.split('-');
+  return `${Number(m)}/${Number(d)}`;
+}
+function monthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function monthLabel(key) {
+  const [y, m] = key.split('-');
+  return `${y}年${Number(m)}月`;
+}
+
+function computeDailyDistances(rows, vehicles, days) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dateList = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    dateList.push(dateKey(d));
+  }
+  const byVehicle = {};
+  vehicles.forEach(id => {
+    byVehicle[id] = {};
+    dateList.forEach(dk => { byVehicle[id][dk] = 0; });
+  });
+  rows.forEach(r => {
+    if (r.kind !== '帰社' || !r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
+    const dk = dateKey(r.reportedAt);
+    if (!(dk in byVehicle[r.vehicleId])) return;
+    byVehicle[r.vehicleId][dk] += Math.max(r.increment, 0);
+  });
+  return { dateList, byVehicle };
+}
+
+function computeMonthlyDistances(rows, vehicles) {
+  const byVehicle = {};
+  vehicles.forEach(id => { byVehicle[id] = {}; });
+  const monthsSet = new Set();
+  rows.forEach(r => {
+    if (r.kind !== '帰社' || !r.reportedAt || r.increment == null || !byVehicle[r.vehicleId]) return;
+    const mk = monthKey(r.reportedAt);
+    monthsSet.add(mk);
+    byVehicle[r.vehicleId][mk] = (byVehicle[r.vehicleId][mk] || 0) + Math.max(r.increment, 0);
+  });
+  const months = Array.from(monthsSet).sort();
+  return { months, byVehicle };
+}
+
+function computeVehicleDailyStats(vehicleId, days) {
+  const { dateList, byVehicle } = computeDailyDistances(logRawRows, [vehicleId], days);
+  const values = dateList.map(dk => byVehicle[vehicleId][dk]);
+  const total = values.reduce((a, b) => a + b, 0);
+  const avg = total / dateList.length;
+  return { dateList, values, total, avg };
+}
+
+function addDays(d, n) {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+function renderSummaryContent() {
+  const container = document.getElementById('content-body');
+  document.getElementById('vehicle-meta').textContent = '';
+  document.getElementById('panel-title').textContent = '車両別の走行距離';
+
+  if (!vehicleOrder.length) {
+    container.innerHTML = '<div class="empty-msg">データがありません</div>';
+    return;
+  }
+
+  const rows = vehicleOrder.map(id => {
+    const v = logRowsByVehicle[id];
+    return `<tr>
+      <td>${id}</td>
+      <td>${v.name || '-'}</td>
+      <td>${v.plate || '-'}</td>
+      <td>${v.site || '-'}</td>
+      <td class="mono">${v.odo != null ? v.odo.toLocaleString() : '-'}</td>
+      <td>${formatDateTime(v.reportedAt)}</td>
+      <td>${v.kind || '-'}</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>管理番号</th><th>車名</th><th>登録番号</th><th>拠点</th>
+            <th>走行距離(km)</th><th>最終報告日時</th><th>最終区分</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <h3 class="section-title">直近1ヶ月の日別走行距離(km)</h3>
+    <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+    <h3 class="section-title">月別走行距離(車両別・km)</h3>
+    <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
+  `;
+
+  renderDailyChart();
+  renderMonthlyChart();
+}
+
+let dailyChartInstance = null;
+let monthlyChartInstance = null;
+let vehicleDailyChartInstance = null;
+
+function renderVehicleDailyChart(vehicleId, dailyStats) {
+  const canvas = document.getElementById('chart-vehicle-daily');
+  if (!canvas) return;
+  if (vehicleDailyChartInstance) vehicleDailyChartInstance.destroy();
+  const ctx = canvas.getContext('2d');
+  vehicleDailyChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dailyStats.dateList.map(dateLabel),
+      datasets: [
+        {
+          type: 'bar',
+          label: '走行距離(km)',
+          data: dailyStats.values,
+          backgroundColor: colorForVehicle(vehicleId),
+          borderRadius: 3,
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: `平均(直近${FORECAST_WINDOW_DAYS}日): ${dailyStats.avg.toFixed(1)} km/日`,
+          data: dailyStats.dateList.map(() => dailyStats.avg),
+          borderColor: '#f97316',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false,
+          tension: 0,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString(undefined, { maximumFractionDigits: 1 })} km` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} km` }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
+
+function renderDailyChart() {
+  const { dateList, byVehicle } = computeDailyDistances(logRawRows, vehicleOrder, 30);
+  const datasets = vehicleOrder.map(id => {
+    const v = logRowsByVehicle[id];
+    return {
+      label: v.name ? `${id}(${v.name})` : id,
+      data: dateList.map(dk => byVehicle[id][dk]),
+      backgroundColor: colorForVehicle(id),
+      borderRadius: 3,
+    };
+  });
+
+  if (dailyChartInstance) dailyChartInstance.destroy();
+  const ctx = document.getElementById('chart-daily').getContext('2d');
+  dailyChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: dateList.map(dateLabel), datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString()} km` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} km` }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
+
+function renderMonthlyChart() {
+  const { months, byVehicle } = computeMonthlyDistances(logRawRows, vehicleOrder);
+  const labels = vehicleOrder.map(id => {
+    const v = logRowsByVehicle[id];
+    return v.name ? `${id}(${v.name})` : id;
+  });
+  const datasets = months.map((mk, i) => ({
+    label: monthLabel(mk),
+    data: vehicleOrder.map(id => byVehicle[id][mk] || 0),
+    backgroundColor: MONTH_COLORS[i % MONTH_COLORS.length],
+    borderRadius: 3,
+  }));
+
+  if (monthlyChartInstance) monthlyChartInstance.destroy();
+  const ctx = document.getElementById('chart-monthly').getContext('2d');
+  monthlyChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8892a4', font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString()} km` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#1e2235' } },
+        y: { ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v.toLocaleString()} km` }, grid: { color: '#1e2235' } },
+      },
+    },
+  });
+}
+
+function badge(daysLeft, kind) {
+  // kind: 'expiry' (小さいほど危険) or 'sinceUsage' (大きいほど危険)
+  if (daysLeft == null) return '<span class="badge badge-muted">未登録</span>';
+  if (kind === 'expiry') {
+    if (daysLeft < 0) return '<span class="badge badge-danger">期限切れ</span>';
+    if (daysLeft <= 30) return `<span class="badge badge-warn">あと${daysLeft}日</span>`;
+    return `<span class="badge badge-ok">あと${daysLeft}日</span>`;
+  }
+  return '';
+}
+
+function renderTabs() {
+  const tabs = document.getElementById('top-tabs');
+  const summaryTab = `<button class="tab-btn ${activeTab === 'summary' ? 'active' : ''}" data-id="summary">📋 サマリー</button>`;
+  const vehicleTabs = vehicleOrder.map(id => {
+    const v = logRowsByVehicle[id];
+    const label = v.name ? `${id}(${v.name})` : id;
+    return `<button class="tab-btn ${id === activeTab ? 'active' : ''}" data-id="${id}">${label}</button>`;
+  }).join('');
+  tabs.innerHTML = summaryTab + vehicleTabs;
+  tabs.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeTab = btn.dataset.id;
+      renderTabs();
+      renderContent();
+    });
+  });
+}
+
+function renderContent() {
+  if (activeTab === 'summary') {
+    renderSummaryContent();
+  } else {
+    renderVehicleDetail();
+  }
+}
+
+function renderVehicleDetail() {
+  const container = document.getElementById('content-body');
+  const meta = document.getElementById('vehicle-meta');
+  const panelTitle = document.getElementById('panel-title');
+  if (!activeTab || !logRowsByVehicle[activeTab]) {
+    container.innerHTML = '<div class="empty-msg">車両を選択してください</div>';
+    meta.textContent = '';
+    return;
+  }
+  const activeVehicle = activeTab;
+  panelTitle.textContent = `${activeVehicle} 詳細(車検・オイル交換・タイヤ交換)`;
+  const v = logRowsByVehicle[activeVehicle];
+  const m = masterByVehicle[activeVehicle] || {};
+  meta.innerHTML = `<strong>${activeVehicle} ${v.name || ''}</strong> / 登録番号: ${v.plate || '-'} / 拠点: ${v.site || '-'} / 現在の走行距離: <strong>${v.odo != null ? v.odo.toLocaleString() + ' km' : '-'}</strong>(${formatDateTime(v.reportedAt)}時点)`;
+
+  const today = new Date();
+  const shakenDays = m.shakenDate ? daysBetween(m.shakenDate, today) : null;
+
+  const oilDaysSince = m.oilDate ? daysBetween(today, m.oilDate) : null;
+  const oilKmSince = (m.oilOdo != null && v.odo != null) ? (v.odo - m.oilOdo) : null;
+  const oilDue = (oilDaysSince != null && oilDaysSince >= OIL_INTERVAL_DAYS) || (oilKmSince != null && oilKmSince >= OIL_INTERVAL_KM);
+
+  const dailyStats = computeVehicleDailyStats(activeVehicle, FORECAST_WINDOW_DAYS);
+  const dateBasedOilDue = m.oilDate ? addDays(m.oilDate, OIL_INTERVAL_DAYS) : null;
+  let distanceBasedOilDue = null;
+  let oilKmRemaining = null;
+  if (oilKmSince != null) {
+    oilKmRemaining = OIL_INTERVAL_KM - oilKmSince;
+    if (dailyStats.avg > 0) {
+      distanceBasedOilDue = addDays(today, oilKmRemaining / dailyStats.avg);
+    }
+  }
+
+  const tireDaysSince = m.tireDate ? daysBetween(today, m.tireDate) : null;
+  const tireKmSince = (m.tireOdo != null && v.odo != null) ? (v.odo - m.tireOdo) : null;
+  const tireDue = (tireDaysSince != null && tireDaysSince >= TIRE_INTERVAL_DAYS) || (tireKmSince != null && tireKmSince >= TIRE_INTERVAL_KM);
+
+  container.innerHTML = `
+    ${!MAINTENANCE_API_URL ? '<div class="setup-notice">⚠ 書き込み用のApps Script URLが未設定のため、保存は無効になっています。docs/vehicle-app-setup.md の手順でセットアップしてください。</div>' : ''}
+    <div class="cards">
+      <div class="card">
+        <h3>🛂 車検 ${badge(shakenDays, 'expiry')}</h3>
+        <div class="metric-row"><span class="label">車検満了日</span><span>${formatDate(m.shakenDate)}</span></div>
+        <div class="field">
+          <label for="input-shaken">車検満了日を更新</label>
+          <input type="date" id="input-shaken" value="${toDateInputValue(m.shakenDate)}" />
+        </div>
+      </div>
+      <div class="card">
+        <h3>🛢 オイル交換 ${oilDue ? '<span class="badge badge-warn">交換目安超過</span>' : (m.oilDate ? '<span class="badge badge-ok">良好</span>' : '<span class="badge badge-muted">未登録</span>')}</h3>
+        <div class="metric-row"><span class="label">前回交換日</span><span>${formatDate(m.oilDate)}</span></div>
+        <div class="metric-row"><span class="label">経過日数</span><span>${oilDaysSince != null ? oilDaysSince + ' 日' : '-'}</span></div>
+        <div class="metric-row"><span class="label">交換時走行距離</span><span>${m.oilOdo != null ? m.oilOdo.toLocaleString() + ' km' : '-'}</span></div>
+        <div class="metric-row"><span class="label">交換後の走行距離</span><span>${oilKmSince != null ? oilKmSince.toLocaleString() + ' km' : '-'}</span></div>
+        <div class="field">
+          <label for="input-oil-date">前回交換日を更新</label>
+          <input type="date" id="input-oil-date" value="${toDateInputValue(m.oilDate)}" />
+        </div>
+        <div class="field">
+          <label for="input-oil-odo">交換時の走行距離(km)を更新</label>
+          <input type="number" id="input-oil-odo" value="${m.oilOdo != null ? m.oilOdo : ''}" />
+        </div>
+      </div>
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>📈 オイル交換目安の予測(直近${FORECAST_WINDOW_DAYS}日の走行実績から算出)</h3>
+        ${(m.oilDate == null || m.oilOdo == null) ? `
+          <div class="forecast-note">前回のオイル交換日・走行距離が未登録のため予測できません。</div>
+        ` : `
+          <div class="metric-row"><span class="label">直近${FORECAST_WINDOW_DAYS}日間の合計走行距離</span><span>${dailyStats.total.toLocaleString()} km</span></div>
+          <div class="metric-row"><span class="label">1日の平均走行距離(直近${FORECAST_WINDOW_DAYS}日)</span><span>${dailyStats.avg.toFixed(1)} km/日</span></div>
+          <div class="metric-row"><span class="label">交換目安(10,000km)まで残り</span><span>${oilKmRemaining != null ? oilKmRemaining.toLocaleString() + ' km' : '-'}</span></div>
+          <div class="metric-row highlight"><span class="label">交換目安予測日(走行距離ベース)</span><span>${distanceBasedOilDue ? formatDate(distanceBasedOilDue) : (dailyStats.avg > 0 ? '-' : '走行データ不足')}</span></div>
+          <div class="metric-row"><span class="label">参考: 前回交換から1年後</span><span>${formatDate(dateBasedOilDue)}</span></div>
+          <div class="forecast-note">※ 交換目安は「10,000km」または「前回交換から1年」のいずれか早い方。予測日は直近${FORECAST_WINDOW_DAYS}日の平均走行距離をもとに算出した参考値です。</div>
+        `}
+        <div class="forecast-chart"><canvas id="chart-vehicle-daily"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>🛞 タイヤ交換 ${tireDue ? '<span class="badge badge-warn">交換目安超過</span>' : (m.tireDate ? '<span class="badge badge-ok">良好</span>' : '<span class="badge badge-muted">未登録</span>')}</h3>
+        <div class="metric-row"><span class="label">前回交換日</span><span>${formatDate(m.tireDate)}</span></div>
+        <div class="metric-row"><span class="label">経過日数</span><span>${tireDaysSince != null ? tireDaysSince + ' 日' : '-'}</span></div>
+        <div class="metric-row"><span class="label">交換時走行距離</span><span>${m.tireOdo != null ? m.tireOdo.toLocaleString() + ' km' : '-'}</span></div>
+        <div class="metric-row"><span class="label">交換後の走行距離</span><span>${tireKmSince != null ? tireKmSince.toLocaleString() + ' km' : '-'}</span></div>
+        <div class="field">
+          <label for="input-tire-date">前回交換日を更新</label>
+          <input type="date" id="input-tire-date" value="${toDateInputValue(m.tireDate)}" />
+        </div>
+        <div class="field">
+          <label for="input-tire-odo">交換時の走行距離(km)を更新</label>
+          <input type="number" id="input-tire-odo" value="${m.tireOdo != null ? m.tireOdo : ''}" />
+        </div>
+      </div>
+    </div>
+    <div class="save-row">
+      <div class="field">
+        <label for="input-updated-by">更新者名</label>
+        <input type="text" id="input-updated-by" placeholder="お名前" />
+      </div>
+      <button class="btn btn-primary" id="save-btn" ${MAINTENANCE_API_URL ? '' : 'disabled'}>保存する</button>
+      <span id="save-status"></span>
+    </div>
+    <div class="empty-msg">最終更新: ${m.updatedAt ? formatDateTime(m.updatedAt) + (m.updatedBy ? `(${m.updatedBy})` : '') : '-'}</div>
+  `;
+
+  document.getElementById('save-btn').addEventListener('click', saveMaintenance);
+  renderVehicleDailyChart(activeVehicle, dailyStats);
+}
+
+async function saveMaintenance() {
+  const vehicleId = activeTab;
+  const v = logRowsByVehicle[vehicleId];
+  const updatedBy = document.getElementById('input-updated-by').value.trim();
+  const status = document.getElementById('save-status');
+  if (!updatedBy) {
+    status.textContent = '更新者名を入力してください';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+  const payload = {
+    vehicleId,
+    registrationNumber: v.plate,
+    vehicleName: v.name,
+    site: v.site,
+    shakenDate: document.getElementById('input-shaken').value || null,
+    oilChangeDate: document.getElementById('input-oil-date').value || null,
+    oilChangeOdo: document.getElementById('input-oil-odo').value ? Number(document.getElementById('input-oil-odo').value) : null,
+    tireChangeDate: document.getElementById('input-tire-date').value || null,
+    tireChangeOdo: document.getElementById('input-tire-odo').value ? Number(document.getElementById('input-tire-odo').value) : null,
+    updatedBy,
+  };
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  status.style.color = 'var(--muted)';
+  status.textContent = '保存中...';
+  try {
+    const res = await fetch(MAINTENANCE_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || '保存に失敗しました');
+    masterByVehicle[vehicleId] = {
+      ...masterByVehicle[vehicleId],
+      shakenDate: payload.shakenDate ? new Date(payload.shakenDate) : masterByVehicle[vehicleId]?.shakenDate,
+      oilDate: payload.oilChangeDate ? new Date(payload.oilChangeDate) : masterByVehicle[vehicleId]?.oilDate,
+      oilOdo: payload.oilChangeOdo != null ? payload.oilChangeOdo : masterByVehicle[vehicleId]?.oilOdo,
+      tireDate: payload.tireChangeDate ? new Date(payload.tireChangeDate) : masterByVehicle[vehicleId]?.tireDate,
+      tireOdo: payload.tireChangeOdo != null ? payload.tireChangeOdo : masterByVehicle[vehicleId]?.tireOdo,
+      updatedBy,
+      updatedAt: new Date(),
+    };
+    status.style.color = 'var(--ok)';
+    status.textContent = '保存しました(反映まで数十秒かかる場合があります)';
+    renderVehicleDetail();
+  } catch (e) {
+    status.style.color = 'var(--danger)';
+    status.textContent = `保存エラー: ${e.message || e}`;
+  } finally {
+    btn.disabled = !MAINTENANCE_API_URL;
+  }
+}
+
+async function loadAll() {
+  document.getElementById('last-updated').textContent = '';
+  document.getElementById('content-body').innerHTML = '<div class="loading">データを読み込み中...</div>';
+  try {
+    const [logResult, masterMap] = await Promise.all([loadLogSheet(), loadMasterSheet()]);
+    logRowsByVehicle = logResult.latest;
+    logRawRows = logResult.rows;
+    masterByVehicle = masterMap;
+    vehicleOrder = Object.keys(logRowsByVehicle).sort();
+    if (activeTab !== 'summary' && !logRowsByVehicle[activeTab]) {
+      activeTab = 'summary';
+    }
+    renderTabs();
+    renderContent();
+    document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+  } catch (e) {
+    document.getElementById('content-body').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message || e}</div>`;
+  }
+}
+
+loadAll();
+</script>
+</body>
+</html>
