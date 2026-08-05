@@ -553,7 +553,12 @@
        実際に画面幅を超える場合のみ、JS（refreshProdTableWrapOverflow）がhas-hscroll
        クラスを付与しoverflow-x:autoへ切り替える（詳細はJS側のコメント参照） */
     .prod-table-wrap { flex-shrink: 0; overflow-x: visible; overflow-y: visible; }
-    .prod-table-wrap.has-hscroll { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 160px); }
+    /* overflow-y: hiddenであってもコンテンツが見切れることはない（.prod-table-wrap
+       自体がflex-shrink: 0で自身の高さをコンテンツにぴったり合わせているため、縦方向の
+       オーバーフローがそもそも発生しない）。以前はoverflow-y: auto + max-heightで
+       縦方向も制限していたが、これにより横スクロールが必要な列数の多いテーブルで
+       main（外側）とは別の入れ子の縦スクロールバーが発生していたため撤廃した */
+    .prod-table-wrap.has-hscroll { overflow-x: auto; overflow-y: hidden; }
     /* 生産計画タブ専用：上部の余白を詰めてスクロール領域を広げる（他タブの
        .prod-panelには影響させないよう、既存クラスとは別に新設） */
     .prod-panel-compact { padding-top: 8px; }
@@ -780,10 +785,17 @@ const PAST_YEAR_COUNT_GID = '1654355403'; // 人数_過去実績
 
 // .prod-table-wrapは通常overflow: visible（スクロールコンテナ化しないため、内側の
 // position:sticky（テーブルヘッダー）が上位のmain要素を基準に正しく機能する）。
-// テーブル列が画面幅を超える場合はJSでhas-hscrollクラスを付与し、overflow-x:auto +
-// overflow-y:auto + max-height:calc(100vh-160px) へ切り替える。この場合ラッパー自体が
-// 縦横両スクロールコンテナとなり、th(position:sticky;top:0)がラッパー基準で固定され
-// 月ヘッダーが常に表示される。
+// テーブル列が画面幅を超える場合はJSでhas-hscrollクラスを付与し、overflow-x:autoへ
+// 切り替える（横スクロールのみ）。overflow-x/overflow-yのどちらか一方でもvisible以外
+// （auto/hiddenなど）になっていると、CSS仕様上その要素は「スクロールコンテナ」となり
+// position:stickyの基準がラッパー自身に変わってしまうため、has-hscroll時はth(top:0)が
+// main基準ではなくラッパー自身基準の固定になる（＝ラッパーの表示範囲内でしか
+// 固定されない。これはoverflow-yをhiddenにしてもautoのままでも変わらない、CSS
+// overflow仕様上の制約であり、以前のoverflow-y:auto+max-height版でも同じだった）。
+// ただしoverflow-yをhiddenにしたことで、ラッパー自身が縦方向にスクロール可能な
+// コンテナになることは無くなり（flex-shrink:0で高さは常にコンテンツにぴったり合う
+// ため、そもそも縦方向の内部オーバーフローが発生しない）、縦スクロールバーは常に
+// main1つだけになる
 function refreshProdTableWrapOverflow() {
   document.querySelectorAll('.prod-table-wrap').forEach(el => {
     const needsHScroll = el.scrollWidth > el.clientWidth + 1;
