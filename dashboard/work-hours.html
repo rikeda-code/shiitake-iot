@@ -7194,13 +7194,25 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           if (actualTotal === 0) return;
           return `実績合計: ${Math.round(actualTotal).toLocaleString('ja-JP')} h`;
         } : undefined,
+        // 標準工数（工程別内訳、_stdGroup）と3拠点マージの標準労働時間バー
+        // （青+黄+緑、_threeSiteMergeStdHours）は別々の積み上げグループのため、
+        // それぞれの合計を別行で表示する（両方存在する月は2行、片方のみの月は1行）
         footer: showStdFooter ? items => {
+          const lines = [];
           const stdTotal = items
             .filter(i => i.dataset._stdGroup && i.parsed.y != null)
             .reduce((s, i) => s + i.parsed.y, 0);
-          if (stdTotal === 0) return;
+          const threeSiteMergeTotal = items
+            .filter(i => i.dataset._threeSiteMergeStdHours && i.parsed.y != null)
+            .reduce((s, i) => s + i.parsed.y, 0);
           const indent = showActualTotal ? '　' : '';
-          return `${indent}予定標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
+          if (threeSiteMergeTotal !== 0) {
+            lines.push(`${indent}標準労働時間合計: ${Math.round(threeSiteMergeTotal).toLocaleString('ja-JP')} h`);
+          }
+          if (stdTotal !== 0) {
+            lines.push(`${indent}標準工数合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
+          }
+          return lines.length ? lines : undefined;
         } : undefined,
       },
     };
@@ -7371,7 +7383,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // opts.taskBreakdown（[{label, data, color}, ...]、1段目のallDivRows/stdByTaskを
   // そのまま流用）を渡すと「予定標準工数合計」を単一バーではなく、1段目と同じ
   // 工程別内訳（TASK_COLORS）の積み上げバーとして描画する。個々のタスク明細は
-  // ツールチップには出さず、footer側の「予定標準合計」1行に集約する（tooltipの
+  // ツールチップには出さず、footer側の「標準工数合計」1行に集約する（tooltipの
   // labelコールバックで_stdGroupを弾く）。taskBreakdown未指定時は従来通り単一バー。
   function renderTotalChart(canvasId, stdTotalRaw, actualDataMap, forecastDataMap, opts) {
     const ctx = document.getElementById(canvasId)?.getContext('2d');
@@ -7421,7 +7433,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             callbacks: {
               label: ctx => {
                 if (ctx.parsed.y == null) return null;
-                // 工程別内訳バーの明細行はツールチップに出さない（footerの「予定標準合計」に集約）
+                // 工程別内訳バーの明細行はツールチップに出さない（footerの「標準工数合計」に集約）
                 if (ctx.dataset._stdGroup) return null;
                 if (ctx.dataset._countLine) return `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ja-JP')} 人`;
                 return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y).toLocaleString('ja-JP')} h`;
@@ -7431,7 +7443,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
                 const stdTotal  = items.filter(i => i.dataset._stdGroup && i.parsed.y != null).reduce((s, i) => s + i.parsed.y, 0);
                 const lines = [];
                 if (workTotal > 0) lines.push(`勤務時間合計: ${Math.round(workTotal).toLocaleString('ja-JP')} h`);
-                if (stdTotal  > 0) lines.push(`予定標準合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
+                if (stdTotal  > 0) lines.push(`標準工数合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
                 return lines;
               },
             },
