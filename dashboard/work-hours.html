@@ -6413,9 +6413,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (planCmpSiteTab === '全拠点合計') {
       divs.forEach(div => {
         html += `<div class="schart-section">
-          <div class="schart-header">${div}（全拠点合計）
-            <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準 vs 実績（h）3拠点合計</span>
-          </div>
+          <div class="schart-header">${div}（全拠点合計）</div>
           ${chartWrapHtml(`plancmp2-all-${div}`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         </div>`;
       });
@@ -6423,9 +6421,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const site = planCmpSiteTab;
       divs.forEach(div => {
         html += `<div class="schart-section">
-          <div class="schart-header">${div}
-            <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 予定標準 vs 実績（h）</span>
-          </div>
+          <div class="schart-header">${div}</div>
           ${chartWrapHtml(`plancmp2-${site}-${div}`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
         </div>`;
       });
@@ -7122,8 +7118,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   main.innerHTML = `
     <div class="compare-shell">
       <div class="compare-header-row" style="flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
-        <div class="chart-section-label" style="flex-shrink:0">📊 予定標準工数 vs 実績工数 比較
-          <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">※ 左棒(赤)=実績　右棒(積み上げ)=予定標準</span>
+        <div class="chart-section-label" style="flex-shrink:0">📊比較（繁忙期見込み）／ ファーム勤務時間 &gt; 標準労働時間
+          <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
         </div>
         <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
