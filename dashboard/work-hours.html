@@ -4203,9 +4203,6 @@ function parseThreeSiteMergeSheet(json) {
   // 2行分（2・3行目の見出し行）をスキップする
   const dataRows = rows.slice(2);
 
-  // X列（実績労働時間）インデックス
-  const X_COL = colLetterToIndex('X'); // 23
-
   // R列（標準労働時間）が空の行を診断用に記録する。以前はR列が空の行はここで
   // 除外されていたが（if (stdHours === null) return;）、R列は空でもよく0として
   // 扱う仕様に変更したため、今後は新たに集計対象へ含まれるようになる。本番シートで
@@ -4237,14 +4234,13 @@ function parseThreeSiteMergeSheet(json) {
     // overtimeH/overtimeNの両方から参照されている。変更する際は両方への影響を確認すること
     const stdHoursOriginallyEmpty = stdHoursRaw === null;
     if (stdHoursOriginallyEmpty) emptyStdHoursRows.push({ site, div, name, activeFlag });
-    const xHours = cellNumber(row, X_COL);
     const prj = cellText(row, THREE_SITE_MERGE_PRJ_COL);
     const maxByYm = {};
     monthCols.forEach(({ idx, ym }) => {
       const v = cellNumber(row, idx);
       if (v !== null) maxByYm[ym] = v;
     });
-    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, xHours, maxByYm, activeFlag, prj });
+    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, maxByYm, activeFlag, prj });
   });
 
   if (emptyStdHoursRows.length) {
@@ -8725,6 +8721,10 @@ function renderDecPlanContent(planData, mergeData) {
   const DEC = '2026/12';
   const junIdx = planMonths.indexOf(JUN);
   const decIdx = planMonths.indexOf(DEC);
+  // 3拠点マージのmaxByYm（年月ラベルを動的に検索して構築された月別列）用のキー。
+  // DECの数値表現（YYYYMM）を1箇所だけで算出し、overtimeH/overtimeNから参照する
+  const [decY, decM] = DEC.split('/').map(Number);
+  const DECPLAN_TARGET_YM = decY * 100 + decM;
 
   // ①6月実績：栽培・出荷・配送
   function junActualH(site) {
@@ -8784,25 +8784,30 @@ function renderDecPlanContent(planData, mergeData) {
     return mergeData.rows.filter(r => r.site === site && r.activeFlag === 2).length || null;
   }
 
-  // ④残業見込み工数：3拠点マージ (X列 - R列) の合計 per site（栽培・出荷div）
-  // R列（標準労働時間）が空の行は、以前と同様この集計から除外する（R列が空でも
-  // 集計対象に含める仕様変更は、比較（繁忙期見込み）タブ側の上乗せ分計算のみが対象）
+  // ④残業見込み工数：3拠点マージ (DECPLAN_TARGET_YM列 - R列) の合計 per site（栽培・
+  // 出荷div）。以前はX列という固定列位置を参照していたが、シート構成の変更（開始月
+  // 列の追加等）で実際の「2026/12」列とズレる不具合があったため、比較（繁忙期見込み）
+  // タブのthreeSiteMergeAgg()と同じ「年月ラベルで動的に列を検索する」maxByYmを使う
+  // 方式に統一した。R列（標準労働時間）が空の行は、以前と同様この集計から除外する
+  // （R列が空でも集計対象に含める仕様変更は、比較（繁忙期見込み）タブ側の上乗せ分
+  // 計算のみが対象）
   function overtimeH(site) {
     if (!mergeData) return null;
     const siteRows = mergeData.rows.filter(r => r.site === site && !r.stdHoursOriginallyEmpty);
     if (!siteRows.length) return null;
     let total = 0;
     siteRows.forEach(r => {
-      if (r.xHours !== null) total += Math.max(0, r.xHours - r.stdHours);
+      const v = r.maxByYm[DECPLAN_TARGET_YM];
+      if (typeof v === 'number') total += Math.max(0, v - r.stdHours);
     });
     return Math.round(total * 10) / 10;
   }
 
-  // ④残業見込み人数：X > R の人数 per site
+  // ④残業見込み人数：DECPLAN_TARGET_YM列 > R列 の人数 per site
   function overtimeN(site) {
     if (!mergeData) return null;
     return mergeData.rows.filter(r =>
-      r.site === site && !r.stdHoursOriginallyEmpty && r.xHours !== null && r.xHours > r.stdHours
+      r.site === site && !r.stdHoursOriginallyEmpty && typeof r.maxByYm[DECPLAN_TARGET_YM] === 'number' && r.maxByYm[DECPLAN_TARGET_YM] > r.stdHours
     ).length || null;
   }
 
