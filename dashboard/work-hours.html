@@ -7051,7 +7051,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 計算に使うdivsForPast（agg集計に使ったdivの配列）・site（同site。nullなら全拠点）
   // から、指定月miにおける「標準労働時間」棒の実効値（積み上げ全体の高さ）を返す。
   // 過去月（ACTUAL_CUTOFF以前、既に実績が確定している月）はcomputeStdHoursLineForDivSite()
-  // による整理済み_Mの実測値、未来月はagg.maxTotalByYm（B=1+B=2集計）を使う。
+  // による整理済み_Mの実測値、未来月は全てagg.maxTotalByYm（B=1+B=2集計）とstdTotalB1
+  // の大きい方（3拠点マージのB=2新規要員行は、開始月以降の月別列に自動的に値が入る
+  // 仕組みのため、未来月すべてで同じ扱いにできる）。
   // threeSiteMergeStdHoursDatasets()・threeSiteMergeStdHoursTotal()の両方から使う共通ロジック
   function threeSiteMergeMonthlyValue(agg, divsForPast, site, mi) {
     if (!agg) return null;
@@ -7063,29 +7065,26 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       }, 0);
     }
     const maxTotal = agg.maxTotalByYm[ym];
-    if (typeof maxTotal !== 'number') return ym === THREE_SITE_MERGE_STACK_YM ? agg.stdTotalB1 : null;
-    return ym === THREE_SITE_MERGE_STACK_YM ? Math.max(agg.stdTotalB1, maxTotal) : maxTotal;
+    return typeof maxTotal === 'number' ? Math.max(agg.stdTotalB1, maxTotal) : agg.stdTotalB1;
   }
 
   // agg（3拠点マージの標準労働時間・最大労働時間集計）から、「実績」棒と「標準工数」棒
   // の中間に表示する「標準労働時間」棒（新規・中央）用のデータセットを構築する。
   // divsForPast・site（過去月の実測値計算に使う、aggの集計に使ったのと同じdiv配列・site）
   // を渡す必要がある。過去月は整理済み_Mの実測値（computeStdHoursLineForDivSite）、
-  // 未来月のうち2026/12以外はagg.maxTotalByYmをそのまま単色で、2026/12のみ
-  // stdTotalB1（基準・下段）＋B=1+B2合計との差分（増加分・上段。0以下は非表示）の
-  // 2段積み上げで表示する（_threeSiteMergeCapSegmentフラグを見てtooltipOpts()側で
-  // 累計値表示に変換する）
+  // 未来月は全てstdTotalB1（基準・下段）＋B=1+B2合計との差分（増加分・上段。0以下は
+  // 非表示）の2段積み上げで表示する（_threeSiteMergeCapSegmentフラグを見て
+  // tooltipOpts()側で累計値表示に変換する）
   function threeSiteMergeStdHoursDatasets(agg, divsForPast, site, opts) {
     opts = opts || {};
     if (!agg) return [];
     const stdData = planMonths.map((_, mi) => {
       const ym = mnum(planMonths[mi]);
-      if (ym === THREE_SITE_MERGE_STACK_YM) return agg.stdTotalB1;
-      return threeSiteMergeMonthlyValue(agg, divsForPast, site, mi);
+      return ym <= ACTUAL_CUTOFF ? threeSiteMergeMonthlyValue(agg, divsForPast, site, mi) : agg.stdTotalB1;
     });
     const capData = planMonths.map((_, mi) => {
       const ym = mnum(planMonths[mi]);
-      if (ym !== THREE_SITE_MERGE_STACK_YM) return null;
+      if (ym <= ACTUAL_CUTOFF) return null;
       const maxTotal = agg.maxTotalByYm[ym];
       if (typeof maxTotal !== 'number') return null;
       const cap = Math.round((maxTotal - agg.stdTotalB1) * 10) / 10;
@@ -7253,10 +7252,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   const ACTUAL_CUTOFF = mnum('2026/6');
   const HEADCOUNT_CUTOFF = mnum('2026/5'); // 人数実績は2026/5まで
   const BASE_MONTH = '2026/5';
-  // 2026/12（唯一、B=1＋B2の2段積み上げで表示する月）。threeSiteMergeStdHoursDatasets等
-  // （このmnum定義より前で宣言されている関数群）から参照されるが、いずれも実際に呼び出さ
-  // れるのはmnum初期化後（レンダリング時）のため問題ない
-  const THREE_SITE_MERGE_STACK_YM = mnum('2026/12');
 
   // 拠点ごとの標準工数合計・実績・予想データを構築
   function computeSiteTotalData(site) {
