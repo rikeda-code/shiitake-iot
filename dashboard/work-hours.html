@@ -7194,25 +7194,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           if (actualTotal === 0) return;
           return `実績合計: ${Math.round(actualTotal).toLocaleString('ja-JP')} h`;
         } : undefined,
-        // 標準工数（工程別内訳、_stdGroup）と3拠点マージの標準労働時間バー
-        // （青+黄+緑、_threeSiteMergeStdHours）は別々の積み上げグループのため、
-        // それぞれの合計を別行で表示する（両方存在する月は2行、片方のみの月は1行）
         footer: showStdFooter ? items => {
-          const lines = [];
           const stdTotal = items
             .filter(i => i.dataset._stdGroup && i.parsed.y != null)
             .reduce((s, i) => s + i.parsed.y, 0);
-          const threeSiteMergeTotal = items
-            .filter(i => i.dataset._threeSiteMergeStdHours && i.parsed.y != null)
-            .reduce((s, i) => s + i.parsed.y, 0);
+          if (stdTotal === 0) return;
           const indent = showActualTotal ? '　' : '';
-          if (threeSiteMergeTotal !== 0) {
-            lines.push(`${indent}標準労働時間合計: ${Math.round(threeSiteMergeTotal).toLocaleString('ja-JP')} h`);
-          }
-          if (stdTotal !== 0) {
-            lines.push(`${indent}標準工数合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`);
-          }
-          return lines.length ? lines : undefined;
+          return `${indent}標準工数合計: ${Math.round(stdTotal).toLocaleString('ja-JP')} h`;
         } : undefined,
       },
     };
