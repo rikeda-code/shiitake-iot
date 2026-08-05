@@ -8807,13 +8807,17 @@ function renderDecPlanContent(planData, mergeData) {
     return mergeData.rows.filter(r => r.site === site && r.activeFlag === 2).length || null;
   }
 
-  // ④残業見込み工数：3拠点マージ (DECPLAN_TARGET_YM列 - R列) の合計 per site（栽培・
-  // 出荷div）。以前はX列という固定列位置を参照していたが、シート構成の変更（開始月
-  // 列の追加等）で実際の「2026/12」列とズレる不具合があったため、比較（繁忙期見込み）
-  // タブのthreeSiteMergeAgg()と同じ「年月ラベルで動的に列を検索する」maxByYmを使う
-  // 方式に統一した。R列（標準労働時間）が空の行は、以前と同様この集計から除外する
-  // （R列が空でも集計対象に含める仕様変更は、比較（繁忙期見込み）タブ側の上乗せ分
-  // 計算のみが対象）
+  // ④残業見込み工数：3拠点マージ DECPLAN_TARGET_YM列（maxByYm）の合計 per site
+  // （栽培・出荷div）。以前はX列という固定列位置を参照していたが、シート構成の変更
+  // （開始月列の追加等）で実際の「2026/12」列とズレる不具合があったため、比較
+  // （繁忙期見込み）タブのthreeSiteMergeAgg()と同じ「年月ラベルで動的に列を検索する」
+  // maxByYmを使う方式に統一した。R列（標準労働時間）が空の行は、以前と同様この集計
+  // から除外する（R列が空でも集計対象に含める仕様変更は、比較（繁忙期見込み）タブ側
+  // の上乗せ分計算のみが対象）。
+  // なお、3拠点マージシートのT列以降（maxByYm）は「R列＋増減」から「増減のみ」に
+  // 意味が変わったため（比較（繁忙期見込み）タブの3段積み上げ化に伴う変更）、v自体が
+  // 既に増減そのものを表す。R列を引く処理・0クリップは不要（減員等でvが負の場合も
+  // そのまま反映する）
   function overtimeH(site) {
     if (!mergeData) return null;
     const siteRows = mergeData.rows.filter(r => r.site === site && !r.stdHoursOriginallyEmpty);
@@ -8821,7 +8825,7 @@ function renderDecPlanContent(planData, mergeData) {
     let total = 0;
     siteRows.forEach(r => {
       const v = r.maxByYm[DECPLAN_TARGET_YM];
-      if (typeof v === 'number') total += Math.max(0, v - r.stdHours);
+      if (typeof v === 'number') total += v;
     });
     return Math.round(total * 10) / 10;
   }
