@@ -1543,6 +1543,8 @@ function rerenderCurrentView() {
     renderProductionTab();
   } else if (activeMode === 'stdhours') {
     renderStdHoursTab();
+  } else if (activeMode === 'plancompare2') {
+    renderPlanCompareTab2();
   }
   // stdset は整理済み_Mも整理済み_分析の期間も参照しないため再描画不要
 }
@@ -6932,10 +6934,34 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     </div>`;
     content.innerHTML = html;
 
-    // 実績工数：栽培・出荷それぞれのactualHを選択中拠点分（全拠点合計時は3拠点合算）集計
+    // 上段チャートの「栽培（実績）」「出荷（実績）」棒専用：画面上部の雇用形態
+    // チェックボックス（empTypeFilter）と連動させるためのローカル計算。
+    // window._planCmpChartData2（workHoursForPlanMonths()由来、拠点別・表・3拠点
+    // サマリの各サブタブでも共有されるキャッシュ）はここでは使わず変更もしない。
+    // ロジック自体はworkHoursForPlanMonths()と同じで、雇用形態フィルタの適用
+    // （既存のapplyEmpTypeFilter()、empTypeFilterがnullなら絞り込み無し）を
+    // 追加しただけ
+    function actualHoursForPlanMonthsFiltered(site, typeFilter) {
+      const { employees, months: activeMonths } = getActiveData();
+      const emps = applyEmpTypeFilter(employees.filter(e => e.base === site && e.workType && typeFilter(e.workType)));
+      return planMonths.map(planMonth => {
+        const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+        if (ami < 0) return null;
+        const total = emps.reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    }
+
+    // 実績工数：栽培・出荷それぞれの実績工数（雇用形態フィルタ適用済み）を
+    // 選択中拠点分（全拠点合計時は3拠点合算）集計
     const actualByDiv = {};
     divs.forEach(div => {
-      const actualBySite = sitesToShow.map(site => window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null));
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualBySite = sitesToShow.map(site => actualHoursForPlanMonthsFiltered(site, typeFilter));
       actualByDiv[div] = sl(planMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
     });
     const actualMonthlyTotals = vm.map((_, mi) => divs.reduce((s, div) => s + (actualByDiv[div][mi] || 0), 0));
