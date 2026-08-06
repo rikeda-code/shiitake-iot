@@ -6952,7 +6952,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       });
     }
 
-    // 実績工数：栽培・出荷それぞれの実績工数（雇用形態フィルタ適用済み）を
+    // 業務区分チェックボックス（画面上部のroleTypeFilter）に応じて、この拠点サマリ
+    // チャート専用に対象divを動的に決定する。'配送・栽培'・'配送・出荷'はどちらか
+    // 一方でもチェックされていれば、内部的には'配送'を1回だけ対象にする（二重計上
+    // 防止）。外側スコープのdivs（['栽培','出荷','配送']、拠点別・表・3拠点サマリの
+    // 各サブタブで共有）はここでは変更せず、この関数内だけのローカル変数として
+    // シャドーイングする
+    const divs = [];
+    if (roleTypeFilter.has('栽培')) divs.push('栽培');
+    if (roleTypeFilter.has('出荷')) divs.push('出荷');
+    if (roleTypeFilter.has('配送・栽培') || roleTypeFilter.has('配送・出荷')) divs.push('配送');
+
+    // 実績工数：栽培・出荷・配送それぞれの実績工数（雇用形態フィルタ適用済み）を
     // 選択中拠点分（全拠点合計時は3拠点合算）集計
     const actualByDiv = {};
     divs.forEach(div => {
@@ -6989,9 +7000,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
     // 折れ線（収穫量・出荷量）：既存div別チャートと同じplanVolume()を使用し、栽培・出荷
     // それぞれ右軸(y2)の折れ線として追加する（選択中拠点分。全拠点合計はこのモードでは
-    // 選択不可のため単一拠点分の集計で足りる）
+    // 選択不可のため単一拠点分の集計で足りる）。配送は生産量指標を持たないため、
+    // 動的なdivsではなく栽培・出荷に固定する（配送のみ選択時にvolDataByDiv['栽培']・
+    // ['出荷']が未定義になり、下のline datasetsがエラーになるのを防ぐ）
     const volDataByDiv = {};
-    divs.forEach(div => {
+    ['栽培', '出荷'].forEach(div => {
       volDataByDiv[div] = sl(planMonths.map((_, mi) =>
         sitesToShow.reduce((s, site) => {
           const v = planVolume(site, div, mi);
@@ -7004,17 +7017,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const ctx = document.getElementById('plansitesum2-combined')?.getContext('2d');
     if (!ctx) return;
     const datasets = [];
-    // 実績工数：栽培＝既存の実績棒と同じ赤、出荷＝オレンジの暖色系2色で内訳がわかるようにする
-    // （既存のROLE_TYPE_COLORS＝栽培緑/出荷黄は使わない）
-    datasets.push({
-      type: 'bar', label: '栽培（実績）', data: actualByDiv['栽培'],
-      backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 1,
-      stack: 'actual', order: 1, _actualGroup: true,
-    });
-    datasets.push({
-      type: 'bar', label: '出荷（実績）', data: actualByDiv['出荷'],
-      backgroundColor: '#fb923c99', borderColor: '#fb923c', borderWidth: 1,
-      stack: 'actual', order: 1, _actualGroup: true,
+    // 実績工数：業務区分チェックボックスで選択されているdivだけ棒を生成する。
+    // 栽培＝赤、出荷＝オレンジ（既存の実績棒と同じ暖色系）、配送＝シアンで、
+    // 既存のROLE_TYPE_COLORS（栽培緑/出荷黄）とは衝突しない配色にしている
+    const ACTUAL_BAR_COLORS = { '栽培': '#f87171', '出荷': '#fb923c', '配送': '#22d3ee' };
+    divs.forEach(div => {
+      const color = ACTUAL_BAR_COLORS[div];
+      datasets.push({
+        type: 'bar', label: `${div}（実績）`, data: actualByDiv[div],
+        backgroundColor: color + '99', borderColor: color, borderWidth: 1,
+        stack: 'actual', order: 1, _actualGroup: true,
+      });
     });
     stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
     allDivRows.forEach((r, ri) => {
