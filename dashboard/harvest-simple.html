@@ -297,7 +297,8 @@
   <div style="background:#1a1d27;border:1px solid #2e3148;border-radius:14px;width:100%;max-width:1100px;padding:24px;position:relative;margin:auto">
     <button onclick="savedCloseZoom()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#8892a4;font-size:1.4rem;cursor:pointer;line-height:1">×</button>
     <div id="saved-zoom-title" style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:12px"></div>
-    <div style="position:relative;height:min(70vh,600px)"><canvas id="saved-zoom-canvas"></canvas></div>
+    <div id="saved-zoom-canvas-wrap" style="position:relative;height:min(70vh,600px)"><canvas id="saved-zoom-canvas"></canvas></div>
+    <img id="saved-zoom-image" style="display:none;max-width:100%;max-height:70vh;margin:0 auto;border-radius:8px">
   </div>
 </div>
 
@@ -6201,6 +6202,7 @@ function savedNotesHtml(col) {
 const SAVED_KIND_LABELS = {
   weekly: '週別累計', temp: '温度分析',
   'mekaki-weekly': '芽かき量(週別)', 'weight-weekly': '菌床重量(週別)',
+  image: '写真',
 };
 function savedChartGroupKey(chart) {
   if (chart.kind === 'analysis') return `analysis:${chart.configKey}`;
@@ -6226,6 +6228,19 @@ function savedOpenZoom(collectionId, chartIdx) {
   document.getElementById('saved-zoom-title').textContent = chart.title;
   document.getElementById('saved-zoom-modal').style.display = 'flex';
   if (savedZoomChart) { try { savedZoomChart.destroy(); } catch (e) {} savedZoomChart = null; }
+
+  const canvasWrap = document.getElementById('saved-zoom-canvas-wrap');
+  const imgEl = document.getElementById('saved-zoom-image');
+  if (chart.kind === 'image') {
+    canvasWrap.style.display = 'none';
+    imgEl.style.display = 'block';
+    imgEl.src = chart.dataUrl;
+    return;
+  }
+  canvasWrap.style.display = 'block';
+  imgEl.style.display = 'none';
+  imgEl.src = '';
+
   if (chart.kind === 'weekly') {
     const revived = weeklyReviveContainers(chart.items);
     savedZoomChart = buildWeeklyLineChart('saved-zoom-canvas', revived, chart.targetData, true);
@@ -6238,6 +6253,71 @@ function savedOpenZoom(collectionId, chartIdx) {
 function savedCloseZoom() {
   document.getElementById('saved-zoom-modal').style.display = 'none';
   if (savedZoomChart) { try { savedZoomChart.destroy(); } catch (e) {} savedZoomChart = null; }
+}
+
+// ── 写真の貼り付け ──────────────────────────────────────────────────────────
+// localStorageの容量を圧迫しないよう、貼り付けられた画像は一定サイズ以下にリサイズ・
+// JPEG圧縮してから保存する(スマホのスクリーンショット等は数MB単位になりうるため)。
+function savedResizeImageFile(file, maxDim = 1600, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), width, height });
+      };
+      img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function savedAddImageFile(file, collectionId) {
+  const col = savedCollections.find(c => c.id === collectionId);
+  if (!col || !file) return;
+  if (!file.type || !file.type.startsWith('image/')) { savedToast('画像ファイルを選択してください'); return; }
+  savedToast('写真を追加しています…');
+  try {
+    const { dataUrl, width, height } = await savedResizeImageFile(file);
+    col.charts.push({ id: savedGenId(), savedAt: new Date().toISOString(), kind: 'image', title: '写真', dataUrl, width, height });
+    if (!savedCollectionsPersist()) {
+      col.charts.pop();
+      savedToast('保存に失敗しました(ブラウザの保存容量が上限です)。不要な保存グラフを削除してからお試しください');
+      return;
+    }
+    savedToast('写真を追加しました');
+    renderSavedTab();
+  } catch (e) {
+    console.error('[savedAddImageFile]', e);
+    savedToast('写真の追加に失敗しました');
+  }
+}
+
+function savedHandlePastePhoto(event, collectionId) {
+  const items = event.clipboardData?.items || [];
+  const imageItem = Array.from(items).find(it => it.type && it.type.startsWith('image/'));
+  if (!imageItem) { savedToast('クリップボードに画像が見つかりません'); return; }
+  event.preventDefault();
+  const file = imageItem.getAsFile();
+  if (file) savedAddImageFile(file, collectionId);
+}
+
+function savedHandlePhotoInputChange(event, collectionId) {
+  const file = event.target.files?.[0];
+  if (file) savedAddImageFile(file, collectionId);
+  event.target.value = '';
 }
 
 function renderSavedTab() {
@@ -6295,16 +6375,28 @@ function renderSavedTab() {
               </div>
               <button title="削除" onclick="event.stopPropagation();savedChartRemove('${activeCol.id}','${chart.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem">🗑</button>
             </div>
-            <div style="position:relative;height:280px"><canvas id="saved-chart-${idx}"></canvas></div>
+            ${chart.kind === 'image'
+              ? `<div style="height:280px;border-radius:8px;overflow:hidden;background:#0f1117"><img src="${chart.dataUrl}" style="width:100%;height:100%;object-fit:contain;display:block"></div>`
+              : `<div style="position:relative;height:280px"><canvas id="saved-chart-${idx}"></canvas></div>`}
           </div>`).join('')}
       </div>
     </div>`).join('') : `<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">このコレクションにはまだグラフがありません。</div>`;
+
+  const pasteZoneHtml = `
+    <div id="saved-paste-zone" tabindex="0"
+      onpaste="savedHandlePastePhoto(event,'${activeCol.id}')"
+      onclick="document.getElementById('saved-photo-input').click()"
+      style="border:2px dashed #2e3148;border-radius:10px;padding:18px;text-align:center;color:#64748b;font-size:0.82rem;cursor:pointer;margin-bottom:16px">
+      📋 写真をペースト(Ctrl+V)、またはクリックしてファイルを選択
+    </div>
+    <input type="file" id="saved-photo-input" accept="image/*" style="display:none" onchange="savedHandlePhotoInputChange(event,'${activeCol.id}')">`;
 
   section.innerHTML = `${headerHtml}
     <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="sort-btn" onclick="savedShareCollection('${activeCol.id}')">🔗 このコレクションを共有</button>
       <button class="sort-btn" onclick="savedExportCollectionPdf('${activeCol.id}')">🖨 PDFとして保存</button>
     </div>
+    ${pasteZoneHtml}
     <div style="margin-bottom:16px">${chartsHtml}</div>
     ${savedNotesHtml(activeCol)}`;
 
@@ -6436,11 +6528,14 @@ async function savedExportCollectionPdf(collectionId) {
     for (let i = 0; i < col.charts.length; i += gridCols) {
       const rowCells = col.charts.slice(i, i + gridCols).map((chart, colIdx) => {
         const idx = i + colIdx;
-        const canvas = document.getElementById(`saved-chart-${idx}`);
+        const isImage = chart.kind === 'image';
+        const canvas = isImage ? null : document.getElementById(`saved-chart-${idx}`);
         const title = savedTextToImage(chart.title, { fontSize: 11, fontWeight: 'bold', maxWidthPx: colWidth });
         const timestamp = savedTextToImage(`${new Date(chart.savedAt).toLocaleString('ja-JP')} 保存`, { fontSize: 8, color: '#666666', maxWidthPx: colWidth });
-        const imgH = canvas && canvas.width && canvas.height ? colWidth * (canvas.height / canvas.width) : 0;
-        return { canvas, title, timestamp, imgH };
+        const imgH = isImage
+          ? (chart.width && chart.height ? colWidth * (chart.height / chart.width) : 0)
+          : (canvas && canvas.width && canvas.height ? colWidth * (canvas.height / canvas.width) : 0);
+        return { chart, isImage, canvas, title, timestamp, imgH };
       });
       const rowHeight = Math.max(...rowCells.map(c => c.title.heightPx + 2 + c.timestamp.heightPx + 4 + c.imgH));
       ensureSpace(rowHeight + 16);
@@ -6451,7 +6546,9 @@ async function savedExportCollectionPdf(collectionId) {
         cellY += cell.title.heightPx + 2;
         pdf.addImage(cell.timestamp.dataUrl, 'PNG', x, cellY, cell.timestamp.widthPx, cell.timestamp.heightPx);
         cellY += cell.timestamp.heightPx + 4;
-        if (cell.canvas && cell.imgH) {
+        if (cell.isImage && cell.imgH) {
+          pdf.addImage(cell.chart.dataUrl, 'JPEG', x, cellY, colWidth, cell.imgH);
+        } else if (cell.canvas && cell.imgH) {
           pdf.addImage(cell.canvas.toDataURL('image/png', 1.0), 'PNG', x, cellY, colWidth, cell.imgH);
         }
       });
