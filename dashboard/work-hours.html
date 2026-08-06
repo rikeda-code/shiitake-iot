@@ -6996,7 +6996,49 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const stdHoursDs = threeSiteMergeStdHoursDatasets(mergedAgg, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
     const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAgg, divs, siteForAgg, mi)));
 
-    const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, stdHoursTotals], 100);
+    // 軸のMAX値専用：業務区分（栽培/出荷/配送）・雇用形態のチェック状態に関わらず、
+    // 「全部ON」を仮定した場合の実績・予定標準工数・標準労働時間の月別合計を算出する。
+    // 実際に描画される棒（actualByDiv・stdByTask・stdHoursDs、上のdivsベースの計算）
+    // 自体は変更せず、sharedMaxの算出にのみこちらを使うことで、チェックボックスの
+    // 切り替えで軸の高さが変動しないようにする。対象拠点（sitesToShow/siteForAgg）は
+    // 現在選択中のまま（拠点を変えればMAXも変わる）
+    const ALL_DIVS = ['栽培', '出荷', '配送'];
+    function actualHoursForPlanMonthsAllEmpTypes(site, typeFilter) {
+      const { employees, months: activeMonths } = getActiveData();
+      const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+      return planMonths.map(planMonth => {
+        const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+        if (ami < 0) return null;
+        const total = emps.reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    }
+    const actualByDivAllOn = {};
+    ALL_DIVS.forEach(div => {
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualBySite = sitesToShow.map(site => actualHoursForPlanMonthsAllEmpTypes(site, typeFilter));
+      actualByDivAllOn[div] = sl(planMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
+    });
+    const actualMonthlyTotalsAllOn = vm.map((_, mi) => ALL_DIVS.reduce((s, div) => s + (actualByDivAllOn[div][mi] || 0), 0));
+
+    const allDivRowsAllOn = rows.filter(r => ALL_DIVS.includes(r.div));
+    const stdByTaskAllOn = allDivRowsAllOn.map(r => sl(planMonths.map((_, mi) => {
+      const total = sitesToShow.reduce((s, site) => {
+        const res = calcRow(site, r, mi);
+        return s + (res.h !== null ? res.h : 0);
+      }, 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    })));
+    const stdMonthlyTotalsAllOn = vm.map((_, mi) => stdByTaskAllOn.reduce((s, data) => s + (data[mi] || 0), 0));
+
+    const mergedAggAllOn = mergeThreeSiteMergeAggAcrossDivs(ALL_DIVS.map(div => threeSiteMergeAgg(div, siteForAgg)));
+    const stdHoursTotalsAllOn = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAggAllOn, ALL_DIVS, siteForAgg, mi)));
+
+    const sharedMax = computeSharedAxisMax([actualMonthlyTotalsAllOn, stdMonthlyTotalsAllOn, stdHoursTotalsAllOn], 100);
 
     // 折れ線（収穫量・出荷量）：既存div別チャートと同じplanVolume()を使用し、栽培・出荷
     // それぞれ右軸(y2)の折れ線として追加する（選択中拠点分。全拠点合計はこのモードでは
