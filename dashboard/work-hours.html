@@ -4156,7 +4156,6 @@ function colLetterToIndex(letter) {
   return letter.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
 }
 const THREE_SITE_MERGE_ACTIVE_FLAG_COL = colLetterToIndex('B');
-const THREE_SITE_MERGE_EMP_COL = colLetterToIndex('C');
 const THREE_SITE_MERGE_SITE_COL = colLetterToIndex('D');
 const THREE_SITE_MERGE_PRJ_COL = colLetterToIndex('E');
 const THREE_SITE_MERGE_DIV_COL = colLetterToIndex('F');
@@ -4233,7 +4232,6 @@ function parseThreeSiteMergeSheet(json) {
     if (!name) return;
     const activeFlag = cellNumber(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
     if (activeFlag !== 1 && activeFlag !== 2) return; // B列が1・2以外は集計対象外
-    const employment = cellText(row, THREE_SITE_MERGE_EMP_COL); // C列（雇用区分）
     const stdHoursRaw = cellNumber(row, stdColIdx);
     const stdHours = stdHoursRaw ?? 0; // R列が空の行も0として成立させる
     // stdHoursOriginallyEmpty：R列が元々空だったかどうかのフラグ。比較（繁忙期見込み）
@@ -4250,7 +4248,7 @@ function parseThreeSiteMergeSheet(json) {
       const v = cellNumber(row, idx);
       if (v !== null) maxByYm[ym] = v;
     });
-    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment });
+    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj });
   });
 
   if (emptyStdHoursRows.length) {
@@ -6990,33 +6988,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     })));
     const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
 
-    // threeSiteMergeAgg()と同じロジックだが、雇用形態チェックボックス（empTypeFilter）を
-    // 適用したフィルタ済み版。拠点サマリの未来月「標準労働時間」棒専用のローカル関数
-    // （既存のthreeSiteMergeAgg()・threeSiteMergeAggFromRows()自体は変更しない）。
-    // empTypeFilterがnullの場合はapplyEmpTypeFilter()が素通しするため、既存の
-    // threeSiteMergeAgg()と同じ結果になる
-    function threeSiteMergeAggFilteredByEmpType(div, site) {
-      if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
-      if (!matched.length && !newStaffMatched.length) return null;
-      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
-      const newStaffByYm = {};
-      mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
-      });
-      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
-      return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
-    }
-
-    // 標準労働時間（青・黄・緑）：栽培・出荷それぞれのthreeSiteMergeAggFilteredByEmpType()
-    // （雇用形態フィルタ適用済み）を合算してからthreeSiteMergeStdHoursDatasets()に渡す
-    // （stdTotalB1・newStaffByYm・deltaByYmとも両div分の合計）
+    // 標準労働時間（青・黄・緑）：栽培・出荷それぞれのthreeSiteMergeAgg()を合算してから
+    // threeSiteMergeStdHoursDatasets()に渡す（stdTotalB1・newStaffByYm・deltaByYmとも
+    // 両div分の合計）
     const siteForAgg = sitesToShow.length > 1 ? null : sitesToShow[0];
-    const mergedAgg = mergeThreeSiteMergeAggAcrossDivs(divs.map(div => threeSiteMergeAggFilteredByEmpType(div, siteForAgg)));
+    const mergedAgg = mergeThreeSiteMergeAggAcrossDivs(divs.map(div => threeSiteMergeAgg(div, siteForAgg)));
     const stdHoursDs = threeSiteMergeStdHoursDatasets(mergedAgg, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
     const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAgg, divs, siteForAgg, mi)));
 
