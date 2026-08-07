@@ -6767,7 +6767,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     </div>`;
     content.innerHTML = html;
 
-    // 実績工数：栽培・出荷それぞれのactualHを3拠点分合算
+    // 業務区分チェックボックス（画面上部のroleTypeFilter）に応じて、この3拠点サマリ
+    // チャート専用に対象divを動的に決定する（拠点サマリと同じロジック）。外側
+    // スコープのdivs（['栽培','出荷','配送']、拠点別・表の各サブタブで共有）は
+    // ここでは変更せず、この関数内だけのローカル変数としてシャドーイングする
+    const divs = [];
+    if (roleTypeFilter.has('栽培')) divs.push('栽培');
+    if (roleTypeFilter.has('出荷')) divs.push('出荷');
+    if (roleTypeFilter.has('配送・栽培') || roleTypeFilter.has('配送・出荷')) divs.push('配送');
+
+    // 実績工数：栽培・出荷・配送それぞれのactualHを3拠点分合算。雇用形態フィルタ
+    // （empTypeFilter）はwindow._planCmpChartData2側（workHoursForPlanMonths()内の
+    // getActiveData()）で既に反映済みのため、ここでは業務区分（divs）の絞り込みのみ行う
     const actualByDiv = {};
     divs.forEach(div => {
       const actualBySite = sitesToShow.map(site => window._planCmpChartData2[`${site}-${div}`]?.actualH || planMonths.map(() => null));
@@ -6787,17 +6798,79 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     })));
     const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
 
-    // 標準労働時間（青・黄・緑）：栽培・出荷それぞれのthreeSiteMergeAgg(div, null)
-    // （3拠点合算済み）をdiv方向にmergeThreeSiteMergeAggAcrossDivsで合算
-    const mergedAgg = mergeThreeSiteMergeAggAcrossDivs(divs.map(div => threeSiteMergeAgg(div, null)));
+    // threeSiteMergeAgg()と同じロジックだが、雇用形態チェックボックス（empTypeFilter）を
+    // 適用したフィルタ済み版（拠点サマリと同じロジック、site=null＝3拠点合算版）。
+    // 既存のthreeSiteMergeAgg()・threeSiteMergeAggFromRows()自体は変更しない
+    function threeSiteMergeAggFilteredByEmpType(div, site) {
+      if (!mergeData) return null;
+      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
+      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
+      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
+      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      if (!matched.length && !newStaffMatched.length) return null;
+      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      const newStaffByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
+        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      });
+      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+      return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+    }
+
+    // 標準労働時間（青・黄・緑）：栽培・出荷それぞれのthreeSiteMergeAggFilteredByEmpType()
+    // （雇用形態フィルタ適用済み）をdiv方向にmergeThreeSiteMergeAggAcrossDivsで合算
+    const mergedAgg = mergeThreeSiteMergeAggAcrossDivs(divs.map(div => threeSiteMergeAggFilteredByEmpType(div, null)));
     const stdHoursDs = threeSiteMergeStdHoursDatasets(mergedAgg, divs, null, { stack: 'stdhours', labelSuffix: '（3拠点合計）' });
     const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAgg, divs, null, mi)));
 
-    const sharedMax = computeSharedAxisMax([actualMonthlyTotals, stdMonthlyTotals, stdHoursTotals], 100);
+    // 軸のMAX値専用：業務区分（栽培/出荷/配送）・雇用形態のチェック状態に関わらず、
+    // 「全部ON」を仮定した場合の実績・予定標準工数・標準労働時間の月別合計を算出する
+    // （拠点サマリと同じロジック、site=null版）。実際に描画される棒（actualByDiv・
+    // stdByTask・stdHoursDs、上のdivsベースの計算）自体は変更せず、sharedMaxの算出に
+    // のみこちらを使うことで、チェックボックスの切り替えで軸の高さが変動しないようにする
+    const ALL_DIVS = ['栽培', '出荷', '配送'];
+    function actualHoursForPlanMonthsAllEmpTypes(site, typeFilter) {
+      const { employees, months: activeMonths } = getActiveData();
+      const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+      return planMonths.map(planMonth => {
+        const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+        if (ami < 0) return null;
+        const total = emps.reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    }
+    const actualByDivAllOn = {};
+    ALL_DIVS.forEach(div => {
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualBySite = sitesToShow.map(site => actualHoursForPlanMonthsAllEmpTypes(site, typeFilter));
+      actualByDivAllOn[div] = sl(planMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
+    });
+    const actualMonthlyTotalsAllOn = vm.map((_, mi) => ALL_DIVS.reduce((s, div) => s + (actualByDivAllOn[div][mi] || 0), 0));
 
-    // 折れ線（収穫量・出荷量）：3拠点分を合算
+    const allDivRowsAllOn = rows.filter(r => ALL_DIVS.includes(r.div));
+    const stdByTaskAllOn = allDivRowsAllOn.map(r => sl(planMonths.map((_, mi) => {
+      const total = sitesToShow.reduce((s, site) => {
+        const res = calcRow(site, r, mi);
+        return s + (res.h !== null ? res.h : 0);
+      }, 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    })));
+    const stdMonthlyTotalsAllOn = vm.map((_, mi) => stdByTaskAllOn.reduce((s, data) => s + (data[mi] || 0), 0));
+
+    const mergedAggAllOn = mergeThreeSiteMergeAggAcrossDivs(ALL_DIVS.map(div => threeSiteMergeAgg(div, null)));
+    const stdHoursTotalsAllOn = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAggAllOn, ALL_DIVS, null, mi)));
+
+    const sharedMax = computeSharedAxisMax([actualMonthlyTotalsAllOn, stdMonthlyTotalsAllOn, stdHoursTotalsAllOn], 100);
+
+    // 折れ線（収穫量・出荷量）：3拠点分を合算。配送は生産量指標を持たないため、
+    // 動的なdivsではなく栽培・出荷に固定する（拠点サマリと同じ理由）
     const volDataByDiv = {};
-    divs.forEach(div => {
+    ['栽培', '出荷'].forEach(div => {
       volDataByDiv[div] = sl(planMonths.map((_, mi) =>
         sitesToShow.reduce((s, site) => {
           const v = planVolume(site, div, mi);
@@ -6810,16 +6883,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const ctx = document.getElementById('plansum2-combined')?.getContext('2d');
     if (ctx) {
       const datasets = [];
-      // 実績工数：栽培＝赤、出荷＝オレンジの暖色系2色（拠点サマリと同じ配色）
-      datasets.push({
-        type: 'bar', label: '栽培（実績）', data: actualByDiv['栽培'],
-        backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 1,
-        stack: 'actual', order: 1, _actualGroup: true,
-      });
-      datasets.push({
-        type: 'bar', label: '出荷（実績）', data: actualByDiv['出荷'],
-        backgroundColor: '#fb923c99', borderColor: '#fb923c', borderWidth: 1,
-        stack: 'actual', order: 1, _actualGroup: true,
+      // 実績工数：業務区分チェックボックスで選択されているdivだけ棒を生成する
+      // （拠点サマリと同じ配色。栽培＝赤、出荷＝オレンジ、配送＝シアン）
+      const ACTUAL_BAR_COLORS = { '栽培': '#f87171', '出荷': '#fb923c', '配送': '#22d3ee' };
+      divs.forEach(div => {
+        const color = ACTUAL_BAR_COLORS[div];
+        datasets.push({
+          type: 'bar', label: `${div}（実績）`, data: actualByDiv[div],
+          backgroundColor: color + '99', borderColor: color, borderWidth: 1,
+          stack: 'actual', order: 1, _actualGroup: true,
+        });
       });
       stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
       allDivRows.forEach((r, ri) => {
@@ -6878,7 +6951,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // stdByTaskをそのまま再利用し、工程別内訳（TASK_COLORS）の積み上げバーとして表示する
     // （二重計算を避けるため、ここでのcalcRow()再計算は行わない）
     {
-      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
+      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s, divs));
       const merged = mergeSiteTotalDataAcrossSites(allSitesTotalData);
       const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = merged;
       const taskBreakdown = allDivRows.map((r, ri) => ({
