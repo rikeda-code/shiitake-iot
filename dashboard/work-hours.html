@@ -6756,11 +6756,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const vm = visMonths();
 
     let html = `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 業務区分別</span></div>
+      <div class="schart-header">実績工数（業務区分別）</div>
       ${chartWrapHtml('plansum2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
     html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 雇用区分別</span></div>
+      <div class="schart-header">実績工数（雇用区分別）</div>
       ${chartWrapHtml('plansum2-emp', vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
@@ -7006,11 +7006,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const vm = visMonths();
 
     let html = `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 業務区分別</span></div>
+      <div class="schart-header">実績工数（業務区分別）</div>
       ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
     html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 雇用区分別</span></div>
+      <div class="schart-header">実績工数（雇用区分別）</div>
       ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
