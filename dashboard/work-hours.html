@@ -6164,10 +6164,15 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
   ];
 
-  // 計画月ごとの実績工数を雇用区分でフィルタして返す
-  function workHoursByEmpForPlanMonths(site, empMatcher) {
+  // 計画月ごとの実績工数を雇用区分でフィルタして返す。filterDivsを渡すと、業務区分
+  // チェックボックス（roleTypeFilter）駆動の対象div配列（'配送'を含みうる）で
+  // 絞り込む（内部で'配送・栽培'・'配送・出荷'に展開）。省略時は既存の動作を
+  // 完全に維持する（拠点別・表・3拠点サマリ・下段チャートの他の呼び出し元向け）
+  function workHoursByEmpForPlanMonths(site, empMatcher, filterDivs) {
     const { employees, months: activeMonths } = getActiveData();
-    const allowedDivs = [...divs, '配送・栽培', '配送・出荷'];
+    const allowedDivs = filterDivs
+      ? filterDivs.flatMap(d => d === '配送' ? ['配送・栽培', '配送・出荷'] : [d])
+      : [...divs, '配送・栽培', '配送・出荷'];
     const emps = employees.filter(e => e.base === site && allowedDivs.includes(e.workType) && empMatcher(e));
     return planMonths.map(planMonth => {
       const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -6178,10 +6183,15 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   }
 
   // 計画月ごとの人数を雇用区分でフィルタして返す（工数>0の人を1人と数える）。
-  // workHoursByEmpForPlanMonths()と同様、栽培・出荷限定とする
-  function headcountByEmpForPlanMonths(site, empMatcher) {
+  // workHoursByEmpForPlanMonths()と同様、栽培・出荷限定とする（filterDivs省略時）。
+  // filterDivsを渡した場合はworkHoursByEmpForPlanMonths()と同じ展開ロジックで
+  // allowedDivsを決定する
+  function headcountByEmpForPlanMonths(site, empMatcher, filterDivs) {
     const { employees, months: activeMonths } = getActiveData();
-    const emps = employees.filter(e => e.base === site && divs.includes(e.workType) && empMatcher(e));
+    const allowedDivs = filterDivs
+      ? filterDivs.flatMap(d => d === '配送' ? ['配送・栽培', '配送・出荷'] : [d])
+      : divs;
+    const emps = employees.filter(e => e.base === site && allowedDivs.includes(e.workType) && empMatcher(e));
     return planMonths.map(planMonth => {
       const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
       if (ami < 0) return null;
@@ -6206,10 +6216,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   const HEADCOUNT_CUTOFF = mnum('2026/5'); // 人数実績は2026/5まで
   const BASE_MONTH = '2026/5';
 
-  // 拠点ごとの標準工数合計・実績・予想データを構築
-  function computeSiteTotalData(site) {
+  // 拠点ごとの標準工数合計・実績・予想データを構築。filterDivsを渡すと、業務区分
+  // チェックボックス（roleTypeFilter）駆動の対象div配列で絞り込む（拠点サマリの
+  // 下段チャート専用）。省略時は表タブ・3拠点サマリ向けに既存の動作を完全に維持する
+  function computeSiteTotalData(site, filterDivs) {
     const stdTotalRaw = planMonths.map((_, mi) =>
-      divs.reduce((sum, div) => {
+      (filterDivs || divs).reduce((sum, div) => {
         const d = window._planCmpChartData2[`${site}-${div}`];
         if (!d) return sum;
         return sum + d.divRows.reduce((s, r) => {
@@ -6219,7 +6231,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       }, 0) || null
     );
     const allActual = {};
-    EMP_SERIES.forEach(et => { allActual[et.label] = workHoursByEmpForPlanMonths(site, et.match); });
+    EMP_SERIES.forEach(et => { allActual[et.label] = workHoursByEmpForPlanMonths(site, et.match, filterDivs); });
     const baseIdx = planMonths.indexOf(BASE_MONTH);
     const baseH = {};
     EMP_SERIES.forEach(et => { baseH[et.label] = baseIdx >= 0 ? (allActual[et.label][baseIdx] ?? 0) : 0; });
@@ -6252,7 +6264,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
     // 人数データ（実績: 〜2026/5、予想: 2026/7〜）
     const allActualCount = {};
-    EMP_SERIES.forEach(et => { allActualCount[et.label] = headcountByEmpForPlanMonths(site, et.match); });
+    EMP_SERIES.forEach(et => { allActualCount[et.label] = headcountByEmpForPlanMonths(site, et.match, filterDivs); });
     const baseCount = {};
     EMP_SERIES.forEach(et => { baseCount[et.label] = baseIdx >= 0 ? (allActualCount[et.label][baseIdx] ?? 0) : 0; });
     // 2026/5時点のパート1人当たり工数
@@ -7154,7 +7166,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // calcRow()再計算は行わない）
     {
       const site = planCmpSiteTab;
-      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s));
+      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s, divs));
       const siteTotalIdx = availSites.indexOf(site);
       const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
       const taskBreakdown = allDivRows.map((r, ri) => ({
