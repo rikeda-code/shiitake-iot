@@ -6755,14 +6755,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const sitesToShow = availSites;
     const vm = visMonths();
 
-    let html = `<div class="schart-header">3拠点サマリ</div>`;
-    html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算（3拠点合計） <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（工程別）</span></div>
-      <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・栽培＋出荷合算）</div>
+    let html = `<div class="schart-section">
+      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 業務区分別</span></div>
       ${chartWrapHtml('plansum2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
     html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算（3拠点合計） <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（雇用形態別）</span></div>
+      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 雇用区分別</span></div>
       ${chartWrapHtml('plansum2-emp', vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
@@ -7005,17 +7003,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function renderSiteSummaryView() {
     const content = document.getElementById('compare2-content');
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
-    const totalSuffix = sitesToShow.length > 1 ? '（3拠点合計）' : '';
     const vm = visMonths();
 
-    let html = `<div class="schart-header">${planCmpSiteTab}</div>`;
-    html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算${totalSuffix} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（工程別）</span></div>
-      <div class="chart-section-label" style="padding-top:0;margin-bottom:6px">予定標準 vs 実績（統合・栽培＋出荷合算）</div>
+    let html = `<div class="schart-section">
+      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 業務区分別</span></div>
       ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
     html += `<div class="schart-section">
-      <div class="schart-header">栽培＋出荷 合算${totalSuffix} <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 実績工数 / 標準労働時間 / 予定標準工数（雇用形態別）</span></div>
+      <div class="schart-header">栽培＋出荷 合算 <span style="font-weight:400;font-size:0.8rem;color:var(--muted)"> 雇用区分別</span></div>
       ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
     </div>`;
     content.innerHTML = html;
@@ -7310,6 +7305,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         <div class="chart-section-label" style="flex-shrink:0">📊比較（繁忙期見込み）／ ファーム勤務時間 &gt; 標準労働時間
           <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
         </div>
+        <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定</div>
         <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
           <div style="position:relative;display:inline-block">
