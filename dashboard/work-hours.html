@@ -1545,6 +1545,8 @@ function rerenderCurrentView() {
     renderStdHoursTab();
   } else if (activeMode === 'plancompare2') {
     renderPlanCompareTab2();
+  } else if (activeMode === 'decplan') {
+    renderDecPlanTab();
   }
   // stdset は整理済み_Mも整理済み_分析の期間も参照しないため再描画不要
 }
@@ -4224,11 +4226,8 @@ function parseThreeSiteMergeSheet(json) {
     if (!site) return;
     const divRaw = cellText(row, THREE_SITE_MERGE_DIV_COL);
     const name = cellText(row, THREE_SITE_MERGE_NAME_COL);
-    // 配送・栽培／配送・出荷は「配送」として正規化。
-    // 生産部長はdiv列が未設定でも「栽培」として扱う（26/12計画タブ②④と表2①に反映）
-    const div = (divRaw === '配送・栽培' || divRaw === '配送・出荷') ? '配送'
-      : (divRaw !== '栽培' && divRaw !== '出荷' && divRaw !== '配送' && name === '生産部長') ? '栽培'
-      : divRaw;
+    // 配送・栽培／配送・出荷は「配送」として正規化
+    const div = (divRaw === '配送・栽培' || divRaw === '配送・出荷') ? '配送' : divRaw;
     if (div !== '栽培' && div !== '出荷' && div !== '配送') return;
     if (!name) return;
     const activeFlag = cellNumber(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
@@ -7784,13 +7783,19 @@ function renderDecPlanContent(planData, mergeData) {
   const [decY, decM] = DEC.split('/').map(Number);
   const DECPLAN_TARGET_YM = decY * 100 + decM;
 
+  // 画面上部の業務区分チェックボックス（roleTypeFilter）から動的に決定した対象div配列
+  const divs = [];
+  if (roleTypeFilter.has('栽培')) divs.push('栽培');
+  if (roleTypeFilter.has('出荷')) divs.push('出荷');
+  if (roleTypeFilter.has('配送・栽培') || roleTypeFilter.has('配送・出荷')) divs.push('配送');
+
   // ①6月実績：栽培・出荷・配送
   function junActualH(site) {
     const ami = activeMonths.findIndex(m => normalizeMonth(m) === JUN);
     if (ami < 0) return null;
     const wc = workTypeClass;
     const total = employees
-      .filter(e => e.base === site && (wc(e.workType) === 'wt-栽培' || wc(e.workType) === 'wt-出荷' || wc(e.workType) === 'wt-配送' || e.workType === '生産部長'))
+      .filter(e => e.base === site && ((divs.includes('栽培') && wc(e.workType) === 'wt-栽培') || (divs.includes('出荷') && wc(e.workType) === 'wt-出荷') || (divs.includes('配送') && wc(e.workType) === 'wt-配送')))
       .reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
     return total > 0 ? Math.round(total * 10) / 10 : null;
   }
@@ -7801,20 +7806,20 @@ function renderDecPlanContent(planData, mergeData) {
     if (ami < 0) return null;
     const wc = workTypeClass;
     return employees.filter(e => e.base === site &&
-      (wc(e.workType) === 'wt-栽培' || wc(e.workType) === 'wt-出荷' || wc(e.workType) === 'wt-配送' || e.workType === '生産部長') &&
+      ((divs.includes('栽培') && wc(e.workType) === 'wt-栽培') || (divs.includes('出荷') && wc(e.workType) === 'wt-出荷') || (divs.includes('配送') && wc(e.workType) === 'wt-配送')) &&
       (e.hours[ami] ?? 0) > 0).length || null;
   }
 
   // 人数表①：3拠点マージシートB=1のみの件数
   function mergeN(site) {
     if (!mergeData) return null;
-    return mergeData.rows.filter(r => r.site === site && r.activeFlag === 1).length || null;
+    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 1 && divs.includes(r.div))).length || null;
   }
 
   // 人数表③新加入見込み：B=2の件数
   function b2N(site) {
     if (!mergeData) return null;
-    return mergeData.rows.filter(r => r.site === site && r.activeFlag === 2).length || null;
+    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div))).length || null;
   }
 
   // ②標準工数合計：3拠点マージR列(栽培・出荷divのみ) per site。B列=1（稼働フラグ）の
@@ -7822,7 +7827,7 @@ function renderDecPlanContent(planData, mergeData) {
   // R列が空の行は、以前と同様この集計から除外する（②③④確認事項と同じ理由）
   function stdHoursFromMerge(site) {
     if (!mergeData) return null;
-    const siteRows = mergeData.rows.filter(r => r.site === site && r.activeFlag === 1 && !r.stdHoursOriginallyEmpty);
+    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 1 && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
     if (!siteRows.length) return null;
     return Math.round(siteRows.reduce((s, r) => s + (r.stdHours || 0), 0) * 10) / 10;
   }
@@ -7831,7 +7836,7 @@ function renderDecPlanContent(planData, mergeData) {
   // 合計から動的に算出する（固定人数計画は撤廃）
   function newHireH(site) {
     if (!mergeData) return null;
-    const rows = mergeData.rows.filter(r => r.site === site && r.activeFlag === 2);
+    const rows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div)));
     if (!rows.length) return null;
     return Math.round(rows.reduce((s, r) => s + (r.stdHours || 0), 0) * 10) / 10;
   }
@@ -7839,7 +7844,7 @@ function renderDecPlanContent(planData, mergeData) {
   // ③新加入見込み人数：3拠点マージシートのB列=2（新規要員）行の件数から動的に算出する
   function newHireN(site) {
     if (!mergeData) return null;
-    return mergeData.rows.filter(r => r.site === site && r.activeFlag === 2).length || null;
+    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div))).length || null;
   }
 
   // ④残業見込み工数：3拠点マージ DECPLAN_TARGET_YM列（maxByYm）の合計 per site
@@ -7855,7 +7860,7 @@ function renderDecPlanContent(planData, mergeData) {
   // そのまま反映する）
   function overtimeH(site) {
     if (!mergeData) return null;
-    const siteRows = mergeData.rows.filter(r => r.site === site && !r.stdHoursOriginallyEmpty);
+    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
     if (!siteRows.length) return null;
     let total = 0;
     siteRows.forEach(r => {
@@ -7876,7 +7881,7 @@ function renderDecPlanContent(planData, mergeData) {
   // ⑥12月標準工数時間：生産計画エンジンから算出
   function stdHoursForMonth(site, mi) {
     if (mi < 0) return null;
-    const divRows = stdRows.filter(r => r.div === '栽培' || r.div === '出荷' || r.div === '配送');
+    const divRows = stdRows.filter(r => divs.includes(r.div));
     if (!divRows.length) return null;
     let total = 0, hasVal = false;
     divRows.forEach(r => {
