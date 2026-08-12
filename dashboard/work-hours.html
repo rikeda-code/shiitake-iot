@@ -7950,6 +7950,23 @@ function renderCompareSiteCharts(prodData) {
     }));
   }
 
+  // 「人数」ビュー用：標準工数・標準労働時間（時間）を「実績の1人当たり時間
+  // （実績工数÷実績人数）」を基準に人数換算する。「◯h相当をこなすには何人相当
+  // 必要か」という値になる
+  function toCount(hoursVal, si, mi) {
+    const actualH = (lowerBySite[si][mi] || 0) + (upperBySite[si][mi] || 0);
+    const actualN = (lowerCountBySite[si][mi] || 0) + (upperCountBySite[si][mi] || 0);
+    if (hoursVal == null || actualH <= 0 || actualN <= 0) return null;
+    const avgPerPerson = actualH / actualN;
+    if (avgPerPerson <= 0) return null;
+    const result = hoursVal * actualN / actualH;
+    return Math.round(result * 10) / 10;
+  }
+  const stdTaskCountBySite = availSites.map((_, si) => commonMonths.map((_, mi) =>
+    stdTaskBySite ? toCount(stdTaskBySite[si][mi], si, mi) : null));
+  const stdHoursCountBySite = availSites.map((_, si) => commonMonths.map((_, mi) =>
+    toCount(stdHoursBySite[si][mi], si, mi)));
+
   main.innerHTML = `
     <div class="compare-shell">
       <div class="compare-header-row">
@@ -8161,8 +8178,9 @@ function renderCompareSiteCharts(prodData) {
     const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
     if (!countCtx) return;
 
-    // 「時間」ビューと同じパターン：拠点ごとに下段（社員＋技能実習生）・上段（アルバイト）の
-    // 2データセットを積み上げる。●マーカーは今回追加しない（後日対応予定）
+    // 「時間」ビューと同じパターン：拠点ごとに4個（下段バー／上段バー／標準工数点／
+    // 標準労働時間点）、合計12個のデータセットを拠点順に4個ずつ並べる。
+    // マーカーの値は人数換算後のstdTaskCountBySite/stdHoursCountBySiteを使う
     const countDatasets = [];
     availSites.forEach((site, si) => {
       const siteColor = SITE_COLORS[site] || '#fff';
@@ -8175,6 +8193,7 @@ function renderCompareSiteCharts(prodData) {
         borderWidth: 1,
         stack: site,
         barThickness: 22,
+        order: 2,
         _site: site, _empSegment: 'lower',
         _origBg: lowerBg, _origBorder: lowerBorder,
       });
@@ -8187,16 +8206,39 @@ function renderCompareSiteCharts(prodData) {
         borderWidth: 1,
         stack: site,
         barThickness: 22,
+        order: 2,
         _site: site, _empSegment: 'upper',
         _origBg: upperBg, _origBorder: upperBorder,
       });
+      countDatasets.push({
+        type: 'line', label: `${site}標準工数`,
+        data: commonMonths.map((_, mi) => ({ x: mi, y: stdTaskCountBySite[si][mi] })),
+        showLine: false, pointStyle: 'circle', pointRadius: 6,
+        backgroundColor: '#ef4444', borderColor: '#ef4444',
+        order: 1,
+        _site: site, _markerType: 'task',
+        _origBg: '#ef4444', _origBorder: '#ef4444',
+      });
+      countDatasets.push({
+        type: 'line', label: `${site}標準労働時間`,
+        data: commonMonths.map((_, mi) => ({ x: mi, y: stdHoursCountBySite[si][mi] })),
+        showLine: false, pointStyle: 'circle', pointRadius: 6,
+        backgroundColor: '#eab308', borderColor: '#eab308',
+        order: 1,
+        _site: site, _markerType: 'hours',
+        _origBg: '#eab308', _origBorder: '#eab308',
+      });
     });
 
-    // 非表示状態の管理用（「時間」ビューと同じくchart.setDatasetVisibility()は使わない。
-    // マーカーが無いため●連動の分岐は不要）
+    // 非表示状態の管理用（「時間」ビューと同じくchart.setDatasetVisibility()は使わない）
     const hiddenCountSites = new Set();
+    const hiddenCountMarkerTypes = new Set();
+    // マーカー（_markerType持ち）は「拠点が表示中」かつ「指標が表示中」のAND条件を
+    // 満たす場合のみ表示する（「時間」ビューと同じロジック）
     function isCountDatasetHidden(ds) {
-      return hiddenCountSites.has(ds._site);
+      if (ds._empSegment) return hiddenCountSites.has(ds._site);
+      if (ds._markerType) return hiddenCountSites.has(ds._site) || hiddenCountMarkerTypes.has(ds._markerType);
+      return false;
     }
     function applyCountHiddenState(chart) {
       chart.data.datasets.forEach(ds => {
@@ -8216,30 +8258,39 @@ function renderCompareSiteCharts(prodData) {
           legend: {
             labels: {
               color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
-              // 上段（アルバイト）バーは下段と一体の実績棒として扱うため凡例には出さない。
+              // 凡例は5項目（拠点3＋標準工数＋標準労働時間）に統一する（「時間」ビューと同じ）。
               // Chart.jsのlegendプラグインは各アイテムのfontColorを使ってテキストを描画し、
               // options.labels.colorには自動フォールバックしないため、fontColorを明示的に
               // 設定しないとテキストが黒になってしまう（過去に発生した不具合と同じ原因）
               generateLabels: chart => {
                 const fontColor = chart.options.plugins.legend.labels.color;
-                return availSites.map(site => ({
-                  text: site,
-                  fillStyle: (SITE_COLORS[site] || '#fff') + '99',
-                  strokeStyle: SITE_COLORS[site] || '#fff',
-                  lineWidth: 1,
-                  fontColor,
-                  hidden: hiddenCountSites.has(site),
-                  _site: site,
-                }));
+                return [
+                  ...availSites.map(site => ({
+                    text: site,
+                    fillStyle: (SITE_COLORS[site] || '#fff') + '99',
+                    strokeStyle: SITE_COLORS[site] || '#fff',
+                    lineWidth: 1,
+                    fontColor,
+                    hidden: hiddenCountSites.has(site),
+                    _kind: 'site', _site: site,
+                  })),
+                  { text: '標準工数', fillStyle: '#ef4444', strokeStyle: '#ef4444', lineWidth: 1, fontColor, hidden: hiddenCountMarkerTypes.has('task'), _kind: 'marker', _markerType: 'task' },
+                  { text: '標準労働時間', fillStyle: '#eab308', strokeStyle: '#eab308', lineWidth: 1, fontColor, hidden: hiddenCountMarkerTypes.has('hours'), _kind: 'marker', _markerType: 'hours' },
+                ];
               },
             },
-            // 拠点の凡例をクリックしたら、その拠点の棒（下段・上段）だけを非表示にする。
-            // setDatasetVisibility()は使わず、hiddenCountSitesを更新してから
-            // applyCountHiddenState()で色を切り替える（残りの拠点のバー位置は変わらない）
+            // 拠点の凡例をクリックしたら、その拠点の棒（下段・上段）だけを非表示にする
+            // （●マーカーは連動しない）。標準工数／標準労働時間の凡例をクリックしたら、
+            // 3拠点分の該当マーカーをまとめて非表示にする（「時間」ビューと同じロジック）
             onClick: (e, legendItem, legend) => {
               const chart = legend.chart;
-              if (hiddenCountSites.has(legendItem._site)) hiddenCountSites.delete(legendItem._site);
-              else hiddenCountSites.add(legendItem._site);
+              if (legendItem._kind === 'site') {
+                if (hiddenCountSites.has(legendItem._site)) hiddenCountSites.delete(legendItem._site);
+                else hiddenCountSites.add(legendItem._site);
+              } else {
+                if (hiddenCountMarkerTypes.has(legendItem._markerType)) hiddenCountMarkerTypes.delete(legendItem._markerType);
+                else hiddenCountMarkerTypes.add(legendItem._markerType);
+              }
               applyCountHiddenState(chart);
               chart.update();
             },
@@ -8270,6 +8321,24 @@ function renderCompareSiteCharts(prodData) {
           },
         },
       },
+      // 標準工数・標準労働時間の点データセットを、対応する拠点の棒（2段積み上げ）の
+      // x座標に位置合わせするプラグイン（「時間」ビューのsiteStdMarkerAlignと同じロジック）
+      plugins: [{
+        id: 'siteStdMarkerAlignCount',
+        beforeDatasetsDraw(chart) {
+          availSites.forEach((site, si) => {
+            const base = si * 4;
+            const barMeta = chart.getDatasetMeta(base);
+            [base + 2, base + 3].forEach(markerIdx => {
+              const markerMeta = chart.getDatasetMeta(markerIdx);
+              markerMeta.data.forEach((pt, mi) => {
+                const bar = barMeta.data[mi];
+                if (bar) pt.x = bar.x;
+              });
+            });
+          });
+        },
+      }],
     });
   }
 }
