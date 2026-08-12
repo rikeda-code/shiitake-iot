@@ -411,9 +411,11 @@ function parseContainerRowsV2(table, startDateStr) {
       }
       if (!rowDate) continue;
       const v13 = parseFloat(cells[13]?.v);
-      const daily = (!isNaN(v13) && v13 > 0) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
+      // 実際の1日あたり収穫量(kg)は現実的に1000kgを超えることはないため、
+      // 列がずれて日付シリアル値(4万台等)を拾ってしまった場合はこの上限で弾く
+      const daily = (!isNaN(v13) && v13 > 0 && v13 < 1000) ? v13 : [6, 7, 8, 9].reduce((s, ci) => {
         const v = parseFloat(cells[ci]?.v);
-        return s + (isNaN(v) || v < 0 ? 0 : v);
+        return s + (isNaN(v) || v < 0 || v >= 1000 ? 0 : v);
       }, 0);
       if (!startD) continue;
       const dayNum = Math.round((rowDate - startD) / 86400000) + 1;
@@ -439,6 +441,7 @@ function parseContainerRowsV2(table, startDateStr) {
       if (/^\d{8}$/.test(ds2)) {
         rowDate = new Date(parseInt(ds2.slice(0,4)), parseInt(ds2.slice(4,6))-1, parseInt(ds2.slice(6,8)));
       }
+      if (!rowDate) continue;
       rows.push({ dayNum, daily, rowDate });
     }
   } else {
@@ -456,9 +459,11 @@ function parseContainerRowsV2(table, startDateStr) {
       }
       if (!rowDate) continue;
       let daily = 0;
+      // 実際の1日あたり収穫量(kg)は現実的に1000kgを超えることはないため、
+      // 列がずれて日付シリアル値(4万台等)を拾ってしまった場合はこの上限で弾く
       for (const offset of [12, 11, 13, 10]) {
         const v = parseFloat(cells[dayCol + offset]?.v);
-        if (!isNaN(v) && v >= 0) { daily = v; break; }
+        if (!isNaN(v) && v >= 0 && v < 1000) { daily = v; break; }
       }
       rows.push({ rowDate, dayNum: dayIdx + 1, daily });
     }
@@ -603,6 +608,7 @@ async function _fetchAndCacheWeekly(section, lsKey, isBackground) {
         }
       }),
       fetchTargetLine(),
+      ensureWateringData().catch(e => { console.error('[watering] 取得に失敗:', e.message); return {}; }),
     ]);
 
     weeklyState = { containerData, targetData };
@@ -1564,18 +1570,29 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
   const ctx = canvas.getContext('2d');
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const tomorrow = new Date(today.getTime() + 86400000);
+
+  // 行の除外判定: 終了済みコンテナは実際の終了日以降を除外、進行中コンテナは
+  // 「今日より後(=未来日)」の行を除外する。
+  // 加えて、当日の行は日付欄だけ先に用意されていて収穫量(daily)がまだ未入力の
+  // プレースホルダーである可能性があるため、当日かつdaily<=0(未入力扱い)の行も
+  // 除外し、実際に収穫量が入力されるまでは前日の累計値のまま線を伸ばさないようにする。
+  const isFutureRow = (r, endD) => {
+    if (!r.rowDate) return false;
+    if (endD) return r.rowDate >= endD;
+    if (r.rowDate > today) return true;
+    if (r.rowDate.getTime() === today.getTime() && !(r.daily > 0)) return true;
+    return false;
+  };
 
   // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
   const maxDayInData = containers.reduce((max, c) => {
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || tomorrow;
     const fromRows = c.rows.reduce((m, r) => {
-      if (r.rowDate && r.rowDate >= cutoffDate) return m;
+      if (isFutureRow(r, endD)) return m;
       return Math.max(m, Math.round(r.dayNum || 0));
     }, 0);
     const startD = parseDateStr(c.startDate);
-    const fromStart = startD ? Math.round((cutoffDate - startD) / 86400000) : 0;
+    const fromStart = startD ? Math.round((today - startD) / 86400000) : 0;
     return Math.max(max, fromRows, fromStart);
   }, 0);
   const MAX_DAY = Math.max(65, maxDayInData);
@@ -1588,12 +1605,10 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     let cumKg = 0;
     let cutoffDay = 0;
 
-    // ended containers: use endDate as cutoff; active: use tomorrow (include today's data)
     const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const cutoffDate = endD || tomorrow;
 
     c.rows.forEach(r => {
-      if (r.rowDate && r.rowDate >= cutoffDate) return;
+      if (isFutureRow(r, endD)) return;
       cumKg += r.daily;
       const d = Math.round(r.dayNum);
       if (d >= 0 && d <= MAX_DAY) {
@@ -1602,9 +1617,10 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     });
 
-    // Fallback for Type C rows without rowDate: use startDate calculation
+    // Fallback: 有効な行が1件もカウントされなかった場合、startDateからの経過日数で代用する
     if (cutoffDay === 0) {
       const startD = parseDateStr(c.startDate);
+      const cutoffDate = endD || today;
       if (startD) {
         cutoffDay = Math.min(Math.round((cutoffDate - startD) / 86400000), MAX_DAY);
       } else {
@@ -1613,16 +1629,9 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
       }
     }
 
-    // For active containers, extend cutoffDay to today so the line reaches the current day
-    if (!c.isEnded) {
-      const startD = parseDateStr(c.startDate);
-      if (startD) {
-        const todayDay = Math.min(Math.round((tomorrow - startD) / 86400000) - 1, MAX_DAY);
-        if (todayDay > cutoffDay) cutoffDay = todayDay;
-      }
-    }
-
-    // Forward-fill only up to cutoffDay
+    // Forward-fill only up to cutoffDay(実データがある最後の日まで)。
+    // 当日分の実データがまだ無い場合は、当日の位置まで無理に線を伸ばさず、
+    // 昨日の実データの位置で線が止まったままにする(横に伸ばさない)。
     let last = null;
     for (let i = 0; i <= MAX_DAY; i++) {
       if (cumArr[i] !== null) { last = cumArr[i]; }
@@ -1631,20 +1640,30 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
 
     // ラベル: 群馬3-12(6/15)L3 形式
     const sd = parseDateStr(c.startDate);
-    const startStr = sd ? `(${sd.getMonth()+1}/${sd.getDate()})` : '';
-    const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
     const containerLabel = '';
+
+    // 注水日の位置に点を表示する(それ以外の日はpointRadius:0で非表示のまま)
+    const wateringDays = new Set(
+      sd ? wateringDatesForContainer(c).map(d => Math.round((d - sd) / 86400000)).filter(d => d >= 0 && d <= MAX_DAY) : []
+    );
+    const pointRadiusArr = xLabels.map((_, i) => wateringDays.has(i) ? 3.5 : 0);
+    const pointBorderArr = xLabels.map((_, i) => wateringDays.has(i) ? 1.5 : 0);
 
     return {
       label: `${c.siteName} ${c.name}`,
       containerLabel,
+      bedCount,
+      wateringDays,
       data: cumArr,
       borderColor: color,
       backgroundColor: 'transparent',
       borderWidth: c.isEnded ? 1 : 1.5,
       borderDash: c.isEnded ? [4, 3] : [],
-      pointRadius: 0,
-      pointHoverRadius: 4,
+      pointRadius: pointRadiusArr,
+      pointBackgroundColor: color,
+      pointBorderColor: '#fff',
+      pointBorderWidth: pointBorderArr,
+      pointHoverRadius: 6,
       tension: 0.2,
       spanGaps: false,
     };
@@ -1679,7 +1698,12 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
           ...tooltipDefaults,
           callbacks: {
             title: items => `栽培${items[0].label}日目`,
-            label: c => c.raw !== null ? `${c.dataset.label}: ${c.raw}g/菌床` : null,
+            label: c => {
+              if (c.raw === null) return null;
+              const bed = c.dataset.bedCount;
+              const watered = c.dataset.wateringDays?.has(c.dataIndex);
+              return `${c.dataset.label}${bed ? `(${bed.toLocaleString('ja-JP')}菌床)` : ''}: ${c.raw}g/菌床${watered ? ' 💧注水' : ''}`;
+            },
           },
         },
       },
@@ -3017,6 +3041,95 @@ function parseWeightRows(table) {
     }
   }
   return containers;
+}
+
+// ── 注水日データ ────────────────────────────────────────────────────────────
+// シート名の「注水」前のスペースが全角/半角どちらか実物と食い違うと別のシート
+// (概要メモ等)を誤って取得してしまうため、両方の候補を用意して実際にパースできた
+// 方を採用する。
+const WATERING_SHEET_NAME_CANDIDATES = {
+  'いなべ': ['いなべ 注水', 'いなべ　注水'],
+  '群馬': ['群馬 注水', '群馬　注水'],
+  '南丹': ['南丹 注水', '南丹　注水'],
+};
+let wateringData = null; // { [siteName]: { [containerNo]: Date[] } }
+
+// 注水日欄が「5/26」等の区切りありでなく、「504」「524」のように区切り無しの
+// 数値(MDD/MMDD)で入力されている行があるため、通常のgvizToDateだけでは
+// 実際の日付シリアル値(4万台の数値)と誤認して不正な日付になってしまう。
+// 現実的な日付シリアル値でない小さい数値は、区切り無しMDD/MMDD表記として救済する。
+function parseWateringDate(cell) {
+  if (!cell) return null;
+  const v = cell.v;
+  if (typeof v === 'number' && Number.isInteger(v) && v >= 101 && v <= 1231) {
+    const s = String(v);
+    const month = s.length <= 3 ? parseInt(s.slice(0, s.length - 2), 10) : parseInt(s.slice(0, 2), 10);
+    const day = parseInt(s.slice(-2), 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return new Date(new Date().getFullYear(), month - 1, day);
+    }
+  }
+  const md = parseDateMD(v, cell.f);
+  if (md) return md;
+  return gvizToDate(cell);
+}
+
+function parseWateringRows(table) {
+  const rows = table.rows || [];
+  const result = [];
+  rows.forEach(row => {
+    const cells = row?.c || [];
+    const cCell = cells[2];
+    const dCell = cells[3];
+    const cVal = cCell?.v != null ? String(cCell.v).trim() : '';
+    const dVal = dCell?.v != null ? String(dCell.v).trim() : '';
+    if (cVal === '' && dVal === '') return;
+
+    // 本来はC列=注水日・D列=号機だが、行によってはC/D列の中身が入れ替わっている
+    let date = parseWateringDate(cCell);
+    let containerNo = dVal;
+    if (!date) {
+      const altDate = parseWateringDate(dCell);
+      if (altDate) { date = altDate; containerNo = cVal; }
+    }
+    if (!date || containerNo === '') return;
+    result.push({ containerNo, date });
+  });
+  return result;
+}
+
+async function ensureWateringData() {
+  if (wateringData) return wateringData;
+  const result = {};
+  await Promise.all(Object.entries(WATERING_SHEET_NAME_CANDIDATES).map(async ([siteName, candidates]) => {
+    const byContainer = {};
+    for (const sheetName of candidates) {
+      try {
+        const table = await fetchWeightSheet(sheetName);
+        const rows = parseWateringRows(table);
+        if (rows.length > 0) {
+          rows.forEach(r => { (byContainer[r.containerNo] ||= []).push(r.date); });
+          break; // このシート名で読み取れたので他の候補は試さない
+        }
+      } catch (e) {
+        console.warn(`[watering] ${siteName}: シート「${sheetName}」の取得に失敗:`, e.message);
+      }
+    }
+    result[siteName] = byContainer;
+  }));
+  wateringData = result;
+  return wateringData;
+}
+
+// コンテナの栽培期間(栽培開始日〜終了日、進行中は今日まで)に含まれる注水日の一覧を返す
+function wateringDatesForContainer(c) {
+  const dates = wateringData?.[c.siteName]?.[c.no] || [];
+  if (!dates.length) return [];
+  const startD = parseDateStr(c.startDate);
+  if (!startD) return [];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : today;
+  return dates.filter(d => d >= startD && (!endD || d <= endD));
 }
 
 function renderWeightSiteContent(result) {
