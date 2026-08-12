@@ -7997,11 +7997,28 @@ function renderCompareSiteCharts(prodData) {
           tooltip: {
             backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
             titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+            footerColor: '#e2e8f0', footerFont: { weight: 'normal' },
             callbacks: {
               label: ctx => {
                 const v = ctx.parsed.y;
                 if (v === null || v === undefined) return null;
                 return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
+              },
+              // ●マーカー（標準工数・標準労働時間）の値を、実績3拠点分の行の下に
+              // 区切り線を挟んで追加する。Chart.jsのtooltipは行ごとに個別の文字色を
+              // 指定できない（footerColorは配列を渡しても全行が同一色になることを
+              // 確認済み）ため、色分けは凡例・チャート上の●マーカー自体で表現し、
+              // ここではテキストラベルで「標準工数」「標準労働時間」を区別する
+              footer: items => {
+                if (!items.length) return undefined;
+                const mi = items[0].dataIndex;
+                const fmt = v => (v === null || v === undefined ? '—' : v.toLocaleString('ja-JP'));
+                const lines = ['─────────────'];
+                if (stdTaskBySite) {
+                  lines.push(`標準工数: ${availSites.map((s, si) => `${s} ${fmt(stdTaskBySite[si][mi])}`).join('／')} h`);
+                }
+                lines.push(`標準労働時間: ${availSites.map((s, si) => `${s} ${fmt(stdHoursBySite[si][mi])}`).join('／')} h`);
+                return lines;
               },
             },
           },
