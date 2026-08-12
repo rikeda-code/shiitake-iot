@@ -906,7 +906,7 @@ let siteFilter = new Set(SITES); // Set<string>：選択中の拠点（初期値
 let compareSubtab = 'site';        // 比較タブのサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ（更新ボタン押下後も保持）
 let empChartSubtab = 'site';       // サマリー「雇用形態別（グラフ）」のサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ
 
-let compareSiteViewMode = 'time';  // 比較（3拠点）タブの表示モード：'time'=実績工数(時間) / 'count'=実績工数(人数)（更新ボタン押下後も保持）
+let compareSiteViewMode = 'time';  // 比較（3拠点）タブの表示モード：'time'=実績工数(時間) / 'count'=実績工数(人数) / 'stdhours'=標準労働時間（更新ボタン押下後も保持）
 
 let planCmpSubtab = 'site';        // 比較（繁忙期見込み）タブのサブタブ状態：'site'/'sitesummary'/'summary'/'table'（更新ボタン押下後も保持）
 let planCmpSiteTab = null;         // 比較（繁忙期見込み）タブの選択中拠点（更新ボタン押下後も保持）。
@@ -7834,6 +7834,7 @@ function renderCompareCharts(prodData) {
    する。トグル切り替え・折れ線オーバーレイは後続のStageで実装する予定 */
 let compareSiteChartInstance = null;
 let compareSiteCountChartInstance = null;
+let compareSiteStdHoursChartInstance = null;
 
 function renderCompareSiteTab() {
   const main = document.getElementById('main');
@@ -7967,6 +7968,51 @@ function renderCompareSiteCharts(prodData) {
   const stdHoursCountBySite = availSites.map((_, si) => commonMonths.map((_, mi) =>
     toCount(stdHoursBySite[si][mi], si, mi)));
 
+  // 「標準労働時間」ビュー用：雇用形態別（社員+実習生／アルバイト）の標準労働時間。
+  // computeStdHoursLineForDivSite()自体は変更せず、同じロジック（3拠点マージのR列を
+  // 氏名突き合わせで合計）にempFilterを追加したローカル版を使う
+  function computeStdHoursLineForDivSiteEmpFilter(div, site, months, empFilter) {
+    const { employees: activeEmployees, months: activeMonths } = getActiveData();
+    const typeFilter = div === '栽培'
+      ? wt => workTypeClass(wt) === 'wt-栽培'
+      : div === '配送'
+        ? wt => workTypeClass(wt) === 'wt-配送'
+        : wt => workTypeClass(wt) === 'wt-出荷';
+    const emps = activeEmployees
+      .filter(e => typeFilter(e.workType) && (site == null || e.base === site) && empFilter(e))
+      .map(e => ({
+        ...e,
+        hours: months.map(planMonth => {
+          const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+          return ami >= 0 ? e.hours[ami] : null;
+        }),
+      }));
+    return computeStdHoursLine(emps, months);
+  }
+  function stdHoursBySiteFor(empFilter) {
+    return availSites.map(site => {
+      const perDiv = divs.map(div => computeStdHoursLineForDivSiteEmpFilter(div, site, normalizedCommonMonths, empFilter));
+      return commonMonths.map((_, mi) => {
+        const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    });
+  }
+  const lowerStdHoursBySite = stdHoursBySiteFor(e => !isPartTime(e));
+  const upperStdHoursBySite = stdHoursBySiteFor(e => isPartTime(e));
+
+  // 「標準労働時間」ビュー用の折れ線：標準労働時間（下段+上段合計）を実績人数
+  // （下段+上段合計）で割った「一人当たりの時間」
+  function toPerPerson(hoursTotal, si, mi) {
+    const actualN = (lowerCountBySite[si][mi] || 0) + (upperCountBySite[si][mi] || 0);
+    if (hoursTotal == null || actualN <= 0) return null;
+    return Math.round((hoursTotal / actualN) * 10) / 10;
+  }
+  const perPersonStdHoursBySite = availSites.map((_, si) => commonMonths.map((_, mi) => {
+    const total = (lowerStdHoursBySite[si][mi] || 0) + (upperStdHoursBySite[si][mi] || 0);
+    return toPerPerson(total > 0 ? total : null, si, mi);
+  }));
+
   main.innerHTML = `
     <div class="compare-shell">
       <div class="compare-header-row">
@@ -7974,16 +8020,21 @@ function renderCompareSiteCharts(prodData) {
         <div class="transfer-toggle" id="comparesite-view-toggle">
           <button class="transfer-toggle-btn${compareSiteViewMode === 'time' ? ' active' : ''}" data-tab="time">時間</button>
           <button class="transfer-toggle-btn${compareSiteViewMode === 'count' ? ' active' : ''}" data-tab="count">人数</button>
+          <button class="transfer-toggle-btn${compareSiteViewMode === 'stdhours' ? ' active' : ''}" data-tab="stdhours">標準労働時間</button>
         </div>
       </div>
       ${compareSiteViewMode === 'time' ? `
       <div class="schart-section">
         <div class="schart-header">実績工数（拠点別、時間）</div>
         ${chartWrapHtml('comparesite-actual', commonMonths.length, { heightPx: 400, inlineHeight: true })}
-      </div>` : `
+      </div>` : compareSiteViewMode === 'count' ? `
       <div class="schart-section">
         <div class="schart-header">実績工数（拠点別、人数）</div>
         ${chartWrapHtml('comparesite-count', commonMonths.length, { heightPx: 400, inlineHeight: true })}
+      </div>` : `
+      <div class="schart-section">
+        <div class="schart-header">標準労働時間（拠点別、雇用形態別・一人当たり）</div>
+        ${chartWrapHtml('comparesite-stdhours', commonMonths.length, { heightPx: 400, inlineHeight: true })}
       </div>`}
     </div>`;
 
@@ -7997,6 +8048,7 @@ function renderCompareSiteCharts(prodData) {
 
   if (compareSiteChartInstance) { compareSiteChartInstance.destroy(); compareSiteChartInstance = null; }
   if (compareSiteCountChartInstance) { compareSiteCountChartInstance.destroy(); compareSiteCountChartInstance = null; }
+  if (compareSiteStdHoursChartInstance) { compareSiteStdHoursChartInstance.destroy(); compareSiteStdHoursChartInstance = null; }
 
   if (compareSiteViewMode === 'time') {
     const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
@@ -8174,7 +8226,7 @@ function renderCompareSiteCharts(prodData) {
         },
       }],
     });
-  } else {
+  } else if (compareSiteViewMode === 'count') {
     const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
     if (!countCtx) return;
 
@@ -8339,6 +8391,164 @@ function renderCompareSiteCharts(prodData) {
           });
         },
       }],
+    });
+  } else if (compareSiteViewMode === 'stdhours') {
+    const stdHoursCtx = document.getElementById('comparesite-stdhours')?.getContext('2d');
+    if (!stdHoursCtx) return;
+
+    // 拠点ごとに3個（下段バー／上段バー／一人当たり折れ線）、合計9個のデータセットを
+    // 拠点順に3個ずつ並べる（datasetIndex = site*3 + offset）
+    const stdHoursDatasets = [];
+    availSites.forEach((site, si) => {
+      const siteColor = SITE_COLORS[site] || '#fff';
+      const lowerBg = siteColor + '99', lowerBorder = siteColor;
+      stdHoursDatasets.push({
+        label: site,
+        data: lowerStdHoursBySite[si],
+        backgroundColor: lowerBg,
+        borderColor: lowerBorder,
+        borderWidth: 1,
+        stack: site,
+        barThickness: 22,
+        order: 2,
+        _site: site, _empSegment: 'lower',
+        _origBg: lowerBg, _origBorder: lowerBorder,
+      });
+      const upperBg = siteColor + '4D', upperBorder = siteColor;
+      stdHoursDatasets.push({
+        label: `${site}(アルバイト)`,
+        data: upperStdHoursBySite[si],
+        backgroundColor: upperBg,
+        borderColor: upperBorder,
+        borderWidth: 1,
+        stack: site,
+        barThickness: 22,
+        order: 2,
+        _site: site, _empSegment: 'upper',
+        _origBg: upperBg, _origBorder: upperBorder,
+      });
+      // 一人当たり標準労働時間（折れ線、右側の第2軸）。棒の再センタリング防止の
+      // 対象外（バーのグループ化・積み上げには関与しない純粋な折れ線データセットの
+      // ため、非表示にしてもchart.setDatasetVisibility()を使って構わない）
+      stdHoursDatasets.push({
+        type: 'line', label: `${site}（一人当たり）`,
+        data: perPersonStdHoursBySite[si],
+        yAxisID: 'y1',
+        borderColor: siteColor,
+        backgroundColor: siteColor,
+        borderWidth: 2,
+        pointRadius: 3,
+        showLine: true,
+        order: 1,
+        _site: site, _perPerson: true,
+      });
+    });
+
+    // 非表示状態の管理用（棒は「時間」ビューと同じくchart.setDatasetVisibility()を
+    // 使わず、hiddenStdHoursSites（Set）でbackgroundColor/borderColorを切り替える。
+    // 折れ線はバーのグループ化に関与しないため、通常のsetDatasetVisibility()で構わない）
+    const hiddenStdHoursSites = new Set();
+    function isStdHoursBarHidden(ds) {
+      return !!ds._empSegment && hiddenStdHoursSites.has(ds._site);
+    }
+    function applyStdHoursHiddenState(chart) {
+      chart.data.datasets.forEach(ds => {
+        if (!ds._empSegment) return;
+        const hidden = isStdHoursBarHidden(ds);
+        ds.backgroundColor = hidden ? 'transparent' : ds._origBg;
+        ds.borderColor = hidden ? 'transparent' : ds._origBorder;
+      });
+    }
+
+    compareSiteStdHoursChartInstance = new Chart(stdHoursCtx, {
+      type: 'bar',
+      data: { labels: commonMonths, datasets: stdHoursDatasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
+              // 凡例は6項目（拠点3つの棒＋拠点3つの一人当たり折れ線）。上段（アルバイト）
+              // バーは下段と一体の実績棒として扱うため凡例には出さない。Chart.jsの
+              // legendプラグインは各アイテムのfontColorを使ってテキストを描画するため、
+              // fontColorを明示的に設定しないとテキストが黒になってしまう
+              generateLabels: chart => {
+                const fontColor = chart.options.plugins.legend.labels.color;
+                const items = availSites.map(site => ({
+                  text: site,
+                  fillStyle: (SITE_COLORS[site] || '#fff') + '99',
+                  strokeStyle: SITE_COLORS[site] || '#fff',
+                  lineWidth: 1,
+                  fontColor,
+                  hidden: hiddenStdHoursSites.has(site),
+                  _kind: 'bar', _site: site,
+                }));
+                availSites.forEach((site, si) => {
+                  const lineIdx = si * 3 + 2;
+                  items.push({
+                    text: `${site}（一人当たり）`,
+                    fillStyle: SITE_COLORS[site] || '#fff',
+                    strokeStyle: SITE_COLORS[site] || '#fff',
+                    lineWidth: 2,
+                    fontColor,
+                    hidden: !chart.isDatasetVisible(lineIdx),
+                    _kind: 'line', _datasetIndex: lineIdx,
+                  });
+                });
+                return items;
+              },
+            },
+            // 拠点の凡例（棒）をクリックしたら、その拠点の棒（下段・上段）だけを
+            // 非表示にする（setDatasetVisibility()は使わず色をtransparentにする）。
+            // 一人当たり折れ線の凡例をクリックしたら、そのデータセットだけを
+            // chart.setDatasetVisibility()で切り替える（棒の位置には影響しない）
+            onClick: (e, legendItem, legend) => {
+              const chart = legend.chart;
+              if (legendItem._kind === 'bar') {
+                if (hiddenStdHoursSites.has(legendItem._site)) hiddenStdHoursSites.delete(legendItem._site);
+                else hiddenStdHoursSites.add(legendItem._site);
+                applyStdHoursHiddenState(chart);
+              } else {
+                chart.setDatasetVisibility(legendItem._datasetIndex, !chart.isDatasetVisible(legendItem._datasetIndex));
+              }
+              chart.update();
+            },
+          },
+          tooltip: {
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+            filter: item => !isStdHoursBarHidden(item.dataset),
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (v === null || v === undefined) return null;
+                const ds = ctx.dataset;
+                if (ds._empSegment === 'lower') return `${ds._site}(社員+実習生): ${v.toLocaleString('ja-JP')} h`;
+                if (ds._empSegment === 'upper') return `${ds._site}(アルバイト): ${v.toLocaleString('ja-JP')} h`;
+                if (ds._perPerson) return `${ds.label}: ${v.toLocaleString('ja-JP')} h/人`;
+                return `${ds.label}: ${v.toLocaleString('ja-JP')}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' }, suggestedMin: 0,
+            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+          },
+          y1: {
+            position: 'right',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h/人` },
+            grid: { display: false }, suggestedMin: 0,
+            title: { display: true, text: 'h/人', color: '#8892a4', font: { size: 10 } },
+          },
+        },
+      },
     });
   }
 }
