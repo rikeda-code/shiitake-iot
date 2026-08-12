@@ -8038,9 +8038,11 @@ function renderCompareSiteCharts(prodData) {
     // 非表示状態の管理用（chart.setDatasetVisibility()は使わない）
     const hiddenSites = new Set();
     const hiddenMarkerTypes = new Set();
+    // マーカー（_markerType持ち）は「拠点が表示中」かつ「指標が表示中」の
+    // AND条件を満たす場合のみ表示する（拠点の凡例クリックにも連動して消える）
     function isDatasetHidden(ds) {
       if (ds._empSegment) return hiddenSites.has(ds._site);
-      if (ds._markerType) return hiddenMarkerTypes.has(ds._markerType);
+      if (ds._markerType) return hiddenSites.has(ds._site) || hiddenMarkerTypes.has(ds._markerType);
       return false;
     }
     function applyHiddenState(chart) {
@@ -8063,19 +8065,26 @@ function renderCompareSiteCharts(prodData) {
               color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
               // 凡例は5項目（拠点3＋標準工数＋標準労働時間）に統一する。データセットとの
               // 1:1対応ではないため、既存のfilter/datasetIndexベースの生成には依らず、
-              // 自前でアイテムを組み立てる（hiddenはhiddenSites/hiddenMarkerTypesの状態を反映）
-              generateLabels: () => [
-                ...availSites.map(site => ({
-                  text: site,
-                  fillStyle: (SITE_COLORS[site] || '#fff') + '99',
-                  strokeStyle: SITE_COLORS[site] || '#fff',
-                  lineWidth: 1,
-                  hidden: hiddenSites.has(site),
-                  _kind: 'site', _site: site,
-                })),
-                { text: '標準工数', fillStyle: '#ef4444', strokeStyle: '#ef4444', lineWidth: 1, hidden: hiddenMarkerTypes.has('task'), _kind: 'marker', _markerType: 'task' },
-                { text: '標準労働時間', fillStyle: '#eab308', strokeStyle: '#eab308', lineWidth: 1, hidden: hiddenMarkerTypes.has('hours'), _kind: 'marker', _markerType: 'hours' },
-              ],
+              // 自前でアイテムを組み立てる（hiddenはhiddenSites/hiddenMarkerTypesの状態を反映）。
+              // Chart.jsのlegendプラグインは各アイテムのfontColorを使ってテキストを描画し、
+              // options.labels.colorには自動フォールバックしないため、fontColorを明示的に
+              // 設定しないとテキストが黒（デフォルト）になってしまう
+              generateLabels: chart => {
+                const fontColor = chart.options.plugins.legend.labels.color;
+                return [
+                  ...availSites.map(site => ({
+                    text: site,
+                    fillStyle: (SITE_COLORS[site] || '#fff') + '99',
+                    strokeStyle: SITE_COLORS[site] || '#fff',
+                    lineWidth: 1,
+                    fontColor,
+                    hidden: hiddenSites.has(site),
+                    _kind: 'site', _site: site,
+                  })),
+                  { text: '標準工数', fillStyle: '#ef4444', strokeStyle: '#ef4444', lineWidth: 1, fontColor, hidden: hiddenMarkerTypes.has('task'), _kind: 'marker', _markerType: 'task' },
+                  { text: '標準労働時間', fillStyle: '#eab308', strokeStyle: '#eab308', lineWidth: 1, fontColor, hidden: hiddenMarkerTypes.has('hours'), _kind: 'marker', _markerType: 'hours' },
+                ];
+              },
             },
             // 拠点の凡例をクリックしたら、その拠点の実績棒（下段・上段）だけを非表示にする
             // （●マーカーは連動しない）。標準工数／標準労働時間の凡例をクリックしたら、
