@@ -7828,6 +7828,7 @@ function renderCompareCharts(prodData) {
    Stage 0：タブの枠組みと「実績工数（拠点別、時間）」の棒グラフ単体のみを実装
    する。トグル切り替え・折れ線オーバーレイは後続のStageで実装する予定 */
 let compareSiteChartInstance = null;
+let compareSiteCountChartInstance = null;
 
 function renderCompareSiteTab() {
   const main = document.getElementById('main');
@@ -7869,6 +7870,23 @@ function renderCompareSiteTab() {
     });
   });
 
+  // 拠点ごとに、選択中のdivsのいずれかに該当し、対象月に工数実績がある人数をカウントする
+  const countBySite = availSites.map(site => {
+    return commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return null;
+      const n = employees.filter(e =>
+        e.base === site &&
+        e.workType &&
+        divs.some(div => {
+          const cls = div === '栽培' ? 'wt-栽培' : div === '配送' ? 'wt-配送' : 'wt-出荷';
+          return workTypeClass(e.workType) === cls;
+        }) &&
+        e.hours[mi] !== null
+      ).length;
+      return n > 0 ? n : null;
+    });
+  });
+
   main.innerHTML = `
     <div class="compare-shell">
       <div class="compare-header-row">
@@ -7877,6 +7895,10 @@ function renderCompareSiteTab() {
       <div class="schart-section">
         <div class="schart-header">実績工数（拠点別、時間）</div>
         ${chartWrapHtml('comparesite-actual', commonMonths.length, { heightPx: 400, inlineHeight: true })}
+      </div>
+      <div class="schart-section">
+        <div class="schart-header">実績工数（拠点別、人数）</div>
+        ${chartWrapHtml('comparesite-count', commonMonths.length, { heightPx: 400, inlineHeight: true })}
       </div>
     </div>`;
 
@@ -7920,6 +7942,51 @@ function renderCompareSiteTab() {
           ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
           grid: { color: '#1e2235' }, suggestedMin: 0,
           title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+        },
+      },
+    },
+  });
+
+  if (compareSiteCountChartInstance) { compareSiteCountChartInstance.destroy(); compareSiteCountChartInstance = null; }
+  const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
+  if (!countCtx) return;
+  compareSiteCountChartInstance = new Chart(countCtx, {
+    type: 'bar',
+    data: {
+      labels: commonMonths,
+      datasets: availSites.map((site, si) => ({
+        label: site,
+        data: countBySite[si],
+        backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+        borderColor: SITE_COLORS[site] || '#fff',
+        borderWidth: 1,
+        _actualGroup: true,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (v === null || v === undefined) return null;
+              return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')}人`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+        y: {
+          position: 'left',
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v}人` },
+          grid: { color: '#1e2235' }, suggestedMin: 0,
+          title: { display: true, text: '人', color: '#8892a4', font: { size: 10 } },
         },
       },
     },
