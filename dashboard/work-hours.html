@@ -906,6 +906,8 @@ let siteFilter = new Set(SITES); // Set<string>：選択中の拠点（初期値
 let compareSubtab = 'site';        // 比較タブのサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ（更新ボタン押下後も保持）
 let empChartSubtab = 'site';       // サマリー「雇用形態別（グラフ）」のサブタブ状態：'site'=拠点別 / 'summary'=拠点サマリ
 
+let compareSiteViewMode = 'time';  // 比較（3拠点）タブの表示モード：'time'=実績工数(時間) / 'count'=実績工数(人数)（更新ボタン押下後も保持）
+
 let planCmpSubtab = 'site';        // 比較（繁忙期見込み）タブのサブタブ状態：'site'/'sitesummary'/'summary'/'table'（更新ボタン押下後も保持）
 let planCmpSiteTab = null;         // 比較（繁忙期見込み）タブの選択中拠点（更新ボタン押下後も保持）。
                                     // nullの場合はrenderPlanCompareCharts2()側でavailSites[0]に初期化される
@@ -927,6 +929,7 @@ function saveSessionState() {
       activeBase,
       activeMode,
       compareSubtab,
+      compareSiteViewMode,
       empChartSubtab,
       stdHoursSubtab,
       stdHoursMetric,
@@ -5826,6 +5829,8 @@ function renderActiveTabContent(summarySubtab) {
     renderStdHoursTab();
   } else if (activeMode === 'compare') {
     renderCompareTab();
+  } else if (activeMode === 'comparesite') {
+    renderCompareSiteTab();
   } else if (activeMode === 'plancompare2') {
     renderPlanCompareTab2();
   } else if (activeMode === 'plan') {
@@ -7891,106 +7896,122 @@ function renderCompareSiteTab() {
     <div class="compare-shell">
       <div class="compare-header-row">
         <div class="chart-section-label">📊 比較（3拠点）</div>
+        <div class="transfer-toggle" id="comparesite-view-toggle">
+          <button class="transfer-toggle-btn${compareSiteViewMode === 'time' ? ' active' : ''}" data-tab="time">時間</button>
+          <button class="transfer-toggle-btn${compareSiteViewMode === 'count' ? ' active' : ''}" data-tab="count">人数</button>
+        </div>
       </div>
+      ${compareSiteViewMode === 'time' ? `
       <div class="schart-section">
         <div class="schart-header">実績工数（拠点別、時間）</div>
         ${chartWrapHtml('comparesite-actual', commonMonths.length, { heightPx: 400, inlineHeight: true })}
-      </div>
+      </div>` : `
       <div class="schart-section">
         <div class="schart-header">実績工数（拠点別、人数）</div>
         ${chartWrapHtml('comparesite-count', commonMonths.length, { heightPx: 400, inlineHeight: true })}
-      </div>
+      </div>`}
     </div>`;
 
-  if (compareSiteChartInstance) { compareSiteChartInstance.destroy(); compareSiteChartInstance = null; }
-  const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
-  if (!ctx) return;
-  compareSiteChartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: commonMonths,
-      datasets: availSites.map((site, si) => ({
-        label: site,
-        data: actualBySite[si],
-        backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
-        borderColor: SITE_COLORS[site] || '#fff',
-        borderWidth: 1,
-        _actualGroup: true,
-      })),
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
-        tooltip: {
-          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
-          titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
-          callbacks: {
-            label: ctx => {
-              const v = ctx.parsed.y;
-              if (v === null || v === undefined) return null;
-              return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
-            },
-          },
-        },
-      },
-      scales: {
-        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
-        y: {
-          position: 'left',
-          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
-          grid: { color: '#1e2235' }, suggestedMin: 0,
-          title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
-        },
-      },
-    },
+  document.querySelectorAll('#comparesite-view-toggle .transfer-toggle-btn').forEach(btn => {
+    btn.onclick = () => {
+      compareSiteViewMode = btn.dataset.tab;
+      saveSessionState();
+      renderCompareSiteTab();
+    };
   });
 
+  if (compareSiteChartInstance) { compareSiteChartInstance.destroy(); compareSiteChartInstance = null; }
   if (compareSiteCountChartInstance) { compareSiteCountChartInstance.destroy(); compareSiteCountChartInstance = null; }
-  const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
-  if (!countCtx) return;
-  compareSiteCountChartInstance = new Chart(countCtx, {
-    type: 'bar',
-    data: {
-      labels: commonMonths,
-      datasets: availSites.map((site, si) => ({
-        label: site,
-        data: countBySite[si],
-        backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
-        borderColor: SITE_COLORS[site] || '#fff',
-        borderWidth: 1,
-        _actualGroup: true,
-      })),
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
-        tooltip: {
-          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
-          titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
-          callbacks: {
-            label: ctx => {
-              const v = ctx.parsed.y;
-              if (v === null || v === undefined) return null;
-              return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')}人`;
+
+  if (compareSiteViewMode === 'time') {
+    const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
+    if (!ctx) return;
+    compareSiteChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: commonMonths,
+        datasets: availSites.map((site, si) => ({
+          label: site,
+          data: actualBySite[si],
+          backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+          borderColor: SITE_COLORS[site] || '#fff',
+          borderWidth: 1,
+          _actualGroup: true,
+        })),
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          tooltip: {
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (v === null || v === undefined) return null;
+                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
+              },
             },
           },
         },
-      },
-      scales: {
-        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
-        y: {
-          position: 'left',
-          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v}人` },
-          grid: { color: '#1e2235' }, suggestedMin: 0,
-          title: { display: true, text: '人', color: '#8892a4', font: { size: 10 } },
+        scales: {
+          x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' }, suggestedMin: 0,
+            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+          },
         },
       },
-    },
-  });
+    });
+  } else {
+    const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
+    if (!countCtx) return;
+    compareSiteCountChartInstance = new Chart(countCtx, {
+      type: 'bar',
+      data: {
+        labels: commonMonths,
+        datasets: availSites.map((site, si) => ({
+          label: site,
+          data: countBySite[si],
+          backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+          borderColor: SITE_COLORS[site] || '#fff',
+          borderWidth: 1,
+          _actualGroup: true,
+        })),
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          tooltip: {
+            backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                if (v === null || v === undefined) return null;
+                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')}人`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v}人` },
+            grid: { color: '#1e2235' }, suggestedMin: 0,
+            title: { display: true, text: '人', color: '#8892a4', font: { size: 10 } },
+          },
+        },
+      },
+    });
+  }
 }
 
 /* ── 要員計画タブ ──────────────────────────────────────────── */
@@ -8419,6 +8440,7 @@ let restoredSummarySubtab = null;
   const REMOVED_MODE_FALLBACK = { staffplan: 'plan', plancompare: 'plan' };
   if (s.activeMode) activeMode = REMOVED_MODE_FALLBACK[s.activeMode] || s.activeMode;
   if (s.compareSubtab) compareSubtab = s.compareSubtab;
+  if (s.compareSiteViewMode) compareSiteViewMode = s.compareSiteViewMode;
   if (s.empChartSubtab) empChartSubtab = s.empChartSubtab;
   if (s.stdHoursSubtab) stdHoursSubtab = s.stdHoursSubtab;
   if (s.stdHoursMetric) stdHoursMetric = s.stdHoursMetric;
