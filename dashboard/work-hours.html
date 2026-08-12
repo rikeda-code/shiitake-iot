@@ -7838,6 +7838,15 @@ let compareSiteCountChartInstance = null;
 function renderCompareSiteTab() {
   const main = document.getElementById('main');
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+  // ●マーカー（標準工数・標準労働時間）用にcalcRow()が必要な生産実績データを取得する。
+  // 取得に失敗しても実績工数・人数チャート自体は表示できるよう、失敗時はprodData=nullで
+  // 続行し、●マーカーのみ非表示にする
+  Promise.all([fetchProductionSheet().catch(e => { console.error('[比較（3拠点）] 生産実績データ取得エラー:', e); return null; }), loadStdSettingsSheetOnce().catch(() => null)])
+    .then(([prodData]) => { renderCompareSiteCharts(prodData); });
+}
+
+function renderCompareSiteCharts(prodData) {
+  const main = document.getElementById('main');
   const { employees } = getActiveData();
   const { months: commonMonths, originalCount } = getExtendedDisplayMonths();
   const availSites = Object.keys(SITE_COLORS);
@@ -7892,6 +7901,41 @@ function renderCompareSiteTab() {
     });
   });
 
+  // ●マーカー①：標準工数（拠点別）。既存の予定標準工数と同じロジック
+  // （loadYojitsuStdSettings()/createStdHoursEngine()のcalcRow()）を使う。
+  // 雇用形態フィルタは適用しない（既存の予定標準工数と同じ理由）
+  let stdTaskBySite = null;
+  // ●マーカー②：標準労働時間（拠点別、過去分のみ）。既存の
+  // computeStdHoursLineForDivSite()と同じロジックで、雇用形態フィルタは
+  // getActiveData()経由で自動的に反映される。未来月はcomputeStdHoursLineForDivSite()
+  // が自然にnullを返すため、空欄のままになる。
+  // computeStdHoursLineForDivSite()内部は、渡されたmonths配列の各要素をそのまま
+  // 「正規化済み（"2026/4"形式）」の値として扱い、activeMonths側だけをnormalizeMonth()
+  // で正規化して比較する。commonMonths（"2026年4月"形式の表示用ラベル）をそのまま渡すと
+  // 一致しないため、事前にnormalizeMonth()を適用してから渡す
+  const normalizedCommonMonths = commonMonths.map(normalizeMonth);
+  const stdHoursBySite = availSites.map(site => {
+    const perDiv = divs.map(div => computeStdHoursLineForDivSite(div, site, normalizedCommonMonths));
+    return commonMonths.map((_, mi) => {
+      const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  });
+  if (prodData) {
+    const { months: prodMonths, records } = prodData;
+    const stdSettingRows = loadYojitsuStdSettings();
+    const stdConv = loadYojitsuCsConv();
+    const { calcRow } = createStdHoursEngine(records, prodMonths, commonMonths, originalCount, stdConv);
+    const stdRowsFiltered = stdSettingRows.filter(r => divs.includes(r.div));
+    stdTaskBySite = availSites.map(site => commonMonths.map((_, mi) => {
+      const total = stdRowsFiltered.reduce((s, r) => {
+        const res = calcRow(site, r, mi);
+        return s + (res.h !== null ? res.h : 0);
+      }, 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    }));
+  }
+
   main.innerHTML = `
     <div class="compare-shell">
       <div class="compare-header-row">
@@ -7930,14 +7974,20 @@ function renderCompareSiteTab() {
       type: 'bar',
       data: {
         labels: commonMonths,
-        datasets: availSites.map((site, si) => ({
-          label: site,
-          data: actualBySite[si],
-          backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
-          borderColor: SITE_COLORS[site] || '#fff',
-          borderWidth: 1,
-          _actualGroup: true,
-        })),
+        datasets: [
+          ...availSites.map((site, si) => ({
+            label: site,
+            data: actualBySite[si],
+            backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+            borderColor: SITE_COLORS[site] || '#fff',
+            borderWidth: 1,
+            _actualGroup: true,
+          })),
+          // ●マーカーの凡例専用（表示のみ）のダミーデータセット。実データは持たず、
+          // afterDatasetsDrawプラグイン側で手動描画する
+          { type: 'line', label: '標準工数', data: [], showLine: false, pointStyle: 'circle', backgroundColor: '#f87171', borderColor: '#f87171' },
+          { type: 'line', label: '標準労働時間', data: [], showLine: false, pointStyle: 'circle', backgroundColor: '#facc15', borderColor: '#facc15' },
+        ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -7966,6 +8016,34 @@ function renderCompareSiteTab() {
           },
         },
       },
+      // ●マーカー（標準工数・標準労働時間）を、各拠点バーの真上に手動描画する試験的な
+      // プラグイン。折れ線ではなく、グループ化バーの実際のピクセル位置（bar.x）に
+      // 個別の点を重ねるため、afterDatasetsDrawで直接canvasに円を描く方式にしている
+      plugins: [{
+        id: 'siteStdMarkers',
+        afterDatasetsDraw(chart) {
+          if (!stdTaskBySite) return;
+          const ctx = chart.ctx;
+          availSites.forEach((site, si) => {
+            const meta = chart.getDatasetMeta(si);
+            meta.data.forEach((bar, mi) => {
+              [
+                { val: stdTaskBySite[si][mi], color: '#f87171' },
+                { val: stdHoursBySite[si][mi], color: '#facc15' },
+              ].forEach(({ val, color }) => {
+                if (val == null) return;
+                const y = chart.scales.y.getPixelForValue(val);
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(bar.x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.restore();
+              });
+            });
+          });
+        },
+      }],
     });
   } else {
     const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
