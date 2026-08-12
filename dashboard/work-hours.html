@@ -7858,9 +7858,10 @@ function renderCompareSiteCharts(prodData) {
   if (roleTypeFilter.has('出荷')) divs.push('出荷');
   if (roleTypeFilter.has('配送・栽培') || roleTypeFilter.has('配送・出荷')) divs.push('配送');
 
-  // 雇用形態（empTypeFilter）はgetActiveData()内で既に反映済み
-  function workHours(site, typeFilter) {
-    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+  // 雇用形態（empTypeFilter）はgetActiveData()内で既に反映済み。
+  // empFilterで社員＋技能実習生（下段）／アルバイト（上段）をさらに絞り込む
+  function workHours(site, typeFilter, empFilter) {
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType) && empFilter(e));
     return commonMonths.map((_, mi) => {
       if (mi >= originalCount) return null;
       const total = emps.reduce((s, e) => s + (e.hours[mi] ?? 0), 0);
@@ -7868,21 +7869,28 @@ function renderCompareSiteCharts(prodData) {
     });
   }
 
+  const isPartTime = e => (e.employment || '').includes('アルバイト');
+
   // 拠点ごとに、選択中のdivsに対応する実績工数を合算する
-  const actualBySite = availSites.map(site => {
-    const perDiv = divs.map(div => {
-      const typeFilter = div === '栽培'
-        ? wt => workTypeClass(wt) === 'wt-栽培'
-        : div === '配送'
-          ? wt => workTypeClass(wt) === 'wt-配送'
-          : wt => workTypeClass(wt) === 'wt-出荷';
-      return workHours(site, typeFilter);
+  // （雇用形態で下段＝社員＋技能実習生／上段＝アルバイトに分割する）
+  function actualBySiteFor(empFilter) {
+    return availSites.map(site => {
+      const perDiv = divs.map(div => {
+        const typeFilter = div === '栽培'
+          ? wt => workTypeClass(wt) === 'wt-栽培'
+          : div === '配送'
+            ? wt => workTypeClass(wt) === 'wt-配送'
+            : wt => workTypeClass(wt) === 'wt-出荷';
+        return workHours(site, typeFilter, empFilter);
+      });
+      return commonMonths.map((_, mi) => {
+        const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
     });
-    return commonMonths.map((_, mi) => {
-      const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
-      return total > 0 ? Math.round(total * 10) / 10 : null;
-    });
-  });
+  }
+  const lowerBySite = actualBySiteFor(e => !isPartTime(e));
+  const upperBySite = actualBySiteFor(e => isPartTime(e));
 
   // 拠点ごとに、選択中のdivsのいずれかに該当し、対象月に工数実績がある人数をカウントする
   const countBySite = availSites.map(site => {
@@ -7970,55 +7978,89 @@ function renderCompareSiteCharts(prodData) {
   if (compareSiteViewMode === 'time') {
     const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
     if (!ctx) return;
+
+    // 拠点ごとに4個（下段バー／上段バー／標準工数点／標準労働時間点）、
+    // 合計12個のデータセットを、拠点順に4個ずつ並べる（datasetIndex = site*4 + offset）。
+    // 凡例には上段（アルバイト）バーを表示せず、拠点3×[実績棒／標準工数／標準労働時間]の
+    // 9項目のみを見せる（下記legend.labels.filter/onClick参照）
+    const datasets = [];
+    availSites.forEach((site, si) => {
+      const siteColor = SITE_COLORS[site] || '#fff';
+      datasets.push({
+        label: site,
+        data: lowerBySite[si],
+        backgroundColor: siteColor + '99',
+        borderColor: siteColor,
+        borderWidth: 1,
+        stack: site,
+        _site: site, _empSegment: 'lower',
+      });
+      datasets.push({
+        label: `${site}(アルバイト)`,
+        data: upperBySite[si],
+        backgroundColor: siteColor + '4D',
+        borderColor: siteColor,
+        borderWidth: 1,
+        stack: site,
+        _site: site, _empSegment: 'upper',
+      });
+      datasets.push({
+        type: 'line', label: `${site}標準工数`,
+        data: stdTaskBySite ? commonMonths.map((_, mi) => ({ x: mi, y: stdTaskBySite[si][mi] })) : [],
+        showLine: false, pointStyle: 'circle', pointRadius: 4,
+        backgroundColor: '#f87171', borderColor: '#f87171',
+        _site: site, _markerType: 'task',
+      });
+      datasets.push({
+        type: 'line', label: `${site}標準労働時間`,
+        data: commonMonths.map((_, mi) => ({ x: mi, y: stdHoursBySite[si][mi] })),
+        showLine: false, pointStyle: 'circle', pointRadius: 4,
+        backgroundColor: '#facc15', borderColor: '#facc15',
+        _site: site, _markerType: 'hours',
+      });
+    });
+
     compareSiteChartInstance = new Chart(ctx, {
       type: 'bar',
-      data: {
-        labels: commonMonths,
-        datasets: [
-          ...availSites.map((site, si) => ({
-            label: site,
-            data: actualBySite[si],
-            backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
-            borderColor: SITE_COLORS[site] || '#fff',
-            borderWidth: 1,
-            _actualGroup: true,
-          })),
-          // ●マーカーの凡例専用（表示のみ）のダミーデータセット。実データは持たず、
-          // afterDatasetsDrawプラグイン側で手動描画する
-          { type: 'line', label: '標準工数', data: [], showLine: false, pointStyle: 'circle', backgroundColor: '#f87171', borderColor: '#f87171' },
-          { type: 'line', label: '標準労働時間', data: [], showLine: false, pointStyle: 'circle', backgroundColor: '#facc15', borderColor: '#facc15' },
-        ],
-      },
+      data: { labels: commonMonths, datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          legend: {
+            labels: {
+              color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
+              // 上段（アルバイト）バーは下段と一体の実績棒として扱うため凡例には出さない
+              filter: item => item.datasetIndex % 4 !== 1,
+            },
+            // 拠点の実績棒（下段、datasetIndex % 4 === 0）をクリックしたら、同拠点の
+            // 上段バー・標準工数・標準労働時間の4データセットを連動して切り替える。
+            // 標準工数／標準労働時間の個別凡例をクリックしたら、そのデータセットのみ切り替える
+            onClick: (e, legendItem, legend) => {
+              const chart = legend.chart;
+              const idx = legendItem.datasetIndex;
+              const offset = idx % 4;
+              if (offset === 0) {
+                const nextVisible = !chart.isDatasetVisible(idx);
+                const base = idx - offset;
+                [0, 1, 2, 3].forEach(o => chart.setDatasetVisibility(base + o, nextVisible));
+              } else {
+                chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
+              }
+              chart.update();
+            },
+          },
           tooltip: {
             backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
             titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
-            footerColor: '#e2e8f0', footerFont: { weight: 'normal' },
             callbacks: {
               label: ctx => {
                 const v = ctx.parsed.y;
                 if (v === null || v === undefined) return null;
-                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
-              },
-              // ●マーカー（標準工数・標準労働時間）の値を、実績3拠点分の行の下に
-              // 区切り線を挟んで追加する。Chart.jsのtooltipは行ごとに個別の文字色を
-              // 指定できない（footerColorは配列を渡しても全行が同一色になることを
-              // 確認済み）ため、色分けは凡例・チャート上の●マーカー自体で表現し、
-              // ここではテキストラベルで「標準工数」「標準労働時間」を区別する
-              footer: items => {
-                if (!items.length) return undefined;
-                const mi = items[0].dataIndex;
-                const fmt = v => (v === null || v === undefined ? '—' : v.toLocaleString('ja-JP'));
-                const lines = ['─────────────'];
-                if (stdTaskBySite) {
-                  lines.push(`標準工数: ${availSites.map((s, si) => `${s} ${fmt(stdTaskBySite[si][mi])}`).join('／')} h`);
-                }
-                lines.push(`標準労働時間: ${availSites.map((s, si) => `${s} ${fmt(stdHoursBySite[si][mi])}`).join('／')} h`);
-                return lines;
+                const ds = ctx.dataset;
+                if (ds._empSegment === 'lower') return `${ds._site}(社員+実習生): ${v.toLocaleString('ja-JP')} h`;
+                if (ds._empSegment === 'upper') return `${ds._site}(アルバイト): ${v.toLocaleString('ja-JP')} h`;
+                return `${ds.label}: ${v.toLocaleString('ja-JP')} h`;
               },
             },
           },
@@ -8033,29 +8075,21 @@ function renderCompareSiteCharts(prodData) {
           },
         },
       },
-      // ●マーカー（標準工数・標準労働時間）を、各拠点バーの真上に手動描画する試験的な
-      // プラグイン。折れ線ではなく、グループ化バーの実際のピクセル位置（bar.x）に
-      // 個別の点を重ねるため、afterDatasetsDrawで直接canvasに円を描く方式にしている
+      // 標準工数・標準労働時間の点データセットを、対応する拠点の実績棒（2段積み上げ）の
+      // x座標に位置合わせするプラグイン。Chart.jsは点データセットのx座標をグループ内の
+      // サブ位置ではなくカテゴリ中心に計算するため、beforeDatasetsDrawで実際のbar要素の
+      // ピクセル位置（bar.x）に直接上書きする
       plugins: [{
-        id: 'siteStdMarkers',
-        afterDatasetsDraw(chart) {
-          if (!stdTaskBySite) return;
-          const ctx = chart.ctx;
+        id: 'siteStdMarkerAlign',
+        beforeDatasetsDraw(chart) {
           availSites.forEach((site, si) => {
-            const meta = chart.getDatasetMeta(si);
-            meta.data.forEach((bar, mi) => {
-              [
-                { val: stdTaskBySite[si][mi], color: '#f87171' },
-                { val: stdHoursBySite[si][mi], color: '#facc15' },
-              ].forEach(({ val, color }) => {
-                if (val == null) return;
-                const y = chart.scales.y.getPixelForValue(val);
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(bar.x, y, 4, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.restore();
+            const base = si * 4;
+            const barMeta = chart.getDatasetMeta(base);
+            [base + 2, base + 3].forEach(markerIdx => {
+              const markerMeta = chart.getDatasetMeta(markerIdx);
+              markerMeta.data.forEach((pt, mi) => {
+                const bar = barMeta.data[mi];
+                if (bar) pt.x = bar.x;
               });
             });
           });
