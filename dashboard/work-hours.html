@@ -1539,6 +1539,8 @@ function rerenderCurrentView() {
     renderProductivityTab();
   } else if (activeMode === 'compare') {
     renderCompareTab();
+  } else if (activeMode === 'comparesite') {
+    renderCompareSiteTab();
   } else if (activeMode === 'production') {
     renderProductionTab();
   } else if (activeMode === 'stdhours') {
@@ -1699,6 +1701,21 @@ function renderSubTabs(bases) {
     renderTransferAlerts();
   };
   tabsEl.appendChild(cmpBtn);
+
+  // 比較（3拠点） tab
+  const cmpSiteBtn = document.createElement('button');
+  cmpSiteBtn.className = 'tab-btn comparesite-tab' + (activeMode === 'comparesite' ? ' active' : '');
+  cmpSiteBtn.textContent = '📊 比較（3拠点）';
+  cmpSiteBtn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    cmpSiteBtn.classList.add('active');
+    activeMode = 'comparesite';
+    saveSessionState();
+    document.getElementById('main').innerHTML = '';
+    renderCompareSiteTab();
+    renderTransferAlerts();
+  };
+  tabsEl.appendChild(cmpSiteBtn);
 
   } // end jisseki group
 
@@ -7805,6 +7822,108 @@ function renderCompareCharts(prodData) {
   });
 
   renderCompareContent();
+}
+
+/* ── 比較（3拠点）タブ ──────────────────────────────────────────
+   Stage 0：タブの枠組みと「実績工数（拠点別、時間）」の棒グラフ単体のみを実装
+   する。トグル切り替え・折れ線オーバーレイは後続のStageで実装する予定 */
+let compareSiteChartInstance = null;
+
+function renderCompareSiteTab() {
+  const main = document.getElementById('main');
+  if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
+  const { employees } = getActiveData();
+  const { months: commonMonths, originalCount } = getExtendedDisplayMonths();
+  const availSites = Object.keys(SITE_COLORS);
+
+  // 画面上部の業務区分チェックボックス（roleTypeFilter）に応じて対象divを動的に
+  // 決定する（比較（繁忙期見込み）タブの拠点サマリ等と同じロジック）
+  const divs = [];
+  if (roleTypeFilter.has('栽培')) divs.push('栽培');
+  if (roleTypeFilter.has('出荷')) divs.push('出荷');
+  if (roleTypeFilter.has('配送・栽培') || roleTypeFilter.has('配送・出荷')) divs.push('配送');
+
+  // 雇用形態（empTypeFilter）はgetActiveData()内で既に反映済み
+  function workHours(site, typeFilter) {
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+    return commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return null;
+      const total = emps.reduce((s, e) => s + (e.hours[mi] ?? 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  }
+
+  // 拠点ごとに、選択中のdivsに対応する実績工数を合算する
+  const actualBySite = availSites.map(site => {
+    const perDiv = divs.map(div => {
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
+      return workHours(site, typeFilter);
+    });
+    return commonMonths.map((_, mi) => {
+      const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    });
+  });
+
+  main.innerHTML = `
+    <div class="compare-shell">
+      <div class="compare-header-row">
+        <div class="chart-section-label">📊 比較（3拠点）</div>
+      </div>
+      <div class="schart-section">
+        <div class="schart-header">実績工数（拠点別、時間）</div>
+        ${chartWrapHtml('comparesite-actual', commonMonths.length, { heightPx: 400, inlineHeight: true })}
+      </div>
+    </div>`;
+
+  if (compareSiteChartInstance) { compareSiteChartInstance.destroy(); compareSiteChartInstance = null; }
+  const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
+  if (!ctx) return;
+  compareSiteChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: commonMonths,
+      datasets: availSites.map((site, si) => ({
+        label: site,
+        data: actualBySite[si],
+        backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
+        borderColor: SITE_COLORS[site] || '#fff',
+        borderWidth: 1,
+        _actualGroup: true,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (v === null || v === undefined) return null;
+              return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')} h`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+        y: {
+          position: 'left',
+          ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+          grid: { color: '#1e2235' }, suggestedMin: 0,
+          title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+        },
+      },
+    },
+  });
 }
 
 /* ── 要員計画タブ ──────────────────────────────────────────── */
