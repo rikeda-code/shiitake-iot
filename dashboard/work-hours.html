@@ -7980,33 +7980,40 @@ function renderCompareSiteCharts(prodData) {
     if (!ctx) return;
 
     // 拠点ごとに4個（下段バー／上段バー／標準工数点／標準労働時間点）、
-    // 合計12個のデータセットを、拠点順に4個ずつ並べる（datasetIndex = site*4 + offset）。
-    // 凡例には上段（アルバイト）バーを表示せず、拠点3×[実績棒／標準工数／標準労働時間]の
-    // 9項目のみを見せる（下記legend.labels.filter/onClick参照）
+    // 合計12個のデータセットを、拠点順に4個ずつ並べる。
+    // chart.setDatasetVisibility()は使わない（表示中データセット数に応じて
+    // Chart.jsがグループ化バーの位置を再計算し、拠点を非表示にすると残りの
+    // バーがセンタリングされてズレてしまうため）。代わりに、データセットは常に
+    // 「有効」のまま保持し、hiddenSites/hiddenMarkerTypesという自前のSetで非表示状態を
+    // 管理して、backgroundColor/borderColorをtransparentにすることで見た目だけ隠す
     const datasets = [];
     availSites.forEach((site, si) => {
       const siteColor = SITE_COLORS[site] || '#fff';
+      const lowerBg = siteColor + '99', lowerBorder = siteColor;
       datasets.push({
         label: site,
         data: lowerBySite[si],
-        backgroundColor: siteColor + '99',
-        borderColor: siteColor,
+        backgroundColor: lowerBg,
+        borderColor: lowerBorder,
         borderWidth: 1,
         stack: site,
         barThickness: 22,
         order: 2,
         _site: site, _empSegment: 'lower',
+        _origBg: lowerBg, _origBorder: lowerBorder,
       });
+      const upperBg = siteColor + '4D', upperBorder = siteColor;
       datasets.push({
         label: `${site}(アルバイト)`,
         data: upperBySite[si],
-        backgroundColor: siteColor + '4D',
-        borderColor: siteColor,
+        backgroundColor: upperBg,
+        borderColor: upperBorder,
         borderWidth: 1,
         stack: site,
         barThickness: 22,
         order: 2,
         _site: site, _empSegment: 'upper',
+        _origBg: upperBg, _origBorder: upperBorder,
       });
       datasets.push({
         type: 'line', label: `${site}標準工数`,
@@ -8015,6 +8022,7 @@ function renderCompareSiteCharts(prodData) {
         backgroundColor: '#ef4444', borderColor: '#ef4444',
         order: 1,
         _site: site, _markerType: 'task',
+        _origBg: '#ef4444', _origBorder: '#ef4444',
       });
       datasets.push({
         type: 'line', label: `${site}標準労働時間`,
@@ -8023,8 +8031,25 @@ function renderCompareSiteCharts(prodData) {
         backgroundColor: '#eab308', borderColor: '#eab308',
         order: 1,
         _site: site, _markerType: 'hours',
+        _origBg: '#eab308', _origBorder: '#eab308',
       });
     });
+
+    // 非表示状態の管理用（chart.setDatasetVisibility()は使わない）
+    const hiddenSites = new Set();
+    const hiddenMarkerTypes = new Set();
+    function isDatasetHidden(ds) {
+      if (ds._empSegment) return hiddenSites.has(ds._site);
+      if (ds._markerType) return hiddenMarkerTypes.has(ds._markerType);
+      return false;
+    }
+    function applyHiddenState(chart) {
+      chart.data.datasets.forEach(ds => {
+        const hidden = isDatasetHidden(ds);
+        ds.backgroundColor = hidden ? 'transparent' : ds._origBg;
+        ds.borderColor = hidden ? 'transparent' : ds._origBorder;
+      });
+    }
 
     compareSiteChartInstance = new Chart(ctx, {
       type: 'bar',
@@ -8036,41 +8061,44 @@ function renderCompareSiteCharts(prodData) {
           legend: {
             labels: {
               color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
-              // 上段（アルバイト）バーは下段と一体の実績棒として扱うため凡例には出さない
-              filter: item => item.datasetIndex % 4 !== 1,
-              // 表示順のみを「拠点3つ→標準労働時間3つ→標準工数3つ」に並び替える。
-              // 各アイテムのdatasetIndexは元のまま保持されるため、onClickの
-              // 「% 4」判定・連動ロジックには影響しない
-              generateLabels: chart => {
-                const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                const groupOrder = { 0: 0, 3: 1, 2: 2 };
-                return items.slice().sort((a, b) => {
-                  const ga = groupOrder[a.datasetIndex % 4] ?? 9;
-                  const gb = groupOrder[b.datasetIndex % 4] ?? 9;
-                  return ga !== gb ? ga - gb : a.datasetIndex - b.datasetIndex;
-                });
-              },
+              // 凡例は5項目（拠点3＋標準工数＋標準労働時間）に統一する。データセットとの
+              // 1:1対応ではないため、既存のfilter/datasetIndexベースの生成には依らず、
+              // 自前でアイテムを組み立てる（hiddenはhiddenSites/hiddenMarkerTypesの状態を反映）
+              generateLabels: () => [
+                ...availSites.map(site => ({
+                  text: site,
+                  fillStyle: (SITE_COLORS[site] || '#fff') + '99',
+                  strokeStyle: SITE_COLORS[site] || '#fff',
+                  lineWidth: 1,
+                  hidden: hiddenSites.has(site),
+                  _kind: 'site', _site: site,
+                })),
+                { text: '標準工数', fillStyle: '#ef4444', strokeStyle: '#ef4444', lineWidth: 1, hidden: hiddenMarkerTypes.has('task'), _kind: 'marker', _markerType: 'task' },
+                { text: '標準労働時間', fillStyle: '#eab308', strokeStyle: '#eab308', lineWidth: 1, hidden: hiddenMarkerTypes.has('hours'), _kind: 'marker', _markerType: 'hours' },
+              ],
             },
-            // 拠点の実績棒（下段、datasetIndex % 4 === 0）をクリックしたら、同拠点の
-            // 上段バー・標準工数・標準労働時間の4データセットを連動して切り替える。
-            // 標準工数／標準労働時間の個別凡例をクリックしたら、そのデータセットのみ切り替える
+            // 拠点の凡例をクリックしたら、その拠点の実績棒（下段・上段）だけを非表示にする
+            // （●マーカーは連動しない）。標準工数／標準労働時間の凡例をクリックしたら、
+            // 3拠点分の該当マーカーをまとめて非表示にする。setDatasetVisibility()は使わず、
+            // hiddenSites/hiddenMarkerTypesを更新してからapplyHiddenState()で色を切り替える
             onClick: (e, legendItem, legend) => {
               const chart = legend.chart;
-              const idx = legendItem.datasetIndex;
-              const offset = idx % 4;
-              if (offset === 0) {
-                const nextVisible = !chart.isDatasetVisible(idx);
-                const base = idx - offset;
-                [0, 1, 2, 3].forEach(o => chart.setDatasetVisibility(base + o, nextVisible));
+              if (legendItem._kind === 'site') {
+                if (hiddenSites.has(legendItem._site)) hiddenSites.delete(legendItem._site);
+                else hiddenSites.add(legendItem._site);
               } else {
-                chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
+                if (hiddenMarkerTypes.has(legendItem._markerType)) hiddenMarkerTypes.delete(legendItem._markerType);
+                else hiddenMarkerTypes.add(legendItem._markerType);
               }
+              applyHiddenState(chart);
               chart.update();
             },
           },
           tooltip: {
             backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
             titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+            // 非表示中（hiddenSites/hiddenMarkerTypes）のデータセットはツールチップにも出さない
+            filter: item => !isDatasetHidden(item.dataset),
             callbacks: {
               label: ctx => {
                 const v = ctx.parsed.y;
