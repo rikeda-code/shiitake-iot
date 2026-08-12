@@ -7893,21 +7893,27 @@ function renderCompareSiteCharts(prodData) {
   const upperBySite = actualBySiteFor(e => isPartTime(e));
 
   // 拠点ごとに、選択中のdivsのいずれかに該当し、対象月に工数実績がある人数をカウントする
-  const countBySite = availSites.map(site => {
-    return commonMonths.map((_, mi) => {
-      if (mi >= originalCount) return null;
-      const n = employees.filter(e =>
-        e.base === site &&
-        e.workType &&
-        divs.some(div => {
-          const cls = div === '栽培' ? 'wt-栽培' : div === '配送' ? 'wt-配送' : 'wt-出荷';
-          return workTypeClass(e.workType) === cls;
-        }) &&
-        e.hours[mi] !== null
-      ).length;
-      return n > 0 ? n : null;
+  // （雇用形態で下段＝社員＋技能実習生／上段＝アルバイトに分割する）
+  function countBySiteFor(empFilter) {
+    return availSites.map(site => {
+      return commonMonths.map((_, mi) => {
+        if (mi >= originalCount) return null;
+        const n = employees.filter(e =>
+          e.base === site &&
+          e.workType &&
+          empFilter(e) &&
+          divs.some(div => {
+            const cls = div === '栽培' ? 'wt-栽培' : div === '配送' ? 'wt-配送' : 'wt-出荷';
+            return workTypeClass(e.workType) === cls;
+          }) &&
+          e.hours[mi] !== null
+        ).length;
+        return n > 0 ? n : null;
+      });
     });
-  });
+  }
+  const lowerCountBySite = countBySiteFor(e => !isPartTime(e));
+  const upperCountBySite = countBySiteFor(e => isPartTime(e));
 
   // ●マーカー①：標準工数（拠点別）。既存の予定標準工数と同じロジック
   // （loadYojitsuStdSettings()/createStdHoursEngine()のcalcRow()）を使う。
@@ -8154,32 +8160,102 @@ function renderCompareSiteCharts(prodData) {
   } else {
     const countCtx = document.getElementById('comparesite-count')?.getContext('2d');
     if (!countCtx) return;
+
+    // 「時間」ビューと同じパターン：拠点ごとに下段（社員＋技能実習生）・上段（アルバイト）の
+    // 2データセットを積み上げる。●マーカーは今回追加しない（後日対応予定）
+    const countDatasets = [];
+    availSites.forEach((site, si) => {
+      const siteColor = SITE_COLORS[site] || '#fff';
+      const lowerBg = siteColor + '99', lowerBorder = siteColor;
+      countDatasets.push({
+        label: site,
+        data: lowerCountBySite[si],
+        backgroundColor: lowerBg,
+        borderColor: lowerBorder,
+        borderWidth: 1,
+        stack: site,
+        barThickness: 22,
+        _site: site, _empSegment: 'lower',
+        _origBg: lowerBg, _origBorder: lowerBorder,
+      });
+      const upperBg = siteColor + '4D', upperBorder = siteColor;
+      countDatasets.push({
+        label: `${site}(アルバイト)`,
+        data: upperCountBySite[si],
+        backgroundColor: upperBg,
+        borderColor: upperBorder,
+        borderWidth: 1,
+        stack: site,
+        barThickness: 22,
+        _site: site, _empSegment: 'upper',
+        _origBg: upperBg, _origBorder: upperBorder,
+      });
+    });
+
+    // 非表示状態の管理用（「時間」ビューと同じくchart.setDatasetVisibility()は使わない。
+    // マーカーが無いため●連動の分岐は不要）
+    const hiddenCountSites = new Set();
+    function isCountDatasetHidden(ds) {
+      return hiddenCountSites.has(ds._site);
+    }
+    function applyCountHiddenState(chart) {
+      chart.data.datasets.forEach(ds => {
+        const hidden = isCountDatasetHidden(ds);
+        ds.backgroundColor = hidden ? 'transparent' : ds._origBg;
+        ds.borderColor = hidden ? 'transparent' : ds._origBorder;
+      });
+    }
+
     compareSiteCountChartInstance = new Chart(countCtx, {
       type: 'bar',
-      data: {
-        labels: commonMonths,
-        datasets: availSites.map((site, si) => ({
-          label: site,
-          data: countBySite[si],
-          backgroundColor: (SITE_COLORS[site] || '#fff') + '99',
-          borderColor: SITE_COLORS[site] || '#fff',
-          borderWidth: 1,
-          _actualGroup: true,
-        })),
-      },
+      data: { labels: commonMonths, datasets: countDatasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          legend: {
+            labels: {
+              color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
+              // 上段（アルバイト）バーは下段と一体の実績棒として扱うため凡例には出さない。
+              // Chart.jsのlegendプラグインは各アイテムのfontColorを使ってテキストを描画し、
+              // options.labels.colorには自動フォールバックしないため、fontColorを明示的に
+              // 設定しないとテキストが黒になってしまう（過去に発生した不具合と同じ原因）
+              generateLabels: chart => {
+                const fontColor = chart.options.plugins.legend.labels.color;
+                return availSites.map(site => ({
+                  text: site,
+                  fillStyle: (SITE_COLORS[site] || '#fff') + '99',
+                  strokeStyle: SITE_COLORS[site] || '#fff',
+                  lineWidth: 1,
+                  fontColor,
+                  hidden: hiddenCountSites.has(site),
+                  _site: site,
+                }));
+              },
+            },
+            // 拠点の凡例をクリックしたら、その拠点の棒（下段・上段）だけを非表示にする。
+            // setDatasetVisibility()は使わず、hiddenCountSitesを更新してから
+            // applyCountHiddenState()で色を切り替える（残りの拠点のバー位置は変わらない）
+            onClick: (e, legendItem, legend) => {
+              const chart = legend.chart;
+              if (hiddenCountSites.has(legendItem._site)) hiddenCountSites.delete(legendItem._site);
+              else hiddenCountSites.add(legendItem._site);
+              applyCountHiddenState(chart);
+              chart.update();
+            },
+          },
           tooltip: {
             backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
             titleColor: '#e2e8f0', bodyColor: '#e2e8f0',
+            filter: item => !isCountDatasetHidden(item.dataset),
             callbacks: {
               label: ctx => {
                 const v = ctx.parsed.y;
                 if (v === null || v === undefined) return null;
-                return `${ctx.dataset.label}: ${v.toLocaleString('ja-JP')}人`;
+                const ds = ctx.dataset;
+                if (ds._empSegment === 'lower') return `${ds._site}(社員+実習生): ${v.toLocaleString('ja-JP')}人`;
+                if (ds._empSegment === 'upper') return `${ds._site}(アルバイト): ${v.toLocaleString('ja-JP')}人`;
+                return `${ds.label}: ${v.toLocaleString('ja-JP')}人`;
               },
             },
           },
