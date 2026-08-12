@@ -7993,6 +7993,8 @@ function renderCompareSiteCharts(prodData) {
         borderColor: siteColor,
         borderWidth: 1,
         stack: site,
+        barThickness: 22,
+        order: 2,
         _site: site, _empSegment: 'lower',
       });
       datasets.push({
@@ -8002,20 +8004,24 @@ function renderCompareSiteCharts(prodData) {
         borderColor: siteColor,
         borderWidth: 1,
         stack: site,
+        barThickness: 22,
+        order: 2,
         _site: site, _empSegment: 'upper',
       });
       datasets.push({
         type: 'line', label: `${site}標準工数`,
         data: stdTaskBySite ? commonMonths.map((_, mi) => ({ x: mi, y: stdTaskBySite[si][mi] })) : [],
-        showLine: false, pointStyle: 'circle', pointRadius: 4,
-        backgroundColor: '#f87171', borderColor: '#f87171',
+        showLine: false, pointStyle: 'circle', pointRadius: 6,
+        backgroundColor: '#ef4444', borderColor: '#ef4444',
+        order: 1,
         _site: site, _markerType: 'task',
       });
       datasets.push({
         type: 'line', label: `${site}標準労働時間`,
         data: commonMonths.map((_, mi) => ({ x: mi, y: stdHoursBySite[si][mi] })),
-        showLine: false, pointStyle: 'circle', pointRadius: 4,
-        backgroundColor: '#facc15', borderColor: '#facc15',
+        showLine: false, pointStyle: 'circle', pointRadius: 6,
+        backgroundColor: '#eab308', borderColor: '#eab308',
+        order: 1,
         _site: site, _markerType: 'hours',
       });
     });
@@ -8032,6 +8038,18 @@ function renderCompareSiteCharts(prodData) {
               color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
               // 上段（アルバイト）バーは下段と一体の実績棒として扱うため凡例には出さない
               filter: item => item.datasetIndex % 4 !== 1,
+              // 表示順のみを「拠点3つ→標準労働時間3つ→標準工数3つ」に並び替える。
+              // 各アイテムのdatasetIndexは元のまま保持されるため、onClickの
+              // 「% 4」判定・連動ロジックには影響しない
+              generateLabels: chart => {
+                const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                const groupOrder = { 0: 0, 3: 1, 2: 2 };
+                return items.slice().sort((a, b) => {
+                  const ga = groupOrder[a.datasetIndex % 4] ?? 9;
+                  const gb = groupOrder[b.datasetIndex % 4] ?? 9;
+                  return ga !== gb ? ga - gb : a.datasetIndex - b.datasetIndex;
+                });
+              },
             },
             // 拠点の実績棒（下段、datasetIndex % 4 === 0）をクリックしたら、同拠点の
             // 上段バー・標準工数・標準労働時間の4データセットを連動して切り替える。
