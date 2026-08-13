@@ -4184,6 +4184,9 @@ const THREE_SITE_MERGE_PRJ_COL = colLetterToIndex('E');
 const THREE_SITE_MERGE_DIV_COL = colLetterToIndex('F');
 const THREE_SITE_MERGE_NAME_COL = colLetterToIndex('H');
 const THREE_SITE_MERGE_START_MONTH_COL = colLetterToIndex('I');
+// 「比較（3拠点）＞標準労働時間」タブのアルバイト内訳（フルタイム／パートタイム）用
+const THREE_SITE_MERGE_FULLTIME_COL = colLetterToIndex('M');
+const THREE_SITE_MERGE_PARTTIME_COL = colLetterToIndex('Q');
 // 群馬拠点が「安中」表記になる既知の表記ゆれ（人数_過去実績のCOUNT_ROW_SITE_ALIASと
 // 同様の対応）。該当しない場合はそのままの拠点名として扱われるだけで実害はない
 const THREE_SITE_MERGE_SITE_ALIAS = { 'いなべ': 'いなべ', '安中': '群馬', '群馬': '群馬', '南丹': '南丹' };
@@ -4269,7 +4272,12 @@ function parseThreeSiteMergeSheet(json) {
       const v = cellNumber(row, idx);
       if (v !== null) maxByYm[ym] = v;
     });
-    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment });
+    // fulltimeHours/parttimeHours：M列/Q列（アルバイトのフルタイム/パートタイム内訳、
+    // 「比較（3拠点）＞標準労働時間」タブ専用）。他の既存フィールドとは異なり
+    // 0デフォルト化はせず、cellNumber()の生の戻り値（数値またはnull）のまま保持する
+    const fulltimeHours = cellNumber(row, THREE_SITE_MERGE_FULLTIME_COL);
+    const parttimeHours = cellNumber(row, THREE_SITE_MERGE_PARTTIME_COL);
+    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment, fulltimeHours, parttimeHours });
   });
 
   if (emptyStdHoursRows.length) {
@@ -8001,6 +8009,72 @@ function renderCompareSiteCharts(prodData) {
   const lowerStdHoursBySite = stdHoursBySiteFor(e => !isPartTime(e));
   const upperStdHoursBySite = stdHoursBySiteFor(e => isPartTime(e));
 
+  // 「標準労働時間」タブの棒：アルバイト段をフルタイム／パートタイムに細分化する。
+  // 3拠点マージのM列（フルタイム）・Q列（パートタイム）を氏名で合算するマップを、
+  // 既存のthreeSiteMergeStdHoursByName()（R列版）と同じパターンで新設する
+  function threeSiteMergeFulltimeHoursByName() {
+    const map = new Map();
+    if (!stdHoursMergeData) return map;
+    stdHoursMergeData.rows.forEach(r => {
+      if (r.activeFlag !== 1) return;
+      const key = normalizeName(r.name);
+      map.set(key, (map.get(key) || 0) + (r.fulltimeHours || 0));
+    });
+    return map;
+  }
+  function threeSiteMergePartTimeHoursByName() {
+    const map = new Map();
+    if (!stdHoursMergeData) return map;
+    stdHoursMergeData.rows.forEach(r => {
+      if (r.activeFlag !== 1) return;
+      const key = normalizeName(r.name);
+      map.set(key, (map.get(key) || 0) + (r.parttimeHours || 0));
+    });
+    return map;
+  }
+  // computeStdHoursLine()と同じ集計ロジックだが、参照する氏名→値のマップを
+  // 引数で切り替えられる汎用版（既存のcomputeStdHoursLine()自体は変更しない）
+  function computeStdHoursLineByMap(emps, months, nameToValueMap) {
+    return months.map((_, mi) => {
+      const vals = emps
+        .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
+        .map(e => nameToValueMap.get(normalizeName(e.name)) ?? 0);
+      if (!vals.length) return null;
+      return Math.round(vals.reduce((s, v) => s + v, 0) * 10) / 10;
+    });
+  }
+  // computeStdHoursLineForDivSiteEmpFilter()と同じ従業員絞り込みロジックだが、
+  // 集計にcomputeStdHoursLineByMap()（マップ差し替え可能）を使う
+  function computeStdHoursLineForDivSiteEmpFilterByMap(div, site, months, empFilter, nameToValueMap) {
+    const { employees: activeEmployees, months: activeMonths } = getActiveData();
+    const typeFilter = div === '栽培'
+      ? wt => workTypeClass(wt) === 'wt-栽培'
+      : div === '配送'
+        ? wt => workTypeClass(wt) === 'wt-配送'
+        : wt => workTypeClass(wt) === 'wt-出荷';
+    const emps = activeEmployees
+      .filter(e => typeFilter(e.workType) && (site == null || e.base === site) && empFilter(e))
+      .map(e => ({
+        ...e,
+        hours: months.map(planMonth => {
+          const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+          return ami >= 0 ? e.hours[ami] : null;
+        }),
+      }));
+    return computeStdHoursLineByMap(emps, months, nameToValueMap);
+  }
+  function stdHoursBySiteForMap(nameToValueMap) {
+    return availSites.map(site => {
+      const perDiv = divs.map(div => computeStdHoursLineForDivSiteEmpFilterByMap(div, site, normalizedCommonMonths, e => isPartTime(e), nameToValueMap));
+      return commonMonths.map((_, mi) => {
+        const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    });
+  }
+  const fulltimeStdHoursBySite = stdHoursBySiteForMap(threeSiteMergeFulltimeHoursByName());
+  const parttimeStdHoursBySite = stdHoursBySiteForMap(threeSiteMergePartTimeHoursByName());
+
   // 「標準労働時間」ビュー用の折れ線：標準労働時間（下段+上段合計）を実績人数
   // （下段+上段合計）で割った「一人当たりの時間」
   function toPerPerson(hoursTotal, si, mi) {
@@ -8396,8 +8470,9 @@ function renderCompareSiteCharts(prodData) {
     const stdHoursCtx = document.getElementById('comparesite-stdhours')?.getContext('2d');
     if (!stdHoursCtx) return;
 
-    // 拠点ごとに3個（下段バー／上段バー／一人当たり折れ線）、合計9個のデータセットを
-    // 拠点順に3個ずつ並べる（datasetIndex = site*3 + offset）
+    // 拠点ごとに4個（下段バー／アルバイト・フルタイムバー／アルバイト・パートタイム
+    // バー／一人当たり折れ線）、合計12個のデータセットを拠点順に4個ずつ並べる
+    // （datasetIndex = site*4 + offset）
     const stdHoursDatasets = [];
     availSites.forEach((site, si) => {
       const siteColor = SITE_COLORS[site] || '#fff';
@@ -8414,18 +8489,31 @@ function renderCompareSiteCharts(prodData) {
         _site: site, _empSegment: 'lower',
         _origBg: lowerBg, _origBorder: lowerBorder,
       });
-      const upperBg = siteColor + '4D', upperBorder = siteColor;
+      const fulltimeBg = siteColor + '99', fulltimeBorder = siteColor;
       stdHoursDatasets.push({
-        label: `${site}(アルバイト)`,
-        data: upperStdHoursBySite[si],
-        backgroundColor: upperBg,
-        borderColor: upperBorder,
+        label: `${site}(アルバイト・フルタイム)`,
+        data: fulltimeStdHoursBySite[si],
+        backgroundColor: fulltimeBg,
+        borderColor: fulltimeBorder,
         borderWidth: 1,
         stack: site,
         barThickness: 22,
         order: 2,
-        _site: site, _empSegment: 'upper',
-        _origBg: upperBg, _origBorder: upperBorder,
+        _site: site, _empSegment: 'fulltime',
+        _origBg: fulltimeBg, _origBorder: fulltimeBorder,
+      });
+      const parttimeBg = siteColor + '4D', parttimeBorder = siteColor;
+      stdHoursDatasets.push({
+        label: `${site}(アルバイト・パートタイム)`,
+        data: parttimeStdHoursBySite[si],
+        backgroundColor: parttimeBg,
+        borderColor: parttimeBorder,
+        borderWidth: 1,
+        stack: site,
+        barThickness: 22,
+        order: 2,
+        _site: site, _empSegment: 'parttime',
+        _origBg: parttimeBg, _origBorder: parttimeBorder,
       });
       // 一人当たり標準労働時間（折れ線、右側の第2軸）。棒の再センタリング防止の
       // 対象外（バーのグループ化・積み上げには関与しない純粋な折れ線データセットの
@@ -8470,10 +8558,11 @@ function renderCompareSiteCharts(prodData) {
           legend: {
             labels: {
               color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6,
-              // 凡例は6項目（拠点3つの棒＋拠点3つの一人当たり折れ線）。上段（アルバイト）
-              // バーは下段と一体の実績棒として扱うため凡例には出さない。Chart.jsの
-              // legendプラグインは各アイテムのfontColorを使ってテキストを描画するため、
-              // fontColorを明示的に設定しないとテキストが黒になってしまう
+              // 凡例は6項目（拠点3つの棒＋拠点3つの一人当たり折れ線）。中段・上段
+              // （アルバイト・フルタイム／パートタイム）バーは下段と一体の実績棒として
+              // 扱うため凡例には出さない。Chart.jsのlegendプラグインは各アイテムの
+              // fontColorを使ってテキストを描画するため、fontColorを明示的に
+              // 設定しないとテキストが黒になってしまう
               generateLabels: chart => {
                 const fontColor = chart.options.plugins.legend.labels.color;
                 const items = availSites.map(site => ({
@@ -8486,7 +8575,7 @@ function renderCompareSiteCharts(prodData) {
                   _kind: 'bar', _site: site,
                 }));
                 availSites.forEach((site, si) => {
-                  const lineIdx = si * 3 + 2;
+                  const lineIdx = si * 4 + 3;
                   items.push({
                     text: `${site}（一人当たり）`,
                     fillStyle: SITE_COLORS[site] || '#fff',
@@ -8526,7 +8615,8 @@ function renderCompareSiteCharts(prodData) {
                 if (v === null || v === undefined) return null;
                 const ds = ctx.dataset;
                 if (ds._empSegment === 'lower') return `${ds._site}(社員+実習生): ${v.toLocaleString('ja-JP')} h`;
-                if (ds._empSegment === 'upper') return `${ds._site}(アルバイト): ${v.toLocaleString('ja-JP')} h`;
+                if (ds._empSegment === 'fulltime') return `${ds._site}(アルバイト・フルタイム): ${v.toLocaleString('ja-JP')} h`;
+                if (ds._empSegment === 'parttime') return `${ds._site}(アルバイト・パートタイム): ${v.toLocaleString('ja-JP')} h`;
                 if (ds._perPerson) return `${ds.label}: ${v.toLocaleString('ja-JP')} h/人`;
                 return `${ds.label}: ${v.toLocaleString('ja-JP')}`;
               },
