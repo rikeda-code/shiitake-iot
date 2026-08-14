@@ -1502,9 +1502,12 @@ function computeStdTransferDeltaBuckets(adjustRecords, employees) {
     let matches = byName.get(normalizeName(rec.rawName));
     if (!matches || matches.length === 0) return;
     if (matches.length > 1) {
-      // 同姓同名で複数件ヒットする場合は、稼働実績（hours配列に非nullの値がある方）を優先する
-      const withHours = matches.filter(e => e.hours.some(h => h !== null));
-      if (withHours.length === 1) matches = withHours;
+      // 同姓同名で複数件ヒットする場合は、振替対象月（rec.ym）に実績がある方を優先する
+      const monthIdx = allData.monthYms.indexOf(rec.ym);
+      const withHoursThisMonth = monthIdx >= 0
+        ? matches.filter(e => e.hours[monthIdx] !== null)
+        : [];
+      if (withHoursThisMonth.length === 1) matches = withHoursThisMonth;
     }
     if (matches.length !== 1) return; // 特定できない場合はスキップ
     const emp = matches[0];
