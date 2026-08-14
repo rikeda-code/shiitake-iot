@@ -8018,6 +8018,32 @@ function renderCompareSiteCharts(prodData) {
     }));
   }
 
+  // 「時間」ビュー専用：整理済み_増減シート（工数振替）の内容を標準工数・標準労働時間に
+  // 反映する。実績棒（lowerBySite/upperBySite）は既にgetActiveData()経由で振替反映済みだが、
+  // stdTaskBySite/stdHoursBySite自体は「人数」ビュー（stdTaskCountBySite/
+  // stdHoursCountBySiteの元）・「標準労働時間」タブからも参照されるため変更せず、
+  // 「時間」ビューのマーカー専用の別配列を作る
+  function monthLabelToYm(label) {
+    const [y, m] = String(label).split('/');
+    return Number(y) * 100 + Number(m);
+  }
+  const stdTransferDeltaMap = computeStdTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+  function applyStdTransferDelta(bySite) {
+    if (!bySite) return bySite;
+    if (!transferMode) return bySite;
+    return availSites.map((site, si) => commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return bySite[si][mi];
+      const ym = monthLabelToYm(normalizedCommonMonths[mi]);
+      const deltaTotal = divs.reduce((s, div) => s + (stdTransferDeltaMap.get(`${site}|${div}|${ym}`) || 0), 0);
+      if (deltaTotal === 0) return bySite[si][mi];
+      const base = bySite[si][mi];
+      const result = base == null ? deltaTotal : base + deltaTotal;
+      return Math.round(result * 10) / 10;
+    }));
+  }
+  const stdTaskBySiteTimeView = applyStdTransferDelta(stdTaskBySite);
+  const stdHoursBySiteTimeView = applyStdTransferDelta(stdHoursBySite);
+
   // 「人数」ビュー用：標準工数・標準労働時間（時間）を「実績の1人当たり時間
   // （実績工数÷実績人数）」を基準に人数換算する。「◯h相当をこなすには何人相当
   // 必要か」という値になる
@@ -8031,9 +8057,9 @@ function renderCompareSiteCharts(prodData) {
     return Math.round(result * 10) / 10;
   }
   const stdTaskCountBySite = availSites.map((_, si) => commonMonths.map((_, mi) =>
-    stdTaskBySite ? toCount(stdTaskBySite[si][mi], si, mi) : null));
+    stdTaskBySiteTimeView ? toCount(stdTaskBySiteTimeView[si][mi], si, mi) : null));
   const stdHoursCountBySite = availSites.map((_, si) => commonMonths.map((_, mi) =>
-    toCount(stdHoursBySite[si][mi], si, mi)));
+    toCount(stdHoursBySiteTimeView[si][mi], si, mi)));
 
   // 「標準労働時間」ビュー用：雇用形態別（社員+実習生／アルバイト）の標準労働時間。
   // computeStdHoursLineForDivSite()自体は変更せず、同じロジック（3拠点マージのR列を
@@ -8212,32 +8238,6 @@ function renderCompareSiteCharts(prodData) {
   if (compareSiteChartInstance) { compareSiteChartInstance.destroy(); compareSiteChartInstance = null; }
   if (compareSiteCountChartInstance) { compareSiteCountChartInstance.destroy(); compareSiteCountChartInstance = null; }
   if (compareSiteStdHoursChartInstance) { compareSiteStdHoursChartInstance.destroy(); compareSiteStdHoursChartInstance = null; }
-
-  // 「時間」ビュー専用：整理済み_増減シート（工数振替）の内容を標準工数・標準労働時間に
-  // 反映する。実績棒（lowerBySite/upperBySite）は既にgetActiveData()経由で振替反映済みだが、
-  // stdTaskBySite/stdHoursBySite自体は「人数」ビュー（stdTaskCountBySite/
-  // stdHoursCountBySiteの元）・「標準労働時間」タブからも参照されるため変更せず、
-  // 「時間」ビューのマーカー専用の別配列を作る
-  function monthLabelToYm(label) {
-    const [y, m] = String(label).split('/');
-    return Number(y) * 100 + Number(m);
-  }
-  const stdTransferDeltaMap = computeStdTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
-  function applyStdTransferDelta(bySite) {
-    if (!bySite) return bySite;
-    if (!transferMode) return bySite;
-    return availSites.map((site, si) => commonMonths.map((_, mi) => {
-      if (mi >= originalCount) return bySite[si][mi];
-      const ym = monthLabelToYm(normalizedCommonMonths[mi]);
-      const deltaTotal = divs.reduce((s, div) => s + (stdTransferDeltaMap.get(`${site}|${div}|${ym}`) || 0), 0);
-      if (deltaTotal === 0) return bySite[si][mi];
-      const base = bySite[si][mi];
-      const result = base == null ? deltaTotal : base + deltaTotal;
-      return Math.round(result * 10) / 10;
-    }));
-  }
-  const stdTaskBySiteTimeView = applyStdTransferDelta(stdTaskBySite);
-  const stdHoursBySiteTimeView = applyStdTransferDelta(stdHoursBySite);
 
   if (compareSiteViewMode === 'time') {
     const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
