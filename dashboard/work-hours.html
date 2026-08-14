@@ -8222,6 +8222,7 @@ function renderCompareSiteCharts(prodData) {
   const stdTransferDeltaMap = computeStdTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
   function applyStdTransferDelta(bySite) {
     if (!bySite) return bySite;
+    if (!transferMode) return bySite;
     return availSites.map((site, si) => commonMonths.map((_, mi) => {
       if (mi >= originalCount) return bySite[si][mi];
       const ym = monthLabelToYm(normalizedCommonMonths[mi]);
