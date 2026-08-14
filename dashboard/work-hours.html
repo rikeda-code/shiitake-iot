@@ -874,6 +874,11 @@ let countChartInstance = null;
 
 let transferMode = true;           // false=振替なし / true=振替あり(既定)
 let transferAdjusted = null;       // { employees, alerts } — 振替反映後のデータ（初回ロード時に計算）
+// 整理済み_増減シートの生レコード（初回ロード時に計算、computeTransferAdjustments()の
+// 入力と同じもの）。「比較（3拠点）＞時間」ビューの標準工数・標準労働時間への振替反映
+// （computeStdTransferDeltaBuckets()）で、個人単位の加減算とは別に拠点×業務区分×月の
+// バケット単位で参照するために保持する
+let stdTransferAdjustRecords = [];
 
 // 「時間_過去実績」シートの解析結果。{ [site]: { '栽培': {ym: 数値}, '出荷': {ym: 数値} } }
 // 標準労働時間タブ拠点別モードの「前年実績」棒でのみ使用。取得失敗時はnullのままとし、
@@ -1468,6 +1473,55 @@ function computeTransferAdjustments(baseData, adjustRecords) {
   });
 
   return { employees: employees.concat(Array.from(addMap.values())), alerts };
+}
+
+// 「比較（3拠点）＞時間」ビューの標準工数・標準労働時間（●マーカー）用：
+// 整理済み_増減シートの内容を、個人単位（computeTransferAdjustments()）ではなく
+// 「拠点×業務区分×月」のバケット単位の加減算に変換する。
+// 戻り値はMap<string, number>（キー："拠点|業務区分|YYYYMM"、値：加減算する時間）。
+// 業務区分はworkTypeClass()（'wt-栽培'/'wt-出荷'/'wt-配送'等）で正規化した上で、
+// 呼び出し側のdivs（'栽培'/'出荷'/'配送'、renderCompareSiteChartsのroleTypeFilter由来）
+// とキーを揃えるため'wt-'接頭辞を外した値をバケットキーに使う。
+// D列＝E列（拠点を跨がない）：本人の業務区分バケットからJ列を減算するのみ。
+// D列≠E列（拠点を跨ぐ）：本人の業務区分バケットから減算し、F列の業務区分を
+// 同様に正規化したバケットへE列拠点で加算する。
+// employeesは振替適用前の生データ（allData.employees）を渡すこと
+function computeStdTransferDeltaBuckets(adjustRecords, employees) {
+  const deltaMap = new Map();
+  const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
+  const divLabel = wt => workTypeClass(wt).replace(/^wt-/, '');
+
+  const byName = new Map();
+  employees.forEach(e => {
+    const key = normalizeName(e.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(e);
+  });
+
+  adjustRecords.forEach(rec => {
+    let matches = byName.get(normalizeName(rec.rawName));
+    if (!matches || matches.length === 0) return;
+    if (matches.length > 1) {
+      // 同姓同名で複数件ヒットする場合は、稼働実績（hours配列に非nullの値がある方）を優先する
+      const withHours = matches.filter(e => e.hours.some(h => h !== null));
+      if (withHours.length === 1) matches = withHours;
+    }
+    if (matches.length !== 1) return; // 特定できない場合はスキップ
+    const emp = matches[0];
+
+    const empDivClass = divLabel(emp.workType);
+    if (!empDivClass) return;
+    addDelta(`${rec.base}|${empDivClass}|${rec.ym}`, -rec.hours);
+
+    if (rec.base !== rec.prj) {
+      const destDivClass = divLabel(rec.role);
+      if (destDivClass) {
+        addDelta(`${rec.prj}|${destDivClass}|${rec.ym}`, rec.hours);
+      }
+    }
+  });
+
+  return deltaMap;
 }
 
 // 現在のトグル状態・雇用区分フィルター・集計期間フィルターに応じたデータを返す
@@ -5766,9 +5820,11 @@ async function loadAll() {
     try {
       const adjJson = await fetchAdjustSheet();
       const adjustRecords = parseAdjustRecords(adjJson);
+      stdTransferAdjustRecords = adjustRecords;
       transferAdjusted = computeTransferAdjustments(allData, adjustRecords);
     } catch (adjErr) {
       console.error(adjErr);
+      stdTransferAdjustRecords = [];
       transferAdjusted = { employees: allData.employees, alerts: [`「${ADJUST_SHEET_NAME}」シートの取得に失敗したため、振替は反映されていません（${adjErr.message}）`] };
     }
 
@@ -8154,6 +8210,31 @@ function renderCompareSiteCharts(prodData) {
   if (compareSiteCountChartInstance) { compareSiteCountChartInstance.destroy(); compareSiteCountChartInstance = null; }
   if (compareSiteStdHoursChartInstance) { compareSiteStdHoursChartInstance.destroy(); compareSiteStdHoursChartInstance = null; }
 
+  // 「時間」ビュー専用：整理済み_増減シート（工数振替）の内容を標準工数・標準労働時間に
+  // 反映する。実績棒（lowerBySite/upperBySite）は既にgetActiveData()経由で振替反映済みだが、
+  // stdTaskBySite/stdHoursBySite自体は「人数」ビュー（stdTaskCountBySite/
+  // stdHoursCountBySiteの元）・「標準労働時間」タブからも参照されるため変更せず、
+  // 「時間」ビューのマーカー専用の別配列を作る
+  function monthLabelToYm(label) {
+    const [y, m] = String(label).split('/');
+    return Number(y) * 100 + Number(m);
+  }
+  const stdTransferDeltaMap = computeStdTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+  function applyStdTransferDelta(bySite) {
+    if (!bySite) return bySite;
+    return availSites.map((site, si) => commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return bySite[si][mi];
+      const ym = monthLabelToYm(normalizedCommonMonths[mi]);
+      const deltaTotal = divs.reduce((s, div) => s + (stdTransferDeltaMap.get(`${site}|${div}|${ym}`) || 0), 0);
+      if (deltaTotal === 0) return bySite[si][mi];
+      const base = bySite[si][mi];
+      const result = base == null ? deltaTotal : base + deltaTotal;
+      return Math.round(result * 10) / 10;
+    }));
+  }
+  const stdTaskBySiteTimeView = applyStdTransferDelta(stdTaskBySite);
+  const stdHoursBySiteTimeView = applyStdTransferDelta(stdHoursBySite);
+
   if (compareSiteViewMode === 'time') {
     const ctx = document.getElementById('comparesite-actual')?.getContext('2d');
     if (!ctx) return;
@@ -8196,7 +8277,7 @@ function renderCompareSiteCharts(prodData) {
       });
       datasets.push({
         type: 'line', label: `${site}標準工数`,
-        data: stdTaskBySite ? commonMonths.map((_, mi) => ({ x: mi, y: stdTaskBySite[si][mi] })) : [],
+        data: stdTaskBySiteTimeView ? commonMonths.map((_, mi) => ({ x: mi, y: stdTaskBySiteTimeView[si][mi] })) : [],
         showLine: false, pointStyle: 'circle', pointRadius: 6,
         backgroundColor: '#ef4444', borderColor: '#ef4444',
         order: 1,
@@ -8205,7 +8286,7 @@ function renderCompareSiteCharts(prodData) {
       });
       datasets.push({
         type: 'line', label: `${site}標準労働時間`,
-        data: commonMonths.map((_, mi) => ({ x: mi, y: stdHoursBySite[si][mi] })),
+        data: commonMonths.map((_, mi) => ({ x: mi, y: stdHoursBySiteTimeView[si][mi] })),
         showLine: false, pointStyle: 'circle', pointRadius: 6,
         backgroundColor: '#eab308', borderColor: '#eab308',
         order: 1,
