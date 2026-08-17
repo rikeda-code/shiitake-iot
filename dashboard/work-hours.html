@@ -141,6 +141,7 @@
     #transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
+    #comparesite-stdhours-alerts .transfer-alert-box { margin: 0; }
     .transfer-alert-box {
       margin: 16px 32px 0;
       background: rgba(250,204,21,0.08);
@@ -1527,6 +1528,131 @@ function computeStdTransferDeltaBuckets(adjustRecords, employees) {
   return deltaMap;
 }
 
+// 「標準労働時間」タブ（社員+実習生／アルバイト・フルタイム／アルバイト・
+// パートタイムの3段積み上げ）用：整理済み_増減シートの各行を、拠点×業務区分×
+// 段（雇用形態ティア：'lower'/'fulltime'/'parttime'）×月のバケット適用情報に
+// 解決する共通ヘルパー。段は振替の前後で変わらない（本人自身の分類のまま）。
+// 時間デルタ・人数デルタの計算、およびアラート収集で共有する。
+// fulltimePartTimeRowsByNameは、renderCompareSiteCharts()内の
+// buildFulltimePartTimeRowsByName()と同じ形式（氏名→3拠点マージ行配列）のMap。
+// 戻り値の各要素は、解決できた場合 { rec, ok:true, emp, empDivClass, tier, destDivClass }
+// （destDivClassはD=Eの場合null）、解決できない場合
+// { rec, ok:false, reason, emp? }（reasonは'ambiguous'/'div-unresolvable'/'tier-unresolvable'。
+// 氏名が整理済み_Mで一件も見つからない場合は、既存のcomputeStdTransferDeltaBuckets()と
+// 同様に無警告でスキップする＝配列に含めない）
+function resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName) {
+  const divLabel = wt => workTypeClass(wt).replace(/^wt-/, '');
+  const isPartTimeEmp = e => (e.employment || '').includes('アルバイト');
+
+  const byName = new Map();
+  employees.forEach(e => {
+    const key = normalizeName(e.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(e);
+  });
+
+  function tierValueFor(rows, ym, field) {
+    return rows.reduce((sum, r) => {
+      if (r.activeFlag === 1) return sum + (r[field] || 0);
+      if (r.activeFlag === 2 && r.startYm != null && ym >= r.startYm) return sum + (r[field] || 0);
+      return sum;
+    }, 0);
+  }
+
+  const results = [];
+  adjustRecords.forEach(rec => {
+    let matches = byName.get(normalizeName(rec.rawName));
+    if (!matches || matches.length === 0) return; // 氏名不一致：無警告でスキップ
+
+    if (matches.length > 1) {
+      // 同姓同名で複数件ヒットする場合は、振替対象月（rec.ym）に実績がある方を優先する
+      const monthIdx = allData.monthYms.indexOf(rec.ym);
+      const withHoursThisMonth = monthIdx >= 0 ? matches.filter(e => e.hours[monthIdx] !== null) : [];
+      if (withHoursThisMonth.length !== 1) {
+        results.push({ rec, ok: false, reason: 'ambiguous' });
+        return;
+      }
+      matches = withHoursThisMonth;
+    }
+    const emp = matches[0];
+
+    const empDivClass = divLabel(emp.workType);
+    if (!empDivClass) {
+      results.push({ rec, ok: false, reason: 'div-unresolvable', emp });
+      return;
+    }
+
+    let tier;
+    if (!isPartTimeEmp(emp)) {
+      tier = 'lower';
+    } else {
+      const rows = fulltimePartTimeRowsByName.get(normalizeName(emp.name)) || [];
+      const fulltimeVal = tierValueFor(rows, rec.ym, 'fulltimeHours');
+      const parttimeVal = tierValueFor(rows, rec.ym, 'parttimeHours');
+      if (fulltimeVal > 0) tier = 'fulltime';
+      else if (parttimeVal > 0) tier = 'parttime';
+      else {
+        results.push({ rec, ok: false, reason: 'tier-unresolvable', emp });
+        return;
+      }
+    }
+
+    let destDivClass = null;
+    if (rec.base !== rec.prj) destDivClass = divLabel(rec.role);
+
+    results.push({ rec, ok: true, emp, empDivClass, tier, destDivClass });
+  });
+  return results;
+}
+
+// 時間デルタ版：戻り値はMap<"拠点|業務区分|段|YYYYMM", 時間>
+function computeStdHoursTierTransferDeltaBuckets(adjustRecords, employees, fulltimePartTimeRowsByName) {
+  const deltaMap = new Map();
+  const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
+  resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName)
+    .filter(r => r.ok)
+    .forEach(({ rec, empDivClass, tier, destDivClass }) => {
+      addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -rec.hours);
+      if (rec.base !== rec.prj && destDivClass) {
+        addDelta(`${rec.prj}|${destDivClass}|${tier}|${rec.ym}`, rec.hours);
+      }
+    });
+  return deltaMap;
+}
+
+// 人数デルタ版：時間量に関わらず常に±1。戻り値はMap<"拠点|業務区分|段|YYYYMM", 人数差分>
+function computeStdHoursTierTransferCountDeltaBuckets(adjustRecords, employees, fulltimePartTimeRowsByName) {
+  const deltaMap = new Map();
+  const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
+  resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName)
+    .filter(r => r.ok)
+    .forEach(({ rec, empDivClass, tier, destDivClass }) => {
+      addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -1);
+      if (rec.base !== rec.prj && destDivClass) {
+        addDelta(`${rec.prj}|${destDivClass}|${tier}|${rec.ym}`, 1);
+      }
+    });
+  return deltaMap;
+}
+
+// 「標準労働時間」タブの振替アラート（業務区分判定不能・フルタイム/パートタイム
+// 判定不能・同姓同名特定不可）を、既存の工数振替アラートと同じ文言スタイルで生成する
+function collectStdHoursTierTransferAlerts(adjustRecords, employees, fulltimePartTimeRowsByName) {
+  const alerts = [];
+  resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName)
+    .filter(r => !r.ok)
+    .forEach(({ rec, reason, emp }) => {
+      if (reason === 'ambiguous') {
+        alerts.push(`同姓同名で特定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」（対象月に実績がある候補が0件、または2件以上あります）`);
+      } else if (reason === 'div-unresolvable') {
+        alerts.push(`業務区分が判定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」（本人の業務区分「${emp.workType || ''}」が栽培/出荷/配送/拠点のいずれにも該当しません）`);
+      } else if (reason === 'tier-unresolvable') {
+        alerts.push(`アルバイトの区分（フルタイム/パートタイム）が判定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」`);
+      }
+    });
+  return alerts;
+}
+
 // 現在のトグル状態・雇用区分フィルター・集計期間フィルターに応じたデータを返す
 function getActiveData() {
   const base = (transferMode && transferAdjusted) ? { ...allData, employees: transferAdjusted.employees } : allData;
@@ -1574,6 +1700,26 @@ function renderTransferAlerts() {
       <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
         <span class="transfer-alert-toggle-icon">${icon}</span>
         <span>⚠ 工数振替アラート（${alerts.length}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
+// 「比較（3拠点）＞標準労働時間」タブ専用の工数振替アラート（既存のrenderTransferAlerts()
+// と同じ見た目・アコーディオン挙動だが、対象が別＝collectStdHoursTierTransferAlerts()の
+// 結果のため、既存のtransferAdjusted.alertsとは独立に表示する）
+function renderCompareSiteStdHoursAlerts(alerts) {
+  const target = document.getElementById('comparesite-stdhours-alerts');
+  if (!target) return;
+  if (!alerts || !alerts.length) { target.innerHTML = ''; return; }
+
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ 工数振替アラート（標準労働時間タブ、${alerts.length}件）</span>
       </div>
       <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
     </div>`;
@@ -8202,6 +8348,76 @@ function renderCompareSiteCharts(prodData) {
     return toPerPerson(total > 0 ? total : null, si, mi);
   }));
 
+  // 「標準労働時間」タブ専用：整理済み_増減シート（工数振替）の内容を、3段
+  // （社員+実習生／アルバイト・フルタイム／アルバイト・パートタイム）それぞれの
+  // 標準労働時間（棒の高さ）・人数（セグメント内表示・ツールチップ）に反映する。
+  // lowerStdHoursBySite等・lowerCountBySite等の本体は「時間」「人数」タブや
+  // 一人当たり折れ線の分母からも参照されるため変更せず、このタブの棒・セグメント内
+  // 人数表示・ツールチップ・一人当たり折れ線の分子専用の別配列（*Adjusted）を作る
+  const stdHoursTierTransferDeltaMap = computeStdHoursTierTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees, fulltimePartTimeRowsByName);
+  const stdHoursTierTransferCountDeltaMap = computeStdHoursTierTransferCountDeltaBuckets(stdTransferAdjustRecords, allData.employees, fulltimePartTimeRowsByName);
+  const stdHoursTierTransferAlerts = collectStdHoursTierTransferAlerts(stdTransferAdjustRecords, allData.employees, fulltimePartTimeRowsByName);
+
+  // lowerCountBySite（既存、変更しない）は、振替あり時にcomputeTransferAdjustments()が
+  // 生成する拠点間振替の「応援」仮想従業員（isTransferVirtual）も実人数としてカウント
+  // してしまう（fulltimeCountBySite/parttimeCountBySiteは既にisTransferVirtualを除外
+  // 済みだが、lowerCountBySiteの元になっているcountBySiteFor()は除外していないため）。
+  // そのままlowerCountBySiteに今回の人数デルタを重ねると、拠点間振替の振替先で
+  // 人数が二重にカウントされてしまうため、'lower'段の人数デルタ適用のベースラインは、
+  // isTransferVirtualを除外した専用の集計を新設して使う
+  function countBySiteForExclTransferVirtual(empFilter) {
+    return availSites.map(site => commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return null;
+      const n = employees.filter(e =>
+        e.base === site &&
+        e.workType &&
+        empFilter(e) &&
+        !e.isTransferVirtual &&
+        divs.some(div => {
+          const cls = div === '栽培' ? 'wt-栽培' : div === '配送' ? 'wt-配送' : 'wt-出荷';
+          return workTypeClass(e.workType) === cls;
+        }) &&
+        e.hours[mi] !== null
+      ).length;
+      return n > 0 ? n : null;
+    }));
+  }
+  const lowerCountBySiteExclTransferVirtual = countBySiteForExclTransferVirtual(e => !isPartTime(e));
+
+  function applyStdHoursTierTransferDelta(bySite, tier) {
+    if (!transferMode) return bySite;
+    return availSites.map((site, si) => commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return bySite[si][mi];
+      const ym = monthLabelToYm(normalizedCommonMonths[mi]);
+      const deltaTotal = divs.reduce((s, div) => s + (stdHoursTierTransferDeltaMap.get(`${site}|${div}|${tier}|${ym}`) || 0), 0);
+      if (deltaTotal === 0) return bySite[si][mi];
+      const base = bySite[si][mi];
+      const result = base == null ? deltaTotal : base + deltaTotal;
+      return Math.round(result * 10) / 10;
+    }));
+  }
+  function applyStdHoursTierTransferCountDelta(bySite, tier) {
+    if (!transferMode) return bySite;
+    return availSites.map((site, si) => commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return bySite[si][mi];
+      const ym = monthLabelToYm(normalizedCommonMonths[mi]);
+      const deltaTotal = divs.reduce((s, div) => s + (stdHoursTierTransferCountDeltaMap.get(`${site}|${div}|${tier}|${ym}`) || 0), 0);
+      if (deltaTotal === 0) return bySite[si][mi];
+      const result = Math.max(0, (bySite[si][mi] || 0) + deltaTotal);
+      return result > 0 ? result : null;
+    }));
+  }
+  const lowerStdHoursBySiteAdjusted = applyStdHoursTierTransferDelta(lowerStdHoursBySite, 'lower');
+  const fulltimeStdHoursBySiteAdjusted = applyStdHoursTierTransferDelta(fulltimeStdHoursBySite, 'fulltime');
+  const parttimeStdHoursBySiteAdjusted = applyStdHoursTierTransferDelta(parttimeStdHoursBySite, 'parttime');
+  const lowerCountBySiteAdjusted = applyStdHoursTierTransferCountDelta(lowerCountBySiteExclTransferVirtual, 'lower');
+  const fulltimeCountBySiteAdjusted = applyStdHoursTierTransferCountDelta(fulltimeCountBySite, 'fulltime');
+  const parttimeCountBySiteAdjusted = applyStdHoursTierTransferCountDelta(parttimeCountBySite, 'parttime');
+  const perPersonStdHoursBySiteAdjusted = availSites.map((_, si) => commonMonths.map((_, mi) => {
+    const total = (lowerStdHoursBySiteAdjusted[si][mi] || 0) + (fulltimeStdHoursBySiteAdjusted[si][mi] || 0) + (parttimeStdHoursBySiteAdjusted[si][mi] || 0);
+    return toPerPerson(total > 0 ? total : null, si, mi);
+  }));
+
   main.innerHTML = `
     <div class="compare-shell">
       <div class="compare-header-row">
@@ -8221,6 +8437,7 @@ function renderCompareSiteCharts(prodData) {
         <div class="schart-header">実績工数（拠点別、人数）</div>
         ${chartWrapHtml('comparesite-count', commonMonths.length, { heightPx: 400, inlineHeight: true })}
       </div>` : `
+      <div id="comparesite-stdhours-alerts"></div>
       <div class="schart-section">
         <div class="schart-header">標準労働時間（拠点別、雇用形態別・一人当たり）</div>
         ${chartWrapHtml('comparesite-stdhours', commonMonths.length, { heightPx: 400, inlineHeight: true })}
@@ -8585,6 +8802,8 @@ function renderCompareSiteCharts(prodData) {
     const stdHoursCtx = document.getElementById('comparesite-stdhours')?.getContext('2d');
     if (!stdHoursCtx) return;
 
+    renderCompareSiteStdHoursAlerts(stdHoursTierTransferAlerts);
+
     // 拠点ごとに4個（下段バー／アルバイト・フルタイムバー／アルバイト・パートタイム
     // バー／一人当たり折れ線）、合計12個のデータセットを拠点順に4個ずつ並べる
     // （datasetIndex = site*4 + offset）
@@ -8596,40 +8815,40 @@ function renderCompareSiteCharts(prodData) {
       const lowerBg = siteColor + 'CC', lowerBorder = siteColor;
       stdHoursDatasets.push({
         label: site,
-        data: lowerStdHoursBySite[si],
+        data: lowerStdHoursBySiteAdjusted[si],
         backgroundColor: lowerBg,
         borderColor: lowerBorder,
         borderWidth: 1,
         stack: site,
         barThickness: 22,
         order: 2,
-        _site: site, _empSegment: 'lower', _countBySite: lowerCountBySite[si],
+        _site: site, _empSegment: 'lower', _countBySite: lowerCountBySiteAdjusted[si],
         _origBg: lowerBg, _origBorder: lowerBorder,
       });
       const fulltimeBg = siteColor + '99', fulltimeBorder = siteColor;
       stdHoursDatasets.push({
         label: `${site}(アルバイト・フルタイム)`,
-        data: fulltimeStdHoursBySite[si],
+        data: fulltimeStdHoursBySiteAdjusted[si],
         backgroundColor: fulltimeBg,
         borderColor: fulltimeBorder,
         borderWidth: 1,
         stack: site,
         barThickness: 22,
         order: 2,
-        _site: site, _empSegment: 'fulltime', _countBySite: fulltimeCountBySite[si],
+        _site: site, _empSegment: 'fulltime', _countBySite: fulltimeCountBySiteAdjusted[si],
         _origBg: fulltimeBg, _origBorder: fulltimeBorder,
       });
       const parttimeBg = siteColor + '4D', parttimeBorder = siteColor;
       stdHoursDatasets.push({
         label: `${site}(アルバイト・パートタイム)`,
-        data: parttimeStdHoursBySite[si],
+        data: parttimeStdHoursBySiteAdjusted[si],
         backgroundColor: parttimeBg,
         borderColor: parttimeBorder,
         borderWidth: 1,
         stack: site,
         barThickness: 22,
         order: 2,
-        _site: site, _empSegment: 'parttime', _countBySite: parttimeCountBySite[si],
+        _site: site, _empSegment: 'parttime', _countBySite: parttimeCountBySiteAdjusted[si],
         _origBg: parttimeBg, _origBorder: parttimeBorder,
       });
       // 一人当たり標準労働時間（折れ線、右側の第2軸）。棒の再センタリング防止の
@@ -8637,7 +8856,7 @@ function renderCompareSiteCharts(prodData) {
       // ため、非表示にしてもchart.setDatasetVisibility()を使って構わない）
       stdHoursDatasets.push({
         type: 'line', label: `${site}（一人当たり）`,
-        data: perPersonStdHoursBySite[si],
+        data: perPersonStdHoursBySiteAdjusted[si],
         yAxisID: 'y1',
         borderColor: siteColor,
         backgroundColor: siteColor,
