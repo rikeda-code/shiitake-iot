@@ -8378,6 +8378,11 @@ function renderCompareSiteCharts(prodData) {
     }));
   }
   const lowerCountBySiteExclTransferVirtual = countBySiteForExclTransferVirtual(e => !isPartTime(e));
+  // 「人数」タブのアルバイト（upper）実績棒にも、拠点間振替の「応援」仮想従業員が
+  // employment（雇用形態）をそのまま引き継ぐため、本人がアルバイトの場合は同様の
+  // 二重カウントが起こる。lowerCountBySiteExclTransferVirtualと同じ理由で
+  // isTransferVirtualを除外した専用の集計を使う
+  const upperCountBySiteExclTransferVirtual = countBySiteForExclTransferVirtual(e => isPartTime(e));
 
   function applyStdHoursTierTransferDelta(bySite, tier) {
     if (!transferMode) return bySite;
@@ -8412,6 +8417,27 @@ function renderCompareSiteCharts(prodData) {
     const total = (lowerStdHoursBySiteAdjusted[si][mi] || 0) + (fulltimeStdHoursBySiteAdjusted[si][mi] || 0) + (parttimeStdHoursBySiteAdjusted[si][mi] || 0);
     return toPerPerson(total > 0 ? total : null, si, mi);
   }));
+
+  // 「人数」タブ専用：実績棒（社員+実習生／アルバイト、2段）に工数振替の人数
+  // デルタを反映する。lowerCountBySite・upperCountBySite本体は変更せず、別配列
+  // （*Adjusted）を作る。lower段はstdHoursTierTransferCountDeltaMapの'lower'
+  // ティア分をそのまま使う（「標準労働時間」タブのlowerCountBySiteAdjustedと
+  // 完全に同じ値のため、そのまま再利用する）。upper段は「標準労働時間」タブと
+  // 異なりフルタイム/パートタイムを区別しないため、'fulltime'・'parttime'
+  // 両ティアの人数デルタを合算して適用する
+  function applyStdHoursTierTransferCountDeltaMulti(bySite, tiers) {
+    if (!transferMode) return bySite;
+    return availSites.map((site, si) => commonMonths.map((_, mi) => {
+      if (mi >= originalCount) return bySite[si][mi];
+      const ym = monthLabelToYm(normalizedCommonMonths[mi]);
+      const deltaTotal = tiers.reduce((tSum, tier) =>
+        tSum + divs.reduce((s, div) => s + (stdHoursTierTransferCountDeltaMap.get(`${site}|${div}|${tier}|${ym}`) || 0), 0), 0);
+      if (deltaTotal === 0) return bySite[si][mi];
+      const result = Math.max(0, (bySite[si][mi] || 0) + deltaTotal);
+      return result > 0 ? result : null;
+    }));
+  }
+  const upperCountBySiteAdjusted = applyStdHoursTierTransferCountDeltaMulti(upperCountBySiteExclTransferVirtual, ['fulltime', 'parttime']);
 
   main.innerHTML = `
     <div class="compare-shell">
@@ -8640,7 +8666,7 @@ function renderCompareSiteCharts(prodData) {
       const lowerBg = siteColor + '99', lowerBorder = siteColor;
       countDatasets.push({
         label: site,
-        data: lowerCountBySite[si],
+        data: lowerCountBySiteAdjusted[si],
         backgroundColor: lowerBg,
         borderColor: lowerBorder,
         borderWidth: 1,
@@ -8653,7 +8679,7 @@ function renderCompareSiteCharts(prodData) {
       const upperBg = siteColor + '4D', upperBorder = siteColor;
       countDatasets.push({
         label: `${site}(アルバイト)`,
-        data: upperCountBySite[si],
+        data: upperCountBySiteAdjusted[si],
         backgroundColor: upperBg,
         borderColor: upperBorder,
         borderWidth: 1,
