@@ -1553,12 +1553,10 @@ function resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePart
     byName.get(key).push(e);
   });
 
+  // 過去月向けのため、B列（現在のステータス）は見ずに単純合算する
+  // （valueForNameAndMonth()と同じ考え方。PR #332での修正漏れだった）
   function tierValueFor(rows, ym, field) {
-    return rows.reduce((sum, r) => {
-      if (r.activeFlag === 1) return sum + (r[field] || 0);
-      if (r.activeFlag === 2 && r.startYm != null && ym >= r.startYm) return sum + (r[field] || 0);
-      return sum;
-    }, 0);
+    return rows.reduce((sum, r) => sum + (r[field] || 0), 0);
   }
 
   const results = [];
