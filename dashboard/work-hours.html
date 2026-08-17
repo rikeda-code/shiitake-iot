@@ -1386,7 +1386,9 @@ function parseAdjustRecords(json) {
     const ym   = parseGvizDateYm(cells[ADJ_YM_COL]);
     const hours = parseDuration(cells[ADJ_HOURS_COL]) || 0;
 
-    records.push({ rowNum: i + 1, rawName, base, prj, role, ym, hours });
+    // headers=3でシート実際の1〜3行目がヘッダーとして除外されるため、rows配列の
+    // インデックス0は実際のシートの4行目に対応する（i+1ではなくi+4が実際の行番号）
+    records.push({ rowNum: i + 4, rawName, base, prj, role, ym, hours });
   });
   return records;
 }
