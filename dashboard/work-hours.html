@@ -3342,14 +3342,14 @@ function computePastYearHoursSummaryBar(months) {
 }
 
 // stdHoursMergeData（3拠点マージ、H列＝名前・R列＝標準労働時間）から、正規化した
-// 氏名をキーとする標準労働時間のMapを作る。B列＝1（稼働フラグ）の行のみを対象とする
-// （B=2の新規要員行は整理済み_M側にまだ実績が無く、computeStdHoursLine()の
-// hours[mi] !== null判定で元々対象外のため含めない）。同名の行が複数あれば合算する
+// 氏名をキーとする標準労働時間のMapを作る。過去月の実績集計専用のため、B列
+// （現在のステータス）は見ない（B列は未来月の集計＝threeSiteMergeAgg()等でのみ
+// 意味を持つ。B=2の新規要員行は整理済み_M側にまだ実績が無く、computeStdHoursLine()の
+// hours[mi] !== null判定で元々対象外になる）。同名の行が複数あれば合算する
 function threeSiteMergeStdHoursByName() {
   const map = new Map();
   if (!stdHoursMergeData) return map;
   stdHoursMergeData.rows.forEach(r => {
-    if (r.activeFlag !== 1) return;
     const key = normalizeName(r.name);
     map.set(key, (map.get(key) || 0) + r.stdHours);
   });
@@ -4459,7 +4459,6 @@ function parseThreeSiteMergeSheet(json) {
     if (div !== '栽培' && div !== '出荷' && div !== '配送') return;
     if (!name) return;
     const activeFlag = cellNumber(row, THREE_SITE_MERGE_ACTIVE_FLAG_COL);
-    if (activeFlag !== 1 && activeFlag !== 2) return; // B列が1・2以外は集計対象外
     const employment = cellText(row, THREE_SITE_MERGE_EMP_COL); // C列（雇用区分）
     const stdHoursRaw = cellNumber(row, stdColIdx);
     const stdHours = stdHoursRaw ?? 0; // R列が空の行も0として成立させる
@@ -8243,29 +8242,25 @@ function renderCompareSiteCharts(prodData) {
   const upperStdHoursBySite = stdHoursBySiteFor(e => isPartTime(e));
 
   // 「標準労働時間」タブの棒：アルバイト段をフルタイム／パートタイムに細分化する。
-  // 3拠点マージのM列（フルタイム）・Q列（パートタイム）を対象に、B=1（稼働中）または
-  // B=2＋I列（開始月）以降を対象にする。既存のthreeSiteMergeStdHoursByName()（R列版、
-  // B=1のみ）は今回のスコープ外のため変更しない。月ごとの判定が必要なため、氏名→値の
-  // フラットなMapではなく、氏名→行配列のMapと、月（ym）を渡して値を計算する関数に分ける
+  // 3拠点マージのM列（フルタイム）・Q列（パートタイム）を対象にする。過去月の実績
+  // 集計専用のため、B列（現在のステータス）は見ない。月ごとの判定が必要なため、
+  // 氏名→値のフラットなMapではなく、氏名→行配列のMapと、月（ym）を渡して値を計算する
+  // 関数に分ける
   function buildFulltimePartTimeRowsByName() {
     const map = new Map();
     if (!stdHoursMergeData) return map;
     stdHoursMergeData.rows.forEach(r => {
-      if (r.activeFlag !== 1 && r.activeFlag !== 2) return;
       const key = normalizeName(r.name);
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(r);
     });
     return map;
   }
+  // 過去月向けのため、B列（現在のステータス）は見ずに単純合算する
   function valueForNameAndMonth(rowsByName, name, ym, field) {
     const rows = rowsByName.get(normalizeName(name));
     if (!rows) return 0;
-    return rows.reduce((sum, r) => {
-      if (r.activeFlag === 1) return sum + (r[field] || 0);
-      if (r.activeFlag === 2 && r.startYm != null && ym >= r.startYm) return sum + (r[field] || 0);
-      return sum;
-    }, 0);
+    return rows.reduce((sum, r) => sum + (r[field] || 0), 0);
   }
   function monthToYm(month) {
     const [y, m] = month.split('/').map(Number);
@@ -9134,7 +9129,11 @@ function renderDecPlanContent(planData, mergeData) {
   // そのまま反映する）
   function overtimeH(site) {
     if (!mergeData) return null;
-    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
+    // B=1（既存人員）・B=2（新規要員候補）のみを対象とする。parseThreeSiteMergeSheet()の
+    // 入口フィルタ撤廃（過去月集計の不具合修正）によりB列が1・2以外の行もmergeData.rows
+    // に含まれるようになったため、この未来月（DECPLAN_TARGET_YM）向けの集計では従来通りの
+    // 対象範囲を維持するために明示的にフィルタする
+    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && (r.activeFlag === 1 || r.activeFlag === 2) && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
     if (!siteRows.length) return null;
     let total = 0;
     siteRows.forEach(r => {
@@ -9147,8 +9146,9 @@ function renderDecPlanContent(planData, mergeData) {
   // ④残業見込み人数：DECPLAN_TARGET_YM列 > R列 の人数 per site
   function overtimeN(site) {
     if (!mergeData) return null;
+    // overtimeH()と同じ理由でB=1・B=2のみを対象とする
     return mergeData.rows.filter(r =>
-      r.site === site && !r.stdHoursOriginallyEmpty && typeof r.maxByYm[DECPLAN_TARGET_YM] === 'number' && r.maxByYm[DECPLAN_TARGET_YM] > r.stdHours
+      r.site === site && (r.activeFlag === 1 || r.activeFlag === 2) && !r.stdHoursOriginallyEmpty && typeof r.maxByYm[DECPLAN_TARGET_YM] === 'number' && r.maxByYm[DECPLAN_TARGET_YM] > r.stdHours
     ).length || null;
   }
 
