@@ -6445,9 +6445,15 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
   // 月の数値比較用ヘルパー（renderSiteView内で共用）
   const mnum = m => { const [y, mo] = m.split('/').map(Number); return y * 100 + mo; };
-  const ACTUAL_CUTOFF = mnum('2026/6');
-  const HEADCOUNT_CUTOFF = mnum('2026/5'); // 人数実績は2026/5まで
-  const BASE_MONTH = '2026/5';
+  // 実績の境界・予想の基礎データは、整理済み_Mの実データ最終月（毎月新しい列が
+  // 追加されるため自動的に最新化される）から動的に算出する。以前はHEADCOUNT_CUTOFF
+  // をACTUAL_CUTOFFより1ヶ月前にしていた（人数データの1ヶ月遅れに対する安全マージン）
+  // が、これは廃止し3つとも同じ最新月を指す
+  const realMonths = getRealMonths();
+  const LATEST_REAL_MONTH = normalizeMonth(realMonths[realMonths.length - 1]);
+  const ACTUAL_CUTOFF = mnum(LATEST_REAL_MONTH);
+  const HEADCOUNT_CUTOFF = mnum(LATEST_REAL_MONTH);
+  const BASE_MONTH = LATEST_REAL_MONTH;
 
   // 拠点ごとの標準工数合計・実績・予想データを構築。filterDivsを渡すと、業務区分
   // チェックボックス（roleTypeFilter）駆動の対象div配列で絞り込む（拠点サマリの
@@ -6495,12 +6501,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       forecastData['パート'][mi] = Math.max(0, Math.round((std - emp - tech) * 10) / 10);
     });
 
-    // 人数データ（実績: 〜2026/5、予想: 2026/7〜）
+    // 人数データ（実績: 〜最新実データ月、予想: 最新実データ月の翌月〜）
     const allActualCount = {};
     EMP_SERIES.forEach(et => { allActualCount[et.label] = headcountByEmpForPlanMonths(site, et.match, filterDivs); });
     const baseCount = {};
     EMP_SERIES.forEach(et => { baseCount[et.label] = baseIdx >= 0 ? (allActualCount[et.label][baseIdx] ?? 0) : 0; });
-    // 2026/5時点のパート1人当たり工数
+    // 最新実データ月（BASE_MONTH）時点のパート1人当たり工数
     const partHourPerPerson = baseCount['パート'] > 0 ? (baseH['パート'] / baseCount['パート']) : null;
     const actualCountData = {}, forecastCountData = {};
     EMP_SERIES.forEach(et => {
@@ -6508,7 +6514,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         mnum(m) <= HEADCOUNT_CUTOFF ? allActualCount[et.label][mi] : null
       );
       forecastCountData[et.label] = planMonths.map((m, mi) => {
-        if (mnum(m) <= ACTUAL_CUTOFF) return null; // 2026/6は空白
+        if (mnum(m) <= ACTUAL_CUTOFF) return null;
         if (et.label === '社員') return baseCount['社員'];
         if (et.label === '技能実習生') return baseCount['技能実習生'] + Math.round(techIncrement(m) / 180);
         if (et.label === 'パート') {
