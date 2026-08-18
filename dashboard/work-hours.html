@@ -6349,9 +6349,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 常にfulltimeと判定されてしまう）。アルバイトなのにM列・Q列とも0または
   // 空欄の行は、「比較（3拠点）」タブと同じ方針（判定できない行はスキップし、
   // アラートで知らせる）に合わせてnullを返す。呼び出し側（
-  // threeSiteMergeStdHoursByNameForTier()・threeSiteMergeAggByTier()）は
-  // tierForMergeRow(r) === tierという一致判定のため、nullは自動的にどの
-  // ティアにも一致せず除外される（3ティアの合計は、判定不能な行の分だけ
+  // threeSiteMergeAggByTier()・computeStdHoursLineForDivSiteByTier()内の
+  // findMergeRow()経由）は tierForMergeRow(r) === tierという一致判定のため、
+  // nullは自動的にどのティアにも一致せず除外される（3ティアの合計は、判定不能な行の分だけ
   // 変更前の合計より少なくなる。collectStdHoursTierAlertsForMerge()で
   // 検知してアラート表示する）
   function tierForMergeRow(r) {
@@ -6376,32 +6376,15 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return alerts;
   }
 
-  // threeSiteMergeStdHoursByName()のティア版（ローカル）：氏名→R列合計のMapを、
-  // 該当ティアの行だけを対象に作る
-  function threeSiteMergeStdHoursByNameForTier(tier) {
-    const map = new Map();
-    if (!mergeData) return map;
-    mergeData.rows.forEach(r => {
-      if (tierForMergeRow(r) !== tier) return;
-      const key = normalizeName(r.name);
-      map.set(key, (map.get(key) || 0) + r.stdHours);
-    });
-    return map;
-  }
-
-  // computeStdHoursLine()のティア版（ローカル）
-  function computeStdHoursLineForTier(emps, months, tier) {
-    const stdHoursByName = threeSiteMergeStdHoursByNameForTier(tier);
-    return months.map((_, mi) => {
-      const vals = emps
-        .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
-        .map(e => stdHoursByName.get(normalizeName(e.name)) ?? 0);
-      return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
-    });
-  }
-
   // computeStdHoursLineForDivSite()のティア版（ローカル）：過去月（実績確定月）の
-  // ティア別標準労働時間
+  // ティア別標準労働時間。
+  // 氏名だけで標準労働時間シート側と名寄せすると、同一人物が雇用区分の変更等で
+  // 複数行（社員としての行・アルバイトとしての行）を持つ場合、両方のティアの
+  // マップに同時にヒットして二重計上されてしまう。整理済み_M側は雇用区分(C)・
+  // 拠点(D)・業務区分(F)が異なれば同一人物でも別レコードとして共存するため、
+  // 「その月・その拠点・その業務区分で実績があった整理済み_Mのレコード」は
+  // 既に一意に定まっている。このレコード自身が持つ雇用区分(e.employment)を
+  // 使ってティアを判定することで、二重計上を防ぐ
   function computeStdHoursLineForDivSiteByTier(div, site, months, tier) {
     const { employees, months: activeMonths } = getActiveData();
     const typeFilter = div === '栽培'
@@ -6418,7 +6401,38 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           return ami >= 0 ? e.hours[ami] : null;
         }),
       }));
-    return computeStdHoursLineForTier(emps, months, tier);
+
+    // 従業員自身の拠点(e.base)・業務区分(div)・氏名で、標準労働時間シート側の
+    // 対応行を検索する。雇用区分が「アルバイトかどうか」で候補を絞り込むことで、
+    // 雇用区分変更前後で標準労働時間シートに複数行（社員としての行・アルバイト
+    // としての行）が残っている場合でも、e.employmentと矛盾する行（例：現在は
+    // 社員なのにアルバイト行がヒットしてしまう）を拾わないようにする（複数行
+    // ヒットする場合は最初に見つかった行を採用する。同一雇用区分内での複数行
+    // 問題は今回の対象外）
+    const findMergeRow = e => {
+      if (!mergeData) return null;
+      const key = normalizeName(e.name);
+      const wantsPartTime = (e.employment || '').includes('アルバイト');
+      return mergeData.rows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
+        && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+    };
+
+    return months.map((_, mi) => {
+      const vals = emps
+        .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
+        .map(e => {
+          const row = findMergeRow(e);
+          // 社員・技能実習生はlower固定。アルバイトは整理済み_M側にフル/パートの
+          // 区別が無いため、標準労働時間シート側のM列/Q列（tierForMergeRow()）で
+          // 判定する
+          const empTier = (e.employment || '').includes('アルバイト')
+            ? (row ? tierForMergeRow(row) : null)
+            : 'lower';
+          return empTier === tier ? (row ? row.stdHours : 0) : null;
+        })
+        .filter(v => v !== null);
+      return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
+    });
   }
 
   // threeSiteMergeAgg()のティア版：同じB=1/B=2集計ロジックを踏襲しつつ、各行を
