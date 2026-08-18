@@ -142,6 +142,7 @@
     #summary-transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
     #comparesite-stdhours-alerts .transfer-alert-box { margin: 0; }
+    #plancmp2-sitealerts .transfer-alert-box { margin: 0; }
     .transfer-alert-box {
       margin: 16px 32px 0;
       background: rgba(250,204,21,0.08);
@@ -1720,6 +1721,26 @@ function renderCompareSiteStdHoursAlerts(alerts) {
       <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
         <span class="transfer-alert-toggle-icon">${icon}</span>
         <span>⚠ 工数振替アラート（標準労働時間タブ、${alerts.length}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
+// 「予実＞比較（繁忙期見込み）＞拠点・業務別」タブ専用のアラート（既存の
+// renderCompareSiteStdHoursAlerts()と同じ見た目・アコーディオン挙動）。
+// 3拠点マージシートの行がtierForMergeRow()で判定できなかった場合に表示する
+function renderPlanCompareStdHoursTierAlerts(alerts) {
+  const target = document.getElementById('plancmp2-sitealerts');
+  if (!target) return;
+  if (!alerts || !alerts.length) { target.innerHTML = ''; return; }
+
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ 標準労働時間シートの判定エラー（${alerts.length}件）</span>
       </div>
       <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
     </div>`;
@@ -6310,6 +6331,167 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return threeSiteMergeMonthlyValue(agg, divsForPast, site, mi);
   }
 
+  // ────────────────────────────────────────────────────────────────────
+  // 「拠点・業務別」（renderSiteView）専用：標準労働時間棒を、社員+実習生／
+  // アルバイト・フルタイム／アルバイト・パートタイムの3ティアに分けて表示する
+  // ための一式。threeSiteMergeAgg()・threeSiteMergeStdHoursDatasets()・
+  // computeStdHoursLineForDivSite()自体は変更せず、別関数として新設する。
+  // 値の集計元は、過去月・未来月とも既存と同じR列（stdHours）のままとし、
+  // 各行をどのティアに振り分けるかだけを変える（3ティアの合計が常に変更前の
+  // 単一系列の合計と一致するようにするため）
+  // ────────────────────────────────────────────────────────────────────
+
+  // 3拠点マージの1行を、雇用区分（C列）・M列（フルタイム）・Q列（パートタイム）
+  // からティアに振り分ける。「比較（3拠点）＞標準労働時間」タブの
+  // buildFulltimePartTimeRowsByName()と同じ判定方法（M列に値があればfulltime、
+  // Q列に値があればparttime）を踏襲する。アルバイトなのにM列・Q列とも値が
+  // 無い行は、「比較（3拠点）」タブと同じ方針（判定できない行はスキップし、
+  // アラートで知らせる）に合わせてnullを返す。呼び出し側（
+  // threeSiteMergeStdHoursByNameForTier()・threeSiteMergeAggByTier()）は
+  // tierForMergeRow(r) === tierという一致判定のため、nullは自動的にどの
+  // ティアにも一致せず除外される（3ティアの合計は、判定不能な行の分だけ
+  // 変更前の合計より少なくなる。collectStdHoursTierAlertsForMerge()で
+  // 検知してアラート表示する）
+  function tierForMergeRow(r) {
+    if (!(r.employment || '').includes('アルバイト')) return 'lower';
+    if (r.fulltimeHours != null) return 'fulltime';
+    if (r.parttimeHours != null) return 'parttime';
+    return null;
+  }
+
+  // 現在表示中のチャート（対象拠点・対象業務区分）に関係する行のうち、
+  // tierForMergeRow()で判定できなかった行を収集してアラート文言を作る。
+  // site=nullの場合は拠点を絞り込まない（全拠点合計表示向け）
+  function collectStdHoursTierAlertsForMerge(targetDivs, site) {
+    if (!mergeData) return [];
+    const alerts = [];
+    mergeData.rows.forEach(r => {
+      if (!targetDivs.includes(r.div)) return;
+      if (site != null && r.site !== site) return;
+      if (tierForMergeRow(r) !== null) return;
+      alerts.push(`雇用形態の判定ができません：標準労働時間シートの${r.name}さん（拠点：${r.site}、業務区分：${r.div}）はアルバイトですが、フルタイム/パートタイムのどちらにも該当しません`);
+    });
+    return alerts;
+  }
+
+  // threeSiteMergeStdHoursByName()のティア版（ローカル）：氏名→R列合計のMapを、
+  // 該当ティアの行だけを対象に作る
+  function threeSiteMergeStdHoursByNameForTier(tier) {
+    const map = new Map();
+    if (!mergeData) return map;
+    mergeData.rows.forEach(r => {
+      if (tierForMergeRow(r) !== tier) return;
+      const key = normalizeName(r.name);
+      map.set(key, (map.get(key) || 0) + r.stdHours);
+    });
+    return map;
+  }
+
+  // computeStdHoursLine()のティア版（ローカル）
+  function computeStdHoursLineForTier(emps, months, tier) {
+    const stdHoursByName = threeSiteMergeStdHoursByNameForTier(tier);
+    return months.map((_, mi) => {
+      const vals = emps
+        .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
+        .map(e => stdHoursByName.get(normalizeName(e.name)) ?? 0);
+      return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
+    });
+  }
+
+  // computeStdHoursLineForDivSite()のティア版（ローカル）：過去月（実績確定月）の
+  // ティア別標準労働時間
+  function computeStdHoursLineForDivSiteByTier(div, site, months, tier) {
+    const { employees, months: activeMonths } = getActiveData();
+    const typeFilter = div === '栽培'
+      ? wt => workTypeClass(wt) === 'wt-栽培'
+      : div === '配送'
+        ? wt => workTypeClass(wt) === 'wt-配送'
+        : wt => workTypeClass(wt) === 'wt-出荷';
+    const emps = employees
+      .filter(e => typeFilter(e.workType) && (site == null || e.base === site))
+      .map(e => ({
+        ...e,
+        hours: months.map(planMonth => {
+          const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+          return ami >= 0 ? e.hours[ami] : null;
+        }),
+      }));
+    return computeStdHoursLineForTier(emps, months, tier);
+  }
+
+  // threeSiteMergeAgg()のティア版：同じB=1/B=2集計ロジックを踏襲しつつ、各行を
+  // tierForMergeRow()でティア分けし、{ lower, fulltime, parttime }（各々
+  // { stdTotalB1, newStaffByYm, deltaByYm }形式、該当行が無ければnull）を返す
+  function threeSiteMergeAggByTier(div, site) {
+    if (!mergeData) return null;
+    const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
+    const result = {};
+    ['lower', 'fulltime', 'parttime'].forEach(tier => {
+      const tierMatch = r => baseMatch(r) && tierForMergeRow(r) === tier;
+      const matched = mergeData.rows.filter(r => tierMatch(r) && isThreeSiteMergeActiveFlag(r.activeFlag));
+      const newStaffMatched = mergeData.rows.filter(r => tierMatch(r) && isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      if (!matched.length && !newStaffMatched.length) { result[tier] = null; return; }
+      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      const newStaffByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
+        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      });
+      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+      result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+    });
+    return result;
+  }
+
+  // threeSiteMergeMonthlyValue()のティア版：aggByTier（threeSiteMergeAggByTier()の
+  // 戻り値）の指定ティア分について、月miの実効値を返す。過去月は
+  // computeStdHoursLineForDivSiteByTier()（整理済み_Mの実測値、ティアで絞り込み）、
+  // 未来月はstdTotalB1+newStaffByYm+deltaByYmの合計（threeSiteMergeStdHoursDatasets()
+  // のように新規要員・増減を別バーに分けず、ティアごとに1本のバーへまとめる）
+  function threeSiteMergeMonthlyValueByTier(aggByTier, divsForPast, site, mi, tier) {
+    const ym = mnum(planMonths[mi]);
+    if (ym <= ACTUAL_CUTOFF) {
+      return divsForPast.reduce((s, div) => {
+        const v = computeStdHoursLineForDivSiteByTier(div, site, planMonths, tier)[mi];
+        return s + (v !== null ? v : 0);
+      }, 0);
+    }
+    const tierAgg = aggByTier ? aggByTier[tier] : null;
+    if (!tierAgg) return 0;
+    const newStaff = tierAgg.newStaffByYm[ym];
+    const delta = tierAgg.deltaByYm[ym];
+    const total = tierAgg.stdTotalB1
+      + (typeof newStaff === 'number' ? newStaff : 0)
+      + (typeof delta === 'number' ? delta : 0);
+    return Math.round(total * 10) / 10;
+  }
+
+  // threeSiteMergeStdHoursDatasets()のティア版：標準労働時間棒を「社員+実習生／
+  // アルバイト・フルタイム／アルバイト・パートタイム」の3系列（それぞれ独立した
+  // 積み上げ色）で返す。新規要員・増減の内訳バーには分けず、各ティア1本の
+  // バーに過去/未来を問わずまとめて表示する（既存のthreeSiteMergeStdHoursDatasets()
+  // は青／黄／緑の3バーだが、こちらは3ティアの3バーに置き換える設計のため）
+  function threeSiteMergeStdHoursDatasetsByTier(aggByTier, divsForPast, site, opts) {
+    opts = opts || {};
+    if (!aggByTier) return [];
+    const stack = opts.stack || 'stdhours';
+    const suffix = opts.labelSuffix || '';
+    // 「比較（3拠点）＞標準労働時間」タブと同じ配色パターン（同系色の濃淡3段階）。
+    // 実績棒（赤系）・予定標準工数棒（TASK_COLORS、赤〜橙〜黄系）と衝突しない
+    // 青系を採用する
+    const baseColor = opts.color || '#60a5fa';
+    const tierDefs = [
+      { tier: 'lower', label: `社員+実習生${suffix}`, opacity: 'CC' },
+      { tier: 'fulltime', label: `アルバイト・フルタイム${suffix}`, opacity: '99' },
+      { tier: 'parttime', label: `アルバイト・パートタイム${suffix}`, opacity: '4D' },
+    ];
+    return tierDefs.map(({ tier, label, opacity }) => ({
+      type: 'bar', label, data: planMonths.map((_, mi) => threeSiteMergeMonthlyValueByTier(aggByTier, divsForPast, site, mi, tier)),
+      backgroundColor: baseColor + opacity, borderColor: baseColor, borderWidth: 0,
+      stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHoursTier: tier,
+    }));
+  }
+
   // 拠点サマリモード用：栽培・出荷（・配送）それぞれのthreeSiteMergeAgg()の結果を、
   // div区別なく1つの集計にまとめる（stdTotalB1・newStaffByYm・deltaByYmとも両div分の合計）
   function mergeThreeSiteMergeAggAcrossDivs(aggs) {
@@ -6663,7 +6845,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const content = document.getElementById('compare2-content');
     const vm = visMonths();
 
-    let html = '';
+    let html = '<div id="plancmp2-sitealerts"></div>';
 
     if (planCmpSiteTab === '全拠点合計') {
       divs.forEach(div => {
@@ -6683,6 +6865,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     }
 
     content.innerHTML = html;
+
+    // 標準労働時間棒（3ティア）の判定エラー（雇用形態の判定不能）を、現在表示中の
+    // 拠点・業務区分に関係する行だけに絞ってアラート表示する
+    renderPlanCompareStdHoursTierAlerts(
+      collectStdHoursTierAlertsForMerge(divs, planCmpSiteTab === '全拠点合計' ? null : planCmpSiteTab)
+    );
 
     if (planCmpSiteTab === '全拠点合計') {
       // 全拠点合計: 栽培・出荷チャート（3拠点集計）
@@ -6718,8 +6906,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const stdMonthlyTotalsAll = planMonths.map((_, mi) => taskData.reduce((s, d) => s + (d[mi] || 0), 0));
         const allAgg = threeSiteMergeAgg(div, null);
         // 実績棒（左）は未来月も空欄のまま（本来の実績のみ）とし、標準労働時間棒
-        // （中央・新規）を過去/未来問わず全ての月に表示する（栽培・出荷共通）
-        const stdHoursDs = threeSiteMergeStdHoursDatasets(allAgg, [div], null, { stack: 'stdhours' });
+        // （中央・新規）を過去/未来問わず全ての月に表示する（栽培・出荷共通）。
+        // 標準労働時間棒自体は社員+実習生／アルバイト・フルタイム／アルバイト・
+        // パートタイムの3ティアで表示する（軸MAX算出用のstdHoursTotalsは、
+        // 3ティアの合計＝allAgg由来の値と一致するため、従来通りallAggのまま）
+        const allAggByTier = threeSiteMergeAggByTier(div, null);
+        const stdHoursDs = threeSiteMergeStdHoursDatasetsByTier(allAggByTier, [div], null, { stack: 'stdhours' });
         const stdHoursTotals = planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(allAgg, [div], null, mi));
         const allYValues = [
           ...sl(allActualH).filter(v => v !== null),
@@ -6824,8 +7016,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           stack: 'actual', yAxisID: 'y', order: 1,
         });
         // 実績棒（左）は未来月も空欄のままとし、標準労働時間棒（中央・新規）を
-        // 過去/未来問わず全ての月に表示する（この拠点分のみ、栽培・出荷共通）
-        threeSiteMergeStdHoursDatasets(threeSiteMergeAgg(div, site), [div], site, { stack: 'stdhours' })
+        // 過去/未来問わず全ての月に表示する（この拠点分のみ、栽培・出荷共通）。
+        // 社員+実習生／アルバイト・フルタイム／アルバイト・パートタイムの
+        // 3ティアで表示する
+        threeSiteMergeStdHoursDatasetsByTier(threeSiteMergeAggByTier(div, site), [div], site, { stack: 'stdhours' })
           .forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
         divRows.forEach((r, ri) => {
           const fullData = planMonths.map((_, mi) => {
