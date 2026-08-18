@@ -6342,10 +6342,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // ────────────────────────────────────────────────────────────────────
 
   // 3拠点マージの1行を、雇用区分（C列）・M列（フルタイム）・Q列（パートタイム）
-  // からティアに振り分ける。「比較（3拠点）＞標準労働時間」タブの
-  // buildFulltimePartTimeRowsByName()と同じ判定方法（M列に値があればfulltime、
-  // Q列に値があればparttime）を踏襲する。アルバイトなのにM列・Q列とも値が
-  // 無い行は、「比較（3拠点）」タブと同じ方針（判定できない行はスキップし、
+  // からティアに振り分ける。実データでは「フルタイムの人はQ列に明示的に0が、
+  // パートタイムの人はM列に明示的に0が入る」記録形式のため、値の有無ではなく
+  // 実際に正の値があるかどうか（> 0）で判定する必要がある（!= nullで判定すると
+  // 明示的な0がfulltimeHours側に入っている全員が、parttimeHoursの値に関わらず
+  // 常にfulltimeと判定されてしまう）。アルバイトなのにM列・Q列とも0または
+  // 空欄の行は、「比較（3拠点）」タブと同じ方針（判定できない行はスキップし、
   // アラートで知らせる）に合わせてnullを返す。呼び出し側（
   // threeSiteMergeStdHoursByNameForTier()・threeSiteMergeAggByTier()）は
   // tierForMergeRow(r) === tierという一致判定のため、nullは自動的にどの
@@ -6354,8 +6356,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 検知してアラート表示する）
   function tierForMergeRow(r) {
     if (!(r.employment || '').includes('アルバイト')) return 'lower';
-    if (r.fulltimeHours != null) return 'fulltime';
-    if (r.parttimeHours != null) return 'parttime';
+    if (r.fulltimeHours > 0) return 'fulltime';
+    if (r.parttimeHours > 0) return 'parttime';
     return null;
   }
 
