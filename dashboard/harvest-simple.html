@@ -6407,9 +6407,9 @@ function renderSavedTab() {
 
   const quickMemoHtml = `
     <div style="margin-bottom:16px">
-      <textarea id="saved-quick-memo" oninput="savedQuickMemoInput('${activeCol.id}',this.value)"
+      <textarea id="saved-quick-memo" oninput="savedQuickMemoInput('${activeCol.id}',this.value);savedAutoGrowTextarea(this)"
         placeholder="このコレクションのひとことメモ(100字程度)"
-        style="width:100%;min-height:44px;max-height:100px;background:#1a1d27;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.9rem;line-height:1.5;resize:vertical;font-family:inherit"
+        style="width:100%;min-height:44px;background:#1a1d27;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.9rem;line-height:1.5;resize:none;overflow-y:hidden;font-family:inherit"
       >${savedEscapeForTextarea(savedEnsureNotes(activeCol).quickMemo)}</textarea>
     </div>`;
 
