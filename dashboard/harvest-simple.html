@@ -5508,7 +5508,10 @@ function analysisSaveBtnHtml(key) {
   return `<button onclick="event.stopPropagation();analysisSaveChart('${key}')" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>`;
 }
 
-// 分析タブの各グラフ用「保存」ボタンの入口。表示中のitems/lotColorMapをそのまま凍結してコレクション選択モーダルを開く
+// 分析タブの各グラフ用「保存」ボタンの入口。表示中のitems/lotColorMapをそのまま凍結してコレクション選択モーダルを開く。
+// 日付範囲(analysisDateRange)・サイズ選択(analysisDateSize/analysisParetoSize)・相関軸(analysisCorrX/Y)は
+// items自体には含まれないグローバルなフィルタ状態のため、これも一緒に凍結しないと、保存後に分析タブ側で
+// フィルタを変えるたびに保存済みグラフの見た目まで連動して変わってしまう(savedBuildChartConfigで復元して使う)
 function analysisSaveChart(key) {
   if (!analysisZoomState) return;
   const cfg = ANALYSIS_CHART_CONFIGS[key];
@@ -5519,6 +5522,13 @@ function analysisSaveChart(key) {
     title: cfg.title,
     items: JSON.parse(JSON.stringify(analysisZoomState.items)),
     lotColorMap: JSON.parse(JSON.stringify(analysisZoomState.lotColorMap)),
+    filterState: {
+      dateRange: { ...analysisDateRange },
+      dateSize: analysisDateSize,
+      paretoSize: analysisParetoSize,
+      corrX: analysisCorrX,
+      corrY: analysisCorrY,
+    },
   });
 }
 
@@ -6077,6 +6087,13 @@ function savedSetActiveCollection(id) {
   renderSavedTab();
 }
 
+// グローバル変数を一時的にnewValueへ差し替え、元の値に戻すための関数を返す(newValueがundefinedなら何もしない)
+function swapGlobal(getter, setter, newValue) {
+  const prev = getter();
+  if (newValue !== undefined) setter(newValue);
+  return () => setter(prev);
+}
+
 // 保存済みスナップショットからChart.js設定を再構築する。kindごとに既存のビルダー関数をそのまま再利用する
 function savedBuildChartConfig(chart) {
   if (chart.kind === 'analysis') {
@@ -6085,7 +6102,22 @@ function savedBuildChartConfig(chart) {
     const lotColorMap = chart.lotColorMap || {};
     const lotColors = chart.items.map(c => analysisLotColorFor(lotColorMap, c.lot));
     const lotTickColor = ctx => lotColors[ctx.index] || '#8892a4';
-    return cfg.build(chart.items, lotColors, lotTickColor);
+
+    // 日付範囲・サイズ選択・相関軸は分析タブのグローバルなフィルタ状態を参照して構築されるため、
+    // 保存時点の値に一時的に差し替えてから作図し、必ず元に戻す(戻し忘れると分析タブ側が壊れる)
+    const fs = chart.filterState;
+    const restore = fs ? [
+      swapGlobal(() => analysisDateRange, v => analysisDateRange = v, { ...fs.dateRange }),
+      swapGlobal(() => analysisDateSize, v => analysisDateSize = v, fs.dateSize),
+      swapGlobal(() => analysisParetoSize, v => analysisParetoSize = v, fs.paretoSize),
+      swapGlobal(() => analysisCorrX, v => analysisCorrX = v, fs.corrX),
+      swapGlobal(() => analysisCorrY, v => analysisCorrY = v, fs.corrY),
+    ] : [];
+    try {
+      return cfg.build(chart.items, lotColors, lotTickColor);
+    } finally {
+      restore.forEach(fn => fn());
+    }
   }
   if (chart.kind === 'temp') {
     return tempChartConfig(chart.items, true);
