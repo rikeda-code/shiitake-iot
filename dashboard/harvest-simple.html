@@ -6111,30 +6111,41 @@ function weeklyReviveContainers(items) {
 }
 
 // ── 分析メモ ────────────────────────────────────────────────────────────
-// コレクションごとに、①現状整理・傾向 ②分析内容(1〜5) ③対応策(1〜5)を書き込める欄を持たせる
-const SAVED_NOTE_SUMMARY_FIELDS = [
+// コレクションごとに、①トピックス ②現状 ③要因 ④対応(各1〜5枚)を書き込める欄を持たせる
+// (2026/8/20MTGでの構成変更: 旧①現状整理・傾向/②分析内容/③対応策のカード形式から移行)
+const SAVED_NOTE_LEGACY_SUMMARY_FIELDS = [
   { key: 'harvest', label: '収穫量' },
   { key: 'temp', label: '温度' },
   { key: 'weight', label: '菌床重量' },
   { key: 'mekaki', label: '芽かき重量' },
   { key: 'packRate', label: 'パック品率' },
 ];
+const SAVED_NOTE_SECTIONS = [
+  { key: 'topics', title: '① トピックス欄' },
+  { key: 'current', title: '② 現状欄' },
+  { key: 'causes', title: '③ 要因欄' },
+  { key: 'actions', title: '④ 対応欄' },
+];
 
 function savedEnsureNotes(col) {
   if (!col.notes) {
-    col.notes = {
-      quickMemo: '',
-      summary: Object.fromEntries(SAVED_NOTE_SUMMARY_FIELDS.map(f => [f.key, ''])),
-      analysis: ['', '', '', '', ''],
-      actions: ['', '', '', '', ''],
-    };
+    col.notes = { quickMemo: '' };
   }
-  // 共有で読み込んだコレクション等、フィールドが一部欠けている場合を補う
-  if (col.notes.quickMemo == null) col.notes.quickMemo = '';
-  SAVED_NOTE_SUMMARY_FIELDS.forEach(f => { if (col.notes.summary[f.key] == null) col.notes.summary[f.key] = ''; });
-  if (!Array.isArray(col.notes.analysis)) col.notes.analysis = ['', '', '', '', ''];
-  if (!Array.isArray(col.notes.actions)) col.notes.actions = ['', '', '', '', ''];
-  return col.notes;
+  const notes = col.notes;
+  if (notes.quickMemo == null) notes.quickMemo = '';
+  // 旧形式(summaryは固定ラベルのオブジェクト、analysisは「分析内容」)からの移行:
+  // 既存の記入内容を失わないよう、新しい配列形式に一度だけ値を引き継ぐ
+  if (!Array.isArray(notes.current)) {
+    notes.current = notes.summary
+      ? SAVED_NOTE_LEGACY_SUMMARY_FIELDS.map(f => notes.summary[f.key] || '')
+      : ['', '', '', '', ''];
+  }
+  if (!Array.isArray(notes.causes)) {
+    notes.causes = Array.isArray(notes.analysis) ? notes.analysis.slice(0, 5) : ['', '', '', '', ''];
+  }
+  if (!Array.isArray(notes.topics)) notes.topics = ['', '', '', '', ''];
+  if (!Array.isArray(notes.actions)) notes.actions = ['', '', '', '', ''];
+  return notes;
 }
 
 // textareaの初期値としてinnerHTMLに埋め込むため、タグとして解釈されうる文字をエスケープする
@@ -6149,15 +6160,14 @@ function savedNoteInput(collectionId, section, key, value) {
   const col = savedCollections.find(c => c.id === collectionId);
   if (!col) return;
   const notes = savedEnsureNotes(col);
-  if (section === 'summary') notes.summary[key] = value;
-  else notes[section][key] = value;
+  notes[section][key] = value;
   clearTimeout(savedNotesSaveTimer);
   savedNotesSaveTimer = setTimeout(() => {
     if (!savedCollectionsPersist()) savedToast('メモの保存に失敗しました(ブラウザの保存容量が上限です)');
   }, 500);
 }
 
-// 保存グラフ欄の一番上に置く、コレクション単位のひとことサマリー欄(①〜③の詳細な分析メモとは別枠)
+// 保存グラフ欄の一番上に置く、コレクション単位のひとことサマリー欄(下の詳細な分析メモとは別枠)
 let savedQuickMemoSaveTimer = null;
 function savedQuickMemoInput(collectionId, value) {
   const col = savedCollections.find(c => c.id === collectionId);
@@ -6181,33 +6191,22 @@ function savedNotesHtml(col) {
   const taStyle = 'width:100%;min-height:64px;background:#0f1117;border:1px solid #2e3148;border-radius:8px;color:#e2e8f0;padding:8px 10px;font-size:0.95rem;line-height:1.5;resize:none;overflow-y:hidden;font-family:inherit';
   const gridStyle = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px';
 
-  const summaryHtml = SAVED_NOTE_SUMMARY_FIELDS.map(f => `
-    <div style="${cardStyle}">
-      <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${f.label}</div>
-      <textarea oninput="savedNoteInput('${col.id}','summary','${f.key}',this.value);savedAutoGrowTextarea(this)" style="${taStyle}">${savedEscapeForTextarea(notes.summary[f.key])}</textarea>
-    </div>`).join('');
-
   const numberedHtml = (arr, section) => arr.map((v, i) => `
     <div style="${cardStyle}">
       <div style="font-size:0.85rem;color:#cbd5e1;font-weight:600;margin-bottom:6px">${i + 1}</div>
       <textarea oninput="savedNoteInput('${col.id}','${section}',${i},this.value);savedAutoGrowTextarea(this)" style="${taStyle}">${savedEscapeForTextarea(v)}</textarea>
     </div>`).join('');
 
+  const sectionsHtml = SAVED_NOTE_SECTIONS.map((s, i) => `
+    <div style="${i < SAVED_NOTE_SECTIONS.length - 1 ? 'margin-bottom:16px' : ''}">
+      <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">${s.title}</div>
+      <div style="${gridStyle}">${numberedHtml(notes[s.key], s.key)}</div>
+    </div>`).join('');
+
   return `
     <div style="background:#13151f;border-radius:12px;padding:16px;margin-bottom:16px">
       <div style="color:#cbd5e1;font-size:0.9rem;font-weight:700;margin-bottom:12px">分析メモ</div>
-      <div style="margin-bottom:16px">
-        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">① 現状整理・傾向</div>
-        <div style="${gridStyle}">${summaryHtml}</div>
-      </div>
-      <div style="margin-bottom:16px">
-        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">② 分析内容</div>
-        <div style="${gridStyle}">${numberedHtml(notes.analysis, 'analysis')}</div>
-      </div>
-      <div>
-        <div style="color:#94a3b8;font-size:0.82rem;font-weight:600;margin-bottom:8px">③ 対応策</div>
-        <div style="${gridStyle}">${numberedHtml(notes.actions, 'actions')}</div>
-      </div>
+      ${sectionsHtml}
     </div>`;
 }
 
@@ -6581,12 +6580,10 @@ async function savedExportCollectionPdf(collectionId) {
 
     const notes = savedEnsureNotes(col);
     addTextBlock('分析メモ', { fontSize: 15, fontWeight: 'bold' });
-    addTextBlock('① 現状整理・傾向', { fontSize: 12, fontWeight: 'bold' });
-    SAVED_NOTE_SUMMARY_FIELDS.forEach(f => addTextBlock(`${f.label}: ${notes.summary[f.key] || '(未記入)'}`, { fontSize: 10 }));
-    addTextBlock('② 分析内容', { fontSize: 12, fontWeight: 'bold' });
-    notes.analysis.forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
-    addTextBlock('③ 対応策', { fontSize: 12, fontWeight: 'bold' });
-    notes.actions.forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
+    SAVED_NOTE_SECTIONS.forEach(s => {
+      addTextBlock(s.title, { fontSize: 12, fontWeight: 'bold' });
+      notes[s.key].forEach((v, i) => addTextBlock(`${i + 1}. ${v || '(未記入)'}`, { fontSize: 10 }));
+    });
 
     pdf.save(`${savedSafeFilename(col.name)}.pdf`);
   } catch (e) {
