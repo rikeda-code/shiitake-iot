@@ -1531,19 +1531,34 @@ function computeStdTransferDeltaBuckets(adjustRecords, employees) {
   return deltaMap;
 }
 
+// stdHoursMergeData（3拠点マージ）から、従業員1人分のオブジェクトeに対応する行を、
+// 拠点(e.base)・業務区分(div)・氏名・雇用区分（アルバイトか否か）で検索する。
+// 氏名だけで名寄せすると、同一人物が雇用区分変更・異動等で標準労働時間シート上に
+// 複数行を持つ場合に本来無関係な行の値まで拾ってしまう可能性があるため。
+// computeStdHoursLine()向けに新設したfindStdHoursMergeRowForEmployee()と同じ
+// 考え方だが、そちらのブランチがまだmainにマージされていないため、このタスク
+// （比較（3拠点）＞標準労働時間タブ側）は独立してrevertできるよう、あえて別関数
+// として自己完結で新設する。複数行ヒットする場合は最初に見つかった行を採用する
+// （同一雇用区分内での複数行問題は今回の対象外）
+function findFulltimePartTimeRowForEmployee(div, e) {
+  if (!stdHoursMergeData) return null;
+  const key = normalizeName(e.name);
+  const wantsPartTime = (e.employment || '').includes('アルバイト');
+  return stdHoursMergeData.rows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
+    && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+}
+
 // 「標準労働時間」タブ（社員+実習生／アルバイト・フルタイム／アルバイト・
 // パートタイムの3段積み上げ）用：整理済み_増減シートの各行を、拠点×業務区分×
 // 段（雇用形態ティア：'lower'/'fulltime'/'parttime'）×月のバケット適用情報に
 // 解決する共通ヘルパー。段は振替の前後で変わらない（本人自身の分類のまま）。
 // 時間デルタ・人数デルタの計算、およびアラート収集で共有する。
-// fulltimePartTimeRowsByNameは、renderCompareSiteCharts()内の
-// buildFulltimePartTimeRowsByName()と同じ形式（氏名→3拠点マージ行配列）のMap。
 // 戻り値の各要素は、解決できた場合 { rec, ok:true, emp, empDivClass, tier, destDivClass }
 // （destDivClassはD=Eの場合null）、解決できない場合
 // { rec, ok:false, reason, emp? }（reasonは'ambiguous'/'div-unresolvable'/'tier-unresolvable'。
 // 氏名が整理済み_Mで一件も見つからない場合は、既存のcomputeStdTransferDeltaBuckets()と
 // 同様に無警告でスキップする＝配列に含めない）
-function resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName) {
+function resolveStdHoursTierAdjustRecords(adjustRecords, employees) {
   const divLabel = wt => workTypeClass(wt).replace(/^wt-/, '');
   const isPartTimeEmp = e => (e.employment || '').includes('アルバイト');
 
@@ -1554,10 +1569,12 @@ function resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePart
     byName.get(key).push(e);
   });
 
-  // 過去月向けのため、B列（現在のステータス）は見ずに単純合算する
-  // （valueForNameAndMonth()と同じ考え方。PR #332での修正漏れだった）
-  function tierValueFor(rows, ym, field) {
-    return rows.reduce((sum, r) => sum + (r[field] || 0), 0);
+  // 拠点・業務区分・氏名・雇用区分が一致する標準労働時間シート側の行を
+  // findFulltimePartTimeRowForEmployee()で特定し、その行のfield値を返す
+  // （見つからない場合は0）
+  function tierValueFor(emp, div, field) {
+    const row = findFulltimePartTimeRowForEmployee(div, emp);
+    return row ? (row[field] || 0) : 0;
   }
 
   const results = [];
@@ -1587,9 +1604,8 @@ function resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePart
     if (!isPartTimeEmp(emp)) {
       tier = 'lower';
     } else {
-      const rows = fulltimePartTimeRowsByName.get(normalizeName(emp.name)) || [];
-      const fulltimeVal = tierValueFor(rows, rec.ym, 'fulltimeHours');
-      const parttimeVal = tierValueFor(rows, rec.ym, 'parttimeHours');
+      const fulltimeVal = tierValueFor(emp, empDivClass, 'fulltimeHours');
+      const parttimeVal = tierValueFor(emp, empDivClass, 'parttimeHours');
       if (fulltimeVal > 0) tier = 'fulltime';
       else if (parttimeVal > 0) tier = 'parttime';
       else {
@@ -1607,10 +1623,10 @@ function resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePart
 }
 
 // 時間デルタ版：戻り値はMap<"拠点|業務区分|段|YYYYMM", 時間>
-function computeStdHoursTierTransferDeltaBuckets(adjustRecords, employees, fulltimePartTimeRowsByName) {
+function computeStdHoursTierTransferDeltaBuckets(adjustRecords, employees) {
   const deltaMap = new Map();
   const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
-  resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName)
+  resolveStdHoursTierAdjustRecords(adjustRecords, employees)
     .filter(r => r.ok)
     .forEach(({ rec, empDivClass, tier, destDivClass }) => {
       addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -rec.hours);
@@ -1622,10 +1638,10 @@ function computeStdHoursTierTransferDeltaBuckets(adjustRecords, employees, fullt
 }
 
 // 人数デルタ版：時間量に関わらず常に±1。戻り値はMap<"拠点|業務区分|段|YYYYMM", 人数差分>
-function computeStdHoursTierTransferCountDeltaBuckets(adjustRecords, employees, fulltimePartTimeRowsByName) {
+function computeStdHoursTierTransferCountDeltaBuckets(adjustRecords, employees) {
   const deltaMap = new Map();
   const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
-  resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName)
+  resolveStdHoursTierAdjustRecords(adjustRecords, employees)
     .filter(r => r.ok)
     .forEach(({ rec, empDivClass, tier, destDivClass }) => {
       addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -1);
@@ -1638,9 +1654,9 @@ function computeStdHoursTierTransferCountDeltaBuckets(adjustRecords, employees, 
 
 // 「標準労働時間」タブの振替アラート（業務区分判定不能・フルタイム/パートタイム
 // 判定不能・同姓同名特定不可）を、既存の工数振替アラートと同じ文言スタイルで生成する
-function collectStdHoursTierTransferAlerts(adjustRecords, employees, fulltimePartTimeRowsByName) {
+function collectStdHoursTierTransferAlerts(adjustRecords, employees) {
   const alerts = [];
-  resolveStdHoursTierAdjustRecords(adjustRecords, employees, fulltimePartTimeRowsByName)
+  resolveStdHoursTierAdjustRecords(adjustRecords, employees)
     .filter(r => !r.ok)
     .forEach(({ rec, reason, emp }) => {
       if (reason === 'ambiguous') {
@@ -8457,48 +8473,32 @@ function renderCompareSiteCharts(prodData) {
 
   // 「標準労働時間」タブの棒：アルバイト段をフルタイム／パートタイムに細分化する。
   // 3拠点マージのM列（フルタイム）・Q列（パートタイム）を対象にする。過去月の実績
-  // 集計専用のため、B列（現在のステータス）は見ない。月ごとの判定が必要なため、
-  // 氏名→値のフラットなMapではなく、氏名→行配列のMapと、月（ym）を渡して値を計算する
-  // 関数に分ける
-  function buildFulltimePartTimeRowsByName() {
-    const map = new Map();
-    if (!stdHoursMergeData) return map;
-    stdHoursMergeData.rows.forEach(r => {
-      const key = normalizeName(r.name);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(r);
-    });
-    return map;
-  }
-  // 過去月向けのため、B列（現在のステータス）は見ずに単純合算する
-  function valueForNameAndMonth(rowsByName, name, ym, field) {
-    const rows = rowsByName.get(normalizeName(name));
-    if (!rows) return 0;
-    return rows.reduce((sum, r) => sum + (r[field] || 0), 0);
-  }
-  function monthToYm(month) {
-    const [y, m] = month.split('/').map(Number);
-    return y * 100 + m;
-  }
-  // computeStdHoursLine()と同じ集計ロジックだが、参照するマップ（氏名→行配列）と
-  // 月ごとのB=2判定に対応させた汎用版（既存のcomputeStdHoursLine()自体は変更しない）
-  function computeStdHoursLineByMap(emps, months, rowsByName, field) {
-    return months.map((month, mi) => {
-      const ym = monthToYm(month);
+  // 集計専用のため、B列（現在のステータス）は見ない。対応行は氏名だけでなく拠点・
+  // 業務区分・雇用区分（アルバイトか否か）が一致するものをfindFulltimePartTimeRowForEmployee()
+  // で特定する（同一人物が標準労働時間シート上に複数行を持つ場合の誤集計を防ぐため）
+  // computeStdHoursLine()と同じ集計ロジックだが、参照するdiv（業務区分）に
+  // 対応させた汎用版（既存のcomputeStdHoursLine()自体は変更しない）
+  function computeStdHoursLineByMap(emps, months, div, field) {
+    return months.map((_, mi) => {
       const vals = emps
         .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
-        .map(e => valueForNameAndMonth(rowsByName, e.name, ym, field));
+        .map(e => {
+          const row = findFulltimePartTimeRowForEmployee(div, e);
+          return row ? (row[field] || 0) : 0;
+        });
       if (!vals.length) return null;
       return Math.round(vals.reduce((s, v) => s + v, 0) * 10) / 10;
     });
   }
   // 同じ対象従業員のうち、該当月に実際に値（0より大きい）を持つ人数だけを数える
-  function computeStdHoursCountByMap(emps, months, rowsByName, field) {
-    return months.map((month, mi) => {
-      const ym = monthToYm(month);
+  function computeStdHoursCountByMap(emps, months, div, field) {
+    return months.map((_, mi) => {
       const n = emps
         .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
-        .filter(e => valueForNameAndMonth(rowsByName, e.name, ym, field) > 0)
+        .filter(e => {
+          const row = findFulltimePartTimeRowForEmployee(div, e);
+          return row && row[field] > 0;
+        })
         .length;
       return n > 0 ? n : null;
     });
@@ -8523,29 +8523,28 @@ function renderCompareSiteCharts(prodData) {
         }),
       }));
   }
-  function stdHoursBySiteForMap(rowsByName, field) {
+  function stdHoursBySiteForMap(field) {
     return availSites.map(site => {
-      const perDiv = divs.map(div => computeStdHoursLineByMap(stdHoursEmpsForDivSite(div, site, normalizedCommonMonths, e => isPartTime(e)), normalizedCommonMonths, rowsByName, field));
+      const perDiv = divs.map(div => computeStdHoursLineByMap(stdHoursEmpsForDivSite(div, site, normalizedCommonMonths, e => isPartTime(e)), normalizedCommonMonths, div, field));
       return commonMonths.map((_, mi) => {
         const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
         return total > 0 ? Math.round(total * 10) / 10 : null;
       });
     });
   }
-  function stdHoursCountBySiteForMap(rowsByName, field) {
+  function stdHoursCountBySiteForMap(field) {
     return availSites.map(site => {
-      const perDiv = divs.map(div => computeStdHoursCountByMap(stdHoursEmpsForDivSite(div, site, normalizedCommonMonths, e => isPartTime(e)), normalizedCommonMonths, rowsByName, field));
+      const perDiv = divs.map(div => computeStdHoursCountByMap(stdHoursEmpsForDivSite(div, site, normalizedCommonMonths, e => isPartTime(e)), normalizedCommonMonths, div, field));
       return commonMonths.map((_, mi) => {
         const total = perDiv.reduce((s, arr) => s + (arr[mi] || 0), 0);
         return total > 0 ? total : null;
       });
     });
   }
-  const fulltimePartTimeRowsByName = buildFulltimePartTimeRowsByName();
-  const fulltimeStdHoursBySite = stdHoursBySiteForMap(fulltimePartTimeRowsByName, 'fulltimeHours');
-  const parttimeStdHoursBySite = stdHoursBySiteForMap(fulltimePartTimeRowsByName, 'parttimeHours');
-  const fulltimeCountBySite = stdHoursCountBySiteForMap(fulltimePartTimeRowsByName, 'fulltimeHours');
-  const parttimeCountBySite = stdHoursCountBySiteForMap(fulltimePartTimeRowsByName, 'parttimeHours');
+  const fulltimeStdHoursBySite = stdHoursBySiteForMap('fulltimeHours');
+  const parttimeStdHoursBySite = stdHoursBySiteForMap('parttimeHours');
+  const fulltimeCountBySite = stdHoursCountBySiteForMap('fulltimeHours');
+  const parttimeCountBySite = stdHoursCountBySiteForMap('parttimeHours');
 
   // 「標準労働時間」ビュー用の折れ線：標準労働時間（下段+上段合計）を実績人数
   // （下段+上段合計）で割った「一人当たりの時間」
@@ -8565,9 +8564,9 @@ function renderCompareSiteCharts(prodData) {
   // lowerStdHoursBySite等・lowerCountBySite等の本体は「時間」「人数」タブや
   // 一人当たり折れ線の分母からも参照されるため変更せず、このタブの棒・セグメント内
   // 人数表示・ツールチップ・一人当たり折れ線の分子専用の別配列（*Adjusted）を作る
-  const stdHoursTierTransferDeltaMap = computeStdHoursTierTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees, fulltimePartTimeRowsByName);
-  const stdHoursTierTransferCountDeltaMap = computeStdHoursTierTransferCountDeltaBuckets(stdTransferAdjustRecords, allData.employees, fulltimePartTimeRowsByName);
-  const stdHoursTierTransferAlerts = collectStdHoursTierTransferAlerts(stdTransferAdjustRecords, allData.employees, fulltimePartTimeRowsByName);
+  const stdHoursTierTransferDeltaMap = computeStdHoursTierTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+  const stdHoursTierTransferCountDeltaMap = computeStdHoursTierTransferCountDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+  const stdHoursTierTransferAlerts = collectStdHoursTierTransferAlerts(stdTransferAdjustRecords, allData.employees);
 
   // lowerCountBySite（既存、変更しない）は、振替あり時にcomputeTransferAdjustments()が
   // 生成する拠点間振替の「応援」仮想従業員（isTransferVirtual）も実人数としてカウント
