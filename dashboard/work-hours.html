@@ -1531,6 +1531,49 @@ function computeStdTransferDeltaBuckets(adjustRecords, employees) {
   return deltaMap;
 }
 
+// 「勤務実績＞サマリー＞標準労働時間」画面用：computeStdTransferDeltaBuckets()と
+// ほぼ同じ実装（氏名でのマッチング、同姓同名時の解決ロジックも同様）だが、
+// サマリー画面は拠点×4区分（ROLE_TYPES＝栽培/出荷/配送・栽培/配送・出荷）で
+// セクションを分けて表示するため、業務区分をworkTypeClass()で3区分（栽培/出荷/配送）
+// に丸めず、emp.workType／rec.role（整理済み_増減シートF列）の生値（4区分）を
+// そのままバケットキーに使う。戻り値はcomputeStdTransferDeltaBuckets()と同じ
+// Map<"拠点|業務区分|YYYYMM", 時間>
+function computeStdHoursSiteTransferDeltaBuckets(adjustRecords, employees) {
+  const deltaMap = new Map();
+  const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
+
+  const byName = new Map();
+  employees.forEach(e => {
+    const key = normalizeName(e.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(e);
+  });
+
+  adjustRecords.forEach(rec => {
+    let matches = byName.get(normalizeName(rec.rawName));
+    if (!matches || matches.length === 0) return;
+    if (matches.length > 1) {
+      // 同姓同名で複数件ヒットする場合は、振替対象月（rec.ym）に実績がある方を優先する
+      const monthIdx = allData.monthYms.indexOf(rec.ym);
+      const withHoursThisMonth = monthIdx >= 0
+        ? matches.filter(e => e.hours[monthIdx] !== null)
+        : [];
+      if (withHoursThisMonth.length === 1) matches = withHoursThisMonth;
+    }
+    if (matches.length !== 1) return; // 特定できない場合はスキップ
+    const emp = matches[0];
+
+    if (!emp.workType) return;
+    addDelta(`${rec.base}|${emp.workType}|${rec.ym}`, -rec.hours);
+
+    if (rec.base !== rec.prj && rec.role) {
+      addDelta(`${rec.prj}|${rec.role}|${rec.ym}`, rec.hours);
+    }
+  });
+
+  return deltaMap;
+}
+
 // stdHoursMergeData（3拠点マージ）から、従業員1人分のオブジェクトeに対応する行を、
 // 拠点(e.base)・業務区分(div)・氏名・雇用区分（アルバイトか否か）で検索する。
 // 氏名だけで名寄せすると、同一人物が雇用区分変更・異動等で標準労働時間シート上に
@@ -3987,6 +4030,22 @@ function renderStdHoursSiteView() {
   // 変更できない）とは独立に、ここで表示用の順序を決める
   const SITE_VIEW_BAR_ORDER = ['previous', 'current'];
 
+  // 標準労働時間の折れ線（黄色）に、画面上部の「振替あり／振替なし」トグルを
+  // 反映する。比較（3拠点）タブのapplyStdTransferDelta()と同じガード方式
+  // （振替なしの場合は元の値のまま）を踏襲する
+  const stdHoursSiteTransferDeltaMap = computeStdHoursSiteTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+  function applyStdHoursSiteTransferDelta(lineData, site, wt) {
+    if (!transferMode) return lineData;
+    return months.map((month, mi) => {
+      const ym = monthLabelToYm(month);
+      const delta = ym == null ? 0 : (stdHoursSiteTransferDeltaMap.get(`${site}|${wt}|${ym}`) || 0);
+      if (delta === 0) return lineData[mi];
+      const base = lineData[mi];
+      const result = base == null ? delta : base + delta;
+      return Math.round(result * 10) / 10;
+    });
+  }
+
   const roleMax = {};
   const dataBySiteRole = {};
   visibleRoleTypes.forEach(wt => {
@@ -4004,7 +4063,7 @@ function renderStdHoursSiteView() {
           excludeFromFooterTotal: s.key !== 'current',
         };
       });
-      const lineData = computeStdHoursLine(emps, months);
+      const lineData = applyStdHoursSiteTransferDelta(computeStdHoursLine(emps, months), site, wt);
       stacksForRole.push(maxMonthlyAcross(months, barDatasets), lineData);
       dataBySiteRole[`${site}|${wt}`] = { barDatasets, lineData };
     });
@@ -4061,8 +4120,23 @@ function renderStdHoursSummaryView() {
   };
   const barDatasets = [previousDataset, ...siteBarDatasets];
 
+  // 標準労働時間の折れ線（黄色）に、画面上部の「振替あり／振替なし」トグルを
+  // 反映する。拠点サマリは全拠点・全業務区分合算の1本の折れ線のため、
+  // activeSites × ROLE_TYPES（4区分）の組み合わせすべてのデルタを合算する
+  // （同一拠点内・active同士の振替は正負が相殺され実質変化しないはずだが、
+  // 計算はROLE_TYPES全区分を回して行う）
+  const stdHoursSiteTransferDeltaMap = computeStdHoursSiteTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
   const allEmps = employees.filter(e => e.workType && stdHoursRoleVisible(e));
-  const lineData = computeStdHoursLine(allEmps, months);
+  const rawLineData = computeStdHoursLine(allEmps, months);
+  const lineData = !transferMode ? rawLineData : months.map((month, mi) => {
+    const ym = monthLabelToYm(month);
+    const deltaTotal = ym == null ? 0 : activeSites.reduce((s, site) =>
+      s + ROLE_TYPES.reduce((s2, wt) => s2 + (stdHoursSiteTransferDeltaMap.get(`${site}|${wt}|${ym}`) || 0), 0), 0);
+    if (deltaTotal === 0) return rawLineData[mi];
+    const base = rawLineData[mi];
+    const result = base == null ? deltaTotal : base + deltaTotal;
+    return Math.round(result * 10) / 10;
+  });
 
   const sharedMax = computeSharedAxisMax([stackedMonthlyTotals(months, siteBarDatasets), lineData, previousData], 100, 1.1);
 
