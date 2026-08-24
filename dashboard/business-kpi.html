@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>事業部KPIダッシュボード</title>
+<meta name="theme-color" content="#0f1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="事業部KPI">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2e3148;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+    min-height: 100vh;
+  }
+
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+  header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
+  header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+  #last-updated { font-size: 0.8rem; color: var(--muted); }
+  #refresh-btn {
+    background: var(--border); border: none; color: var(--text);
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    transition: background 0.2s;
+  }
+  #refresh-btn:hover { background: #3a3f5c; }
+
+  .sample-banner {
+    margin: 14px 32px 0;
+    background: rgba(96,165,250,0.08);
+    border: 1px solid rgba(96,165,250,0.25);
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .sample-banner strong { color: #93c5fd; }
+
+  /* ── Top tabs (metric group) ── */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    background: var(--surface);
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .tab-btn {
+    padding: 12px 24px;
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 0.9rem; font-weight: 500;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-bottom-color: #60a5fa; }
+
+  main { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; }
+
+  /* ── Location sub-tabs ── */
+  .loc-tabs { display: flex; gap: 4px; }
+  .loc-tab {
+    padding: 7px 18px;
+    border-radius: 6px;
+    font-size: 0.86rem;
+    cursor: pointer;
+    color: var(--muted);
+    border: 1px solid transparent;
+    background: transparent;
+    transition: background 0.12s, color 0.12s;
+  }
+  .loc-tab:hover { color: var(--text); }
+  .loc-tab.active { background: var(--surface); border-color: var(--border); font-weight: 600; }
+
+  .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+  .section-title .sub { color: var(--muted); font-size: 0.78rem; font-weight: 400; margin-left: 8px; }
+
+  /* ── Stat cards ── */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .stat-card .card-label { font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .stat-card .card-value { font-size: 1.5rem; font-weight: 700; margin-top: 8px; }
+  .stat-card .card-value .unit { font-size: 0.72rem; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .stat-card .card-sub { font-size: 0.74rem; color: var(--muted); margin-top: 6px; }
+
+  /* ── Chart / table sections ── */
+  .chart-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .chart-wrap { height: 340px; position: relative; }
+
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  thead th {
+    background: #20232f; padding: 10px 14px; text-align: left;
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  thead th.num { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #20232f; }
+  td { padding: 7px 14px; white-space: nowrap; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; }
+  td.dim { color: var(--muted); }
+
+  @media (max-width: 640px) {
+    header, main { padding: 16px; }
+    .tabs { padding: 0 16px; }
+    .tab-btn { padding: 10px 14px; font-size: 0.82rem; }
+    .chart-wrap { height: 260px; }
+    .sample-banner { margin: 14px 16px 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📊 事業部KPIダッシュボード</h1>
+    <div class="subtitle">売上・出荷・生産KPI ／ いなべ・群馬・南丹・全社合計 ／ 月次</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="render()">↻ 更新</button>
+  </div>
+</header>
+
+<div class="sample-banner">
+  <strong>データ最終反映月：</strong>
+  収穫量・出荷量・出荷額＝2026年7月／菌床仕入本数＝2026年8月／売上＝2026年6月／菌床代＝2026年4月（各元シートへの入力状況により異なります）。
+  それ以降は未入力のため「—」表示です。
+</div>
+
+<div class="tabs" id="top-tabs"></div>
+<main id="main"></main>
+
+<script>
+// ────────────────────────────────────────────────────────────────
+// データ定義
+// ────────────────────────────────────────────────────────────────
+
+const MONTH_LABELS = [
+  '25/1','25/2','25/3','25/4','25/5','25/6','25/7','25/8','25/9','25/10','25/11','25/12',
+  '26/1','26/2','26/3','26/4','26/5','26/6','26/7','26/8',
+];
+const N = MONTH_LABELS.length;
+
+const SITES = [
+  { key: 'inabe',  name: 'いなべ', color: '#38bdf8' },
+  { key: 'gunma',  name: '群馬',   color: '#f97316' },
+  { key: 'nantan', name: '南丹',   color: '#34d399' },
+];
+const TOTAL_SITE = { key: 'total', name: '全社合計', color: '#a78bfa' };
+
+// ── 実績値 ──
+// 収穫量 (kg) — 収穫量シート「中期計画（7月修正)」 いなべ11行目/群馬27行目/南丹43行目, AV列(2025.1)〜
+const HARVEST = {
+  inabe:  [12565.0,13083.0,10519.0,11161.0,14106.8,6917.1,7974.0,9202.0,15652.0,17981.0,20719.0,29626.0, 19941.0,18079.0,14571.0,13764.0,15453.0,15516.7,14387.0,null],
+  gunma:  [11451.0,9556.5,8853.0,8940.2,7751.0,7752.9,5762.0,8153.0,11686.4,13878.0,15607.0,14827.0,    21367.0,13837.0,16281.0,12082.0,13708.0,16308.3,10036.0,null],
+  nantan: [10965.0,10606.0,10965.0,7051.0,10085.4,8011.6,7528.1,8443.0,8356.0,13518.0,13246.0,19404.0,   17186.0,10864.0,12266.0,9044.0,9722.0,11379.8,10658.0,null],
+};
+// 出荷量 (kg) ・出荷額 (円) — 出荷量＆出荷額シート「2026/2025 + 拠点名」タブ B列(出荷量,g→kg換算)/E列(出荷額)
+const SHIPMENT = {
+  inabe:  [11234.93,12128.28,9130.68,8693.36,11275.06,5512.51,5823.75,7596.91,11913.37,15576.84,16585.79,24439.55, 15501.78,16248.34,13623.74,13220.34,13252.29,13650.16,12736.24,null],
+  gunma:  [9807.25,7804.84,7009.85,7524.37,7259.08,5408.6,4062.65,6291.54,8275.95,12508.84,15161.75,16730.57,       18476.72,16252.5,14718.2,12460.8,13040.8,12431.77,10316.63,null],
+  nantan: [8618.63,8984.1,9033.75,6635.26,8567.71,6706.2,5499.87,7388.61,7014.9,11460.19,11234.89,19718.95,         12866.15,12009.55,11056.15,8345.25,8367.1,10067.4,9573.45,null],
+};
+const SHIPMENT_VALUE = {
+  inabe:  [11132798,11530269,8911935,7812855,10076090,5511492,6069812,7700518,12165553,15610663,16565013,25253268, 15692233,16711474,13845602,13971265,13071502,14290350,13289932,null],
+  gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,null],
+  nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,null],
+};
+// 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.10)〜
+const BED_COUNT = {
+  inabe:  [null,null,null,null,null,null,null,null,null, 31541,46440,50115, 22680,12960,23063,14930,25646,26133,18900,28919],
+  gunma:  [null,null,null,null,null,null,null,null,null, 22610,45360,47880, 27720,22680,20160,17640,23930,18900,20160,15120],
+  nantan: [null,null,null,null,null,null,null,null,null, 22502,39418,47834, 19922,11871,20993,12156,13850,18056,20160,15093],
+};
+// 売上 (円) — 売上・菌床代シート「26年度計画①（実績入力用）」 いなべ14行目/群馬(安中)15行目/南丹16行目, Q列(2025.1)〜 実績のみ
+const REVENUE = {
+  inabe:  [10510096,10191882,8742871,7231155,8720873,5162377,5774116,7396001,11146965,15047070,16075945,23960359, 15698105,15986374,13039789,12832284,12526989,12146811,null,null],
+  gunma:  [6896257,6374300,6177660,5606524,5307398,4245882,3625088,5760112,7695618,11534373,13863046,15940866,     16288202,15778578,12586789,11408840,12356300,10713760,null,null],
+  nantan: [8194037,8095650,8377298,5594517,6365436,5246525,4316604,6730172,6880656,10956651,11745408,18952887,     12247781,11413810,9850296,7465095,8592262,9151246,null,null],
+};
+// 菌床代 (円) — 同シート いなべ26行目/群馬(安中)27行目/南丹28行目, Q列(2025.1)〜 実績のみ
+const SUBSTRATE_COST = {
+  inabe:  [5500765,5664620,725410,4784825,4672165,2923785,2899060,5082135,6458858,7196051,10894824,11663781, 5335008,3040416,5353681,3308734,null,null,null,null],
+  gunma:  [5128410,3982230,568890,2275560,2844450,2275560,3271117,3342570,5122461,5304306,10641456,11232648,   6503112,5342148,4737696,4138344,null,null,null,null],
+  nantan: [3428040,5120010,568890,2853910,3386250,2519370,3467520,3742980,4672251,5072346,9116966,11074582,     4628974,2749833,4859239,2771516,null,null,null,null],
+};
+
+function calcSite(siteKey) {
+  const harvest       = HARVEST[siteKey];
+  const shipment      = SHIPMENT[siteKey];
+  const bedCount      = BED_COUNT[siteKey];
+  const shipmentValue = SHIPMENT_VALUE[siteKey];
+  const revenue       = REVENUE[siteKey];
+  const substrateCost = SUBSTRATE_COST[siteKey];
+
+  const yieldRate   = shipment.map((v,i) => (v == null || !harvest[i]) ? null : +(v / harvest[i] * 100).toFixed(1));
+  const unitPrice   = shipment.map((v,i) => (v == null || shipmentValue[i] == null) ? null : Math.round(shipmentValue[i] / v));
+  const costRatio   = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : +(substrateCost[i] / v * 100).toFixed(1));
+  const grossProfit = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : v - substrateCost[i]);
+
+  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit };
+}
+
+const DATA = {};
+SITES.forEach(s => { DATA[s.key] = calcSite(s.key); });
+
+// 全社合計（各配列を月ごとに合算。null月はnull）
+function sumArr(...arrs) {
+  return Array.from({length: N}, (_, i) => {
+    if (arrs.some(a => a[i] == null)) return null;
+    return arrs.reduce((s,a) => s + a[i], 0);
+  });
+}
+DATA.total = {
+  harvest:  sumArr(DATA.inabe.harvest, DATA.gunma.harvest, DATA.nantan.harvest),
+  shipment: sumArr(DATA.inabe.shipment, DATA.gunma.shipment, DATA.nantan.shipment),
+  bedCount: sumArr(DATA.inabe.bedCount, DATA.gunma.bedCount, DATA.nantan.bedCount),
+  shipmentValue: sumArr(DATA.inabe.shipmentValue, DATA.gunma.shipmentValue, DATA.nantan.shipmentValue),
+  revenue:  sumArr(DATA.inabe.revenue, DATA.gunma.revenue, DATA.nantan.revenue),
+  substrateCost: sumArr(DATA.inabe.substrateCost, DATA.gunma.substrateCost, DATA.nantan.substrateCost),
+  grossProfit: sumArr(DATA.inabe.grossProfit, DATA.gunma.grossProfit, DATA.nantan.grossProfit),
+};
+DATA.total.yieldRate = DATA.total.shipment.map((v,i) => v == null ? null : +(v / DATA.total.harvest[i] * 100).toFixed(1));
+DATA.total.unitPrice = DATA.total.shipment.map((v,i) => v == null ? null : Math.round(DATA.total.shipmentValue[i] / v));
+DATA.total.costRatio = DATA.total.revenue.map((v,i) => v == null ? null : +(DATA.total.substrateCost[i] / v * 100).toFixed(1));
+
+const ALL_LOCS = [...SITES, TOTAL_SITE];
+
+// ────────────────────────────────────────────────────────────────
+// メトリクスグループ定義（トップタブ）
+// ────────────────────────────────────────────────────────────────
+// series: key, label, unit, color
+// axis: グラフのY軸('y'=左, 'y2'=右)。type: 'bar'|'line'。chart:false でグラフから除外(カード/表のみ表示)。
+const GROUPS = [
+  {
+    key: 'sales', label: '売上・出荷額',
+    series: [
+      { key: 'revenue',       label: '売上',   unit: '円', color: '#a78bfa', axis: 'y', type: 'bar' },
+      { key: 'shipmentValue', label: '出荷額', unit: '円', color: '#f472b6', axis: 'y', type: 'bar' },
+    ],
+  },
+  {
+    key: 'volume', label: '出荷量・収穫量',
+    series: [
+      { key: 'harvest',  label: '収穫量', unit: 'kg', color: '#34d399', axis: 'y', type: 'bar' },
+      { key: 'shipment', label: '出荷量', unit: 'kg', color: '#60a5fa', axis: 'y', type: 'bar' },
+    ],
+  },
+  {
+    key: 'bed', label: '菌床仕入・菌床代',
+    series: [
+      { key: 'bedCount',      label: '菌床仕入本数', unit: '本', color: '#38bdf8', axis: 'y',  type: 'bar' },
+      { key: 'substrateCost', label: '菌床代',       unit: '円', color: '#fbbf24', axis: 'y2', type: 'line' },
+    ],
+  },
+  {
+    key: 'kpi', label: 'KPI指標',
+    series: [
+      { key: 'yieldRate',   label: '歩留まり率（出荷量/収穫量）', unit: '%',    color: '#60a5fa', axis: 'y',  type: 'bar' },
+      { key: 'costRatio',   label: '菌床原価率（菌床代/売上）',   unit: '%',    color: '#fbbf24', axis: 'y',  type: 'line' },
+      { key: 'grossProfit', label: '粗利（売上-菌床代）',         unit: '円',   color: '#86efac', axis: 'y2', type: 'line' },
+      { key: 'unitPrice',   label: '出荷単価',                   unit: '円/kg', color: '#f472b6', chart: false },
+    ],
+  },
+];
+
+let activeGroup = GROUPS[0].key;
+let activeLoc = { sales: 'total', volume: 'total', bed: 'total', kpi: 'total' };
+
+// ────────────────────────────────────────────────────────────────
+// 描画
+// ────────────────────────────────────────────────────────────────
+const fmt = (n, digits = 0) => n == null ? '—' : n.toLocaleString('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const fmtUnit = (n, unit, digits = 0) => n == null ? '—' : `${fmt(n, digits)} ${unit}`;
+
+function lastValid(arr) {
+  for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return { value: arr[i], idx: i };
+  return { value: null, idx: -1 };
+}
+function sumValid(arr) { return arr.filter(v => v != null).reduce((s,v) => s+v, 0); }
+function avgValid(arr) { const v = arr.filter(v => v != null); return v.length ? sumValid(v) / v.length : null; }
+
+function renderTopTabs() {
+  const el = document.getElementById('top-tabs');
+  el.innerHTML = GROUPS.map(g =>
+    `<button class="tab-btn${g.key===activeGroup?' active':''}" onclick="setGroup('${g.key}')">${g.label}</button>`
+  ).join('');
+}
+
+function setGroup(key) { activeGroup = key; render(); }
+function setLoc(key) { activeLoc[activeGroup] = key; render(); }
+
+let charts = {};
+function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch(e) {} delete charts[id]; } }
+
+function render() {
+  renderTopTabs();
+  const group = GROUPS.find(g => g.key === activeGroup);
+  const loc = activeLoc[activeGroup];
+  const d = DATA[loc];
+
+  const locTabsHtml = `<div class="loc-tabs">${ALL_LOCS.map(l =>
+    `<button class="loc-tab${l.key===loc?' active':''}" style="${l.key===loc?`color:${l.color}`:''}" onclick="setLoc('${l.key}')">${l.name}</button>`
+  ).join('')}</div>`;
+
+  const cardsHtml = group.series.map(s => {
+    const arr = d[s.key];
+    const last = lastValid(arr);
+    const prevIdx = last.idx - 1;
+    const prev = prevIdx >= 0 ? arr[prevIdx] : null;
+    const mom = (last.value != null && prev != null) ? last.value - prev : null;
+    const momPct = (mom != null && prev) ? (mom / prev * 100).toFixed(1) : null;
+    const total = sumValid(arr);
+    const avg = avgValid(arr);
+    const momColor = mom == null ? 'var(--muted)' : mom >= 0 ? '#86efac' : '#f87171';
+    return `<div class="stat-card">
+      <div class="card-label">${s.label}</div>
+      <div class="card-value" style="color:${s.color}">${fmt(last.value, s.unit==='%'?1:0)}<span class="unit">${s.unit}</span></div>
+      <div class="card-sub">${last.idx>=0?MONTH_LABELS[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, s.unit==='%'?1:0)+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
+      <div class="card-sub">累計 ${fmtUnit(s.unit==='%'||s.unit==='円/kg'?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, s.unit==='%'?1:0)}</div>
+    </div>`;
+  }).join('');
+
+  const canvasId = `chart-${group.key}`;
+  const chartSeries = group.series.filter(s => s.chart !== false);
+  const dualAxis = chartSeries.some(s => s.axis === 'y2');
+
+  const tableHead = `<th>月</th>` + group.series.map(s => `<th class="num">${s.label} (${s.unit})</th>`).join('');
+  const tableRows = MONTH_LABELS.map((m,i) => {
+    const cells = group.series.map(s => `<td class="num">${fmt(d[s.key][i], s.unit==='%'?1:0)}</td>`).join('');
+    return `<tr><td class="dim">${m}</td>${cells}</tr>`;
+  }).join('');
+
+  document.getElementById('main').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+      <div class="section-title">${group.label}<span class="sub">${ALL_LOCS.find(l=>l.key===loc).name} ／ 月次</span></div>
+      ${locTabsHtml}
+    </div>
+    <div class="cards-grid">${cardsHtml}</div>
+    <div class="chart-section">
+      <div class="chart-wrap"><canvas id="${canvasId}"></canvas></div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>${tableHead}</tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table></div>
+  `;
+
+  drawChart(canvasId, group, d, dualAxis);
+  document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+}
+
+function drawChart(canvasId, group, d, dualAxis) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+
+  const chartSeries = group.series.filter(s => s.chart !== false);
+  const datasets = chartSeries.map(s => {
+    const isLine = s.type === 'line';
+    return {
+      type: isLine ? 'line' : 'bar',
+      label: s.label,
+      data: d[s.key],
+      backgroundColor: isLine ? 'transparent' : s.color + 'cc',
+      borderColor: s.color,
+      borderWidth: isLine ? 2.5 : 1,
+      borderRadius: isLine ? 0 : 4,
+      spanGaps: false,
+      tension: 0.3,
+      pointRadius: isLine ? 3 : 0,
+      yAxisID: s.axis === 'y2' ? 'y2' : 'y',
+    };
+  });
+
+  const scales = {
+    x: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#232636' } },
+    y: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#232636' } },
+  };
+  if (dualAxis) {
+    scales.y2 = { position: 'right', ticks: { color: '#8892a4', font: { size: 11 } }, grid: { drawOnChartArea: false } };
+  }
+
+  charts[canvasId] = new Chart(ctx, {
+    data: { labels: MONTH_LABELS, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#c3cadb', font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
+          callbacks: {
+            label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toLocaleString('ja-JP')}`,
+          },
+        },
+      },
+      scales,
+    },
+  });
+}
+
+render();
+</script>
+</body>
+</html>
