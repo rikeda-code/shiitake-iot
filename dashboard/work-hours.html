@@ -8131,6 +8131,35 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       return gap > 0 ? gap : null;
     });
 
+    // 要員不足（人数換算）：勤務実績＞比較（3拠点）＞標準労働時間タブの「一人当たり」
+    // 折れ線（toPerPerson()）と同じ考え方（実績工数合計÷実績人数合計＝一人当たり時間）
+    // で、要員不足（時間）を人数に換算する。ただし、actualMonthlyTotals[mi]・
+    // headcountByEmpForPlanMonths()由来の実績人数は、整理済み_Mの実績データが存在する
+    // 月（=ACTUAL_CUTOFF以前、過去月）でしか非ゼロにならない一方、staffGapData
+    // （要員不足の時間）はACTUAL_CUTOFFより後（未来月）の月でしか値を持たないため、
+    // 同じ月インデックスでは両者が同時に値を持つことがなく、月ごとの換算はできない。
+    // そのため、直近の実績月（vm内でym<=ACTUAL_CUTOFFの最後の月）1点だけで
+    // 「一人当たり時間」の固定比率を求め、これを全ての未来月の要員不足（時間）に
+    // 適用して人数換算する（toPerPerson()自体は別のトップレベル関数のためここから
+    // 直接参照できず、既存のheadcountByEmpForPlanMonths()をactualByDivと同じ
+    // パターン（div・拠点方向に合算）で使って実績人数を求める）
+    const headcountByDiv = {};
+    divs.forEach(div => {
+      const headcountBySite = sitesToShow.map(site => headcountByEmpForPlanMonths(site, () => true, [div]));
+      headcountByDiv[div] = sl(planMonths.map((_, mi) => headcountBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
+    });
+    const actualHeadcountTotals = vm.map((_, mi) => divs.reduce((s, div) => s + (headcountByDiv[div][mi] || 0), 0));
+    let latestActualIdx = -1;
+    vm.forEach((m, mi) => { if (mnum(m) <= ACTUAL_CUTOFF) latestActualIdx = mi; });
+    const baselineHours = latestActualIdx >= 0 ? actualMonthlyTotals[latestActualIdx] : null;
+    const baselineHeadcount = latestActualIdx >= 0 ? actualHeadcountTotals[latestActualIdx] : null;
+    const perPersonHoursBaseline = (baselineHours > 0 && baselineHeadcount > 0) ? baselineHours / baselineHeadcount : null;
+    const staffGapCountData = vm.map((_, mi) => {
+      const gap = staffGapData[mi];
+      if (gap == null || !(perPersonHoursBaseline > 0)) return null;
+      return Math.round(gap / perPersonHoursBaseline);
+    });
+
     // 軸のMAX値専用：業務区分（栽培/出荷/配送）・雇用形態のチェック状態に関わらず、
     // 「全部ON」を仮定した場合の実績・予定標準工数・標準労働時間の月別合計を算出する。
     // 実際に描画される棒（actualByDiv・stdByTask・stdHoursDs、上のdivsベースの計算）
@@ -8210,11 +8239,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // 要員不足：標準労働時間バー群（stack:'stdhours'）の一番上に継ぎ足す。既存の
     // 標準労働時間バー群（青濃淡3段階／黄／緑）・実績棒（赤/オレンジ/シアン）の
     // いずれとも衝突しない、視覚的に区別しやすい白系の色にする。_staffGapBarは
-    // 下のstaffGapSegmentValuesプラグインが対象datasetを見分けるための目印
+    // 下のstaffGapSegmentValuesプラグインが対象datasetを見分けるための目印。
+    // _staffGapCountは同プラグインが下段（人数）を描画する際に参照する
     datasets.push({
       type: 'bar', label: '要員不足（標準工数差分）h', data: staffGapData,
       backgroundColor: '#ffffff' + 'e6', borderColor: '#ffffff', borderWidth: 1,
-      stack: 'stdhours', order: 1, _staffGapBar: true,
+      stack: 'stdhours', order: 1, _staffGapBar: true, _staffGapCount: staffGapCountData,
     });
     allDivRows.forEach((r, ri) => {
       datasets.push({
@@ -8264,22 +8294,35 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           },
         },
       },
-      // 要員不足バー（_staffGapBar）のセグメント上に、差分の数値をホバーせずとも常時
-      // 見える形で直接描画する。既存のstdHoursSegmentCounts（別グラフ用、変更しない）
-      // と同じ「chartjs-plugin-datalabelsを使わず、afterDatasetsDrawで手動描画する」
-      // 方式を踏襲した、要員計画タブ専用の別プラグインとして新設する
+      // 要員不足バー（_staffGapBar）のセグメント上に、時間（上段）・人数換算（下段、
+      // _staffGapCount）の2行をホバーせずとも常時見える形で直接描画する。既存の
+      // stdHoursSegmentCounts（別グラフ用、変更しない）と同じ「chartjs-plugin-datalabels
+      // を使わず、afterDatasetsDrawで手動描画する」方式を踏襲した、要員計画タブ専用の
+      // 別プラグインとして新設する
       plugins: [{
         id: 'staffGapSegmentValues',
         afterDatasetsDraw(chart) {
           const ctx = chart.ctx;
+          const LINE_H = 11;
           chart.data.datasets.forEach((ds, dsIndex) => {
             if (!ds._staffGapBar) return;
             const meta = chart.getDatasetMeta(dsIndex);
             meta.data.forEach((bar, mi) => {
               const val = ds.data[mi];
+              // 要員不足自体が無い月（値がnull）は何も描画しない
               if (val == null) return;
-              // セグメントが小さすぎる場合は文字を描画しない（読みづらい重なりを避ける）
-              if (bar.height < 15) return;
+              const count = ds._staffGapCount ? ds._staffGapCount[mi] : null;
+              // 上段：時間、下段：人数換算（値がnullの場合は下段を描画せず時間のみ）
+              const lines = count != null ? [`${Math.round(val)}`, `${count}人`] : [`${Math.round(val)}`];
+              const totalH = lines.length * LINE_H;
+              const centerY = bar.y + bar.height / 2;
+              // セグメントの高さが2行分（＋余白）を収められる場合は、通常通りセグメント
+              // 中央に収める。収まらない場合は、下段（人数、配列の最後の行）をセグメント
+              // 上端のすぐ外側に置き、そこから上方向に残りの行（時間）を積み上げて描画する
+              // （時間の行がセグメント内に隠れて人数だけ見える、という状態を避けるため）
+              const fitsInside = bar.height >= totalH + 4;
+              const lastLineY = fitsInside ? (centerY + totalH / 2 - LINE_H / 2) : (bar.y - 6);
+              const firstLineY = lastLineY - (lines.length - 1) * LINE_H;
               ctx.save();
               ctx.font = '10px sans-serif';
               // バー自体がほぼ白（#ffffff）のため、stdHoursSegmentCountsと同じ白文字
@@ -8287,7 +8330,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
               ctx.fillStyle = '#1e2235';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(`${Math.round(val)}`, bar.x, bar.y + bar.height / 2);
+              lines.forEach((text, li) => ctx.fillText(text, bar.x, firstLineY + li * LINE_H));
               ctx.restore();
             });
           });
