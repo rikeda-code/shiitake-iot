@@ -9680,7 +9680,7 @@ function renderDecPlanContent(planData, mergeData) {
   // 列ヘッダー：①〜⑦
   const COLS_H = [
     '①<br>6月勤務実績<br>(栽培・出荷・配送) h',
-    '②<br>標準時間<br>(6月) h',
+    `②<br>標準時間<br>(${STD_HOURS_TARGET_MONTH.split('/')[1]}月) h`,
     '③<br>新加入見込み<br>h',
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
@@ -9689,7 +9689,7 @@ function renderDecPlanContent(planData, mergeData) {
   ];
   const COLS_N = [
     '①<br>標準人数<br>(B=1/2) 名',
-    '②<br>標準人数<br>(6月)',
+    `②<br>標準人数<br>(${STD_HOURS_TARGET_MONTH.split('/')[1]}月)`,
     '③<br>新加入見込み<br>名',
     '④<br>残業見込み<br>名',
     '⑤<br>①+③<br>名',
