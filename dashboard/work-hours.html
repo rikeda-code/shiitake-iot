@@ -6612,11 +6612,40 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return Math.round(total * 10) / 10;
   }
 
-  // threeSiteMergeStdHoursDatasets()のティア版：標準労働時間棒を「社員+実習生／
-  // アルバイト・フルタイム／アルバイト・パートタイム」の3系列（それぞれ独立した
-  // 積み上げ色）で返す。新規要員・増減の内訳バーには分けず、各ティア1本の
-  // バーに過去/未来を問わずまとめて表示する（既存のthreeSiteMergeStdHoursDatasets()
-  // は青／黄／緑の3バーだが、こちらは3ティアの3バーに置き換える設計のため）
+  // threeSiteMergeMonthlyValueByTier()のティア版のうち、未来月の基準部分
+  // （新規要員・増減を含まない、stdTotalB1のみ）を返す。過去月は
+  // threeSiteMergeMonthlyValueByTier()をそのまま呼ぶ（実測値取得は変更しない）
+  function threeSiteMergeBaseValueByTier(aggByTier, divsForPast, site, mi, tier) {
+    const ym = mnum(planMonths[mi]);
+    if (ym <= ACTUAL_CUTOFF) return threeSiteMergeMonthlyValueByTier(aggByTier, divsForPast, site, mi, tier);
+    const tierAgg = aggByTier ? aggByTier[tier] : null;
+    if (!tierAgg) return 0;
+    return Math.round(tierAgg.stdTotalB1 * 10) / 10;
+  }
+
+  // ティア別集計（aggByTier）の新規要員(newStaffByYm)・増減(deltaByYm)を、
+  // 3ティア合算した1本の値として返す（threeSiteMergeStdHoursDatasets()の
+  // newStaffData/deltaData生成ロジックと同じ判定基準：新規要員は合計>0の場合の
+  // みnull以外、増減は合計!==0の場合のみnull以外）。過去月は内訳表示の対象外
+  // のためnullを返す
+  function threeSiteMergeAggregatedNewStaffOrDeltaByTier(aggByTier, mi, field) {
+    const ym = mnum(planMonths[mi]);
+    if (ym <= ACTUAL_CUTOFF || !aggByTier) return null;
+    const total = ['lower', 'fulltime', 'parttime'].reduce((s, tier) => {
+      const tierAgg = aggByTier[tier];
+      const v = tierAgg ? tierAgg[field][ym] : undefined;
+      return s + (typeof v === 'number' ? v : 0);
+    }, 0);
+    if (field === 'newStaffByYm') return total > 0 ? Math.round(total * 10) / 10 : null;
+    return total !== 0 ? Math.round(total * 10) / 10 : null;
+  }
+
+  // threeSiteMergeStdHoursDatasets()のティア版：標準労働時間棒のうち基準部分
+  // （新規要員・増減を含まないstdTotalB1）を「社員+実習生／アルバイト・
+  // フルタイム／アルバイト・パートタイム」の3系列（それぞれ独立した積み上げ色）
+  // で返し、これに続けて新規要員・増減をそれぞれ3ティア合算した1本ずつの
+  // バー（非ティア版と同じ黄／緑）を追加する。過去月はcomputeStdHoursLineForDivSiteByTier()
+  // 由来の実測値（ティア別、内訳分けなし）のまま変更しない
   function threeSiteMergeStdHoursDatasetsByTier(aggByTier, divsForPast, site, opts) {
     opts = opts || {};
     if (!aggByTier) return [];
@@ -6626,16 +6655,33 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // 実績棒（赤系）・予定標準工数棒（TASK_COLORS、赤〜橙〜黄系）と衝突しない
     // 青系を採用する
     const baseColor = opts.color || '#60a5fa';
+    const newStaffColor = opts.newStaffColor || '#fbbf24';
+    const deltaColor = opts.deltaColor || '#4ade80';
     const tierDefs = [
       { tier: 'lower', label: `社員+実習生${suffix}`, opacity: 'CC' },
       { tier: 'fulltime', label: `アルバイト・フルタイム${suffix}`, opacity: '99' },
       { tier: 'parttime', label: `アルバイト・パートタイム${suffix}`, opacity: '4D' },
     ];
-    return tierDefs.map(({ tier, label, opacity }) => ({
-      type: 'bar', label, data: planMonths.map((_, mi) => threeSiteMergeMonthlyValueByTier(aggByTier, divsForPast, site, mi, tier)),
+    const tierBars = tierDefs.map(({ tier, label, opacity }) => ({
+      type: 'bar', label, data: planMonths.map((_, mi) => threeSiteMergeBaseValueByTier(aggByTier, divsForPast, site, mi, tier)),
       backgroundColor: baseColor + opacity, borderColor: baseColor, borderWidth: 0,
       stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHoursTier: tier,
     }));
+    return [
+      ...tierBars,
+      {
+        type: 'bar', label: `新規要員（開始済み）${suffix}`,
+        data: planMonths.map((_, mi) => threeSiteMergeAggregatedNewStaffOrDeltaByTier(aggByTier, mi, 'newStaffByYm')),
+        backgroundColor: newStaffColor, borderColor: newStaffColor, borderWidth: 0,
+        stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHours: true,
+      },
+      {
+        type: 'bar', label: `増減${suffix}`,
+        data: planMonths.map((_, mi) => threeSiteMergeAggregatedNewStaffOrDeltaByTier(aggByTier, mi, 'deltaByYm')),
+        backgroundColor: deltaColor, borderColor: deltaColor, borderWidth: 0,
+        stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHours: true,
+      },
+    ];
   }
 
   // 拠点サマリモード用：栽培・出荷（・配送）それぞれのthreeSiteMergeAgg()の結果を、
