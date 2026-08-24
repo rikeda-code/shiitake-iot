@@ -168,6 +168,7 @@
 </div>
 
 <div class="tabs" id="top-tabs"></div>
+<div class="tabs" id="sub-tabs" style="display:none"></div>
 <main id="main"></main>
 
 <script>
@@ -237,8 +238,12 @@ function calcSite(siteKey) {
   const unitPrice   = shipment.map((v,i) => (v == null || shipmentValue[i] == null) ? null : Math.round(shipmentValue[i] / v));
   const costRatio   = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : +(substrateCost[i] / v * 100).toFixed(1));
   const grossProfit = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : v - substrateCost[i]);
+  // 1菌床あたり収穫量 (g/本) = 収穫量(kg)×1000 ÷ 菌床仕入本数
+  const harvestPerBed = harvest.map((v,i) => (v == null || !bedCount[i]) ? null : Math.round(v * 1000 / bedCount[i]));
+  // 売上÷菌床代 (倍)
+  const salesCostRatio = revenue.map((v,i) => (v == null || !substrateCost[i]) ? null : +(v / substrateCost[i]).toFixed(2));
 
-  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit };
+  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit, harvestPerBed, salesCostRatio };
 }
 
 const DATA = {};
@@ -263,6 +268,8 @@ DATA.total = {
 DATA.total.yieldRate = DATA.total.shipment.map((v,i) => (v == null || !DATA.total.harvest[i]) ? null : +(v / DATA.total.harvest[i] * 100).toFixed(1));
 DATA.total.unitPrice = DATA.total.shipment.map((v,i) => (v == null || DATA.total.shipmentValue[i] == null) ? null : Math.round(DATA.total.shipmentValue[i] / v));
 DATA.total.costRatio = DATA.total.revenue.map((v,i) => (v == null || DATA.total.substrateCost[i] == null) ? null : +(DATA.total.substrateCost[i] / v * 100).toFixed(1));
+DATA.total.harvestPerBed = DATA.total.harvest.map((v,i) => (v == null || !DATA.total.bedCount[i]) ? null : Math.round(v * 1000 / DATA.total.bedCount[i]));
+DATA.total.salesCostRatio = DATA.total.revenue.map((v,i) => (v == null || !DATA.total.substrateCost[i]) ? null : +(v / DATA.total.substrateCost[i]).toFixed(2));
 
 const ALL_LOCS = [...SITES, TOTAL_SITE];
 
@@ -271,6 +278,7 @@ const ALL_LOCS = [...SITES, TOTAL_SITE];
 // ────────────────────────────────────────────────────────────────
 // series: key, label, unit, color
 // axis: グラフのY軸('y'=左, 'y2'=右)。type: 'bar'|'line'。chart:false でグラフから除外(カード/表のみ表示)。
+// digits: 表示小数桁数(既定0)。agg: 'avg'指定で累計/年計の代わりに平均集計(比率・単価系)。
 const GROUPS = [
   {
     key: 'sales', label: '売上・出荷額',
@@ -295,11 +303,36 @@ const GROUPS = [
   },
   {
     key: 'kpi', label: 'KPI指標',
-    series: [
-      { key: 'yieldRate',   label: '歩留まり率（出荷量/収穫量）', unit: '%',    color: '#60a5fa', axis: 'y',  type: 'bar' },
-      { key: 'costRatio',   label: '菌床原価率（菌床代/売上）',   unit: '%',    color: '#fbbf24', axis: 'y',  type: 'line' },
-      { key: 'grossProfit', label: '粗利（売上-菌床代）',         unit: '円',   color: '#86efac', axis: 'y2', type: 'line' },
-      { key: 'unitPrice',   label: '出荷単価',                   unit: '円/kg', color: '#f472b6', chart: false },
+    subgroups: [
+      {
+        key: 'summary', label: '総合指標',
+        series: [
+          { key: 'yieldRate',   label: '歩留まり率（出荷量/収穫量）', unit: '%',     color: '#60a5fa', axis: 'y',  type: 'bar',  digits: 1, agg: 'avg' },
+          { key: 'costRatio',   label: '菌床原価率（菌床代/売上）',   unit: '%',     color: '#fbbf24', axis: 'y',  type: 'line', digits: 1, agg: 'avg' },
+          { key: 'grossProfit', label: '粗利（売上-菌床代）',         unit: '円',    color: '#86efac', axis: 'y2', type: 'line' },
+          { key: 'unitPrice',   label: '出荷単価',                   unit: '円/kg', color: '#f472b6', agg: 'avg', chart: false },
+        ],
+      },
+      {
+        key: 'perBed', label: '1菌床あたり収穫量',
+        series: [
+          { key: 'harvestPerBed', label: '1菌床あたり収穫量（収穫量÷菌床数）', unit: 'g', color: '#34d399', axis: 'y', type: 'bar', agg: 'avg' },
+        ],
+      },
+      {
+        key: 'salesCost', label: '売上÷菌床代',
+        series: [
+          { key: 'bedCount',       label: '菌床仕入数',   unit: '本', color: '#38bdf8', axis: 'y',  type: 'bar' },
+          { key: 'salesCostRatio', label: '売上÷菌床代', unit: '倍', color: '#fbbf24', axis: 'y2', type: 'line', digits: 2, agg: 'avg' },
+        ],
+      },
+      {
+        key: 'shipPrice', label: '出荷量・単価',
+        series: [
+          { key: 'shipment',  label: '出荷量', unit: 'kg',    color: '#60a5fa', axis: 'y',  type: 'bar' },
+          { key: 'unitPrice', label: '単価',   unit: '円/kg', color: '#f472b6', axis: 'y2', type: 'line', agg: 'avg' },
+        ],
+      },
     ],
   },
 ];
@@ -307,6 +340,14 @@ const GROUPS = [
 let activeGroup = GROUPS[0].key;
 let activeLoc = { sales: 'total', volume: 'total', bed: 'total', kpi: 'total' };
 let activeView = { sales: 'all', volume: 'all', bed: 'all', kpi: 'all' }; // 'all' | '2025' | '2026' | 'compare'
+let activeSubgroup = { kpi: 'summary' }; // グループ内サブタブ(subgroups持ちのグループのみ使用)
+
+// group.subgroups があればアクティブなサブタブの{key,label,series}を、なければgroup自体を返す
+function currentSeriesGroup(group) {
+  if (!group.subgroups) return group;
+  const key = activeSubgroup[group.key] || group.subgroups[0].key;
+  return group.subgroups.find(sg => sg.key === key) || group.subgroups[0];
+}
 
 const VIEW_MODES = [
   { key: 'all',     label: '全期間' },
@@ -334,7 +375,8 @@ function sliceDataset(d, year) {
 // ────────────────────────────────────────────────────────────────
 const fmt = (n, digits = 0) => n == null ? '—' : n.toLocaleString('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmtUnit = (n, unit, digits = 0) => n == null ? '—' : `${fmt(n, digits)} ${unit}`;
-const isRateUnit = (unit) => unit === '%' || unit === '円/kg';
+const dig = (s) => s.digits ?? 0;
+const isAvgSeries = (s) => s.agg === 'avg';
 
 function lastValid(arr) {
   for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return { value: arr[i], idx: i };
@@ -354,6 +396,7 @@ function renderTopTabs() {
 function setGroup(key) { activeGroup = key; render(); }
 function setLoc(key) { activeLoc[activeGroup] = key; render(); }
 function setView(key) { activeView[activeGroup] = key; render(); }
+function setSubgroup(key) { activeSubgroup[activeGroup] = key; render(); }
 
 let charts = {};
 function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch(e) {} delete charts[id]; } }
@@ -372,9 +415,9 @@ function buildCardsHtml(group, labels, dataset) {
     const momColor = mom == null ? 'var(--muted)' : mom >= 0 ? '#86efac' : '#f87171';
     return `<div class="stat-card">
       <div class="card-label">${s.label}</div>
-      <div class="card-value" style="color:${s.color}">${fmt(last.value, s.unit==='%'?1:0)}<span class="unit">${s.unit}</span></div>
-      <div class="card-sub">${last.idx>=0?labels[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, s.unit==='%'?1:0)+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
-      <div class="card-sub">累計 ${fmtUnit(isRateUnit(s.unit)?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, s.unit==='%'?1:0)}</div>
+      <div class="card-value" style="color:${s.color}">${fmt(last.value, dig(s))}<span class="unit">${s.unit}</span></div>
+      <div class="card-sub">${last.idx>=0?labels[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, dig(s))+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
+      <div class="card-sub">累計 ${fmtUnit(isAvgSeries(s)?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, dig(s))}</div>
     </div>`;
   }).join('');
 }
@@ -382,7 +425,7 @@ function buildCardsHtml(group, labels, dataset) {
 function buildTableHtml(group, labels, dataset) {
   const tableHead = `<th>月</th>` + group.series.map(s => `<th class="num">${s.label} (${s.unit})</th>`).join('');
   const tableRows = labels.map((m,i) => {
-    const cells = group.series.map(s => `<td class="num">${fmt(dataset[s.key][i], s.unit==='%'?1:0)}</td>`).join('');
+    const cells = group.series.map(s => `<td class="num">${fmt(dataset[s.key][i], dig(s))}</td>`).join('');
     return `<tr><td class="dim">${m}</td>${cells}</tr>`;
   }).join('');
   return `<div class="table-wrap"><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
@@ -392,17 +435,18 @@ function buildTableHtml(group, labels, dataset) {
 function buildYoYSummaryHtml(group, d) {
   const y25 = sliceDataset(d, 2025), y26 = sliceDataset(d, 2026);
   const cards = group.series.map(s => {
-    const rate = isRateUnit(s.unit);
-    const agg = rate ? avgValid : sumValid;
+    const avgAgg = isAvgSeries(s);
+    const agg = avgAgg ? avgValid : sumValid;
     const v25 = hasValid(y25[s.key]) ? agg(y25[s.key]) : null;
     const v26 = hasValid(y26[s.key]) ? agg(y26[s.key]) : null;
-    const round = (v) => v == null ? null : (rate ? Math.round(v*10)/10 : Math.round(v));
+    const mul = Math.pow(10, dig(s));
+    const round = (v) => v == null ? null : Math.round(v*mul)/mul;
     const delta = (v25 && v26 != null) ? ((v26 - v25) / v25 * 100) : null;
     const deltaColor = delta == null ? 'var(--muted)' : delta >= 0 ? '#86efac' : '#f87171';
     return `<div class="stat-card">
-      <div class="card-label">${s.label}（${rate?'期間平均':'年計'}・2026年）</div>
-      <div class="card-value" style="color:${s.color}">${fmtUnit(round(v26), s.unit, s.unit==='%'?1:0)}</div>
-      <div class="card-sub">2025年: ${fmtUnit(round(v25), s.unit, s.unit==='%'?1:0)}　前年比 <span style="color:${deltaColor}">${delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)+'%'}</span></div>
+      <div class="card-label">${s.label}（${avgAgg?'期間平均':'年計'}・2026年）</div>
+      <div class="card-value" style="color:${s.color}">${fmtUnit(round(v26), s.unit, dig(s))}</div>
+      <div class="card-sub">2025年: ${fmtUnit(round(v25), s.unit, dig(s))}　前年比 <span style="color:${deltaColor}">${delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)+'%'}</span></div>
     </div>`;
   }).join('');
   return `<div class="cards-grid">${cards}</div>`;
@@ -422,11 +466,23 @@ function renderBlock(containerId, group, labels, dataset, canvasId) {
 function render() {
   renderTopTabs();
   const group = GROUPS.find(g => g.key === activeGroup);
+  const leaf = currentSeriesGroup(group);
   const loc = activeLoc[activeGroup];
   const view = activeView[activeGroup];
   const d = DATA[loc];
 
   destroyAllCharts();
+
+  const subTabsEl = document.getElementById('sub-tabs');
+  if (group.subgroups) {
+    subTabsEl.style.display = '';
+    subTabsEl.innerHTML = group.subgroups.map(sg =>
+      `<button class="tab-btn${sg.key===leaf.key?' active':''}" onclick="setSubgroup('${sg.key}')">${sg.label}</button>`
+    ).join('');
+  } else {
+    subTabsEl.style.display = 'none';
+    subTabsEl.innerHTML = '';
+  }
 
   const locTabsHtml = `<div class="loc-tabs">${ALL_LOCS.map(l =>
     `<button class="loc-tab${l.key===loc?' active':''}" style="${l.key===loc?`color:${l.color}`:''}" onclick="setLoc('${l.key}')">${l.name}</button>`
@@ -436,11 +492,13 @@ function render() {
   ).join('')}</div>`;
 
   const subLabel = view === 'compare' ? '前年比較（2025年 / 2026年）' : view === 'all' ? '月次(全期間)' : `${view}年 月次`;
+  const titleLabel = group.subgroups ? `${group.label}<span class="sub" style="margin-left:0">・${leaf.label}</span>` : group.label;
+  const idBase = group.subgroups ? `${group.key}-${leaf.key}` : group.key;
 
   let bodyHtml;
   if (view === 'compare') {
     bodyHtml = `
-      ${buildYoYSummaryHtml(group, d)}
+      ${buildYoYSummaryHtml(leaf, d)}
       <div class="compare-grid">
         <div class="compare-year-block">
           <div class="compare-year-title">2025年</div>
@@ -457,19 +515,19 @@ function render() {
 
   document.getElementById('main').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-      <div class="section-title">${group.label}<span class="sub">${ALL_LOCS.find(l=>l.key===loc).name} ／ ${subLabel}</span></div>
+      <div class="section-title">${titleLabel}<span class="sub">${ALL_LOCS.find(l=>l.key===loc).name} ／ ${subLabel}</span></div>
       <div style="display:flex;gap:16px;flex-wrap:wrap">${locTabsHtml}${viewTabsHtml}</div>
     </div>
     ${bodyHtml}
   `;
 
   if (view === 'compare') {
-    renderBlock('block-2025', group, YEAR_MONTH_LABELS, sliceDataset(d, 2025), `chart-${group.key}-2025`);
-    renderBlock('block-2026', group, YEAR_MONTH_LABELS, sliceDataset(d, 2026), `chart-${group.key}-2026`);
+    renderBlock('block-2025', leaf, YEAR_MONTH_LABELS, sliceDataset(d, 2025), `chart-${idBase}-2025`);
+    renderBlock('block-2026', leaf, YEAR_MONTH_LABELS, sliceDataset(d, 2026), `chart-${idBase}-2026`);
   } else if (view === '2025' || view === '2026') {
-    renderBlock('block-main', group, YEAR_MONTH_LABELS, sliceDataset(d, parseInt(view, 10)), `chart-${group.key}`);
+    renderBlock('block-main', leaf, YEAR_MONTH_LABELS, sliceDataset(d, parseInt(view, 10)), `chart-${idBase}`);
   } else {
-    renderBlock('block-main', group, MONTH_LABELS, d, `chart-${group.key}`);
+    renderBlock('block-main', leaf, MONTH_LABELS, d, `chart-${idBase}`);
   }
 
   document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
