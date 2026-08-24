@@ -8213,7 +8213,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // 下のstaffGapSegmentValuesプラグインが対象datasetを見分けるための目印
     datasets.push({
       type: 'bar', label: '要員不足（標準工数差分）h', data: staffGapData,
-      backgroundColor: '#ffffff' + '99', borderColor: '#ffffff', borderWidth: 1,
+      backgroundColor: '#ffffff' + 'e6', borderColor: '#ffffff', borderWidth: 1,
       stack: 'stdhours', order: 1, _staffGapBar: true,
     });
     allDivRows.forEach((r, ri) => {
@@ -8287,7 +8287,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
               ctx.fillStyle = '#1e2235';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(`${val}`, bar.x, bar.y + bar.height / 2);
+              ctx.fillText(`${Math.round(val)}`, bar.x, bar.y + bar.height / 2);
               ctx.restore();
             });
           });
