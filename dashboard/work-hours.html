@@ -6355,21 +6355,34 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
   }
 
+  // 「拠点・業務別」「拠点サマリ」「3拠点サマリ」「表」の標準労働時間棒（過去月）に
+  // 工数振替（整理済み_増減シート）を反映するための共通デルタマップ。既存の
+  // computeStdTransferDeltaBuckets()・computeStdHoursTierTransferDeltaBuckets()
+  // （いずれも変更しない）をそのまま再利用する
+  const stdTransferDeltaMap = computeStdTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+  const stdHoursTierTransferDeltaMap = computeStdHoursTierTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+
   // agg（threeSiteMergeAgg()／mergeThreeSiteMergeAggAcrossDivsの戻り値）と、過去月
   // 計算に使うdivsForPast（agg集計に使ったdivの配列）・site（同site。nullなら全拠点）
   // から、指定月miにおける「標準労働時間」棒の実効値（積み上げ全体の高さ）を返す。
   // 過去月（ACTUAL_CUTOFF以前、既に実績が確定している月）はcomputeStdHoursLineForDivSite()
-  // による整理済み_Mの実測値、未来月はstdTotalB1（青）＋newStaffByYm（黄）＋deltaByYm
-  // （緑）の合計。threeSiteMergeStdHoursDatasets()・threeSiteMergeStdHoursTotal()の
+  // による整理済み_Mの実測値に、振替あり（transferMode）の場合は工数振替のデルタ
+  // （stdTransferDeltaMap）を加算する。未来月はstdTotalB1（青）＋newStaffByYm（黄）＋
+  // deltaByYm（緑）の合計。threeSiteMergeStdHoursDatasets()・threeSiteMergeStdHoursTotal()の
   // 両方から使う共通ロジック
   function threeSiteMergeMonthlyValue(agg, divsForPast, site, mi) {
     if (!agg) return null;
     const ym = mnum(planMonths[mi]);
     if (ym <= ACTUAL_CUTOFF) {
-      return divsForPast.reduce((s, div) => {
+      const base = divsForPast.reduce((s, div) => {
         const v = computeStdHoursLineForDivSite(div, site, planMonths)[mi];
         return s + (v !== null ? v : 0);
       }, 0);
+      if (!transferMode) return base;
+      const sitesForDelta = site != null ? [site] : SITES;
+      const delta = sitesForDelta.reduce((s, st) =>
+        s + divsForPast.reduce((s2, div) => s2 + (stdTransferDeltaMap.get(`${st}|${div}|${ym}`) || 0), 0), 0);
+      return base + delta;
     }
     const newStaff = agg.newStaffByYm[ym];
     const delta = agg.deltaByYm[ym];
@@ -6571,16 +6584,23 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
   // threeSiteMergeMonthlyValue()のティア版：aggByTier（threeSiteMergeAggByTier()の
   // 戻り値）の指定ティア分について、月miの実効値を返す。過去月は
-  // computeStdHoursLineForDivSiteByTier()（整理済み_Mの実測値、ティアで絞り込み）、
-  // 未来月はstdTotalB1+newStaffByYm+deltaByYmの合計（threeSiteMergeStdHoursDatasets()
-  // のように新規要員・増減を別バーに分けず、ティアごとに1本のバーへまとめる）
+  // computeStdHoursLineForDivSiteByTier()（整理済み_Mの実測値、ティアで絞り込み）に、
+  // 振替あり（transferMode）の場合は工数振替のデルタ（stdHoursTierTransferDeltaMap、
+  // ティアで絞り込み済み）を加算する。未来月はstdTotalB1+newStaffByYm+deltaByYmの合計
+  // （threeSiteMergeStdHoursDatasets()のように新規要員・増減を別バーに分けず、
+  // ティアごとに1本のバーへまとめる）
   function threeSiteMergeMonthlyValueByTier(aggByTier, divsForPast, site, mi, tier) {
     const ym = mnum(planMonths[mi]);
     if (ym <= ACTUAL_CUTOFF) {
-      return divsForPast.reduce((s, div) => {
+      const base = divsForPast.reduce((s, div) => {
         const v = computeStdHoursLineForDivSiteByTier(div, site, planMonths, tier)[mi];
         return s + (v !== null ? v : 0);
       }, 0);
+      if (!transferMode) return base;
+      const sitesForDelta = site != null ? [site] : SITES;
+      const delta = sitesForDelta.reduce((s, st) =>
+        s + divsForPast.reduce((s2, div) => s2 + (stdHoursTierTransferDeltaMap.get(`${st}|${div}|${tier}|${ym}`) || 0), 0), 0);
+      return base + delta;
     }
     const tierAgg = aggByTier ? aggByTier[tier] : null;
     if (!tierAgg) return 0;
