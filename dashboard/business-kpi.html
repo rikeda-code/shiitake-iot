@@ -17,7 +17,6 @@
     --border: #2e3148;
     --text: #e2e8f0;
     --muted: #8892a4;
-    --sample: #fbbf24;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -44,15 +43,15 @@
 
   .sample-banner {
     margin: 14px 32px 0;
-    background: rgba(251,191,36,0.08);
-    border: 1px solid rgba(251,191,36,0.3);
+    background: rgba(96,165,250,0.08);
+    border: 1px solid rgba(96,165,250,0.25);
     border-radius: 10px;
     padding: 12px 18px;
     font-size: 0.82rem;
     line-height: 1.7;
     color: var(--text);
   }
-  .sample-banner strong { color: var(--sample); }
+  .sample-banner strong { color: #93c5fd; }
 
   /* ── Top tabs (metric group) ── */
   .tabs {
@@ -110,16 +109,6 @@
   .stat-card .card-value .unit { font-size: 0.72rem; font-weight: 400; color: var(--muted); margin-left: 3px; }
   .stat-card .card-sub { font-size: 0.74rem; color: var(--muted); margin-top: 6px; }
 
-  .sample-badge {
-    background: rgba(251,191,36,0.15);
-    color: var(--sample);
-    font-size: 0.62rem;
-    font-weight: 700;
-    padding: 1px 7px;
-    border-radius: 8px;
-    letter-spacing: 0.03em;
-  }
-
   /* ── Chart / table sections ── */
   .chart-section {
     background: var(--surface);
@@ -167,9 +156,9 @@
 </header>
 
 <div class="sample-banner">
-  <strong>⚠ サンプルデータ表示中：</strong>
-  「売上」「出荷額」「菌床代」は実データ未接続のため、出荷量・菌床仕入本数から仮の単価で試算した<strong>サンプル値</strong>です（<span class="sample-badge">SAMPLE</span> 表示）。
-  「収穫量」「出荷量」「菌床仕入本数」は既存ダッシュボードの実績値を使用しています。実データのスプレッドシートをいただき次第、差し替えます。
+  <strong>データ最終反映月：</strong>
+  収穫量・出荷量・出荷額＝2026年7月／菌床仕入本数＝2026年8月／売上＝2026年6月／菌床代＝2026年4月（各元シートへの入力状況により異なります）。
+  それ以降は未入力のため「—」表示です。
 </div>
 
 <div class="tabs" id="top-tabs"></div>
@@ -182,7 +171,7 @@
 
 const MONTH_LABELS = [
   '25/1','25/2','25/3','25/4','25/5','25/6','25/7','25/8','25/9','25/10','25/11','25/12',
-  '26/1','26/2','26/3','26/4','26/5','26/6',
+  '26/1','26/2','26/3','26/4','26/5','26/6','26/7','26/8',
 ];
 const N = MONTH_LABELS.length;
 
@@ -193,45 +182,55 @@ const SITES = [
 ];
 const TOTAL_SITE = { key: 'total', name: '全社合計', color: '#a78bfa' };
 
-// ── 実績値（既存 harvest-dashboard.html の数値を流用）──
-// 収穫量 (kg)
+// ── 実績値 ──
+// 収穫量 (kg) — 収穫量シート「中期計画（7月修正)」 いなべ11行目/群馬27行目/南丹43行目, AV列(2025.1)〜
 const HARVEST = {
-  inabe:  [12564.8,12815.4,9392.9,11347.6,14106.8,6917.2,7676.0,6142.0,15652.7,17227.7,21093.8,29042.5, 19940.5,18078.7,14894.3,13764.1,15606.0,15207.9],
-  gunma:  [11451.1,9556.5,8853.1,8940.8,7751.9,7752.9,5762.2,8157.0,6225.7,13920.3,15697.8,14827.9,    21366.8,13873.2,16280.6,12082.2,14005.2,15746.3],
-  nantan: [10965.5,10606.2,11039.3,7051.3,10085.4,8011.6,7606.1,8660.0,8536.7,13581.4,14418.0,19404.8, 17185.9,10889.1,12492.1,9630.7,9966.6,10476.5],
+  inabe:  [12565.0,13083.0,10519.0,11161.0,14106.8,6917.1,7974.0,9202.0,15652.0,17981.0,20719.0,29626.0, 19941.0,18079.0,14571.0,13764.0,15453.0,15516.7,14387.0,null],
+  gunma:  [11451.0,9556.5,8853.0,8940.2,7751.0,7752.9,5762.0,8153.0,11686.4,13878.0,15607.0,14827.0,    21367.0,13837.0,16281.0,12082.0,13708.0,16308.3,10036.0,null],
+  nantan: [10965.0,10606.0,10965.0,7051.0,10085.4,8011.6,7528.1,8443.0,8356.0,13518.0,13246.0,19404.0,   17186.0,10864.0,12266.0,9044.0,9722.0,11379.8,10658.0,null],
 };
-// 出荷量 (kg) — 2025年7〜12月はデータなし(null)
+// 出荷量 (kg) ・出荷額 (円) — 出荷量＆出荷額シート「2026/2025 + 拠点名」タブ B列(出荷量,g→kg換算)/E列(出荷額)
 const SHIPMENT = {
-  inabe:  [11234.93,12128.28,9130.68,8693.36,11275.06,5512.51, null,null,null,null,null,null, 15501.8,16248.3,13623.7,13220.3,13252.3,13489.3],
-  gunma:  [9807.25,7804.84,7009.85,7524.37,7259.08,5408.60,   null,null,null,null,null,null, 18476.7,16252.5,14718.2,12459.0,13040.8,12050.7],
-  nantan: [8618.63,8984.10,9033.75,6635.26,8567.71,6706.20,   null,null,null,null,null,null, 12866.2,12009.6,11056.2,8352.8,8367.6,10029.6],
+  inabe:  [11234.93,12128.28,9130.68,8693.36,11275.06,5512.51,5823.75,7596.91,11913.37,15576.84,16585.79,24439.55, 15501.78,16248.34,13623.74,13220.34,13252.29,13650.16,12736.24,null],
+  gunma:  [9807.25,7804.84,7009.85,7524.37,7259.08,5408.6,4062.65,6291.54,8275.95,12508.84,15161.75,16730.57,       18476.72,16252.5,14718.2,12460.8,13040.8,12431.77,10316.63,null],
+  nantan: [8618.63,8984.1,9033.75,6635.26,8567.71,6706.2,5499.87,7388.61,7014.9,11460.19,11234.89,19718.95,         12866.15,12009.55,11056.15,8345.25,8367.1,10067.4,9573.45,null],
 };
-// 菌床仕入本数 (本) — 千葉七河 + 自社菌床 合計
+const SHIPMENT_VALUE = {
+  inabe:  [11132798,11530269,8911935,7812855,10076090,5511492,6069812,7700518,12165553,15610663,16565013,25253268, 15692233,16711474,13845602,13971265,13071502,14290350,13289932,null],
+  gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,null],
+  nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,null],
+};
+// 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.10)〜
 const BED_COUNT = {
-  inabe:  [24453,25301,3248,24441,21605,10701,13063,23460,24362,31541,46440,60480, 15120,12960,23063,14930,25646,26133],
-  gunma:  [22680,17640,2520,10080,12600,10080,14490,14760,18170,22610,45360,47880, 12600,22680,20160,17640,23930,18900],
-  nantan: [24453,25301,3248,24441,21605,10701,13063,23460,24362,31541,46440,60480, 9842,11871,20993,12156,13850,18056],
+  inabe:  [null,null,null,null,null,null,null,null,null, 31541,46440,50115, 22680,12960,23063,14930,25646,26133,18900,28919],
+  gunma:  [null,null,null,null,null,null,null,null,null, 22610,45360,47880, 27720,22680,20160,17640,23930,18900,20160,15120],
+  nantan: [null,null,null,null,null,null,null,null,null, 22502,39418,47834, 19922,11871,20993,12156,13850,18056,20160,15093],
 };
-
-// ── サンプル値（実データ未接続。仮単価で試算）──
-const SAMPLE_PRICE_FACTOR = [0.97,1.02,0.95,1.05,0.99,1.03,1.00,1.00,1.00,1.00,1.00,1.00, 1.04,0.96,1.01,0.98,1.03,1.00];
-const SAMPLE_UNIT_PRICE_BASE = 950;   // 円/kg（仮）
-const SAMPLE_BED_UNIT_COST   = 380;   // 円/本（仮）
-const SAMPLE_REVENUE_FACTOR  = 1.05;  // 出荷額に対する売上の仮倍率
+// 売上 (円) — 売上・菌床代シート「26年度計画①（実績入力用）」 いなべ14行目/群馬(安中)15行目/南丹16行目, Q列(2025.1)〜 実績のみ
+const REVENUE = {
+  inabe:  [10510096,10191882,8742871,7231155,8720873,5162377,5774116,7396001,11146965,15047070,16075945,23960359, 15698105,15986374,13039789,12832284,12526989,12146811,null,null],
+  gunma:  [6896257,6374300,6177660,5606524,5307398,4245882,3625088,5760112,7695618,11534373,13863046,15940866,     16288202,15778578,12586789,11408840,12356300,10713760,null,null],
+  nantan: [8194037,8095650,8377298,5594517,6365436,5246525,4316604,6730172,6880656,10956651,11745408,18952887,     12247781,11413810,9850296,7465095,8592262,9151246,null,null],
+};
+// 菌床代 (円) — 同シート いなべ26行目/群馬(安中)27行目/南丹28行目, Q列(2025.1)〜 実績のみ
+const SUBSTRATE_COST = {
+  inabe:  [5500765,5664620,725410,4784825,4672165,2923785,2899060,5082135,6458858,7196051,10894824,11663781, 5335008,3040416,5353681,3308734,null,null,null,null],
+  gunma:  [5128410,3982230,568890,2275560,2844450,2275560,3271117,3342570,5122461,5304306,10641456,11232648,   6503112,5342148,4737696,4138344,null,null,null,null],
+  nantan: [3428040,5120010,568890,2853910,3386250,2519370,3467520,3742980,4672251,5072346,9116966,11074582,     4628974,2749833,4859239,2771516,null,null,null,null],
+};
 
 function calcSite(siteKey) {
-  const harvest  = HARVEST[siteKey];
-  const shipment = SHIPMENT[siteKey];
-  const bedCount = BED_COUNT[siteKey];
+  const harvest       = HARVEST[siteKey];
+  const shipment      = SHIPMENT[siteKey];
+  const bedCount      = BED_COUNT[siteKey];
+  const shipmentValue = SHIPMENT_VALUE[siteKey];
+  const revenue       = REVENUE[siteKey];
+  const substrateCost = SUBSTRATE_COST[siteKey];
 
-  const shipmentValue = shipment.map((v,i) => v == null ? null : Math.round(v * SAMPLE_UNIT_PRICE_BASE * SAMPLE_PRICE_FACTOR[i]));
-  const revenue        = shipmentValue.map(v => v == null ? null : Math.round(v * SAMPLE_REVENUE_FACTOR));
-  const substrateCost   = bedCount.map(v => Math.round(v * SAMPLE_BED_UNIT_COST));
-
-  const yieldRate  = shipment.map((v,i) => v == null ? null : +(v / harvest[i] * 100).toFixed(1));
-  const unitPrice  = shipment.map((v,i) => v == null ? null : Math.round(shipmentValue[i] / v));
-  const costRatio  = revenue.map((v,i) => v == null ? null : +(substrateCost[i] / v * 100).toFixed(1));
-  const grossProfit = revenue.map((v,i) => v == null ? null : v - substrateCost[i]);
+  const yieldRate   = shipment.map((v,i) => (v == null || !harvest[i]) ? null : +(v / harvest[i] * 100).toFixed(1));
+  const unitPrice   = shipment.map((v,i) => (v == null || shipmentValue[i] == null) ? null : Math.round(shipmentValue[i] / v));
+  const costRatio   = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : +(substrateCost[i] / v * 100).toFixed(1));
+  const grossProfit = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : v - substrateCost[i]);
 
   return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit };
 }
@@ -264,37 +263,37 @@ const ALL_LOCS = [...SITES, TOTAL_SITE];
 // ────────────────────────────────────────────────────────────────
 // メトリクスグループ定義（トップタブ）
 // ────────────────────────────────────────────────────────────────
-// series: key, label, unit, color, sample(実データか否か)
+// series: key, label, unit, color
 // axis: グラフのY軸('y'=左, 'y2'=右)。type: 'bar'|'line'。chart:false でグラフから除外(カード/表のみ表示)。
 const GROUPS = [
   {
     key: 'sales', label: '売上・出荷額',
     series: [
-      { key: 'revenue',       label: '売上',   unit: '円', color: '#a78bfa', sample: true, axis: 'y', type: 'bar' },
-      { key: 'shipmentValue', label: '出荷額', unit: '円', color: '#f472b6', sample: true, axis: 'y', type: 'bar' },
+      { key: 'revenue',       label: '売上',   unit: '円', color: '#a78bfa', axis: 'y', type: 'bar' },
+      { key: 'shipmentValue', label: '出荷額', unit: '円', color: '#f472b6', axis: 'y', type: 'bar' },
     ],
   },
   {
     key: 'volume', label: '出荷量・収穫量',
     series: [
-      { key: 'harvest',  label: '収穫量', unit: 'kg', color: '#34d399', sample: false, axis: 'y', type: 'bar' },
-      { key: 'shipment', label: '出荷量', unit: 'kg', color: '#60a5fa', sample: false, axis: 'y', type: 'bar' },
+      { key: 'harvest',  label: '収穫量', unit: 'kg', color: '#34d399', axis: 'y', type: 'bar' },
+      { key: 'shipment', label: '出荷量', unit: 'kg', color: '#60a5fa', axis: 'y', type: 'bar' },
     ],
   },
   {
     key: 'bed', label: '菌床仕入・菌床代',
     series: [
-      { key: 'bedCount',      label: '菌床仕入本数', unit: '本', color: '#38bdf8', sample: false, axis: 'y',  type: 'bar' },
-      { key: 'substrateCost', label: '菌床代',       unit: '円', color: '#fbbf24', sample: true,  axis: 'y2', type: 'line' },
+      { key: 'bedCount',      label: '菌床仕入本数', unit: '本', color: '#38bdf8', axis: 'y',  type: 'bar' },
+      { key: 'substrateCost', label: '菌床代',       unit: '円', color: '#fbbf24', axis: 'y2', type: 'line' },
     ],
   },
   {
     key: 'kpi', label: 'KPI指標',
     series: [
-      { key: 'yieldRate',   label: '歩留まり率（出荷量/収穫量）', unit: '%',    color: '#60a5fa', sample: false, axis: 'y',  type: 'bar' },
-      { key: 'costRatio',   label: '菌床原価率（菌床代/売上）',   unit: '%',    color: '#fbbf24', sample: true,  axis: 'y',  type: 'line' },
-      { key: 'grossProfit', label: '粗利（売上-菌床代）',         unit: '円',   color: '#86efac', sample: true,  axis: 'y2', type: 'line' },
-      { key: 'unitPrice',   label: '出荷単価',                   unit: '円/kg', color: '#f472b6', sample: true,  chart: false },
+      { key: 'yieldRate',   label: '歩留まり率（出荷量/収穫量）', unit: '%',    color: '#60a5fa', axis: 'y',  type: 'bar' },
+      { key: 'costRatio',   label: '菌床原価率（菌床代/売上）',   unit: '%',    color: '#fbbf24', axis: 'y',  type: 'line' },
+      { key: 'grossProfit', label: '粗利（売上-菌床代）',         unit: '円',   color: '#86efac', axis: 'y2', type: 'line' },
+      { key: 'unitPrice',   label: '出荷単価',                   unit: '円/kg', color: '#f472b6', chart: false },
     ],
   },
 ];
@@ -349,7 +348,7 @@ function render() {
     const avg = avgValid(arr);
     const momColor = mom == null ? 'var(--muted)' : mom >= 0 ? '#86efac' : '#f87171';
     return `<div class="stat-card">
-      <div class="card-label">${s.label}${s.sample ? '<span class="sample-badge">SAMPLE</span>' : ''}</div>
+      <div class="card-label">${s.label}</div>
       <div class="card-value" style="color:${s.color}">${fmt(last.value, s.unit==='%'?1:0)}<span class="unit">${s.unit}</span></div>
       <div class="card-sub">${last.idx>=0?MONTH_LABELS[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, s.unit==='%'?1:0)+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
       <div class="card-sub">累計 ${fmtUnit(s.unit==='%'||s.unit==='円/kg'?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, s.unit==='%'?1:0)}</div>
@@ -394,7 +393,7 @@ function drawChart(canvasId, group, d, dualAxis) {
     const isLine = s.type === 'line';
     return {
       type: isLine ? 'line' : 'bar',
-      label: s.label + (s.sample ? ' (SAMPLE)' : ''),
+      label: s.label,
       data: d[s.key],
       backgroundColor: isLine ? 'transparent' : s.color + 'cc',
       borderColor: s.color,
