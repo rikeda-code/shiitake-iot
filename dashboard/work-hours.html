@@ -9694,8 +9694,8 @@ function renderDecPlanContent(planData, mergeData) {
           labels: SITES,
           datasets: [
             { label: '②標準時間(6月)', data: SITES.map(s => stdHoursFromMerge(s) || 0), backgroundColor: '#60a5fa', stack: 'current' },
-            { label: '③新加入見込み', data: SITES.map(s => newHireH(s) || 0), backgroundColor: '#4ade80', stack: 'current' },
-            { label: '④残業見込み',   data: SITES.map(s => overtimeH(s) || 0),  backgroundColor: '#facc15', stack: 'current' },
+            { label: '③新加入見込み', data: SITES.map(s => newHireH(s) || 0), backgroundColor: '#fbbf24', stack: 'current' },
+            { label: '④残業見込み',   data: SITES.map(s => overtimeH(s) || 0),  backgroundColor: '#4ade80', stack: 'current' },
             { label: '⑥12月標準工数時間', data: SITES.map(s => stdHoursForMonth(s, decIdx) || 0), backgroundColor: '#a78bfa', stack: 'dec' },
           ],
         },
@@ -9713,7 +9713,7 @@ function renderDecPlanContent(planData, mergeData) {
           labels: SITES,
           datasets: [
             { label: '①人数(B=1/2)',   data: SITES.map(s => mergeN(s) || 0),      backgroundColor: '#60a5fa', stack: 'current' },
-            { label: '③新加入見込み', data: SITES.map(s => newHireN(s) || 0),    backgroundColor: '#4ade80', stack: 'current' },
+            { label: '③新加入見込み', data: SITES.map(s => newHireN(s) || 0),    backgroundColor: '#fbbf24', stack: 'current' },
             { label: '⑥12月標準人数', data: SITES.map(s => { const d = stdHoursForMonth(s, decIdx); return d !== null ? Math.round(d / 173.8) : 0; }), backgroundColor: '#a78bfa', stack: 'dec' },
           ],
         },
