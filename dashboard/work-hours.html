@@ -8304,6 +8304,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         afterDatasetsDraw(chart) {
           const ctx = chart.ctx;
           const LINE_H = 11;
+          // グラフの描画可能領域の上端。セグメントの座標計算がこれより上に達して
+          // しまうケース（軸スケールの丸め等の要因で発生しうる）で文字が完全に不可視に
+          // なるのを防ぐため、下の補正で使う
+          const areaTop = chart.chartArea.top;
           chart.data.datasets.forEach((ds, dsIndex) => {
             if (!ds._staffGapBar) return;
             const meta = chart.getDatasetMeta(dsIndex);
@@ -8311,6 +8315,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
               const val = ds.data[mi];
               // 要員不足自体が無い月（値がnull）は何も描画しない
               if (val == null) return;
+              // bar.x/y/heightが不正な値（NaN・非数）の場合は描画をスキップする
+              // （原因調査用にコンソール警告を残す）
+              if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y) || !Number.isFinite(bar.height)) {
+                console.warn('[staffGapSegmentValues] 不正な座標のため描画をスキップしました:', { mi, val, bar });
+                return;
+              }
               const count = ds._staffGapCount ? ds._staffGapCount[mi] : null;
               // 上段：時間、下段：人数換算（値がnullの場合は下段を描画せず時間のみ）
               const lines = count != null ? [`${Math.round(val)}`, `${count}人`] : [`${Math.round(val)}`];
@@ -8321,8 +8331,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
               // 上端のすぐ外側に置き、そこから上方向に残りの行（時間）を積み上げて描画する
               // （時間の行がセグメント内に隠れて人数だけ見える、という状態を避けるため）
               const fitsInside = bar.height >= totalH + 4;
-              const lastLineY = fitsInside ? (centerY + totalH / 2 - LINE_H / 2) : (bar.y - 6);
-              const firstLineY = lastLineY - (lines.length - 1) * LINE_H;
+              let lastLineY = fitsInside ? (centerY + totalH / 2 - LINE_H / 2) : (bar.y - 6);
+              let firstLineY = lastLineY - (lines.length - 1) * LINE_H;
+              // 何らかの理由（複数月にまたがる積み上げ・軸スケールの丸め等）で、
+              // 計算上の描画位置がグラフの描画可能領域より上にはみ出してしまう場合、
+              // 文字が完全に不可視になってしまう。上端がchartArea内に収まるよう、
+              // 2行分の位置関係を保ったまま全体を下方向へ補正する
+              const minFirstLineY = areaTop + LINE_H / 2;
+              if (firstLineY < minFirstLineY) {
+                const shift = minFirstLineY - firstLineY;
+                firstLineY += shift;
+                lastLineY += shift;
+              }
               ctx.save();
               ctx.font = '10px sans-serif';
               // バー自体がほぼ白（#ffffff）のため、stdHoursSegmentCountsと同じ白文字
