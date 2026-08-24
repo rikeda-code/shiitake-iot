@@ -89,6 +89,12 @@
   .loc-tab:hover { color: var(--text); }
   .loc-tab.active { background: var(--surface); border-color: var(--border); font-weight: 600; }
 
+  /* ── 前年比較 (2-up layout) ── */
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .compare-year-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; color: var(--muted); }
+  .compare-year-block { display: flex; flex-direction: column; gap: 16px; }
+  @media (max-width: 900px) { .compare-grid { grid-template-columns: 1fr; } }
+
   .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
   .section-title .sub { color: var(--muted); font-size: 0.78rem; font-weight: 400; margin-left: 8px; }
 
@@ -254,9 +260,9 @@ DATA.total = {
   substrateCost: sumArr(DATA.inabe.substrateCost, DATA.gunma.substrateCost, DATA.nantan.substrateCost),
   grossProfit: sumArr(DATA.inabe.grossProfit, DATA.gunma.grossProfit, DATA.nantan.grossProfit),
 };
-DATA.total.yieldRate = DATA.total.shipment.map((v,i) => v == null ? null : +(v / DATA.total.harvest[i] * 100).toFixed(1));
-DATA.total.unitPrice = DATA.total.shipment.map((v,i) => v == null ? null : Math.round(DATA.total.shipmentValue[i] / v));
-DATA.total.costRatio = DATA.total.revenue.map((v,i) => v == null ? null : +(DATA.total.substrateCost[i] / v * 100).toFixed(1));
+DATA.total.yieldRate = DATA.total.shipment.map((v,i) => (v == null || !DATA.total.harvest[i]) ? null : +(v / DATA.total.harvest[i] * 100).toFixed(1));
+DATA.total.unitPrice = DATA.total.shipment.map((v,i) => (v == null || DATA.total.shipmentValue[i] == null) ? null : Math.round(DATA.total.shipmentValue[i] / v));
+DATA.total.costRatio = DATA.total.revenue.map((v,i) => (v == null || DATA.total.substrateCost[i] == null) ? null : +(DATA.total.substrateCost[i] / v * 100).toFixed(1));
 
 const ALL_LOCS = [...SITES, TOTAL_SITE];
 
@@ -300,12 +306,35 @@ const GROUPS = [
 
 let activeGroup = GROUPS[0].key;
 let activeLoc = { sales: 'total', volume: 'total', bed: 'total', kpi: 'total' };
+let activeView = { sales: 'all', volume: 'all', bed: 'all', kpi: 'all' }; // 'all' | '2025' | '2026' | 'compare'
+
+const VIEW_MODES = [
+  { key: 'all',     label: '全期間' },
+  { key: '2025',    label: '2025年' },
+  { key: '2026',    label: '2026年' },
+  { key: 'compare', label: '前年比較' },
+];
+const YEAR_MONTH_LABELS = Array.from({ length: 12 }, (_, i) => `${i+1}月`);
+
+// 20ヶ月の通し配列から該当年の1〜12月を切り出す（存在しない月はnull埋め）
+function yearSlice(arr, year) {
+  const start = year === 2025 ? 0 : 12;
+  const s = arr.slice(start, start + 12);
+  while (s.length < 12) s.push(null);
+  return s;
+}
+function sliceDataset(d, year) {
+  const out = {};
+  Object.keys(d).forEach(k => { out[k] = yearSlice(d[k], year); });
+  return out;
+}
 
 // ────────────────────────────────────────────────────────────────
 // 描画
 // ────────────────────────────────────────────────────────────────
 const fmt = (n, digits = 0) => n == null ? '—' : n.toLocaleString('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmtUnit = (n, unit, digits = 0) => n == null ? '—' : `${fmt(n, digits)} ${unit}`;
+const isRateUnit = (unit) => unit === '%' || unit === '円/kg';
 
 function lastValid(arr) {
   for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return { value: arr[i], idx: i };
@@ -313,6 +342,7 @@ function lastValid(arr) {
 }
 function sumValid(arr) { return arr.filter(v => v != null).reduce((s,v) => s+v, 0); }
 function avgValid(arr) { const v = arr.filter(v => v != null); return v.length ? sumValid(v) / v.length : null; }
+function hasValid(arr) { return arr.some(v => v != null); }
 
 function renderTopTabs() {
   const el = document.getElementById('top-tabs');
@@ -323,22 +353,15 @@ function renderTopTabs() {
 
 function setGroup(key) { activeGroup = key; render(); }
 function setLoc(key) { activeLoc[activeGroup] = key; render(); }
+function setView(key) { activeView[activeGroup] = key; render(); }
 
 let charts = {};
 function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch(e) {} delete charts[id]; } }
+function destroyAllCharts() { Object.keys(charts).forEach(destroyChart); }
 
-function render() {
-  renderTopTabs();
-  const group = GROUPS.find(g => g.key === activeGroup);
-  const loc = activeLoc[activeGroup];
-  const d = DATA[loc];
-
-  const locTabsHtml = `<div class="loc-tabs">${ALL_LOCS.map(l =>
-    `<button class="loc-tab${l.key===loc?' active':''}" style="${l.key===loc?`color:${l.color}`:''}" onclick="setLoc('${l.key}')">${l.name}</button>`
-  ).join('')}</div>`;
-
-  const cardsHtml = group.series.map(s => {
-    const arr = d[s.key];
+function buildCardsHtml(group, labels, dataset) {
+  return group.series.map(s => {
+    const arr = dataset[s.key];
     const last = lastValid(arr);
     const prevIdx = last.idx - 1;
     const prev = prevIdx >= 0 ? arr[prevIdx] : null;
@@ -350,41 +373,109 @@ function render() {
     return `<div class="stat-card">
       <div class="card-label">${s.label}</div>
       <div class="card-value" style="color:${s.color}">${fmt(last.value, s.unit==='%'?1:0)}<span class="unit">${s.unit}</span></div>
-      <div class="card-sub">${last.idx>=0?MONTH_LABELS[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, s.unit==='%'?1:0)+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
-      <div class="card-sub">累計 ${fmtUnit(s.unit==='%'||s.unit==='円/kg'?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, s.unit==='%'?1:0)}</div>
+      <div class="card-sub">${last.idx>=0?labels[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, s.unit==='%'?1:0)+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
+      <div class="card-sub">累計 ${fmtUnit(isRateUnit(s.unit)?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, s.unit==='%'?1:0)}</div>
     </div>`;
   }).join('');
+}
 
-  const canvasId = `chart-${group.key}`;
-  const chartSeries = group.series.filter(s => s.chart !== false);
-  const dualAxis = chartSeries.some(s => s.axis === 'y2');
-
+function buildTableHtml(group, labels, dataset) {
   const tableHead = `<th>月</th>` + group.series.map(s => `<th class="num">${s.label} (${s.unit})</th>`).join('');
-  const tableRows = MONTH_LABELS.map((m,i) => {
-    const cells = group.series.map(s => `<td class="num">${fmt(d[s.key][i], s.unit==='%'?1:0)}</td>`).join('');
+  const tableRows = labels.map((m,i) => {
+    const cells = group.series.map(s => `<td class="num">${fmt(dataset[s.key][i], s.unit==='%'?1:0)}</td>`).join('');
     return `<tr><td class="dim">${m}</td>${cells}</tr>`;
   }).join('');
+  return `<div class="table-wrap"><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
+}
+
+// 前年比較の上部サマリーカード（年計/期間平均と前年比%）
+function buildYoYSummaryHtml(group, d) {
+  const y25 = sliceDataset(d, 2025), y26 = sliceDataset(d, 2026);
+  const cards = group.series.map(s => {
+    const rate = isRateUnit(s.unit);
+    const agg = rate ? avgValid : sumValid;
+    const v25 = hasValid(y25[s.key]) ? agg(y25[s.key]) : null;
+    const v26 = hasValid(y26[s.key]) ? agg(y26[s.key]) : null;
+    const round = (v) => v == null ? null : (rate ? Math.round(v*10)/10 : Math.round(v));
+    const delta = (v25 && v26 != null) ? ((v26 - v25) / v25 * 100) : null;
+    const deltaColor = delta == null ? 'var(--muted)' : delta >= 0 ? '#86efac' : '#f87171';
+    return `<div class="stat-card">
+      <div class="card-label">${s.label}（${rate?'期間平均':'年計'}・2026年）</div>
+      <div class="card-value" style="color:${s.color}">${fmtUnit(round(v26), s.unit, s.unit==='%'?1:0)}</div>
+      <div class="card-sub">2025年: ${fmtUnit(round(v25), s.unit, s.unit==='%'?1:0)}　前年比 <span style="color:${deltaColor}">${delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)+'%'}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="cards-grid">${cards}</div>`;
+}
+
+function renderBlock(containerId, group, labels, dataset, canvasId) {
+  const chartSeries = group.series.filter(s => s.chart !== false);
+  const dualAxis = chartSeries.some(s => s.axis === 'y2');
+  document.getElementById(containerId).innerHTML = `
+    <div class="cards-grid">${buildCardsHtml(group, labels, dataset)}</div>
+    <div class="chart-section"><div class="chart-wrap"><canvas id="${canvasId}"></canvas></div></div>
+    ${buildTableHtml(group, labels, dataset)}
+  `;
+  drawChart(canvasId, group, labels, dataset, dualAxis);
+}
+
+function render() {
+  renderTopTabs();
+  const group = GROUPS.find(g => g.key === activeGroup);
+  const loc = activeLoc[activeGroup];
+  const view = activeView[activeGroup];
+  const d = DATA[loc];
+
+  destroyAllCharts();
+
+  const locTabsHtml = `<div class="loc-tabs">${ALL_LOCS.map(l =>
+    `<button class="loc-tab${l.key===loc?' active':''}" style="${l.key===loc?`color:${l.color}`:''}" onclick="setLoc('${l.key}')">${l.name}</button>`
+  ).join('')}</div>`;
+  const viewTabsHtml = `<div class="loc-tabs">${VIEW_MODES.map(v =>
+    `<button class="loc-tab${v.key===view?' active':''}" onclick="setView('${v.key}')">${v.label}</button>`
+  ).join('')}</div>`;
+
+  const subLabel = view === 'compare' ? '前年比較（2025年 / 2026年）' : view === 'all' ? '月次(全期間)' : `${view}年 月次`;
+
+  let bodyHtml;
+  if (view === 'compare') {
+    bodyHtml = `
+      ${buildYoYSummaryHtml(group, d)}
+      <div class="compare-grid">
+        <div class="compare-year-block">
+          <div class="compare-year-title">2025年</div>
+          <div id="block-2025"></div>
+        </div>
+        <div class="compare-year-block">
+          <div class="compare-year-title">2026年</div>
+          <div id="block-2026"></div>
+        </div>
+      </div>`;
+  } else {
+    bodyHtml = `<div id="block-main"></div>`;
+  }
 
   document.getElementById('main').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-      <div class="section-title">${group.label}<span class="sub">${ALL_LOCS.find(l=>l.key===loc).name} ／ 月次</span></div>
-      ${locTabsHtml}
+      <div class="section-title">${group.label}<span class="sub">${ALL_LOCS.find(l=>l.key===loc).name} ／ ${subLabel}</span></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">${locTabsHtml}${viewTabsHtml}</div>
     </div>
-    <div class="cards-grid">${cardsHtml}</div>
-    <div class="chart-section">
-      <div class="chart-wrap"><canvas id="${canvasId}"></canvas></div>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr>${tableHead}</tr></thead>
-      <tbody>${tableRows}</tbody>
-    </table></div>
+    ${bodyHtml}
   `;
 
-  drawChart(canvasId, group, d, dualAxis);
+  if (view === 'compare') {
+    renderBlock('block-2025', group, YEAR_MONTH_LABELS, sliceDataset(d, 2025), `chart-${group.key}-2025`);
+    renderBlock('block-2026', group, YEAR_MONTH_LABELS, sliceDataset(d, 2026), `chart-${group.key}-2026`);
+  } else if (view === '2025' || view === '2026') {
+    renderBlock('block-main', group, YEAR_MONTH_LABELS, sliceDataset(d, parseInt(view, 10)), `chart-${group.key}`);
+  } else {
+    renderBlock('block-main', group, MONTH_LABELS, d, `chart-${group.key}`);
+  }
+
   document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
 }
 
-function drawChart(canvasId, group, d, dualAxis) {
+function drawChart(canvasId, group, labels, dataset, dualAxis) {
   destroyChart(canvasId);
   const ctx = document.getElementById(canvasId).getContext('2d');
 
@@ -394,7 +485,7 @@ function drawChart(canvasId, group, d, dualAxis) {
     return {
       type: isLine ? 'line' : 'bar',
       label: s.label,
-      data: d[s.key],
+      data: dataset[s.key],
       backgroundColor: isLine ? 'transparent' : s.color + 'cc',
       borderColor: s.color,
       borderWidth: isLine ? 2.5 : 1,
@@ -415,7 +506,7 @@ function drawChart(canvasId, group, d, dualAxis) {
   }
 
   charts[canvasId] = new Chart(ctx, {
-    data: { labels: MONTH_LABELS, datasets },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
