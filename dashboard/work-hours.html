@@ -915,7 +915,7 @@ let empChartSubtab = 'site';       // サマリー「雇用形態別（グラフ
 
 let compareSiteViewMode = 'time';  // 比較（3拠点）タブの表示モード：'time'=実績工数(時間) / 'count'=実績工数(人数) / 'stdhours'=標準労働時間（更新ボタン押下後も保持）
 
-let planCmpSubtab = 'site';        // 比較（繁忙期見込み）タブのサブタブ状態：'site'/'sitesummary'/'summary'/'table'（更新ボタン押下後も保持）
+let planCmpSubtab = 'site';        // 比較（繁忙期見込み）タブのサブタブ状態：'site'/'sitesummary'/'summary'/'table'/'staffplan'（更新ボタン押下後も保持）
 let planCmpSiteTab = null;         // 比較（繁忙期見込み）タブの選択中拠点（更新ボタン押下後も保持）。
                                     // nullの場合はrenderPlanCompareCharts2()側でavailSites[0]に初期化される
 
@@ -7018,10 +7018,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   }
 
   // 拠点タブ(いなべ/群馬/南丹/全拠点合計)のHTML断片。固定エリア側(renderSiteTabBarFixed)から呼ぶ。
-  // 拠点サマリモード（'sitesummary'）は栽培+出荷を合算した拠点別サマリという性質上、
-  // 「全拠点合計」ボタンは対象外とし、いなべ/群馬/南丹の3拠点のみ表示する
+  // 拠点サマリモード（'sitesummary'）・要員計画モード（'staffplan'）は栽培+出荷を
+  // 合算した拠点別サマリという性質上、「全拠点合計」ボタンは対象外とし、
+  // いなべ/群馬/南丹の3拠点のみ表示する
   function siteTabBarHtml() {
-    const tabs = planCmpSubtab === 'sitesummary' ? availSites : SITE_TABS;
+    const tabs = (planCmpSubtab === 'sitesummary' || planCmpSubtab === 'staffplan') ? availSites : SITE_TABS;
     return tabs.map(t =>
       `<button class="plancmp2-site-tab${planCmpSiteTab === t ? ' active' : ''}" data-site="${t}"
         style="padding:4px 14px;border-radius:6px;border:1px solid ${planCmpSiteTab === t ? '#38bdf8' : '#3a3f5c'};background:${planCmpSiteTab === t ? '#38bdf8' : 'transparent'};color:${planCmpSiteTab === t ? '#0f1117' : '#8892a4'};font-size:0.8rem;cursor:pointer;font-weight:${planCmpSiteTab === t ? '600' : '400'}">${t}</button>`
@@ -7033,11 +7034,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function renderSiteTabBarFixed() {
     const el = document.getElementById('plancmp2-site-tabbar-fixed');
     if (!el) return;
-    // 'sitesummary'（拠点サマリ）も拠点タブで選択中拠点を切り替えられるようにする
-    if (planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary') { el.style.display = 'none'; el.innerHTML = ''; return; }
-    // 拠点サマリモードには「全拠点合計」が存在しないため、他モードから切り替えた
-    // 直後にplanCmpSiteTabが「全拠点合計」のままだった場合は先頭拠点に切り替える
-    if (planCmpSubtab === 'sitesummary' && planCmpSiteTab === '全拠点合計') {
+    // 'sitesummary'（拠点サマリ）・'staffplan'（要員計画）も拠点タブで選択中拠点を
+    // 切り替えられるようにする
+    if (planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary' && planCmpSubtab !== 'staffplan') { el.style.display = 'none'; el.innerHTML = ''; return; }
+    // 拠点サマリ・要員計画モードには「全拠点合計」が存在しないため、他モードから
+    // 切り替えた直後にplanCmpSiteTabが「全拠点合計」のままだった場合は先頭拠点に切り替える
+    if ((planCmpSubtab === 'sitesummary' || planCmpSubtab === 'staffplan') && planCmpSiteTab === '全拠点合計') {
       planCmpSiteTab = availSites[0];
     }
     el.style.display = 'flex';
@@ -7982,18 +7984,354 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax, taskBreakdown });
     }
   }
+
+  // 要員計画：renderSiteSummaryView()（拠点サマリ）と同じ画面構成（実績工数(業務区分別)・
+  // 実績工数(雇用区分別)の2グラフ、拠点選択タブ）をベースに、標準労働時間バーの上に
+  // 「要員不足（標準工数−標準労働時間、未来月かつ差分がプラスの月のみ）」セグメントを
+  // 継ぎ足して表示する。renderSiteSummaryView()自体は変更せず、このためだけの
+  // 別関数として新設する（canvas ID・チャートインスタンスキーも重複しないよう
+  // 専用のものを使う）
+  function renderStaffPlanView() {
+    const content = document.getElementById('compare2-content');
+    const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
+    const vm = visMonths();
+
+    let html = `<div class="schart-section">
+      <div class="schart-header">実績工数（業務区分別）</div>
+      ${chartWrapHtml('planstaffplan2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
+    </div>`;
+    html += `<div class="schart-section">
+      <div class="schart-header">実績工数（雇用区分別）</div>
+      ${chartWrapHtml(`planstaffplan2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
+    </div>`;
+    content.innerHTML = html;
+
+    // 上段チャートの「栽培（実績）」「出荷（実績）」棒専用：画面上部の雇用形態
+    // チェックボックス（empTypeFilter）と連動させるためのローカル計算。
+    // window._planCmpChartData2（workHoursForPlanMonths()由来、拠点別・表・3拠点
+    // サマリの各サブタブでも共有されるキャッシュ）はここでは使わず変更もしない。
+    // ロジック自体はworkHoursForPlanMonths()と同じで、雇用形態フィルタの適用
+    // （既存のapplyEmpTypeFilter()、empTypeFilterがnullなら絞り込み無し）を
+    // 追加しただけ
+    function actualHoursForPlanMonthsFiltered(site, typeFilter) {
+      const { employees, months: activeMonths } = getActiveData();
+      const emps = applyEmpTypeFilter(employees.filter(e => e.base === site && e.workType && typeFilter(e.workType)));
+      return planMonths.map(planMonth => {
+        const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+        if (ami < 0) return null;
+        const total = emps.reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    }
+
+    // 業務区分チェックボックス（画面上部のroleTypeFilter）に応じて、この要員計画
+    // チャート専用に対象divを動的に決定する。'配送・栽培'・'配送・出荷'はどちらか
+    // 一方でもチェックされていれば、内部的には'配送'を1回だけ対象にする（二重計上
+    // 防止）。外側スコープのdivs（['栽培','出荷','配送']、拠点別・表・3拠点サマリの
+    // 各サブタブで共有）はここでは変更せず、この関数内だけのローカル変数として
+    // シャドーイングする
+    const divs = [];
+    if (roleTypeFilter.has('栽培')) divs.push('栽培');
+    if (roleTypeFilter.has('出荷')) divs.push('出荷');
+    if (roleTypeFilter.has('配送・栽培') || roleTypeFilter.has('配送・出荷')) divs.push('配送');
+
+    // 実績工数：栽培・出荷・配送それぞれの実績工数（雇用形態フィルタ適用済み）を
+    // 選択中拠点分（全拠点合計時は3拠点合算）集計
+    const actualByDiv = {};
+    divs.forEach(div => {
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualBySite = sitesToShow.map(site => actualHoursForPlanMonthsFiltered(site, typeFilter));
+      actualByDiv[div] = sl(planMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
+    });
+    const actualMonthlyTotals = vm.map((_, mi) => divs.reduce((s, div) => s + (actualByDiv[div][mi] || 0), 0));
+
+    // 予定標準工数（工程別）：栽培・出荷のタスク行を区別せず1つの積み上げグループとして集計
+    const allDivRows = rows.filter(r => divs.includes(r.div));
+    const stdByTask = allDivRows.map(r => sl(planMonths.map((_, mi) => {
+      const total = sitesToShow.reduce((s, site) => {
+        const res = calcRow(site, r, mi);
+        return s + (res.h !== null ? res.h : 0);
+      }, 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    })));
+    const stdMonthlyTotals = vm.map((_, mi) => stdByTask.reduce((s, data) => s + (data[mi] || 0), 0));
+
+    // threeSiteMergeAgg()と同じロジックだが、雇用形態チェックボックス（empTypeFilter）を
+    // 適用したフィルタ済み版。要員計画の未来月「標準労働時間」棒専用のローカル関数
+    // （既存のthreeSiteMergeAgg()・threeSiteMergeAggFromRows()自体は変更しない）。
+    // empTypeFilterがnullの場合はapplyEmpTypeFilter()が素通しするため、既存の
+    // threeSiteMergeAgg()と同じ結果になる
+    function threeSiteMergeAggFilteredByEmpType(div, site) {
+      if (!mergeData) return null;
+      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
+      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
+      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
+      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      if (!matched.length && !newStaffMatched.length) return null;
+      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      const newStaffByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
+        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      });
+      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+      return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+    }
+
+    // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
+    // matched・newStaffMatchedをtierForMergeRow()で3ティアに分けてから、
+    // ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を計算する
+    // （threeSiteMergeAggByTier()と同じロジックだが、雇用形態フィルタ適用の
+    // 有無だけが異なる別実装として新設。上のthreeSiteMergeAggFilteredByEmpType()
+    // 自体は変更しない）
+    function threeSiteMergeAggByTierFilteredByEmpType(div, site) {
+      if (!mergeData) return null;
+      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
+      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
+      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
+      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const result = {};
+      ['lower', 'fulltime', 'parttime'].forEach(tier => {
+        const matchedTier = matched.filter(r => tierForMergeRow(r) === tier);
+        const newStaffMatchedTier = newStaffMatched.filter(r => tierForMergeRow(r) === tier);
+        if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
+        const stdTotalB1 = Math.round(matchedTier.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const newStaffByYm = {};
+        mergeData.monthYms.forEach(ym => {
+          const eligible = newStaffMatchedTier.filter(r => r.startYm == null || r.startYm <= ym);
+          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        });
+        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier, ...newStaffMatchedTier]);
+        result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      });
+      return result;
+    }
+
+    // 標準労働時間（青濃淡3段階＋黄＋緑）：栽培・出荷それぞれのティア別
+    // threeSiteMergeAggByTierFilteredByEmpType()（雇用形態フィルタ適用済み）を
+    // 合算してからthreeSiteMergeStdHoursDatasetsByTier()に渡す
+    // （stdTotalB1・newStaffByYm・deltaByYmとも両div分の合計、ティアごとに合算）
+    const siteForAgg = sitesToShow.length > 1 ? null : sitesToShow[0];
+    const mergedAggByTier = mergeThreeSiteMergeAggByTierAcrossDivs(divs.map(div => threeSiteMergeAggByTierFilteredByEmpType(div, siteForAgg)));
+    const stdHoursDs = threeSiteMergeStdHoursDatasetsByTier(mergedAggByTier, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
+    const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotalByTier(mergedAggByTier, divs, siteForAgg, mi)));
+
+    // 要員不足（標準工数−標準労働時間）：未来月かつ差分がプラスの月のみ、標準労働時間
+    // バー群（stack:'stdhours'）の上に継ぎ足す1本を追加する。stdMonthlyTotals・
+    // stdHoursTotalsとも既にvisMonths()基準（vmと同じ並び）にスライス済みのため、
+    // ここでもvm[mi]から実データ最終月判定用のymを求める
+    const staffGapData = vm.map((_, mi) => {
+      const ym = mnum(vm[mi]);
+      if (ym <= ACTUAL_CUTOFF) return null;
+      const gap = Math.round((stdMonthlyTotals[mi] - stdHoursTotals[mi]) * 10) / 10;
+      return gap > 0 ? gap : null;
+    });
+
+    // 軸のMAX値専用：業務区分（栽培/出荷/配送）・雇用形態のチェック状態に関わらず、
+    // 「全部ON」を仮定した場合の実績・予定標準工数・標準労働時間の月別合計を算出する。
+    // 実際に描画される棒（actualByDiv・stdByTask・stdHoursDs、上のdivsベースの計算）
+    // 自体は変更せず、sharedMaxの算出にのみこちらを使うことで、チェックボックスの
+    // 切り替えで軸の高さが変動しないようにする。対象拠点（sitesToShow/siteForAgg）は
+    // 現在選択中のまま（拠点を変えればMAXも変わる）
+    const ALL_DIVS = ['栽培', '出荷', '配送'];
+    function actualHoursForPlanMonthsAllEmpTypes(site, typeFilter) {
+      const { employees, months: activeMonths } = getActiveData();
+      const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+      return planMonths.map(planMonth => {
+        const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
+        if (ami < 0) return null;
+        const total = emps.reduce((s, e) => s + (e.hours[ami] ?? 0), 0);
+        return total > 0 ? Math.round(total * 10) / 10 : null;
+      });
+    }
+    const actualByDivAllOn = {};
+    ALL_DIVS.forEach(div => {
+      const typeFilter = div === '栽培'
+        ? wt => workTypeClass(wt) === 'wt-栽培'
+        : div === '配送'
+          ? wt => workTypeClass(wt) === 'wt-配送'
+          : wt => workTypeClass(wt) === 'wt-出荷';
+      const actualBySite = sitesToShow.map(site => actualHoursForPlanMonthsAllEmpTypes(site, typeFilter));
+      actualByDivAllOn[div] = sl(planMonths.map((_, mi) => actualBySite.reduce((s, arr) => s + (arr[mi] || 0), 0)));
+    });
+    const actualMonthlyTotalsAllOn = vm.map((_, mi) => ALL_DIVS.reduce((s, div) => s + (actualByDivAllOn[div][mi] || 0), 0));
+
+    const allDivRowsAllOn = rows.filter(r => ALL_DIVS.includes(r.div));
+    const stdByTaskAllOn = allDivRowsAllOn.map(r => sl(planMonths.map((_, mi) => {
+      const total = sitesToShow.reduce((s, site) => {
+        const res = calcRow(site, r, mi);
+        return s + (res.h !== null ? res.h : 0);
+      }, 0);
+      return total > 0 ? Math.round(total * 10) / 10 : null;
+    })));
+    const stdMonthlyTotalsAllOn = vm.map((_, mi) => stdByTaskAllOn.reduce((s, data) => s + (data[mi] || 0), 0));
+
+    const mergedAggAllOn = mergeThreeSiteMergeAggAcrossDivs(ALL_DIVS.map(div => threeSiteMergeAgg(div, siteForAgg)));
+    const stdHoursTotalsAllOn = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotal(mergedAggAllOn, ALL_DIVS, siteForAgg, mi)));
+
+    const sharedMax = computeSharedAxisMax([actualMonthlyTotalsAllOn, stdMonthlyTotalsAllOn, stdHoursTotalsAllOn], 100);
+
+    // 折れ線（収穫量・出荷量）：既存div別チャートと同じplanVolume()を使用し、栽培・出荷
+    // それぞれ右軸(y2)の折れ線として追加する（選択中拠点分。全拠点合計はこのモードでは
+    // 選択不可のため単一拠点分の集計で足りる）。配送は生産量指標を持たないため、
+    // 動的なdivsではなく栽培・出荷に固定する（配送のみ選択時にvolDataByDiv['栽培']・
+    // ['出荷']が未定義になり、下のline datasetsがエラーになるのを防ぐ）
+    const volDataByDiv = {};
+    ['栽培', '出荷'].forEach(div => {
+      volDataByDiv[div] = sl(planMonths.map((_, mi) =>
+        sitesToShow.reduce((s, site) => {
+          const v = planVolume(site, div, mi);
+          return s + (v !== null ? v : 0);
+        }, 0) || null
+      ));
+    });
+    const volMax = computeSharedAxisMax([volDataByDiv['栽培'], volDataByDiv['出荷']], 1000) || undefined;
+
+    const ctx = document.getElementById('planstaffplan2-combined')?.getContext('2d');
+    if (!ctx) return;
+    const datasets = [];
+    // 実績工数：業務区分チェックボックスで選択されているdivだけ棒を生成する。
+    // 栽培＝赤、出荷＝オレンジ（既存の実績棒と同じ暖色系）、配送＝シアンで、
+    // 既存のROLE_TYPE_COLORS（栽培緑/出荷黄）とは衝突しない配色にしている
+    const ACTUAL_BAR_COLORS = { '栽培': '#f87171', '出荷': '#fb923c', '配送': '#22d3ee' };
+    divs.forEach(div => {
+      const color = ACTUAL_BAR_COLORS[div];
+      datasets.push({
+        type: 'bar', label: `${div}（実績）`, data: actualByDiv[div],
+        backgroundColor: color + '99', borderColor: color, borderWidth: 1,
+        stack: 'actual', order: 1, _actualGroup: true,
+      });
+    });
+    stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
+    // 要員不足：標準労働時間バー群（stack:'stdhours'）の一番上に継ぎ足す。既存の
+    // 標準労働時間バー群（青濃淡3段階／黄／緑）・実績棒（赤/オレンジ/シアン）の
+    // いずれとも衝突しない、視覚的に区別しやすい白系の色にする
+    datasets.push({
+      type: 'bar', label: '要員不足（標準工数差分）h', data: staffGapData,
+      backgroundColor: '#e2e8f0' + '99', borderColor: '#e2e8f0', borderWidth: 1,
+      stack: 'stdhours', order: 1,
+    });
+    allDivRows.forEach((r, ri) => {
+      datasets.push({
+        type: 'bar', label: r.task, data: stdByTask[ri],
+        backgroundColor: TASK_COLORS[ri % TASK_COLORS.length] + 'cc',
+        borderColor: TASK_COLORS[ri % TASK_COLORS.length],
+        borderWidth: 0, stack: 'std', order: 2, _stdGroup: true,
+      });
+    });
+    datasets.push({
+      type: 'line', label: DIV_METRIC['栽培'], data: volDataByDiv['栽培'],
+      borderColor: '#94a3b8', backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#94a3b8',
+      tension: 0.3, yAxisID: 'y2', order: 0,
+      _volumeLine: true, _unit: DIV_UNIT['栽培'],
+    });
+    datasets.push({
+      type: 'line', label: DIV_METRIC['出荷'], data: volDataByDiv['出荷'],
+      borderColor: '#c084fc', backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#c084fc',
+      tension: 0.3, yAxisID: 'y2', order: 0,
+      _volumeLine: true, _unit: DIV_UNIT['出荷'],
+    });
+    planCmpChartInstances['staffplan-combined'] = new Chart(ctx, {
+      data: { labels: vm, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#8892a4', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+          tooltip: tooltipOpts(true, true),
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1e2235' } },
+          y: {
+            stacked: true, position: 'left',
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v} h` },
+            grid: { color: '#1e2235' }, suggestedMin: 0, max: sharedMax,
+            title: { display: true, text: 'h', color: '#8892a4', font: { size: 10 } },
+          },
+          y2: {
+            position: 'right',
+            ticks: { color: '#64748b', font: { size: 10 }, callback: v => v.toLocaleString('ja-JP') },
+            grid: { drawOnChartArea: false },
+            suggestedMin: 0, max: volMax,
+            title: { display: true, text: 'kg', color: '#64748b', font: { size: 10 } },
+          },
+        },
+      },
+    });
+
+    // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
+    // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
+    // 呼び出し先のcanvas IDと見出し文言のみ変更している。「予定標準工数合計」バーは
+    // 1段目で計算済みのallDivRows/stdByTaskをそのまま再利用し、工程別内訳
+    // （TASK_COLORS）の積み上げバーとして表示する（二重計算を避けるため、ここでの
+    // calcRow()再計算は行わない）
+    {
+      const site = planCmpSiteTab;
+      const allSitesTotalData = availSites.map(s => computeSiteTotalData(s, divs));
+      const siteTotalIdx = availSites.indexOf(site);
+      const { stdTotalRaw, actualData, forecastData, actualCountData, forecastCountData } = allSitesTotalData[siteTotalIdx];
+      const taskBreakdown = allDivRows.map((r, ri) => ({
+        label: r.task, data: stdByTask[ri], color: TASK_COLORS[ri % TASK_COLORS.length],
+      }));
+      const totalYMax = computeSharedAxisMax(
+        allSitesTotalData.map(d => totalChartStackedValues(d.stdTotalRaw, d.actualData, d.forecastData)),
+        100
+      ) || undefined;
+      const siteCountMax = computeSharedAxisMax(
+        allSitesTotalData.map(d => EMP_SERIES.flatMap(et => [
+          ...sl(d.actualCountData[et.label]).filter(v => v !== null),
+          ...sl(d.forecastCountData[et.label]).filter(v => v !== null),
+        ])),
+        1
+      ) || undefined;
+      const siteCountDatasets = EMP_SERIES.flatMap(et => [
+        {
+          type: 'line', label: `${et.label}人数（実績）`, data: sl(actualCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, pointBackgroundColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
+        },
+        {
+          type: 'line', label: `${et.label}人数（予想）`, data: sl(forecastCountData[et.label]),
+          borderColor: et.color, backgroundColor: 'transparent',
+          borderWidth: 2, borderDash: [5, 4],
+          pointRadius: 3, pointBackgroundColor: et.color, pointBorderColor: et.color,
+          tension: 0.3, yAxisID: 'y2', order: 0, _countLine: true, spanGaps: true,
+        },
+      ]);
+      const siteCountScale = {
+        y2: {
+          position: 'right',
+          ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v} 人` },
+          grid: { drawOnChartArea: false },
+          suggestedMin: 0, max: siteCountMax,
+          title: { display: true, text: '人', color: '#64748b', font: { size: 10 } },
+        },
+      };
+      renderTotalChart(`planstaffplan2-${site}-emp`, stdTotalRaw, actualData, forecastData,
+        { extraDatasets: siteCountDatasets, extraScales: siteCountScale, yMaxOverride: totalYMax, taskBreakdown });
+    }
+  }
+
   // planCmpSubtabはグローバル変数（restoreSessionStateBeforeFirstLoad()で復元される）。
   // ここでlet宣言してしまうとローカルにシャドーイングされ、復元された値が反映されなく
   // なるため、宣言はトップレベルのみとし、ここでは代入しない（有効な4値のいずれか
   // であることだけ保証する。restoreSessionStateBeforeFirstLoad()経由以外で不正な値が
   // 入ることは想定しないが、念のため無効値の場合のみ既定値'site'にフォールバックする）
-  if (!['site', 'sitesummary', 'summary', 'table'].includes(planCmpSubtab)) planCmpSubtab = 'site';
+  if (!['site', 'sitesummary', 'summary', 'table', 'staffplan'].includes(planCmpSubtab)) planCmpSubtab = 'site';
   function renderContent() {
     destroyCharts();
     renderSiteTabBarFixed();
     if (planCmpSubtab === 'sitesummary') renderSiteSummaryView();
     else if (planCmpSubtab === 'summary') renderSummaryView();
     else if (planCmpSubtab === 'table') renderTableView();
+    else if (planCmpSubtab === 'staffplan') renderStaffPlanView();
     else renderSiteView();
   }
 
@@ -8033,6 +8371,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             <button class="transfer-toggle-btn${planCmpSubtab === 'sitesummary' ? ' active' : ''}" data-tab="sitesummary">拠点サマリ</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">3拠点サマリ</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'table' ? ' active' : ''}" data-tab="table">表</button>
+            <button class="transfer-toggle-btn${planCmpSubtab === 'staffplan' ? ' active' : ''}" data-tab="staffplan">要員計画</button>
           </div>
         </div>
       </div>
