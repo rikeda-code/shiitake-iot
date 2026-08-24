@@ -8209,11 +8209,12 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     stdHoursDs.forEach(ds => datasets.push({ ...ds, data: sl(ds.data) }));
     // 要員不足：標準労働時間バー群（stack:'stdhours'）の一番上に継ぎ足す。既存の
     // 標準労働時間バー群（青濃淡3段階／黄／緑）・実績棒（赤/オレンジ/シアン）の
-    // いずれとも衝突しない、視覚的に区別しやすい白系の色にする
+    // いずれとも衝突しない、視覚的に区別しやすい白系の色にする。_staffGapBarは
+    // 下のstaffGapSegmentValuesプラグインが対象datasetを見分けるための目印
     datasets.push({
       type: 'bar', label: '要員不足（標準工数差分）h', data: staffGapData,
-      backgroundColor: '#e2e8f0' + '99', borderColor: '#e2e8f0', borderWidth: 1,
-      stack: 'stdhours', order: 1,
+      backgroundColor: '#ffffff' + '99', borderColor: '#ffffff', borderWidth: 1,
+      stack: 'stdhours', order: 1, _staffGapBar: true,
     });
     allDivRows.forEach((r, ri) => {
       datasets.push({
@@ -8263,6 +8264,35 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           },
         },
       },
+      // 要員不足バー（_staffGapBar）のセグメント上に、差分の数値をホバーせずとも常時
+      // 見える形で直接描画する。既存のstdHoursSegmentCounts（別グラフ用、変更しない）
+      // と同じ「chartjs-plugin-datalabelsを使わず、afterDatasetsDrawで手動描画する」
+      // 方式を踏襲した、要員計画タブ専用の別プラグインとして新設する
+      plugins: [{
+        id: 'staffGapSegmentValues',
+        afterDatasetsDraw(chart) {
+          const ctx = chart.ctx;
+          chart.data.datasets.forEach((ds, dsIndex) => {
+            if (!ds._staffGapBar) return;
+            const meta = chart.getDatasetMeta(dsIndex);
+            meta.data.forEach((bar, mi) => {
+              const val = ds.data[mi];
+              if (val == null) return;
+              // セグメントが小さすぎる場合は文字を描画しない（読みづらい重なりを避ける）
+              if (bar.height < 15) return;
+              ctx.save();
+              ctx.font = '10px sans-serif';
+              // バー自体がほぼ白（#ffffff）のため、stdHoursSegmentCountsと同じ白文字
+              // では読めない。濃色（グラフの暗背景と同系）にして視認性を確保する
+              ctx.fillStyle = '#1e2235';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(`${val}`, bar.x, bar.y + bar.height / 2);
+              ctx.restore();
+            });
+          });
+        },
+      }],
     });
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
