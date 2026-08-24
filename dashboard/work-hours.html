@@ -9396,7 +9396,12 @@ function renderDecPlanContent(planData, mergeData) {
   const engine = createStdHoursEngine(planRecords, planMonths, planMonths, originalCount, conv, null, '実数計画');
 
   const SITES_ORD = ['いなべ', '群馬', '南丹'];
+  // ①6月実績：作成時点（2026年6月）に固定。表示文言・計算対象月とも変更しない
   const JUN = '2026/6';
+  // ②標準工数合計専用：整理済み_Mシートの実データ最終月から動的に算出する
+  // （①のJUNとは意図的に分離している。「予実＞比較（繁忙期見込み）」タブの
+  // LATEST_REAL_MONTHと同じ考え方）
+  const STD_HOURS_TARGET_MONTH = normalizeMonth(getRealMonths()[getRealMonths().length - 1]);
   const DEC = '2026/12';
   const junIdx = planMonths.indexOf(JUN);
   const decIdx = planMonths.indexOf(DEC);
@@ -9441,24 +9446,34 @@ function renderDecPlanContent(planData, mergeData) {
   // 人数表③新加入見込み：B=2の件数
   function b2N(site) {
     if (!mergeData) return null;
-    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div))).length || null;
+    // newHireN()と同じ開始月フィルタ（12月までに開始予定の新規要員は含める）。
+    // このフィルタが無いと、人数表③（本関数）とグラフ③バー（newHireN()）の人数が
+    // 食い違ってしまう
+    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div) && (r.startYm == null || r.startYm <= DECPLAN_TARGET_YM))).length || null;
   }
 
-  // ②標準工数合計：3拠点マージR列(栽培・出荷divのみ) per site。B列=1（稼働フラグ）の
-  // 行のみを対象とし、B列=2（新規要員）の行は③新加入見込みで別途集計するため除外する
-  // R列が空の行は、以前と同様この集計から除外する（②③④確認事項と同じ理由）
+  // ②標準工数合計：STD_HOURS_TARGET_MONTH（動的算出した実データ最終月）時点の在籍者を
+  // 対象に算出する。3拠点マージシート自身のB列（活動フラグ＝現在のステータス）で
+  // 絞り込むと、過去のSTD_HOURS_TARGET_MONTH時点の在籍者を正しく表せない（PR #332で
+  // 修正した問題と同種）ため、整理済み_M側でSTD_HOURS_TARGET_MONTHに実績がある人を
+  // 対象者として特定し、その人に対応する3拠点マージ側の行（拠点・業務区分・氏名・
+  // 雇用区分の一致、findStdHoursMergeRowForEmployee()経由）からR列を取得して合計する
+  // computeStdHoursLineForDivSite()（4-1で修正済み）をそのまま再利用する。雇用区分
+  // トグル（applyEmpTypeFilter）はcomputeStdHoursLineForDivSite()が内部で使う
+  // getActiveData()が既に適用済みのため、ここで重ねて適用する必要はない
   function stdHoursFromMerge(site) {
-    if (!mergeData) return null;
-    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 1 && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
-    if (!siteRows.length) return null;
-    return Math.round(siteRows.reduce((s, r) => s + (r.stdHours || 0), 0) * 10) / 10;
+    const total = divs.reduce((s, div) => {
+      const v = computeStdHoursLineForDivSite(div, site, [STD_HOURS_TARGET_MONTH])[0];
+      return s + (v !== null ? v : 0);
+    }, 0);
+    return total > 0 ? Math.round(total * 10) / 10 : null;
   }
 
   // ③新加入見込み工数：3拠点マージシートのB列=2（新規要員）行のR列（標準労働時間）
   // 合計から動的に算出する（固定人数計画は撤廃）
   function newHireH(site) {
     if (!mergeData) return null;
-    const rows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div)));
+    const rows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div) && (r.startYm == null || r.startYm <= DECPLAN_TARGET_YM)));
     if (!rows.length) return null;
     return Math.round(rows.reduce((s, r) => s + (r.stdHours || 0), 0) * 10) / 10;
   }
@@ -9466,7 +9481,7 @@ function renderDecPlanContent(planData, mergeData) {
   // ③新加入見込み人数：3拠点マージシートのB列=2（新規要員）行の件数から動的に算出する
   function newHireN(site) {
     if (!mergeData) return null;
-    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div))).length || null;
+    return applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && r.activeFlag === 2 && divs.includes(r.div) && (r.startYm == null || r.startYm <= DECPLAN_TARGET_YM))).length || null;
   }
 
   // ④残業見込み工数：3拠点マージ DECPLAN_TARGET_YM列（maxByYm）の合計 per site
@@ -9485,8 +9500,12 @@ function renderDecPlanContent(planData, mergeData) {
     // B=1（既存人員）・B=2（新規要員候補）のみを対象とする。parseThreeSiteMergeSheet()の
     // 入口フィルタ撤廃（過去月集計の不具合修正）によりB列が1・2以外の行もmergeData.rows
     // に含まれるようになったため、この未来月（DECPLAN_TARGET_YM）向けの集計では従来通りの
-    // 対象範囲を維持するために明示的にフィルタする
-    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site && (r.activeFlag === 1 || r.activeFlag === 2) && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
+    // 対象範囲を維持するために明示的にフィルタする。B=2行は、比較（繁忙期見込み）タブの
+    // threeSiteMergeAgg()と同じく開始月（startYm）がDECPLAN_TARGET_YM以前の場合のみ対象と
+    // する（12月までに開始予定の新規要員は含める）。B=1行にはこのフィルタは不要
+    const siteRows = applyEmpTypeFilter(mergeData.rows.filter(r => r.site === site
+      && (r.activeFlag === 1 || (r.activeFlag === 2 && (r.startYm == null || r.startYm <= DECPLAN_TARGET_YM)))
+      && !r.stdHoursOriginallyEmpty && divs.includes(r.div)));
     if (!siteRows.length) return null;
     let total = 0;
     siteRows.forEach(r => {
@@ -9499,9 +9518,10 @@ function renderDecPlanContent(planData, mergeData) {
   // ④残業見込み人数：DECPLAN_TARGET_YM列 > R列 の人数 per site
   function overtimeN(site) {
     if (!mergeData) return null;
-    // overtimeH()と同じ理由でB=1・B=2のみを対象とする
+    // overtimeH()と同じ理由でB=1・B=2のみを対象とする（B=2は開始月フィルタも同様に適用）
     return mergeData.rows.filter(r =>
-      r.site === site && (r.activeFlag === 1 || r.activeFlag === 2) && !r.stdHoursOriginallyEmpty && typeof r.maxByYm[DECPLAN_TARGET_YM] === 'number' && r.maxByYm[DECPLAN_TARGET_YM] > r.stdHours
+      r.site === site && (r.activeFlag === 1 || (r.activeFlag === 2 && (r.startYm == null || r.startYm <= DECPLAN_TARGET_YM)))
+      && !r.stdHoursOriginallyEmpty && typeof r.maxByYm[DECPLAN_TARGET_YM] === 'number' && r.maxByYm[DECPLAN_TARGET_YM] > r.stdHours
     ).length || null;
   }
 
