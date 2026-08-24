@@ -3360,36 +3360,56 @@ function computePastYearHoursSummaryBar(months) {
   });
 }
 
-// stdHoursMergeData（3拠点マージ、H列＝名前・R列＝標準労働時間）から、正規化した
-// 氏名をキーとする標準労働時間のMapを作る。過去月の実績集計専用のため、B列
-// （現在のステータス）は見ない（B列は未来月の集計＝threeSiteMergeAgg()等でのみ
-// 意味を持つ。B=2の新規要員行は整理済み_M側にまだ実績が無く、computeStdHoursLine()の
-// hours[mi] !== null判定で元々対象外になる）。同名の行が複数あれば合算する
-function threeSiteMergeStdHoursByName() {
-  const map = new Map();
-  if (!stdHoursMergeData) return map;
-  stdHoursMergeData.rows.forEach(r => {
-    const key = normalizeName(r.name);
-    map.set(key, (map.get(key) || 0) + r.stdHours);
-  });
-  return map;
+// workTypeClass()の戻り値（'wt-栽培'/'wt-出荷'/'wt-配送'/'wt-拠点'/''）を、
+// 標準労働時間シート（3拠点マージ）側のdiv表記（'栽培'/'出荷'/'配送'）に変換する。
+// 「拠点業務」（'wt-拠点'）や未分類（''）は3拠点マージ側に対応する業務区分が
+// 無いため、nullを返す
+function stdHoursMergeDivForWorkType(workType) {
+  const cls = workTypeClass(workType);
+  if (cls === 'wt-栽培') return '栽培';
+  if (cls === 'wt-出荷') return '出荷';
+  if (cls === 'wt-配送') return '配送';
+  return null;
+}
+
+// stdHoursMergeData（3拠点マージ）から、従業員1人分のオブジェクトeに対応する行を
+// 検索する。氏名だけで名寄せすると、同一人物が雇用区分変更・異動等で標準労働時間
+// シート上に複数行（社員としての行・アルバイトとしての行、異動前後の拠点の行等）
+// を持つ場合、本来無関係な行の値まで拾ってしまう可能性があるため、拠点(e.base)・
+// 業務区分（stdHoursMergeDivForWorkType(e.workType)）・氏名・雇用区分（アルバイト
+// か否か）が一致する行だけを候補にする。「拠点・業務別」タブのfindMergeRow()
+// （renderPlanCompareCharts2内）と同じ考え方。stdHoursMergeDivForWorkType()が
+// nullの場合（拠点業務等、3拠点マージ側に対応する業務区分が無い）は無条件でnullを
+// 返す。複数行ヒットする場合は最初に見つかった行を採用する（同一雇用区分内での
+// 複数行問題は今回の対象外）
+function findStdHoursMergeRowForEmployee(mergeRows, e) {
+  const div = stdHoursMergeDivForWorkType(e.workType);
+  if (div == null) return null;
+  const key = normalizeName(e.name);
+  const wantsPartTime = (e.employment || '').includes('アルバイト');
+  return mergeRows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
+    && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
 }
 
 // 標準労働時間（月ごとに、その月に実績[実質勤務時間]があるスタッフのみを対象に合計）。
 // parseDuration()は0以下の値を既にnullとして返しているため、hours[mi] !== nullの
 // 判定だけで「実質勤務時間が0または未入力のスタッフを除外」の条件を満たせる。
-// 合計する値は整理済み_MのI列（e.stdHours）ではなく、3拠点マージのR列を氏名突き合わせ
-// で取得する（normalizeName()で表記ゆれ・括弧付き注記を吸収）。一致する行がない場合は
-// 0扱いとする
+// 合計する値は整理済み_MのI列（e.stdHours）ではなく、3拠点マージのR列を
+// findStdHoursMergeRowForEmployee()で取得する（拠点・業務区分・氏名・雇用区分の
+// 一致で対応行を特定する。normalizeName()で表記ゆれ・括弧付き注記を吸収）。
+// 一致する行がない場合は0扱いとする
 function computeStdHoursLine(emps, months) {
-  const stdHoursByName = threeSiteMergeStdHoursByName();
+  const mergeRows = stdHoursMergeData ? stdHoursMergeData.rows : [];
   return months.map((_, mi) => {
     // 工数振替の「応援」仮想従業員（computeTransferAdjustments()生成分）は元の従業員と
     // 同一人物のため、氏名突き合わせでは元の記録と同じ3拠点マージ行にマッチしてしまう。
     // 標準労働時間の概念自体が無い仮想レコードのため、二重集計を避けるために除外する
     const vals = emps
       .filter(e => e.hours[mi] !== null && !e.isTransferVirtual)
-      .map(e => stdHoursByName.get(normalizeName(e.name)) ?? 0);
+      .map(e => {
+        const row = findStdHoursMergeRowForEmployee(mergeRows, e);
+        return row ? row.stdHours : 0;
+      });
     return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) * 10) / 10 : null;
   });
 }
