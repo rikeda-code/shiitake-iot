@@ -1322,11 +1322,23 @@ function buildDataset(json) {
     const flag       = cells[flagIdx]?.v;
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
-    if (hours.every(h => h === null)) return;
+    // B=2（新規要員・追加待ち）は、まだ稼働実績が無く全月nullになるのが通常のため、
+    // 除外対象から外す（変更B・段階3の追加修正）。hours配列自体は全てnullのまま
+    // 変更しないため、実績集計・実績人数等（e.hours[mi] !== nullを条件にする箇所）
+    // には一切現れない
+    if (hours.every(h => h === null) && flag !== 2) return;
 
     const stdHours = stdHoursIdx >= 0 ? parsePlainHours(cells[stdHoursIdx]) : null;
 
-    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours });
+    // startYm：I列（開始月）。標準労働時間シート側のパース（parseThreeSiteMergeSheet）
+    // と同じ列インデックス定数・同じパース関数を再利用する（A〜I列は各シートで同一構成）
+    const startYm = parseGvizDateYm(cells[THREE_SITE_MERGE_START_MONTH_COL]);
+
+    // prj：E列（PRJ＝計上先）。空欄は「計上外」（例：他担当の営業等）を意味する。
+    // 標準労働時間シート側と同じ列インデックス定数を再利用する
+    const prj = String(cells[THREE_SITE_MERGE_PRJ_COL]?.v ?? '').trim();
+
+    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours, startYm, prj });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
@@ -6327,31 +6339,55 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return { stdTotalB1, newStaffByYm: sumByYmField('newStaffByYm'), deltaByYm: sumByYmField('deltaByYm') };
   }
 
+  // renderSiteView()内のローカル関数findMergeRowと同じロジック（拠点(e.base)・
+  // 業務区分(div)・氏名・雇用区分（アルバイトかどうか）で標準労働時間シート側の
+  // 対応行を1件に絞り込む）の汎用版。mergeRowsとdivを引数として受け取ることで、
+  // findMergeRow自体を変更せずに他の場所からも同じマッチングロジックを利用できる
+  function findStdHoursMergeRowInDiv(mergeRows, div, e) {
+    if (!mergeRows) return null;
+    const key = normalizeName(e.name);
+    const wantsPartTime = (e.employment || '').includes('アルバイト');
+    return mergeRows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
+      && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+  }
+
   // 拠点×業務区分(栽培/出荷/配送)ごとの集計を返す。site=nullなら3拠点合算（全拠点合計
-  // タブ・3拠点サマリタブ・拠点サマリタブで使用）。集計対象は、D・F・H列による
-  // マッチングに加えて、E列が空でない（プロジェクト等の割当あり）行のみとする。
-  // - stdTotalB1：B列＝1（稼働フラグ）の行のみのR列合計（固定値）
-  // - newStaffByYm：B列＝2（新規要員・追加待ち）の行のうち、I列（開始月）が未設定
-  //   またはその月以前の行だけを対象に、月ごとにR列を合計したもの（開始月を境に
-  //   対象行が増えるため、月によって値が変わる）
-  // - deltaByYm：T列以降（スタッフMの増減のみ。以前のような「合計－R列」の差分計算は
-  //   不要で、シート側の値をそのまま月ごとに合計するだけでよい）をB=1・B=2両方の
-  //   行を対象に合計したもの
-  // R列（標準労働時間）は空でもよく、その場合はparseThreeSiteMergeSheet()側で0として
-  // 扱われている
+  // タブ・3拠点サマリタブ・拠点サマリタブで使用）。対象者の特定は、標準労働時間
+  // シート自身のB列（activeFlag）ではなく、整理済み_M（allData.employees）のB列
+  // （e.flag）を基準に行う（変更B・段階2）。E列（PRJ、e.prj）が空欄の行は「計上外」
+  // （例：他担当の営業等）のため、B列の値に関わらず対象者から除外する（変更B・
+  // 段階2の追加修正）。各対象者に対応する標準労働時間シート側の行はfindStdHoursMergeRowInDiv()
+  // で検索し、そのstdHoursを使う（対応行が見つからない場合は0として扱う）。
+  // - stdTotalB1：整理済み_M側でflag===1（稼働）の従業員の、対応行stdHours合計（固定値）
+  // - newStaffByYm：整理済み_M側でflag===2（新規要員・追加待ち）の従業員のうち、
+  //   e.startYm（整理済み_M側の開始月）が未設定またはその月以前の従業員だけを対象に、
+  //   月ごとに対応行stdHoursを合計したもの（開始月を境に対象者が増えるため、月によって
+  //   値が変わる）
+  // - deltaByYm：T列以降（スタッフMの増減のみ）をflag===1・flag===2両方の対象者に
+  //   対応する行を対象に合計したもの（threeSiteMergeAggFromRows()自体は変更なし。
+  //   対応行が見つからなかった従業員はここでは除外する）
   function threeSiteMergeAgg(div, site) {
     if (!mergeData) return null;
-    const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-    const matched = mergeData.rows.filter(r => baseMatch(r) && isThreeSiteMergeActiveFlag(r.activeFlag));
-    const newStaffMatched = mergeData.rows.filter(r => baseMatch(r) && isThreeSiteMergeNewStaffFlag(r.activeFlag));
+    const emps = allData.employees.filter(e =>
+      stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+      && (e.prj || '').trim() !== '');
+    const matched = emps.filter(e => e.flag === 1);
+    const newStaffMatched = emps.filter(e => e.flag === 2);
     if (!matched.length && !newStaffMatched.length) return null;
-    const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+
+    const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+    const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+
+    const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
     const newStaffByYm = {};
     mergeData.monthYms.forEach(ym => {
-      const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
-      if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+      const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+      if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
     });
-    const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+
+    const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
+    const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
+    const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
     return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
   }
 
@@ -7444,48 +7480,61 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
 
     // threeSiteMergeAgg()と同じロジックだが、雇用形態チェックボックス（empTypeFilter）を
     // 適用したフィルタ済み版（拠点サマリと同じロジック、site=null＝3拠点合算版）。
+    // 対象者の特定は整理済み_M（allData.employees）のB列（e.flag）・E列（e.prj、
+    // 空欄は計上外）を基準に行う（変更B・段階3。threeSiteMergeAgg()と同じ考え方）。
     // 既存のthreeSiteMergeAgg()・threeSiteMergeAggFromRows()自体は変更しない
     function threeSiteMergeAggFilteredByEmpType(div, site) {
       if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+        && (e.prj || '').trim() !== ''));
+      const matched = emps.filter(e => e.flag === 1);
+      const newStaffMatched = emps.filter(e => e.flag === 2);
       if (!matched.length && !newStaffMatched.length) return null;
-      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+
+      const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+      const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+
+      const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       const newStaffByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
-      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+
+      const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
+      const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
+      const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
       return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
-    // matched・newStaffMatchedをtierForMergeRow()で3ティアに分けてから、
-    // ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を計算する
-    // （threeSiteMergeAggByTier()と同じロジックだが、雇用形態フィルタ適用の
-    // 有無だけが異なる別実装として新設。上のthreeSiteMergeAggFilteredByEmpType()
-    // 自体は変更しない）
+    // matched・newStaffMatchedを、各対象者に対応する標準労働時間シート側の行
+    // （findStdHoursMergeRowInDiv()の結果）に対してtierForMergeRow()を適用して
+    // 3ティアに分けてから、ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を
+    // 計算する（対応行が見つからない従業員はティア判定できないため除外する）。
+    // 対象者の特定自体は上のthreeSiteMergeAggFilteredByEmpType()と同じ（変更B・段階3）
     function threeSiteMergeAggByTierFilteredByEmpType(div, site) {
       if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+        && (e.prj || '').trim() !== ''));
+      const matchedWithRow = emps.filter(e => e.flag === 1)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
+      const newStaffWithRow = emps.filter(e => e.flag === 2)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const result = {};
       ['lower', 'fulltime', 'parttime'].forEach(tier => {
-        const matchedTier = matched.filter(r => tierForMergeRow(r) === tier);
-        const newStaffMatchedTier = newStaffMatched.filter(r => tierForMergeRow(r) === tier);
+        const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+        const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
-        const stdTotalB1 = Math.round(matchedTier.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         const newStaffByYm = {};
         mergeData.monthYms.forEach(ym => {
-          const eligible = newStaffMatchedTier.filter(r => r.startYm == null || r.startYm <= ym);
-          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+          const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
-        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier, ...newStaffMatchedTier]);
+        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
         result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
       });
       return result;
@@ -7748,49 +7797,60 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // threeSiteMergeAgg()と同じロジックだが、雇用形態チェックボックス（empTypeFilter）を
     // 適用したフィルタ済み版。拠点サマリの未来月「標準労働時間」棒専用のローカル関数
     // （既存のthreeSiteMergeAgg()・threeSiteMergeAggFromRows()自体は変更しない）。
-    // empTypeFilterがnullの場合はapplyEmpTypeFilter()が素通しするため、既存の
-    // threeSiteMergeAgg()と同じ結果になる
+    // 対象者の特定は整理済み_M（allData.employees）のB列（e.flag）・E列（e.prj、
+    // 空欄は計上外）を基準に行う（変更B・段階3。threeSiteMergeAgg()と同じ考え方）
     function threeSiteMergeAggFilteredByEmpType(div, site) {
       if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+        && (e.prj || '').trim() !== ''));
+      const matched = emps.filter(e => e.flag === 1);
+      const newStaffMatched = emps.filter(e => e.flag === 2);
       if (!matched.length && !newStaffMatched.length) return null;
-      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+
+      const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+      const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+
+      const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       const newStaffByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
-      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+
+      const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
+      const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
+      const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
       return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
-    // matched・newStaffMatchedをtierForMergeRow()で3ティアに分けてから、
-    // ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を計算する
-    // （threeSiteMergeAggByTier()と同じロジックだが、雇用形態フィルタ適用の
-    // 有無だけが異なる別実装として新設。上のthreeSiteMergeAggFilteredByEmpType()
-    // 自体は変更しない）
+    // matched・newStaffMatchedを、各対象者に対応する標準労働時間シート側の行
+    // （findStdHoursMergeRowInDiv()の結果）に対してtierForMergeRow()を適用して
+    // 3ティアに分けてから、ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を
+    // 計算する（対応行が見つからない従業員はティア判定できないため除外する）。
+    // 対象者の特定自体は上のthreeSiteMergeAggFilteredByEmpType()と同じ（変更B・段階3）
     function threeSiteMergeAggByTierFilteredByEmpType(div, site) {
       if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+        && (e.prj || '').trim() !== ''));
+      const matchedWithRow = emps.filter(e => e.flag === 1)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
+      const newStaffWithRow = emps.filter(e => e.flag === 2)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const result = {};
       ['lower', 'fulltime', 'parttime'].forEach(tier => {
-        const matchedTier = matched.filter(r => tierForMergeRow(r) === tier);
-        const newStaffMatchedTier = newStaffMatched.filter(r => tierForMergeRow(r) === tier);
+        const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+        const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
-        const stdTotalB1 = Math.round(matchedTier.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         const newStaffByYm = {};
         mergeData.monthYms.forEach(ym => {
-          const eligible = newStaffMatchedTier.filter(r => r.startYm == null || r.startYm <= ym);
-          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+          const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
-        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier, ...newStaffMatchedTier]);
+        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
         result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
       });
       return result;
@@ -8063,49 +8123,60 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // threeSiteMergeAgg()と同じロジックだが、雇用形態チェックボックス（empTypeFilter）を
     // 適用したフィルタ済み版。要員計画の未来月「標準労働時間」棒専用のローカル関数
     // （既存のthreeSiteMergeAgg()・threeSiteMergeAggFromRows()自体は変更しない）。
-    // empTypeFilterがnullの場合はapplyEmpTypeFilter()が素通しするため、既存の
-    // threeSiteMergeAgg()と同じ結果になる
+    // 対象者の特定は整理済み_M（allData.employees）のB列（e.flag）・E列（e.prj、
+    // 空欄は計上外）を基準に行う（変更B・段階3。threeSiteMergeAgg()と同じ考え方）
     function threeSiteMergeAggFilteredByEmpType(div, site) {
       if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+        && (e.prj || '').trim() !== ''));
+      const matched = emps.filter(e => e.flag === 1);
+      const newStaffMatched = emps.filter(e => e.flag === 2);
       if (!matched.length && !newStaffMatched.length) return null;
-      const stdTotalB1 = Math.round(matched.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+
+      const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+      const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+
+      const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       const newStaffByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffMatched.filter(r => r.startYm == null || r.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
-      const deltaCombined = threeSiteMergeAggFromRows([...matched, ...newStaffMatched]);
+
+      const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
+      const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
+      const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
       return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
-    // matched・newStaffMatchedをtierForMergeRow()で3ティアに分けてから、
-    // ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を計算する
-    // （threeSiteMergeAggByTier()と同じロジックだが、雇用形態フィルタ適用の
-    // 有無だけが異なる別実装として新設。上のthreeSiteMergeAggFilteredByEmpType()
-    // 自体は変更しない）
+    // matched・newStaffMatchedを、各対象者に対応する標準労働時間シート側の行
+    // （findStdHoursMergeRowInDiv()の結果）に対してtierForMergeRow()を適用して
+    // 3ティアに分けてから、ティアごとに{stdTotalB1, newStaffByYm, deltaByYm}を
+    // 計算する（対応行が見つからない従業員はティア判定できないため除外する）。
+    // 対象者の特定自体は上のthreeSiteMergeAggFilteredByEmpType()と同じ（変更B・段階3）
     function threeSiteMergeAggByTierFilteredByEmpType(div, site) {
       if (!mergeData) return null;
-      const baseMatch = r => r.div === div && (site == null || r.site === site) && r.prj !== '';
-      const rowsFiltered = applyEmpTypeFilter(mergeData.rows.filter(baseMatch));
-      const matched = rowsFiltered.filter(r => isThreeSiteMergeActiveFlag(r.activeFlag));
-      const newStaffMatched = rowsFiltered.filter(r => isThreeSiteMergeNewStaffFlag(r.activeFlag));
+      const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+        && (e.prj || '').trim() !== ''));
+      const matchedWithRow = emps.filter(e => e.flag === 1)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
+      const newStaffWithRow = emps.filter(e => e.flag === 2)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const result = {};
       ['lower', 'fulltime', 'parttime'].forEach(tier => {
-        const matchedTier = matched.filter(r => tierForMergeRow(r) === tier);
-        const newStaffMatchedTier = newStaffMatched.filter(r => tierForMergeRow(r) === tier);
+        const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+        const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
-        const stdTotalB1 = Math.round(matchedTier.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+        const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         const newStaffByYm = {};
         mergeData.monthYms.forEach(ym => {
-          const eligible = newStaffMatchedTier.filter(r => r.startYm == null || r.startYm <= ym);
-          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, r) => s + r.stdHours, 0) * 10) / 10;
+          const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
-        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier, ...newStaffMatchedTier]);
+        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
         result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
       });
       return result;
