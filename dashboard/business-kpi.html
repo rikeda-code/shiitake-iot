@@ -252,12 +252,14 @@ const SHIPMENT_VALUE = {
   gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,null],
   nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,null],
 };
-// g単価 (円/kg) — 出荷量＆出荷額シート 同タブ I列「g単価(出荷額ベース)」(円/g)を1000倍して円/kgに変換
+// g単価 (円/kg) — 出荷量＆出荷額シート「g単価(売上ベース)」列(円/g)を1000倍して円/kgに変換。
+// 拠点タブ(いなべ/群馬/南丹)ではJ列、全拠点タブではI列だが、列名(ラベル)で照合するため位置には依存しない。
 // ライブ取得できるまではnull。calcSite()内でnullの月は出荷額÷出荷量の計算値にフォールバックする。
 const UNIT_PRICE = {
   inabe:  Array(N).fill(null),
   gunma:  Array(N).fill(null),
   nantan: Array(N).fill(null),
+  total:  Array(N).fill(null),
 };
 // 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.1)〜 ※ライブ取得
 const BED_COUNT = {
@@ -330,18 +332,19 @@ function parseBedCountTable(table) {
 
 // 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額)で
 // 特定し、行は「n月」ラベルで特定する(行・列位置に依存しないため多少の行列挿入があっても壊れにくい)。
+// g単価は「g単価(売上ベース)」列を採用(拠点タブではJ列相当だが、ラベル照合のため列位置には依存しない)。
 async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const tabName = `${year}${siteNameJP}`;
   const table = await fetchSheet(sheetId, tabName, 1);
   const rows = table.rows || [];
-  let colB = null, colE = null, colI = null;
+  let colB = null, colE = null, colUnitPrice = null;
   rows.forEach(row => {
     (row.c || []).forEach((c, i) => {
       const label = c && c.v != null ? String(c.v).trim() : '';
       // 出荷量の見出しはタブによって表記が異なる(いなべ:「出荷量(固定)」／群馬・南丹:「出荷量」)
       if (label === '出荷量(固定)' || label === '出荷量') colB = i;
       if (label === '出荷額') colE = i;
-      if (label === 'g単価(出荷額ベース)') colI = i;
+      if (label === 'g単価(売上ベース)') colUnitPrice = i;
     });
   });
   if (colB == null || colE == null) throw new Error(`${tabName}: 列見出しが見つかりません`);
@@ -360,13 +363,42 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
     const eVal = cells[colE]?.v;
     shipment[month - 1] = (bVal != null && bVal !== 0) ? +(bVal / 1000).toFixed(2) : null;
     shipmentValue[month - 1] = (eVal != null && eVal !== 0) ? Math.round(eVal) : null;
-    // I列「g単価(出荷額ベース)」は円/g のため、ダッシュボード表示単位の円/kgに変換(×1000)
-    if (colI != null) {
-      const iVal = cells[colI]?.v;
-      unitPrice[month - 1] = (iVal != null && iVal !== 0) ? Math.round(iVal * 1000) : null;
+    // 「g単価(売上ベース)」は円/g のため、ダッシュボード表示単位の円/kgに変換(×1000)
+    if (colUnitPrice != null) {
+      const uVal = cells[colUnitPrice]?.v;
+      unitPrice[month - 1] = (uVal != null && uVal !== 0) ? Math.round(uVal * 1000) : null;
     }
   });
   return { shipment, shipmentValue, unitPrice };
+}
+
+// 全拠点タブ(例:2025全拠点)から「g単価(売上ベース)」列のみを取得する(全社合計のg単価用)。
+// 全拠点タブでは同じ列名がI列相当になるが、こちらもラベル照合のため列位置には依存しない。
+async function fetchTotalUnitPriceYear(sheetId, year) {
+  const tabName = `${year}全拠点`;
+  const table = await fetchSheet(sheetId, tabName, 1);
+  const rows = table.rows || [];
+  let colUnitPrice = null;
+  rows.forEach(row => {
+    (row.c || []).forEach((c, i) => {
+      const label = c && c.v != null ? String(c.v).trim() : '';
+      if (label === 'g単価(売上ベース)') colUnitPrice = i;
+    });
+  });
+  if (colUnitPrice == null) throw new Error(`${tabName}: 列見出しが見つかりません`);
+
+  const unitPrice = Array(12).fill(null);
+  rows.forEach(row => {
+    const cells = row.c || [];
+    const monthLabel = cells[0]?.v != null ? String(cells[0].v) : (cells[0]?.f || '');
+    const m = String(monthLabel).match(/^(\d{1,2})月$/);
+    if (!m) return;
+    const month = parseInt(m[1], 10);
+    if (month < 1 || month > 12) return;
+    const uVal = cells[colUnitPrice]?.v;
+    unitPrice[month - 1] = (uVal != null && uVal !== 0) ? Math.round(uVal * 1000) : null;
+  });
+  return unitPrice;
 }
 
 // 拠点ごとに独立して取得し、1拠点が失敗しても他拠点の成功分は反映する(全滅を避ける)
@@ -387,6 +419,18 @@ async function fetchShipmentAll(sheetId) {
       failures.push(`${SITE_JP[key]}: ${e.message}`);
     }
   }
+
+  // 全社合計のg単価は拠点の加重平均ではなく、全拠点タブの「g単価(売上ベース)」を直接採用する
+  try {
+    const [t25, t26] = await Promise.all([
+      fetchTotalUnitPriceYear(sheetId, 2025),
+      fetchTotalUnitPriceYear(sheetId, 2026),
+    ]);
+    unitPrice.total = [...t25, ...t26].slice(0, N);
+  } catch (e) {
+    failures.push(`全拠点: ${e.message}`);
+  }
+
   return { shipment, shipmentValue, unitPrice, failures };
 }
 
@@ -575,7 +619,11 @@ function buildData() {
     grossProfit: sumArr(data.inabe.grossProfit, data.gunma.grossProfit, data.nantan.grossProfit),
   };
   data.total.yieldRate = data.total.shipment.map((v,i) => (v == null || !data.total.harvest[i]) ? null : +(v / data.total.harvest[i] * 100).toFixed(1));
-  data.total.unitPrice = data.total.shipment.map((v,i) => (v == null || data.total.shipmentValue[i] == null) ? null : Math.round(data.total.shipmentValue[i] / v));
+  // 全社合計のg単価は全拠点タブのライブ値(g単価・売上ベース)を優先し、未取得の月のみ出荷額÷出荷量で補完
+  data.total.unitPrice = data.total.shipment.map((v,i) => {
+    if (UNIT_PRICE.total && UNIT_PRICE.total[i] != null) return UNIT_PRICE.total[i];
+    return (v == null || data.total.shipmentValue[i] == null) ? null : Math.round(data.total.shipmentValue[i] / v);
+  });
   data.total.costRatio = data.total.revenue.map((v,i) => (v == null || data.total.substrateCost[i] == null) ? null : +(data.total.substrateCost[i] / v * 100).toFixed(1));
   data.total.harvestPerBed = data.total.harvest.map((v,i) => (v == null || !data.total.bedCount[i]) ? null : Math.round(v * 1000 / data.total.bedCount[i]));
   data.total.shipmentPerBed = data.total.shipment.map((v,i) => (v == null || !data.total.bedCount[i]) ? null : Math.round(v * 1000 / data.total.bedCount[i]));
