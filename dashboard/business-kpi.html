@@ -3,148 +3,150 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>事業部KPIダッシュボード</title>
-<meta name="theme-color" content="#0f1117">
+<title>椎茸事業部 経営ダッシュボード</title>
+<meta name="theme-color" content="#ffffff">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="事業部KPI">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="経営KPI">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2e3148;
-    --text: #e2e8f0;
-    --muted: #8892a4;
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --good: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+    font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif;
     min-height: 100vh;
   }
 
   header {
-    padding: 20px 32px;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
-  }
-  header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
-  header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
-  #last-updated { font-size: 0.8rem; color: var(--muted); }
-  #refresh-btn {
-    background: var(--border); border: none; color: var(--text);
-    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
-    transition: background 0.2s;
-  }
-  #refresh-btn:hover { background: #3a3f5c; }
-
-  .sample-banner {
-    margin: 14px 32px 0;
-    background: rgba(96,165,250,0.08);
-    border: 1px solid rgba(96,165,250,0.25);
-    border-radius: 10px;
-    padding: 12px 18px;
-    font-size: 0.82rem;
-    line-height: 1.7;
-    color: var(--text);
-  }
-  .sample-banner strong { color: #93c5fd; }
-
-  /* ── Top tabs (metric group) ── */
-  .tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-    padding: 0 32px;
     background: var(--surface);
-    margin-top: 16px;
-    flex-wrap: wrap;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
   }
-  .tab-btn {
-    padding: 12px 24px;
-    background: none; border: none; color: var(--muted);
-    cursor: pointer; font-size: 0.9rem; font-weight: 500;
-    border-bottom: 2px solid transparent; margin-bottom: -1px;
-    transition: color 0.15s, border-color 0.15s;
+  header h1 { font-size: 1.25rem; font-weight: 700; }
+  header .subtitle { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+  #last-updated { font-size: 0.78rem; color: var(--muted); }
+  #refresh-btn {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+    transition: background 0.15s;
   }
-  .tab-btn:hover:not(.active) { color: var(--text); }
-  .tab-btn.active { color: var(--text); border-bottom-color: #60a5fa; }
+  #refresh-btn:hover { background: #f0f1f3; }
 
-  main { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; }
-
-  /* ── Location sub-tabs ── */
-  .loc-tabs { display: flex; gap: 4px; }
-  .loc-tab {
-    padding: 7px 18px;
-    border-radius: 6px;
-    font-size: 0.86rem;
-    cursor: pointer;
-    color: var(--muted);
-    border: 1px solid transparent;
-    background: transparent;
+  .site-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .site-tab {
+    padding: 7px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; color: var(--muted); border: 1px solid var(--border); background: var(--surface);
     transition: background 0.12s, color 0.12s;
   }
-  .loc-tab:hover { color: var(--text); }
-  .loc-tab.active { background: var(--surface); border-color: var(--border); font-weight: 600; }
+  .site-tab:hover { color: var(--text); }
+  .site-tab.active { background: #1f2430; color: #fff; border-color: #1f2430; }
 
-  /* ── 前年比較 (2-up layout) ── */
-  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .compare-year-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; color: var(--muted); }
-  .compare-year-block { display: flex; flex-direction: column; gap: 16px; }
-  @media (max-width: 900px) { .compare-grid { grid-template-columns: 1fr; } }
+  .coverage-banner {
+    margin: 14px 28px 0;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: #1e3a5f;
+  }
+  .coverage-banner strong { color: #1d4ed8; }
 
-  .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
-  .section-title .sub { color: var(--muted); font-size: 0.78rem; font-weight: 400; margin-left: 8px; }
+  main { padding: 20px 28px 48px; display: flex; flex-direction: column; gap: 22px; }
 
-  /* ── Stat cards ── */
-  .cards-grid {
+  .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+  .section-title .sub { color: var(--muted); font-size: 0.76rem; font-weight: 400; margin-left: 8px; }
+
+  /* ── 経営サマリー KPIカード ── */
+  .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
     gap: 12px;
   }
-  .stat-card {
+  .kpi-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 16px 18px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 2px rgba(16,24,40,0.03);
   }
-  .stat-card .card-label { font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-  .stat-card .card-value { font-size: 1.5rem; font-weight: 700; margin-top: 8px; }
-  .stat-card .card-value .unit { font-size: 0.72rem; font-weight: 400; color: var(--muted); margin-left: 3px; }
-  .stat-card .card-sub { font-size: 0.74rem; color: var(--muted); margin-top: 6px; }
+  .kpi-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .kpi-value { font-size: 1.5rem; font-weight: 700; margin-top: 6px; line-height: 1.1; }
+  .kpi-value .kpi-unit { font-size: 0.68rem; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .kpi-deltas { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 7px; font-size: 0.74rem; }
+  .delta.up { color: var(--good); }
+  .delta.down { color: var(--bad); }
+  .kpi-asof { font-size: 0.68rem; color: var(--muted); margin-top: 5px; }
 
-  /* ── Chart / table sections ── */
-  .chart-section {
+  /* ── パネル(2x2 + 下段) ── */
+  .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 980px) { .panel-grid { grid-template-columns: 1fr; } }
+  .panel {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 20px 24px;
+    padding: 18px 20px;
+    display: flex; flex-direction: column;
   }
-  .chart-wrap { height: 340px; position: relative; }
+  .panel-title { font-size: 0.95rem; font-weight: 700; }
+  .panel-sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; margin-bottom: 12px; }
+  .chart-wrap { height: 260px; position: relative; }
+  .chart-wrap.small { height: 150px; }
+  .composite-split { display: flex; flex-direction: column; gap: 16px; flex: 1; }
 
+  .todo-note {
+    margin-top: 10px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.72rem;
+    line-height: 1.6;
+    color: #78350f;
+  }
+  .todo-note code { background: #fef3c7; padding: 1px 5px; border-radius: 3px; }
+
+  /* ── アラート / テーブル ── */
   .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
   thead th {
-    background: #20232f; padding: 10px 14px; text-align: left;
-    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); white-space: nowrap;
+    background: #f7f8fa; padding: 9px 14px; text-align: left;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;
   }
   thead th.num { text-align: right; }
   tbody tr { border-bottom: 1px solid var(--border); }
   tbody tr:last-child { border-bottom: none; }
-  tbody tr:hover { background: #20232f; }
+  tbody tr:hover { background: #fafbfc; }
+  tbody tr.footer-row { background: #f7f8fa; font-weight: 700; }
   td { padding: 7px 14px; white-space: nowrap; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.dim { color: var(--muted); }
 
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.72rem; font-weight: 700; }
+  .badge-ok   { background: #dcfce7; color: #15803d; }
+  .badge-warn { background: #fef3c7; color: #b45309; }
+  .badge-bad  { background: #fee2e2; color: #b91c1c; }
+  .alert-empty { padding: 16px; color: var(--muted); font-size: 0.85rem; }
+
   @media (max-width: 640px) {
-    header, main { padding: 16px; }
-    .tabs { padding: 0 16px; }
-    .tab-btn { padding: 10px 14px; font-size: 0.82rem; }
-    .chart-wrap { height: 260px; }
-    .sample-banner { margin: 14px 16px 0; }
+    header, main { padding: 14px; }
+    .coverage-banner { margin: 14px 14px 0; }
+    .chart-wrap { height: 220px; }
   }
 </style>
 </head>
@@ -152,28 +154,73 @@
 
 <header>
   <div>
-    <h1>📊 事業部KPIダッシュボード</h1>
-    <div class="subtitle">売上・出荷・生産KPI ／ いなべ・群馬・南丹・全社合計 ／ 月次</div>
+    <h1>🍄 椎茸事業部 経営ダッシュボード</h1>
+    <div class="subtitle">結果 → 原因 → 生産性 → 原価 → 経営判断 ／ 月次</div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <div class="site-tabs" id="site-tabs"></div>
     <span id="last-updated"></span>
     <button id="refresh-btn" onclick="render()">↻ 更新</button>
   </div>
 </header>
 
-<div class="sample-banner">
+<div class="coverage-banner">
   <strong>データ最終反映月：</strong>
-  収穫量・出荷量・出荷額＝2026年7月／菌床仕入本数＝2026年8月／売上＝2026年6月／菌床代＝2026年4月（各元シートへの入力状況により異なります）。
-  それ以降は未入力のため「—」表示です。
+  収穫量・出荷量・出荷額＝2026年7月／菌床仕入本数＝2026年8月／売上＝2026年6月／菌床代＝2026年4月（各元シートへの入力状況により異なります）。それ以降は未入力のため「—」表示です。
 </div>
 
-<div class="tabs" id="top-tabs"></div>
-<div class="tabs" id="sub-tabs" style="display:none"></div>
-<main id="main"></main>
+<main id="main">
+  <section>
+    <div class="section-title">経営サマリー<span class="sub" id="summary-sub"></span></div>
+    <div class="kpi-grid" id="kpi-grid"></div>
+  </section>
+
+  <div class="panel-grid">
+    <div class="panel">
+      <div class="panel-title">① 売上推移</div>
+      <div class="panel-sub">売上 ＝ 出荷量 × g単価　の関係を確認</div>
+      <div class="chart-wrap"><canvas id="chart-sales"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">② 生産推移</div>
+      <div class="panel-sub">総収穫量の増加か、1菌床あたりの生産性向上かを判断</div>
+      <div class="chart-wrap"><canvas id="chart-production"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">③ 菌床仕入・原価分析</div>
+      <div class="panel-sub">仕入数・仕入額・1菌床単価の推移</div>
+      <div class="chart-wrap"><canvas id="chart-cost"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">④ 複合分析</div>
+      <div class="panel-sub">投資効率・歩留まり・出荷量と単価の関係</div>
+      <div class="composite-split">
+        <div class="chart-wrap small"><canvas id="chart-composite-ratio"></canvas></div>
+        <div class="chart-wrap small"><canvas id="chart-composite-scatter"></canvas></div>
+      </div>
+      <div class="todo-note">
+        ⚠ TODO: 労働生産性（売上÷人時、収穫量÷人時）は未実装です。人時データは <code>dashboard/work-hours.html</code>
+        （標準労働時間・工数振替の管理システム）に存在しますが、社員別・拠点別の詳細管理用データであり、
+        事業部全体の月次合計人時としてすぐに使える形にはまとまっていません。実装する場合は月次総労働時間を
+        集計する処理を別途追加してください。
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="section-title">経営アラート</div>
+    <div class="table-wrap" id="alerts-table"></div>
+  </section>
+
+  <section>
+    <div class="section-title">月次データ（要因分析用）</div>
+    <div id="monthly-table"></div>
+  </section>
+</main>
 
 <script>
 // ────────────────────────────────────────────────────────────────
-// データ定義
+// データ定義（既存のまま流用）
 // ────────────────────────────────────────────────────────────────
 
 const MONTH_LABELS = [
@@ -187,7 +234,8 @@ const SITES = [
   { key: 'gunma',  name: '群馬',   color: '#f97316' },
   { key: 'nantan', name: '南丹',   color: '#34d399' },
 ];
-const TOTAL_SITE = { key: 'total', name: '全社合計', color: '#a78bfa' };
+const TOTAL_SITE = { key: 'total', name: '全社合計', color: '#1f2430' };
+const ALL_LOCS = [TOTAL_SITE, ...SITES];
 
 // ── 実績値 ──
 // 収穫量 (kg) — 収穫量シート「中期計画（7月修正)」 いなべ11行目/群馬27行目/南丹43行目, AV列(2025.1)〜
@@ -240,10 +288,12 @@ function calcSite(siteKey) {
   const grossProfit = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : v - substrateCost[i]);
   // 1菌床あたり収穫量 (g/本) = 収穫量(kg)×1000 ÷ 菌床仕入本数
   const harvestPerBed = harvest.map((v,i) => (v == null || !bedCount[i]) ? null : Math.round(v * 1000 / bedCount[i]));
-  // 売上÷菌床代 (倍)
+  // 売上÷菌床代 = 菌床投資売上倍率 (倍)
   const salesCostRatio = revenue.map((v,i) => (v == null || !substrateCost[i]) ? null : +(v / substrateCost[i]).toFixed(2));
+  // 1菌床単価 (円/本) = 菌床仕入額 ÷ 菌床仕入本数
+  const bedUnitCost = substrateCost.map((v,i) => (v == null || !bedCount[i]) ? null : Math.round(v / bedCount[i]));
 
-  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit, harvestPerBed, salesCostRatio };
+  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit, harvestPerBed, salesCostRatio, bedUnitCost };
 }
 
 const DATA = {};
@@ -270,298 +320,132 @@ DATA.total.unitPrice = DATA.total.shipment.map((v,i) => (v == null || DATA.total
 DATA.total.costRatio = DATA.total.revenue.map((v,i) => (v == null || DATA.total.substrateCost[i] == null) ? null : +(DATA.total.substrateCost[i] / v * 100).toFixed(1));
 DATA.total.harvestPerBed = DATA.total.harvest.map((v,i) => (v == null || !DATA.total.bedCount[i]) ? null : Math.round(v * 1000 / DATA.total.bedCount[i]));
 DATA.total.salesCostRatio = DATA.total.revenue.map((v,i) => (v == null || !DATA.total.substrateCost[i]) ? null : +(v / DATA.total.substrateCost[i]).toFixed(2));
-
-const ALL_LOCS = [...SITES, TOTAL_SITE];
-
-// ────────────────────────────────────────────────────────────────
-// メトリクスグループ定義（トップタブ）
-// ────────────────────────────────────────────────────────────────
-// series: key, label, unit, color
-// axis: グラフのY軸('y'=左, 'y2'=右)。type: 'bar'|'line'。chart:false でグラフから除外(カード/表のみ表示)。
-// digits: 表示小数桁数(既定0)。agg: 'avg'指定で累計/年計の代わりに平均集計(比率・単価系)。
-const GROUPS = [
-  {
-    key: 'sales', label: '売上・出荷額',
-    series: [
-      { key: 'revenue',       label: '売上',   unit: '円', color: '#a78bfa', axis: 'y', type: 'bar' },
-      { key: 'shipmentValue', label: '出荷額', unit: '円', color: '#f472b6', axis: 'y', type: 'bar' },
-    ],
-  },
-  {
-    key: 'volume', label: '出荷量・収穫量',
-    series: [
-      { key: 'harvest',  label: '収穫量', unit: 'kg', color: '#34d399', axis: 'y', type: 'bar' },
-      { key: 'shipment', label: '出荷量', unit: 'kg', color: '#60a5fa', axis: 'y', type: 'bar' },
-    ],
-  },
-  {
-    key: 'bed', label: '菌床仕入・菌床代',
-    series: [
-      { key: 'bedCount',      label: '菌床仕入本数', unit: '本', color: '#38bdf8', axis: 'y',  type: 'bar' },
-      { key: 'substrateCost', label: '菌床代',       unit: '円', color: '#fbbf24', axis: 'y2', type: 'line' },
-    ],
-  },
-  {
-    key: 'kpi', label: 'KPI指標',
-    subgroups: [
-      {
-        key: 'summary', label: '総合指標',
-        series: [
-          { key: 'yieldRate',   label: '歩留まり率（出荷量/収穫量）', unit: '%',     color: '#60a5fa', axis: 'y',  type: 'bar',  digits: 1, agg: 'avg' },
-          { key: 'costRatio',   label: '菌床原価率（菌床代/売上）',   unit: '%',     color: '#fbbf24', axis: 'y',  type: 'line', digits: 1, agg: 'avg' },
-          { key: 'grossProfit', label: '粗利（売上-菌床代）',         unit: '円',    color: '#86efac', axis: 'y2', type: 'line' },
-          { key: 'unitPrice',   label: '出荷単価',                   unit: '円/kg', color: '#f472b6', agg: 'avg', chart: false },
-        ],
-      },
-      {
-        key: 'perBed', label: '1菌床あたり収穫量',
-        series: [
-          { key: 'harvestPerBed', label: '1菌床あたり収穫量（収穫量÷菌床数）', unit: 'g', color: '#34d399', axis: 'y', type: 'bar', agg: 'avg' },
-        ],
-      },
-      {
-        key: 'salesCost', label: '売上÷菌床代',
-        series: [
-          { key: 'bedCount',       label: '菌床仕入数',   unit: '本', color: '#38bdf8', axis: 'y',  type: 'bar' },
-          { key: 'salesCostRatio', label: '売上÷菌床代', unit: '倍', color: '#fbbf24', axis: 'y2', type: 'line', digits: 2, agg: 'avg' },
-        ],
-      },
-      {
-        key: 'shipPrice', label: '出荷量・単価',
-        series: [
-          { key: 'shipment',  label: '出荷量', unit: 'kg',    color: '#60a5fa', axis: 'y',  type: 'bar' },
-          { key: 'unitPrice', label: '単価',   unit: '円/kg', color: '#f472b6', axis: 'y2', type: 'line', agg: 'avg' },
-        ],
-      },
-    ],
-  },
-];
-
-let activeGroup = GROUPS[0].key;
-let activeLoc = { sales: 'total', volume: 'total', bed: 'total', kpi: 'total' };
-let activeView = { sales: 'all', volume: 'all', bed: 'all', kpi: 'all' }; // 'all' | '2025' | '2026' | 'compare'
-let activeSubgroup = { kpi: 'summary' }; // グループ内サブタブ(subgroups持ちのグループのみ使用)
-
-// group.subgroups があればアクティブなサブタブの{key,label,series}を、なければgroup自体を返す
-function currentSeriesGroup(group) {
-  if (!group.subgroups) return group;
-  const key = activeSubgroup[group.key] || group.subgroups[0].key;
-  return group.subgroups.find(sg => sg.key === key) || group.subgroups[0];
-}
-
-const VIEW_MODES = [
-  { key: 'all',     label: '全期間' },
-  { key: '2025',    label: '2025年' },
-  { key: '2026',    label: '2026年' },
-  { key: 'compare', label: '前年比較' },
-];
-const YEAR_MONTH_LABELS = Array.from({ length: 12 }, (_, i) => `${i+1}月`);
-
-// 20ヶ月の通し配列から該当年の1〜12月を切り出す（存在しない月はnull埋め）
-function yearSlice(arr, year) {
-  const start = year === 2025 ? 0 : 12;
-  const s = arr.slice(start, start + 12);
-  while (s.length < 12) s.push(null);
-  return s;
-}
-function sliceDataset(d, year) {
-  const out = {};
-  Object.keys(d).forEach(k => { out[k] = yearSlice(d[k], year); });
-  return out;
-}
+DATA.total.bedUnitCost = DATA.total.substrateCost.map((v,i) => (v == null || !DATA.total.bedCount[i]) ? null : Math.round(v / DATA.total.bedCount[i]));
 
 // ────────────────────────────────────────────────────────────────
-// 描画
+// 表示色（指標ごとに固定。全パネル・全カードで共通使用）
+// ────────────────────────────────────────────────────────────────
+const COLORS = {
+  revenue:        '#1e3a8a', // 売上
+  shipmentValue:  '#7c3aed', // 出荷額
+  shipment:       '#2563eb', // 出荷量
+  harvest:        '#059669', // 収穫量
+  unitPrice:      '#d97706', // g単価
+  bedCount:       '#0891b2', // 菌床仕入数
+  substrateCost:  '#b45309', // 菌床仕入額
+  bedUnitCost:    '#dc2626', // 1菌床単価
+  harvestPerBed:  '#16a34a', // 1菌床あたり収穫量
+  yieldRate:      '#0284c7', // 出荷歩留まり
+  costRatio:      '#dc2626', // 菌床原価率
+  salesCostRatio: '#9a3412', // 菌床投資売上倍率
+};
+
+// ────────────────────────────────────────────────────────────────
+// 共通ユーティリティ
 // ────────────────────────────────────────────────────────────────
 const fmt = (n, digits = 0) => n == null ? '—' : n.toLocaleString('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmtUnit = (n, unit, digits = 0) => n == null ? '—' : `${fmt(n, digits)} ${unit}`;
-const dig = (s) => s.digits ?? 0;
-const isAvgSeries = (s) => s.agg === 'avg';
-
+function pctLabel(pct) {
+  if (pct == null) return '—';
+  return pct >= 0 ? `+${pct.toFixed(1)}%` : `▲${Math.abs(pct).toFixed(1)}%`;
+}
 function lastValid(arr) {
   for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return { value: arr[i], idx: i };
   return { value: null, idx: -1 };
 }
 function sumValid(arr) { return arr.filter(v => v != null).reduce((s,v) => s+v, 0); }
 function avgValid(arr) { const v = arr.filter(v => v != null); return v.length ? sumValid(v) / v.length : null; }
-function hasValid(arr) { return arr.some(v => v != null); }
 
-function renderTopTabs() {
-  const el = document.getElementById('top-tabs');
-  el.innerHTML = GROUPS.map(g =>
-    `<button class="tab-btn${g.key===activeGroup?' active':''}" onclick="setGroup('${g.key}')">${g.label}</button>`
-  ).join('');
+// 最新値 + 前月比 + 前年比(同月, 12ヶ月前)をまとめて算出
+function cardStat(arr) {
+  const last = lastValid(arr);
+  if (last.idx < 0) return { value: null, idx: -1, mom: null, momPct: null, yoy: null, yoyPct: null };
+  const prev = last.idx >= 1 ? arr[last.idx - 1] : null;
+  const yoyIdx = last.idx - 12;
+  const yoyVal = yoyIdx >= 0 ? arr[yoyIdx] : null;
+  const mom = prev != null ? last.value - prev : null;
+  const momPct = (mom != null && prev) ? mom / prev * 100 : null;
+  const yoy = yoyVal != null ? last.value - yoyVal : null;
+  const yoyPct = (yoy != null && yoyVal) ? yoy / yoyVal * 100 : null;
+  return { value: last.value, idx: last.idx, mom, momPct, yoy, yoyPct };
 }
 
-function setGroup(key) { activeGroup = key; render(); }
-function setLoc(key) { activeLoc[activeGroup] = key; render(); }
-function setView(key) { activeView[activeGroup] = key; render(); }
-function setSubgroup(key) { activeSubgroup[activeGroup] = key; render(); }
+// ────────────────────────────────────────────────────────────────
+// 状態
+// ────────────────────────────────────────────────────────────────
+let activeSite = 'total';
+function setSite(key) { activeSite = key; render(); }
 
 let charts = {};
 function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch(e) {} delete charts[id]; } }
 function destroyAllCharts() { Object.keys(charts).forEach(destroyChart); }
 
-function buildCardsHtml(group, labels, dataset) {
-  return group.series.map(s => {
-    const arr = dataset[s.key];
-    const last = lastValid(arr);
-    const prevIdx = last.idx - 1;
-    const prev = prevIdx >= 0 ? arr[prevIdx] : null;
-    const mom = (last.value != null && prev != null) ? last.value - prev : null;
-    const momPct = (mom != null && prev) ? (mom / prev * 100).toFixed(1) : null;
-    const total = sumValid(arr);
-    const avg = avgValid(arr);
-    const momColor = mom == null ? 'var(--muted)' : mom >= 0 ? '#86efac' : '#f87171';
-    return `<div class="stat-card">
-      <div class="card-label">${s.label}</div>
-      <div class="card-value" style="color:${s.color}">${fmt(last.value, dig(s))}<span class="unit">${s.unit}</span></div>
-      <div class="card-sub">${last.idx>=0?labels[last.idx]:''}時点　前月比 <span style="color:${momColor}">${mom==null?'—':(mom>=0?'+':'')+fmt(mom, dig(s))+' '+s.unit+(momPct!=null?` (${mom>=0?'+':''}${momPct}%)`:'')}</span></div>
-      <div class="card-sub">累計 ${fmtUnit(isAvgSeries(s)?null:Math.round(total), s.unit)}　平均 ${fmtUnit(avg!=null?Math.round(avg*10)/10:null, s.unit, dig(s))}</div>
-    </div>`;
-  }).join('');
-}
+// ────────────────────────────────────────────────────────────────
+// ① 経営サマリー KPIカード
+// ────────────────────────────────────────────────────────────────
+// good: 上昇が好ましい方向('up'|'down')。色分けは増減の符号ではなくKPIにとっての良し悪しで判定。
+const KPI_CARDS = [
+  { key: 'revenue',        label: '売上',           unit: '円',  good: 'up' },
+  { key: 'shipment',       label: '出荷量',         unit: 'kg',  good: 'up' },
+  { key: 'unitPrice',      label: 'g単価',          unit: '円/kg', good: 'up' },
+  { key: 'harvest',        label: '収穫量',         unit: 'kg',  good: 'up' },
+  { key: 'harvestPerBed',  label: '1菌床収穫量',    unit: 'g',   good: 'up' },
+  { key: 'substrateCost',  label: '菌床仕入額',     unit: '円',  good: 'down' },
+  { key: 'costRatio',      label: '菌床原価率',     unit: '%',  digits: 1, good: 'down' },
+  { key: 'salesCostRatio', label: '菌床投資売上倍率', unit: '倍', digits: 2, good: 'up' },
+];
 
-function buildTableHtml(group, labels, dataset) {
-  const tableHead = `<th>月</th>` + group.series.map(s => `<th class="num">${s.label} (${s.unit})</th>`).join('');
-  const tableRows = labels.map((m,i) => {
-    const cells = group.series.map(s => `<td class="num">${fmt(dataset[s.key][i], dig(s))}</td>`).join('');
-    return `<tr><td class="dim">${m}</td>${cells}</tr>`;
-  }).join('');
-  return `<div class="table-wrap"><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
-}
-
-// 前年比較の上部サマリーカード（年計/期間平均と前年比%）
-function buildYoYSummaryHtml(group, d) {
-  const y25 = sliceDataset(d, 2025), y26 = sliceDataset(d, 2026);
-  const cards = group.series.map(s => {
-    const avgAgg = isAvgSeries(s);
-    const agg = avgAgg ? avgValid : sumValid;
-    const v25 = hasValid(y25[s.key]) ? agg(y25[s.key]) : null;
-    const v26 = hasValid(y26[s.key]) ? agg(y26[s.key]) : null;
-    const mul = Math.pow(10, dig(s));
-    const round = (v) => v == null ? null : Math.round(v*mul)/mul;
-    const delta = (v25 && v26 != null) ? ((v26 - v25) / v25 * 100) : null;
-    const deltaColor = delta == null ? 'var(--muted)' : delta >= 0 ? '#86efac' : '#f87171';
-    return `<div class="stat-card">
-      <div class="card-label">${s.label}（${avgAgg?'期間平均':'年計'}・2026年）</div>
-      <div class="card-value" style="color:${s.color}">${fmtUnit(round(v26), s.unit, dig(s))}</div>
-      <div class="card-sub">2025年: ${fmtUnit(round(v25), s.unit, dig(s))}　前年比 <span style="color:${deltaColor}">${delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)+'%'}</span></div>
-    </div>`;
-  }).join('');
-  return `<div class="cards-grid">${cards}</div>`;
-}
-
-function renderBlock(containerId, group, labels, dataset, canvasId) {
-  const chartSeries = group.series.filter(s => s.chart !== false);
-  const dualAxis = chartSeries.some(s => s.axis === 'y2');
-  document.getElementById(containerId).innerHTML = `
-    <div class="cards-grid">${buildCardsHtml(group, labels, dataset)}</div>
-    <div class="chart-section"><div class="chart-wrap"><canvas id="${canvasId}"></canvas></div></div>
-    ${buildTableHtml(group, labels, dataset)}
-  `;
-  drawChart(canvasId, group, labels, dataset, dualAxis);
-}
-
-function render() {
-  renderTopTabs();
-  const group = GROUPS.find(g => g.key === activeGroup);
-  const leaf = currentSeriesGroup(group);
-  const loc = activeLoc[activeGroup];
-  const view = activeView[activeGroup];
-  const d = DATA[loc];
-
-  destroyAllCharts();
-
-  const subTabsEl = document.getElementById('sub-tabs');
-  if (group.subgroups) {
-    subTabsEl.style.display = '';
-    subTabsEl.innerHTML = group.subgroups.map(sg =>
-      `<button class="tab-btn${sg.key===leaf.key?' active':''}" onclick="setSubgroup('${sg.key}')">${sg.label}</button>`
-    ).join('');
-  } else {
-    subTabsEl.style.display = 'none';
-    subTabsEl.innerHTML = '';
-  }
-
-  const locTabsHtml = `<div class="loc-tabs">${ALL_LOCS.map(l =>
-    `<button class="loc-tab${l.key===loc?' active':''}" style="${l.key===loc?`color:${l.color}`:''}" onclick="setLoc('${l.key}')">${l.name}</button>`
-  ).join('')}</div>`;
-  const viewTabsHtml = `<div class="loc-tabs">${VIEW_MODES.map(v =>
-    `<button class="loc-tab${v.key===view?' active':''}" onclick="setView('${v.key}')">${v.label}</button>`
-  ).join('')}</div>`;
-
-  const subLabel = view === 'compare' ? '前年比較（2025年 / 2026年）' : view === 'all' ? '月次(全期間)' : `${view}年 月次`;
-  const titleLabel = group.subgroups ? `${group.label}<span class="sub" style="margin-left:0">・${leaf.label}</span>` : group.label;
-  const idBase = group.subgroups ? `${group.key}-${leaf.key}` : group.key;
-
-  let bodyHtml;
-  if (view === 'compare') {
-    bodyHtml = `
-      ${buildYoYSummaryHtml(leaf, d)}
-      <div class="compare-grid">
-        <div class="compare-year-block">
-          <div class="compare-year-title">2025年</div>
-          <div id="block-2025"></div>
-        </div>
-        <div class="compare-year-block">
-          <div class="compare-year-title">2026年</div>
-          <div id="block-2026"></div>
-        </div>
-      </div>`;
-  } else {
-    bodyHtml = `<div id="block-main"></div>`;
-  }
-
-  document.getElementById('main').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-      <div class="section-title">${titleLabel}<span class="sub">${ALL_LOCS.find(l=>l.key===loc).name} ／ ${subLabel}</span></div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap">${locTabsHtml}${viewTabsHtml}</div>
+function kpiCardHtml(d, c) {
+  const digits = c.digits || 0;
+  const st = cardStat(d[c.key]);
+  const color = COLORS[c.key] || '#1f2430';
+  const cls = (p) => {
+    if (p == null) return '';
+    const isGoodMove = c.good ? (p >= 0) === (c.good === 'up') : (p >= 0);
+    return isGoodMove ? 'up' : 'down';
+  };
+  return `<div class="kpi-card">
+    <div class="kpi-label">${c.label}</div>
+    <div class="kpi-value" style="color:${color}">${fmt(st.value, digits)}<span class="kpi-unit">${c.unit}</span></div>
+    <div class="kpi-deltas">
+      ${st.momPct != null ? `<span class="delta ${cls(st.momPct)}">前月比 ${pctLabel(st.momPct)}</span>` : ''}
+      ${st.yoyPct != null ? `<span class="delta ${cls(st.yoyPct)}">前年比 ${pctLabel(st.yoyPct)}</span>` : ''}
     </div>
-    ${bodyHtml}
-  `;
-
-  if (view === 'compare') {
-    renderBlock('block-2025', leaf, YEAR_MONTH_LABELS, sliceDataset(d, 2025), `chart-${idBase}-2025`);
-    renderBlock('block-2026', leaf, YEAR_MONTH_LABELS, sliceDataset(d, 2026), `chart-${idBase}-2026`);
-  } else if (view === '2025' || view === '2026') {
-    renderBlock('block-main', leaf, YEAR_MONTH_LABELS, sliceDataset(d, parseInt(view, 10)), `chart-${idBase}`);
-  } else {
-    renderBlock('block-main', leaf, MONTH_LABELS, d, `chart-${idBase}`);
-  }
-
-  document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+    <div class="kpi-asof">${st.idx >= 0 ? MONTH_LABELS[st.idx] : ''}時点</div>
+  </div>`;
 }
 
-function drawChart(canvasId, group, labels, dataset, dualAxis) {
+// ────────────────────────────────────────────────────────────────
+// チャート共通描画（複数軸対応の棒+折れ線コンボ）
+// ────────────────────────────────────────────────────────────────
+function drawCombo(canvasId, labels, series) {
   destroyChart(canvasId);
   const ctx = document.getElementById(canvasId).getContext('2d');
+  const axesUsed = [...new Set(series.map(s => s.axis || 'y'))];
 
-  const chartSeries = group.series.filter(s => s.chart !== false);
-  const datasets = chartSeries.map(s => {
-    const isLine = s.type === 'line';
-    return {
-      type: isLine ? 'line' : 'bar',
-      label: s.label,
-      data: dataset[s.key],
-      backgroundColor: isLine ? 'transparent' : s.color + 'cc',
-      borderColor: s.color,
-      borderWidth: isLine ? 2.5 : 1,
-      borderRadius: isLine ? 0 : 4,
-      spanGaps: false,
-      tension: 0.3,
-      pointRadius: isLine ? 3 : 0,
-      yAxisID: s.axis === 'y2' ? 'y2' : 'y',
+  const datasets = series.map(s => ({
+    type: s.type || 'bar',
+    label: s.label,
+    data: s.data,
+    backgroundColor: s.type === 'line' ? 'transparent' : s.color + 'cc',
+    borderColor: s.color,
+    borderWidth: s.type === 'line' ? 2.5 : 1,
+    borderRadius: s.type === 'line' ? 0 : 4,
+    borderDash: s.dash || undefined,
+    pointRadius: s.type === 'line' ? 3 : 0,
+    tension: 0.3,
+    spanGaps: false,
+    yAxisID: s.axis || 'y',
+  }));
+
+  const scales = { x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { display: false } } };
+  axesUsed.forEach(id => {
+    scales[id] = {
+      position: id === 'y' ? 'left' : 'right',
+      ticks: { color: '#6b7280', font: { size: 10 } },
+      grid: { drawOnChartArea: id === 'y', color: '#eef0f3' },
     };
   });
-
-  const scales = {
-    x: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#232636' } },
-    y: { ticks: { color: '#8892a4', font: { size: 11 } }, grid: { color: '#232636' } },
-  };
-  if (dualAxis) {
-    scales.y2 = { position: 'right', ticks: { color: '#8892a4', font: { size: 11 } }, grid: { drawOnChartArea: false } };
-  }
 
   charts[canvasId] = new Chart(ctx, {
     data: { labels, datasets },
@@ -570,18 +454,162 @@ function drawChart(canvasId, group, labels, dataset, dualAxis) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: '#c3cadb', font: { size: 11 } } },
+        legend: { position: 'top', labels: { color: '#374151', font: { size: 10 }, boxWidth: 12, padding: 10 } },
         tooltip: {
-          backgroundColor: '#1e2235', borderColor: '#3a3f5c', borderWidth: 1,
-          titleColor: '#e2e8f0', bodyColor: '#a0aec0',
-          callbacks: {
-            label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toLocaleString('ja-JP')}`,
-          },
+          backgroundColor: '#ffffff', borderColor: '#e3e6ea', borderWidth: 1,
+          titleColor: '#1f2430', bodyColor: '#374151',
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toLocaleString('ja-JP')}` },
         },
       },
       scales,
     },
   });
+}
+
+function drawScatter(canvasId, d) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const points = MONTH_LABELS.map((m, i) => (d.shipment[i] != null && d.unitPrice[i] != null) ? { x: d.shipment[i], y: d.unitPrice[i], label: m } : null).filter(Boolean);
+
+  charts[canvasId] = new Chart(ctx, {
+    type: 'scatter',
+    data: { datasets: [{ label: '出荷量×g単価', data: points, backgroundColor: COLORS.shipment + 'aa', pointRadius: 5, pointHoverRadius: 7 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#ffffff', borderColor: '#e3e6ea', borderWidth: 1,
+          titleColor: '#1f2430', bodyColor: '#374151',
+          callbacks: { label: (c) => `${c.raw.label}: 出荷量${c.raw.x.toLocaleString('ja-JP')}kg / 単価${c.raw.y.toLocaleString('ja-JP')}円/kg` },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: '出荷量(kg)', color: '#6b7280', font: { size: 10 } }, ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#eef0f3' } },
+        y: { title: { display: true, text: 'g単価(円/kg)', color: '#6b7280', font: { size: 10 } }, ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#eef0f3' } },
+      },
+    },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────
+// ④ 経営アラート（前月比の増減に応じた簡易判定）
+// ────────────────────────────────────────────────────────────────
+// good: そのKPIにとって「上昇が好ましい方向」('up'|'down')。未指定(bedCountなど水準指標)は方向を問わず変動幅のみで判定。
+const ALERT_METRICS = [
+  { key: 'revenue',        label: '売上',           digits: 0, good: 'up' },
+  { key: 'shipment',       label: '出荷量',         digits: 0, good: 'up' },
+  { key: 'unitPrice',      label: 'g単価',          digits: 0, good: 'up' },
+  { key: 'harvest',        label: '収穫量',         digits: 0, good: 'up' },
+  { key: 'harvestPerBed',  label: '1菌床収穫量',    digits: 0, good: 'up' },
+  { key: 'bedCount',       label: '菌床仕入数',     digits: 0 },
+  { key: 'substrateCost',  label: '菌床仕入額',     digits: 0, good: 'down' },
+  { key: 'bedUnitCost',    label: '1菌床単価',      digits: 0, good: 'down' },
+  { key: 'costRatio',      label: '菌床原価率',     digits: 1, good: 'down' },
+  { key: 'salesCostRatio', label: '菌床投資売上倍率', digits: 2, good: 'up' },
+  { key: 'yieldRate',      label: '出荷歩留まり',   digits: 1, good: 'up' },
+];
+
+function buildAlertsHtml(d) {
+  const rows = ALERT_METRICS.map(m => {
+    const st = cardStat(d[m.key]);
+    if (st.momPct == null) return null;
+    const abs = Math.abs(st.momPct);
+    const dirLabel = st.momPct >= 0 ? '上昇' : '低下';
+    const isGoodMove = m.good ? (st.momPct >= 0) === (m.good === 'up') : null;
+    let sev, sevLabel;
+    if (abs < 3) { sev = 'ok'; sevLabel = '安定'; }
+    else if (isGoodMove === true) { sev = 'ok'; sevLabel = '好調'; }
+    else { sev = abs < 8 ? 'warn' : 'bad'; sevLabel = dirLabel; }
+    return { m, st, sev, sevLabel };
+  }).filter(Boolean);
+
+  if (!rows.length) return `<div class="alert-empty">アラート対象データがありません</div>`;
+
+  return `<table>
+    <thead><tr><th>KPI</th><th>状態</th><th>内容</th></tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td>${r.m.label}</td>
+      <td><span class="badge badge-${r.sev}">${r.sevLabel}</span></td>
+      <td>前月比 ${pctLabel(r.st.momPct)}（${MONTH_LABELS[r.st.idx]}時点）</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// ────────────────────────────────────────────────────────────────
+// 月次データテーブル（要因分析用の全指標一覧）
+// ────────────────────────────────────────────────────────────────
+const TABLE_COLUMNS = [
+  { key: 'harvest',        label: '収穫量(kg)',       digits: 0, agg: 'sum' },
+  { key: 'shipment',       label: '出荷量(kg)',       digits: 0, agg: 'sum' },
+  { key: 'unitPrice',      label: 'g単価(円/kg)',     digits: 0, agg: 'avg' },
+  { key: 'revenue',        label: '売上(円)',         digits: 0, agg: 'sum' },
+  { key: 'shipmentValue',  label: '出荷額(円)',       digits: 0, agg: 'sum' },
+  { key: 'bedCount',       label: '菌床仕入数(本)',   digits: 0, agg: 'sum' },
+  { key: 'substrateCost',  label: '菌床仕入額(円)',   digits: 0, agg: 'sum' },
+  { key: 'bedUnitCost',    label: '1菌床単価(円)',    digits: 0, agg: 'avg' },
+  { key: 'harvestPerBed',  label: '1菌床収穫量(g)',   digits: 0, agg: 'avg' },
+  { key: 'costRatio',      label: '菌床原価率(%)',    digits: 1, agg: 'avg' },
+  { key: 'salesCostRatio', label: '投資売上倍率(倍)', digits: 2, agg: 'avg' },
+  { key: 'yieldRate',      label: '出荷歩留まり(%)',  digits: 1, agg: 'avg' },
+];
+
+function buildMonthlyTableHtml(d) {
+  const head = `<th>月</th>` + TABLE_COLUMNS.map(c => `<th class="num">${c.label}</th>`).join('');
+  const rows = MONTH_LABELS.map((m, i) =>
+    `<tr><td class="dim">${m}</td>${TABLE_COLUMNS.map(c => `<td class="num">${fmt(d[c.key][i], c.digits)}</td>`).join('')}</tr>`
+  ).join('');
+  const footer = `<tr class="footer-row"><td class="dim">累計/平均</td>${TABLE_COLUMNS.map(c => {
+    const v = c.agg === 'sum' ? sumValid(d[c.key]) : avgValid(d[c.key]);
+    const mul = Math.pow(10, c.digits);
+    return `<td class="num">${v != null ? fmt(Math.round(v * mul) / mul, c.digits) : '—'}</td>`;
+  }).join('')}</tr>`;
+  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows}${footer}</tbody></table></div>`;
+}
+
+// ────────────────────────────────────────────────────────────────
+// 描画本体
+// ────────────────────────────────────────────────────────────────
+function render() {
+  const d = DATA[activeSite];
+  const site = ALL_LOCS.find(l => l.key === activeSite);
+
+  document.getElementById('site-tabs').innerHTML = ALL_LOCS.map(l =>
+    `<button class="site-tab${l.key === activeSite ? ' active' : ''}" onclick="setSite('${l.key}')">${l.name}</button>`
+  ).join('');
+  document.getElementById('summary-sub').textContent = `${site.name} ／ 月次`;
+
+  document.getElementById('kpi-grid').innerHTML = KPI_CARDS.map(c => kpiCardHtml(d, c)).join('');
+
+  destroyAllCharts();
+
+  drawCombo('chart-sales', MONTH_LABELS, [
+    { label: '出荷量(kg)',    data: d.shipment,  color: COLORS.shipment,  type: 'bar',  axis: 'y' },
+    { label: 'g単価(円/kg)',  data: d.unitPrice, color: COLORS.unitPrice, type: 'line', axis: 'y2' },
+    { label: '売上(円)',      data: d.revenue,   color: COLORS.revenue,   type: 'line', axis: 'y3', dash: [6,3] },
+  ]);
+
+  drawCombo('chart-production', MONTH_LABELS, [
+    { label: '収穫量(kg)',         data: d.harvest,       color: COLORS.harvest,       type: 'bar',  axis: 'y' },
+    { label: '1菌床収穫量(g/本)',  data: d.harvestPerBed, color: COLORS.harvestPerBed, type: 'line', axis: 'y2' },
+  ]);
+
+  drawCombo('chart-cost', MONTH_LABELS, [
+    { label: '菌床仕入数(本)',    data: d.bedCount,      color: COLORS.bedCount,      type: 'bar',  axis: 'y' },
+    { label: '菌床仕入額(円)',    data: d.substrateCost, color: COLORS.substrateCost, type: 'line', axis: 'y2' },
+    { label: '1菌床単価(円/本)',  data: d.bedUnitCost,   color: COLORS.bedUnitCost,   type: 'line', axis: 'y3', dash: [6,3] },
+  ]);
+
+  drawCombo('chart-composite-ratio', MONTH_LABELS, [
+    { label: '菌床投資売上倍率(倍)', data: d.salesCostRatio, color: COLORS.salesCostRatio, type: 'line', axis: 'y' },
+    { label: '出荷歩留まり(%)',      data: d.yieldRate,      color: COLORS.yieldRate,      type: 'line', axis: 'y2' },
+  ]);
+  drawScatter('chart-composite-scatter', d);
+
+  document.getElementById('alerts-table').innerHTML = buildAlertsHtml(d);
+  document.getElementById('monthly-table').innerHTML = buildMonthlyTableHtml(d);
+
+  document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
 }
 
 render();
