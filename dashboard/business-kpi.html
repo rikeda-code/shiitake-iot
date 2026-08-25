@@ -332,7 +332,8 @@ function parseBedCountTable(table) {
 
 // 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額)で
 // 特定し、行は「n月」ラベルで特定する(行・列位置に依存しないため多少の行列挿入があっても壊れにくい)。
-// g単価は「g単価(売上ベース)」列を採用(拠点タブではJ列相当だが、ラベル照合のため列位置には依存しない)。
+// g単価は「g単価(売上ベース)」列を採用(拠点タブではJ列相当)。ラベル照合を優先し、
+// ラベルが見つからない場合のみJ列(インデックス9)固定にフォールバックする。
 async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const tabName = `${year}${siteNameJP}`;
   const table = await fetchSheet(sheetId, tabName, 1);
@@ -348,6 +349,8 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
     });
   });
   if (colB == null || colE == null) throw new Error(`${tabName}: 列見出しが見つかりません`);
+  // ラベルが見つからない場合はJ列(0始まりで9列目)を仮定してフォールバックする
+  if (colUnitPrice == null) colUnitPrice = 9;
 
   const shipment = Array(12).fill(null);
   const shipmentValue = Array(12).fill(null);
@@ -373,7 +376,8 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
 }
 
 // 全拠点タブ(例:2025全拠点)から「g単価(売上ベース)」列のみを取得する(全社合計のg単価用)。
-// 全拠点タブでは同じ列名がI列相当になるが、こちらもラベル照合のため列位置には依存しない。
+// 全拠点タブでは同じ列名がI列相当。ラベル照合を優先し、見つからない場合のみ
+// I列(インデックス8)固定にフォールバックする。
 async function fetchTotalUnitPriceYear(sheetId, year) {
   const tabName = `${year}全拠点`;
   const table = await fetchSheet(sheetId, tabName, 1);
@@ -385,7 +389,8 @@ async function fetchTotalUnitPriceYear(sheetId, year) {
       if (label === 'g単価(売上ベース)') colUnitPrice = i;
     });
   });
-  if (colUnitPrice == null) throw new Error(`${tabName}: 列見出しが見つかりません`);
+  // ラベルが見つからない場合はI列(0始まりで8列目)を仮定してフォールバックする
+  if (colUnitPrice == null) colUnitPrice = 8;
 
   const unitPrice = Array(12).fill(null);
   rows.forEach(row => {
