@@ -10222,11 +10222,11 @@ function renderDecPlanContent(planData, mergeData) {
     '⑦<br>差分<br>⑤−⑥ h',
   ];
   const COLS_N = [
-    '①<br>標準人数<br>(B=1/2) 名',
+    '①<br>6月人数実績<br>名',
     `②<br>標準人数<br>(${STD_HOURS_TARGET_MONTH.split('/')[1]}月)`,
     '③<br>新加入見込み<br>名',
     '④<br>残業見込み<br>名',
-    '⑤<br>①+③<br>名',
+    '⑤<br>②+③<br>名',
     '⑥<br>12月標準人数<br>(÷173.8h)',
     '⑦<br>差分<br>⑤−⑥ 名',
   ];
@@ -10239,15 +10239,15 @@ function renderDecPlanContent(planData, mergeData) {
     let rows = '';
 
     SITES_ORD.forEach(site => {
-      const jun   = isH ? junActualH(site) : mergeN(site);
-      const std6  = isH ? stdHoursFromMerge(site) : null; // 人数表②は空欄
+      const jun   = isH ? junActualH(site) : junActualN(site);
+      const std6  = isH ? stdHoursFromMerge(site) : mergeN(site);
       const dec   = stdHoursForMonth(site, decIdx);
       const newV  = isH ? newHireH(site) : b2N(site);
       const ovV   = isH ? overtimeH(site) : null; // 人数表④は空欄
-      // 時間表⑤=②+③+④、人数表⑤=①+③
+      // 時間表⑤=②+③+④、人数表⑤=②+③
       const sum5  = isH
         ? (std6 !== null ? Math.round(((std6 || 0) + (newV || 0) + (ovV || 0)) * 10) / 10 : null)
-        : (jun !== null ? Math.round(((jun || 0) + (newV || 0)) * 10) / 10 : null);
+        : (std6 !== null ? Math.round(((std6 || 0) + (newV || 0)) * 10) / 10 : null);
       // ⑥人数表：標準工数時間÷173.8h
       const dec6N = (dec !== null) ? Math.round(dec / 173.8) : null;
       const decVal = isH ? dec : dec6N;
@@ -10264,7 +10264,7 @@ function renderDecPlanContent(planData, mergeData) {
       rows += `<tr>
         <td style="font-weight:600;color:${SITE_COLORS[site]}">${site}</td>
         <td style="text-align:right">${isH ? fmtH(jun) : fmtN(jun)}</td>
-        <td style="text-align:right">${isH ? fmtH(std6) : '—'}</td>
+        <td style="text-align:right">${isH ? fmtH(std6) : fmtN(std6)}</td>
         <td style="text-align:right">${isH
           ? (newV !== null ? newHireN(site) + '名 (' + fmtH(newV) + ')' : '—')
           : (newV !== null ? newV + ' 名' : '—')}</td>
@@ -10276,13 +10276,13 @@ function renderDecPlanContent(planData, mergeData) {
     });
 
     // 合計行
-    const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : mergeN(site)) || 0), 0);
-    const totStd6 = isH ? SITES_ORD.reduce((s, site) => s + (stdHoursFromMerge(site) || 0), 0) : 0;
+    const totJun  = SITES_ORD.reduce((s, site) => s + ((isH ? junActualH(site) : junActualN(site)) || 0), 0);
+    const totStd6 = SITES_ORD.reduce((s, site) => s + ((isH ? stdHoursFromMerge(site) : mergeN(site)) || 0), 0);
     const totNew  = SITES_ORD.reduce((s, site) => s + ((isH ? newHireH(site) : b2N(site)) || 0), 0);
     const totOv   = isH ? SITES_ORD.reduce((s, site) => s + (overtimeH(site) || 0), 0) : 0;
     const totSum5 = isH
       ? Math.round((totStd6 + totNew + totOv) * 10) / 10
-      : Math.round((totJun + totNew) * 10) / 10;
+      : Math.round((totStd6 + totNew) * 10) / 10;
     const totDec  = SITES_ORD.reduce((s, site) => s + (stdHoursForMonth(site, decIdx) || 0), 0);
     const totDec6N = Math.round(totDec / 173.8);
     const totDecVal = isH ? totDec : totDec6N;
@@ -10299,7 +10299,7 @@ function renderDecPlanContent(planData, mergeData) {
     rows += `<tr style="background:var(--surface2);font-weight:600;border-top:2px solid #3a3f5c">
       <td>合計</td>
       <td style="text-align:right">${isH ? fmtH(totJun) : fmtN(totJun)}</td>
-      <td style="text-align:right">${isH ? fmtH(totStd6) : '—'}</td>
+      <td style="text-align:right">${isH ? fmtH(totStd6) : fmtN(totStd6)}</td>
       <td style="text-align:right">${isH ? fmtH(totNew) : totNew + ' 名'}</td>
       <td style="text-align:right;color:#facc15">${isH ? fmtH(Math.round(totOv * 10) / 10) : '—'}</td>
       <td style="text-align:right">${isH ? fmtH(totSum5) : Math.round(totSum5) + ' 名'}</td>
