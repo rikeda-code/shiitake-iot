@@ -8364,6 +8364,20 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
                 fitsInside, firstLineY, lastLineY,
                 canvasWidth: ctx.canvas.width, canvasHeight: ctx.canvas.height,
               });
+              // 【調査用の一時マーカー】実際にfillTextを呼ぶ座標に、既存のどの色とも
+              // 被らない蛍光マゼンタの小さな円を描く。テキストが見えない原因が
+              // 「その座標に何も残っていない（描画自体が無効）」のか「その座標には
+              // 何か描かれているがテキストの色・フォントの問題で見えない」のか
+              // 「別の要素に後から隠されている」のかを視覚的に切り分けるため
+              // （原因特定後に除去する）
+              ctx.save();
+              ctx.fillStyle = '#ff00ff';
+              lines.forEach((text, li) => {
+                ctx.beginPath();
+                ctx.arc(bar.x, firstLineY + li * LINE_H, 3, 0, Math.PI * 2);
+                ctx.fill();
+              });
+              ctx.restore();
               ctx.save();
               ctx.font = '10px sans-serif';
               // バー自体がほぼ白（#ffffff）のため、stdHoursSegmentCountsと同じ白文字
