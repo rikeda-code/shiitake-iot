@@ -1322,7 +1322,11 @@ function buildDataset(json) {
     const flag       = cells[flagIdx]?.v;
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
-    if (hours.every(h => h === null)) return;
+    // B=2（新規要員・追加待ち）は、まだ稼働実績が無く全月nullになるのが通常のため、
+    // 除外対象から外す（変更B・段階3の追加修正）。hours配列自体は全てnullのまま
+    // 変更しないため、実績集計・実績人数等（e.hours[mi] !== nullを条件にする箇所）
+    // には一切現れない
+    if (hours.every(h => h === null) && flag !== 2) return;
 
     const stdHours = stdHoursIdx >= 0 ? parsePlainHours(cells[stdHoursIdx]) : null;
 
