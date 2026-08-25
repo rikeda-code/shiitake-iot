@@ -1330,7 +1330,11 @@ function buildDataset(json) {
     // と同じ列インデックス定数・同じパース関数を再利用する（A〜I列は各シートで同一構成）
     const startYm = parseGvizDateYm(cells[THREE_SITE_MERGE_START_MONTH_COL]);
 
-    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours, startYm });
+    // prj：E列（PRJ＝計上先）。空欄は「計上外」（例：他担当の営業等）を意味する。
+    // 標準労働時間シート側と同じ列インデックス定数を再利用する
+    const prj = String(cells[THREE_SITE_MERGE_PRJ_COL]?.v ?? '').trim();
+
+    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours, startYm, prj });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
@@ -6346,9 +6350,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 拠点×業務区分(栽培/出荷/配送)ごとの集計を返す。site=nullなら3拠点合算（全拠点合計
   // タブ・3拠点サマリタブ・拠点サマリタブで使用）。対象者の特定は、標準労働時間
   // シート自身のB列（activeFlag）ではなく、整理済み_M（allData.employees）のB列
-  // （e.flag）を基準に行う（変更B・段階2）。各対象者に対応する標準労働時間シート側の
-  // 行はfindStdHoursMergeRowInDiv()で検索し、そのstdHoursを使う（対応行が見つからない
-  // 場合は0として扱う）。
+  // （e.flag）を基準に行う（変更B・段階2）。E列（PRJ、e.prj）が空欄の行は「計上外」
+  // （例：他担当の営業等）のため、B列の値に関わらず対象者から除外する（変更B・
+  // 段階2の追加修正）。各対象者に対応する標準労働時間シート側の行はfindStdHoursMergeRowInDiv()
+  // で検索し、そのstdHoursを使う（対応行が見つからない場合は0として扱う）。
   // - stdTotalB1：整理済み_M側でflag===1（稼働）の従業員の、対応行stdHours合計（固定値）
   // - newStaffByYm：整理済み_M側でflag===2（新規要員・追加待ち）の従業員のうち、
   //   e.startYm（整理済み_M側の開始月）が未設定またはその月以前の従業員だけを対象に、
@@ -6360,7 +6365,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function threeSiteMergeAgg(div, site) {
     if (!mergeData) return null;
     const emps = allData.employees.filter(e =>
-      stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site));
+      stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
+      && (e.prj || '').trim() !== '');
     const matched = emps.filter(e => e.flag === 1);
     const newStaffMatched = emps.filter(e => e.flag === 2);
     if (!matched.length && !newStaffMatched.length) return null;
