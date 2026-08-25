@@ -305,7 +305,7 @@ async function fetchSheetOnce(sheetId, sheetName, headers) {
     const table = json.table;
     // 応答が極端に短い(行がほぼ無い)場合は、途中で応答が切れた/取得失敗のサインとみなし再試行対象にする
     if (!table || !table.rows || table.rows.length < 2) {
-      throw new Error(`${sheetName}: 応答データが空または不完全です`);
+      throw new Error(`${sheetName}: 応答データが空または不完全です ${sampleRowStrings(table && table.rows)}`);
     }
     return table;
   } finally {
@@ -320,6 +320,17 @@ async function fetchSheet(sheetId, sheetName, headers = 1) {
     await new Promise(r => setTimeout(r, 1000));
     return await fetchSheetOnce(sheetId, sheetName, headers);
   }
+}
+
+// エラーメッセージに実際の応答内容の先頭数行を埋め込むための診断用ヘルパー。
+// 期待通りの取得ができない場合に「実際に何が返ってきたか」をバナー上で確認できるようにする。
+function sampleRowStrings(rows, maxRows = 5, maxCols = 6) {
+  const out = [];
+  for (let i = 0; i < (rows || []).length && out.length < maxRows; i++) {
+    const cells = (rows[i].c || []).slice(0, maxCols).map(c => (c && c.v != null ? String(c.v) : '·'));
+    out.push(`[${i}]${cells.join(',')}`);
+  }
+  return out.join(' ');
 }
 
 // 菌床数集計タブ: 拠点名(B列)は各ブロック先頭行のみ入っているため直前の値を引き継ぎ、
@@ -346,7 +357,7 @@ function parseBedCountTable(table) {
   // 3拠点すべてが空の場合は、シート構成が想定と異なる(または取得内容が不完全な)可能性が高いため
   // 「取得成功だがデータ無し」を「エラー」として明示的に扱う
   if (Object.values(result).every(arr => arr.every(v => v == null))) {
-    throw new Error(`拠点の合計行が見つかりません(取得行数=${(table.rows || []).length})`);
+    throw new Error(`拠点の合計行が見つかりません(取得行数=${(table.rows || []).length}) ${sampleRowStrings(table.rows)}`);
   }
   return result;
 }
@@ -370,7 +381,7 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
     });
   });
   if (colB == null || colE == null) {
-    throw new Error(`${tabName}: 列見出しが見つかりません(取得行数=${rows.length})`);
+    throw new Error(`${tabName}: 列見出しが見つかりません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
   }
   // ラベルが見つからない場合はJ列(0始まりで9列目)を仮定してフォールバックする
   if (colUnitPrice == null) colUnitPrice = 9;
@@ -479,7 +490,7 @@ function parseSalesTable(table) {
     if (markerRowIdx === -1 && (joined.match(/実績/g) || []).length >= 5 && (joined.match(/計画/g) || []).length >= 5) markerRowIdx = i;
   });
   if (monthRowIdx === -1 || markerRowIdx === -1) {
-    throw new Error(`月ラベル行/実績列が見つかりません(取得行数=${rows.length})`);
+    throw new Error(`月ラベル行/実績列が見つかりません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
   }
 
   const monthCells = rows[monthRowIdx].c || [];
