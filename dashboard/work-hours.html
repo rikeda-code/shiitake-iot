@@ -10193,7 +10193,7 @@ function renderDecPlanContent(planData, mergeData) {
   // 列ヘッダー：①〜⑦
   const COLS_H = [
     '①<br>6月勤務実績<br>(栽培・出荷・配送) h',
-    '②<br>標準時間<br>(6月) h',
+    `②<br>標準時間<br>(${STD_HOURS_TARGET_MONTH.split('/')[1]}月) h`,
     '③<br>新加入見込み<br>h',
     '④<br>残業見込み<br>h',
     '⑤<br>②+③+④<br>h',
@@ -10202,7 +10202,7 @@ function renderDecPlanContent(planData, mergeData) {
   ];
   const COLS_N = [
     '①<br>標準人数<br>(B=1/2) 名',
-    '②<br>標準人数<br>(6月)',
+    `②<br>標準人数<br>(${STD_HOURS_TARGET_MONTH.split('/')[1]}月)`,
     '③<br>新加入見込み<br>名',
     '④<br>残業見込み<br>名',
     '⑤<br>①+③<br>名',
@@ -10330,7 +10330,7 @@ function renderDecPlanContent(planData, mergeData) {
         data: {
           labels: SITES,
           datasets: [
-            { label: '②標準時間(6月)', data: SITES.map(s => stdHoursFromMerge(s) || 0), backgroundColor: '#60a5fa', stack: 'current' },
+            { label: `②標準時間(${STD_HOURS_TARGET_MONTH.split('/')[1]}月)`, data: SITES.map(s => stdHoursFromMerge(s) || 0), backgroundColor: '#60a5fa', stack: 'current' },
             { label: '③新加入見込み', data: SITES.map(s => newHireH(s) || 0), backgroundColor: '#fbbf24', stack: 'current' },
             { label: '④残業見込み',   data: SITES.map(s => overtimeH(s) || 0),  backgroundColor: '#4ade80', stack: 'current' },
             { label: '⑥12月標準工数時間', data: SITES.map(s => stdHoursForMonth(s, decIdx) || 0), backgroundColor: '#a78bfa', stack: 'dec' },
@@ -10360,9 +10360,9 @@ function renderDecPlanContent(planData, mergeData) {
   }
 
   const note = `<div style="font-size:0.8rem;color:var(--muted);margin-bottom:16px">
-    ※ ①6月実績は栽培・出荷のみ集計。　※ ②標準時間は3拠点マージシートB列=1（栽培・出荷div）のR列合計。<br>
-    ※ ③新加入見込み：3拠点マージシートB列=2（栽培・出荷div）のR列合計・件数。<br>
-    ※ ④残業見込み：3拠点マージシートX列−R列の合計（栽培・出荷div）。内訳：社員・技能実習生 +30h、パート社保加入者は本人希望調査。<br>
+    ※ ①6月は実績。　※ ②標準時間は整理済み_M最新月の実績有無で対象者を特定し、標準労働時間シートのR列を合計。<br>
+    ※ ③新加入見込み：標準労働時間シートB列=2かつ12月までに開始予定の行のR列合計・件数。<br>
+    ※ ④残業見込み：標準労働時間シートX列（増減）の合計（B=1は全員、B=2は12月までに開始予定の者のみ対象）。内訳：社員・技能実習生 +30h、パート社保加入者は本人希望調査。<br>
     ※ ⑤=②+③+④。　※ ⑥12月標準工数時間は生産計画×標準工数設定から算出。
   </div>`;
 
