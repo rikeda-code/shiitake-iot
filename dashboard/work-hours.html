@@ -1326,7 +1326,11 @@ function buildDataset(json) {
 
     const stdHours = stdHoursIdx >= 0 ? parsePlainHours(cells[stdHoursIdx]) : null;
 
-    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours });
+    // startYm：I列（開始月）。標準労働時間シート側のパース（parseThreeSiteMergeSheet）
+    // と同じ列インデックス定数・同じパース関数を再利用する（A〜I列は各シートで同一構成）
+    const startYm = parseGvizDateYm(cells[THREE_SITE_MERGE_START_MONTH_COL]);
+
+    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours, startYm });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
@@ -6325,6 +6329,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       return out;
     };
     return { stdTotalB1, newStaffByYm: sumByYmField('newStaffByYm'), deltaByYm: sumByYmField('deltaByYm') };
+  }
+
+  // renderSiteView()内のローカル関数findMergeRowと同じロジック（拠点(e.base)・
+  // 業務区分(div)・氏名・雇用区分（アルバイトかどうか）で標準労働時間シート側の
+  // 対応行を1件に絞り込む）の汎用版。mergeRowsとdivを引数として受け取ることで、
+  // findMergeRow自体を変更せずに他の場所からも同じマッチングロジックを利用できる
+  function findStdHoursMergeRowInDiv(mergeRows, div, e) {
+    if (!mergeRows) return null;
+    const key = normalizeName(e.name);
+    const wantsPartTime = (e.employment || '').includes('アルバイト');
+    return mergeRows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
+      && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
   }
 
   // 拠点×業務区分(栽培/出荷/配送)ごとの集計を返す。site=nullなら3拠点合算（全拠点合計
