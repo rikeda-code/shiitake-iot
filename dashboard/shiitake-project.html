@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>椎茸栽培標準化プロジェクト ダッシュボード</title>
+<style>
+  :root {
+    --bg: #f4f5f2;
+    --panel: #ffffff;
+    --panel-2: #fafaf8;
+    --border: #dde1da;
+    --text: #2b2f28;
+    --muted: #6d7468;
+    --muted-2: #99a091;
+    --accent: #4d7c5f;
+    --accent-d: #3a5f48;
+    --accent-bg: #e7f0ea;
+    --danger: #b5514a;
+    --danger-bg: #f6e8e7;
+    --warn: #a97a26;
+    --warn-bg: #f5ecd9;
+    --link: #3a6ea5;
+    --radius: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Hiragino Sans", "Yu Gothic", "Segoe UI", -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button {
+    cursor: pointer;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+  }
+  button:hover { background: var(--panel-2); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent-d); }
+  button.primary:hover { background: var(--accent-d); }
+  button.danger { color: var(--danger); }
+  button.small { padding: 3px 9px; font-size: 12.5px; }
+  input[type=text], input[type=url], input[type=date], input[type=number], textarea, select {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 7px 9px;
+    background: #fff;
+    width: 100%;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  label.field { display: block; margin-bottom: 12px; }
+  label.field > span.label-text { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .field-row > label.field { flex: 1; min-width: 160px; }
+
+  header.topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header.topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }
+  header.topbar h1 a { color: var(--text); }
+  .search-box { flex: 1; min-width: 200px; max-width: 420px; display: flex; }
+  .search-box input { border-radius: var(--radius) 0 0 var(--radius); }
+  .search-box button { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+
+  nav.tabs {
+    position: sticky; top: 45px; z-index: 19;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    display: flex; gap: 2px; overflow-x: auto;
+  }
+  nav.tabs a {
+    display: inline-block; padding: 9px 14px; color: var(--muted); white-space: nowrap;
+    border-bottom: 2px solid transparent;
+  }
+  nav.tabs a:hover { color: var(--text); text-decoration: none; }
+  nav.tabs a.active { color: var(--accent-d); border-bottom-color: var(--accent); font-weight: 600; }
+
+  main#app { max-width: 1180px; margin: 0 auto; padding: 20px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 16px;
+  }
+  .panel > h2 { font-size: 14.5px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .panel > h2 .h2-actions { font-weight: normal; font-size: 12.5px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  table.list { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.list th, table.list td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  table.list th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; }
+  table.list tbody tr:hover { background: var(--panel-2); }
+  table.list tr.clickable { cursor: pointer; }
+  .empty-msg { color: var(--muted-2); padding: 18px 4px; text-align: center; font-size: 13px; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; border: 1px solid transparent; }
+  .badge.st-未着手 { background: #eceeea; color: #5c6258; }
+  .badge.st-調査中 { background: #e3ecf5; color: #315a89; }
+  .badge.st-仮説形成 { background: #efe6f5; color: #6d3f8c; }
+  .badge.st-検証中 { background: #e1f0ee; color: #2c7a72; }
+  .badge.st-暫定 { background: var(--warn-bg); color: var(--warn); }
+  .badge.st-標準化 { background: var(--accent-bg); color: var(--accent-d); }
+  .badge.st-継続改善 { background: #e6e9f5; color: #4a4f8c; }
+  .badge.st-保留 { background: #ececec; color: #7a7a7a; }
+  .badge.pr-高 { background: var(--danger-bg); color: var(--danger); }
+  .badge.pr-中 { background: var(--warn-bg); color: var(--warn); }
+  .badge.pr-低 { background: #eceeea; color: #6d7468; }
+  .badge.hs-仮説 { background: #eceeea; color: #5c6258; }
+  .badge.hs-検証中 { background: #e3ecf5; color: #315a89; }
+  .badge.hs-支持 { background: var(--accent-bg); color: var(--accent-d); }
+  .badge.hs-棄却 { background: var(--danger-bg); color: var(--danger); }
+  .badge.hs-保留 { background: #ececec; color: #7a7a7a; }
+  .badge.hs-標準反映済 { background: #e6e9f5; color: #4a4f8c; }
+  .badge.sr { background: #f0f1ec; color: #6d7468; }
+  .badge.type { background: #eef1ec; color: #4d5449; }
+
+  .progress-wrap { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+  .progress-bar { flex: 1; height: 7px; background: #eceeea; border-radius: 4px; overflow: hidden; }
+  .progress-bar > div { height: 100%; background: var(--accent); }
+  .progress-pct { font-size: 12px; color: var(--muted); width: 34px; text-align: right; }
+
+  .chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-block; padding: 2px 9px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; }
+  .chip a { color: var(--text); }
+
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .mt8 { margin-top: 8px; } .mt12 { margin-top: 12px; } .mt16 { margin-top: 16px; }
+  .mb8 { margin-bottom: 8px; }
+  .flex { display: flex; align-items: center; gap: 8px; }
+  .flex-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filters select, .filters input { width: auto; min-width: 130px; }
+  hr.sep { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+  .history-item { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .history-item:last-child { border-bottom: none; }
+  .history-time { color: var(--muted-2); white-space: nowrap; font-size: 12px; min-width: 92px; }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(30,32,28,0.45);
+    align-items: flex-start; justify-content: center; z-index: 50; padding: 40px 16px; overflow-y: auto;
+  }
+  .modal-box {
+    background: #fff; border-radius: 8px; max-width: 640px; width: 100%;
+    padding: 22px 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+  }
+  .modal-box h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+  .rel-picker { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; background: #fff; }
+  .rel-picker .rel-filter { margin-bottom: 6px; }
+  .rel-options { max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .rel-opt { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; font-size: 13px; cursor: pointer; }
+  .rel-opt:hover { background: var(--panel-2); }
+  .rel-opt input { width: auto; }
+  .rel-empty { color: var(--muted-2); font-size: 12.5px; padding: 4px; }
+
+  .detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .detail-title { font-size: 19px; font-weight: 700; margin: 0 0 4px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 13.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+
+  .search-group h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 18px 0 8px; }
+  .search-group:first-child h3 { margin-top: 0; }
+  .search-result { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .search-result:last-child { border-bottom: none; }
+  .snippet { color: var(--muted); font-size: 12.5px; }
+  mark { background: #fdf0b0; padding: 0 1px; border-radius: 2px; }
+
+  .dashboard-hero { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .dashboard-hero .purpose { max-width: 640px; color: var(--muted); }
+  .stat-pills { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat-pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 14px; min-width: 110px; }
+  .stat-pill .num { font-size: 18px; font-weight: 700; }
+  .stat-pill .lbl { font-size: 11.5px; color: var(--muted); }
+
+  textarea.plain-view { border: none; background: transparent; padding: 0; resize: none; }
+  .icon-btn { background: none; border: none; padding: 2px 6px; color: var(--muted); }
+  .icon-btn:hover { color: var(--danger); }
+  footer.app-footer { text-align: center; color: var(--muted-2); font-size: 12px; padding: 24px 0 40px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1><a href="#/dashboard">🍄 椎茸栽培標準化プロジェクト</a></h1>
+  <form class="search-box" onsubmit="return onGlobalSearchSubmit(event)">
+    <input type="text" id="globalSearchInput" placeholder="項目・タスク・資料・仮説・知識を横断検索...">
+    <button type="submit">検索</button>
+  </form>
+</header>
+<nav class="tabs" id="tabsNav">
+  <a href="#/dashboard" data-view="dashboard">ダッシュボード</a>
+  <a href="#/items" data-view="items">項目</a>
+  <a href="#/tasks" data-view="tasks">タスク</a>
+  <a href="#/materials" data-view="materials">資料</a>
+  <a href="#/hypotheses" data-view="hypotheses">仮説</a>
+  <a href="#/knowledge" data-view="knowledge">知識</a>
+  <a href="#/history" data-view="history">履歴</a>
+  <a href="#/data" data-view="data">データ管理</a>
+</nav>
+
+<main id="app"></main>
+<footer class="app-footer">椎茸栽培標準化プロジェクト ダッシュボード ｜ データはこのブラウザ内に保存されます（localStorage）</footer>
+
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this) closeModal()">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<script>
+/* =========================================================
+   定数
+========================================================= */
+const STATUS_LIST = ['未着手','調査中','仮説形成','検証中','暫定','標準化','継続改善','保留'];
+const ACTIVE_TASK_STATUSES = ['未着手','調査中','仮説形成','検証中'];
+const PRIORITY_LIST = ['高','中','低'];
+const PROGRESS_LIST = [0,25,50,75,100];
+const MATERIAL_TYPES = ['Googleスプレッドシート','Googleスライド','Googleドキュメント','PDF','写真','Excel','文章メモ','その他'];
+const HYPOTHESIS_STATUS = ['仮説','検証中','支持','棄却','保留','標準反映済'];
+const STANDARD_REFLECTION = ['未反映','検討中','一部反映','標準反映済み'];
+const DB_KEY = 'shiitakeProjectDB_v1';
+
+/* =========================================================
+   ユーティリティ
+========================================================= */
+function uid(prefix) {
+  return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function nowISO() { return new Date().toISOString(); }
+function fmtDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d)) return '-';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function fmtDateOnly(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d)) return '-';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())}`;
+}
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function nl2br(s) { return esc(s).replace(/\n/g, '<br>'); }
+function highlight(text, q) {
+  if (!q) return esc(text);
+  const idx = String(text).toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return esc(text);
+  return esc(text.slice(0, idx)) + '<mark>' + esc(text.slice(idx, idx + q.length)) + '</mark>' + esc(text.slice(idx + q.length));
+}
+function snippet(text, q, len) {
+  len = len || 60;
+  text = String(text || '');
+  if (!q) return esc(text.slice(0, len));
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return esc(text.slice(0, len));
+  const start = Math.max(0, idx - 20);
+  const end = Math.min(text.length, idx + q.length + 30);
+  return (start > 0 ? '…' : '') + highlight(text.slice(start, end), q) + (end < text.length ? '…' : '');
+}
+
+/* =========================================================
+   データストア
+========================================================= */
+let DB = null;
+
+function seedDB() {
+  const now = nowISO();
+  const itemDefs = [
+    ['目標設定', 'プロジェクトの到達目標と成功基準を明確にする'],
+    ['栽培原則の決定', '栽培において譲れない基本原則を定める'],
+    ['暗黙知の収集', '熟練者が持つ経験・勘・判断基準を言語化して集める'],
+    ['菌床状態の定義', '菌床の状態を客観的に判断できる基準を定義する'],
+    ['菌床分類', '菌床の状態や特性に応じた分類軸を確立する'],
+    ['最初の20日仮説検証', '栽培開始から20日間のデータをもとに初期仮説を検証する'],
+    ['栽培戦略', '検証された知見をもとに栽培全体の戦略を組み立てる'],
+    ['標準化', '検証された知識を現場で使える標準として整理する'],
+    ['現場検証', '策定した標準を現場で実践し、有効性を確認する'],
+    ['継続改善', '現場実践から得た新しい知見をもとに標準を継続的に更新する'],
+  ];
+  const items = itemDefs.map(([name, purpose]) => ({
+    id: uid('I'), name, purpose, description: '', status: '未着手', progress: 0,
+    priority: '中', owner: '', memo: '', createdAt: now, updatedAt: now,
+  }));
+  return {
+    project: {
+      name: '椎茸栽培標準化プロジェクト',
+      purpose: '品質を落とさず、菌床当たり660～800gを安定して達成するための栽培標準を構築する。「正解をマニュアルにする」のではなく、「正解を生み出す能力を組織に埋め込む」。',
+      currentPhase: '知識収集・仮説形成',
+      focusTheme: '最初の20日仮説',
+      currentIssues: '',
+    },
+    items, tasks: [], materials: [], hypotheses: [], knowledge: [], history: [
+      { id: uid('L'), timestamp: now, type: 'create', entityType: 'project', entityId: null, entityLabel: '椎茸栽培標準化プロジェクト', message: 'プロジェクトを初期化しました（初期項目10件を登録）', relatedItemIds: [] }
+    ],
+  };
+}
+
+function loadDB() {
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.items)) {
+        parsed.tasks = parsed.tasks || [];
+        parsed.materials = parsed.materials || [];
+        parsed.hypotheses = parsed.hypotheses || [];
+        parsed.knowledge = parsed.knowledge || [];
+        parsed.history = parsed.history || [];
+        return parsed;
+      }
+    }
+  } catch (e) { console.error('DBの読み込みに失敗しました', e); }
+  const fresh = seedDB();
+  localStorage.setItem(DB_KEY, JSON.stringify(fresh));
+  return fresh;
+}
+function saveDB() {
+  localStorage.setItem(DB_KEY, JSON.stringify(DB));
+}
+
+function getItem(id) { return DB.items.find(x => x.id === id); }
+function getTask(id) { return DB.tasks.find(x => x.id === id); }
+function getMaterial(id) { return DB.materials.find(x => x.id === id); }
+function getHypothesis(id) { return DB.hypotheses.find(x => x.id === id); }
+function getKnowledge(id) { return DB.knowledge.find(x => x.id === id); }
+
+function logHistory(type, entityType, entityId, entityLabel, message, relatedItemIds) {
+  DB.history.unshift({
+    id: uid('L'), timestamp: nowISO(), type, entityType, entityId, entityLabel, message,
+    relatedItemIds: relatedItemIds || [],
+  });
+  if (DB.history.length > 3000) DB.history.length = 3000;
+}
+
+/* ---- 項目 CRUD ---- */
+function createItem(patch) {
+  const now = nowISO();
+  const item = Object.assign({ id: uid('I'), createdAt: now, updatedAt: now }, patch);
+  DB.items.push(item);
+  logHistory('create', 'item', item.id, item.name, `項目「${item.name}」を追加しました`, [item.id]);
+  saveDB();
+  return item;
+}
+function updateItem(id, patch) {
+  const item = getItem(id); if (!item) return;
+  const statusChanged = patch.status !== undefined && patch.status !== item.status;
+  const oldStatus = item.status;
+  Object.assign(item, patch, { updatedAt: nowISO() });
+  const msg = statusChanged
+    ? `項目「${item.name}」のステータスを「${oldStatus}」→「${item.status}」に変更しました`
+    : `項目「${item.name}」を更新しました`;
+  logHistory(statusChanged ? 'status' : 'update', 'item', item.id, item.name, msg, [item.id]);
+  saveDB();
+}
+function deleteItem(id) {
+  const item = getItem(id); if (!item) return;
+  if (!confirm(`項目「${item.name}」を削除します。タスク・資料・仮説・知識との紐付けも解除されます。よろしいですか？`)) return;
+  DB.items = DB.items.filter(i => i.id !== id);
+  DB.tasks.forEach(t => t.itemIds = (t.itemIds || []).filter(x => x !== id));
+  DB.materials.forEach(m => m.itemIds = (m.itemIds || []).filter(x => x !== id));
+  DB.hypotheses.forEach(h => h.itemIds = (h.itemIds || []).filter(x => x !== id));
+  DB.knowledge.forEach(k => k.itemIds = (k.itemIds || []).filter(x => x !== id));
+  logHistory('delete', 'item', id, item.name, `項目「${item.name}」を削除しました`, []);
+  saveDB();
+  location.hash = '#/items';
+}
+
+/* ---- タスク CRUD ---- */
+function createTask(patch) {
+  const now = nowISO();
+  const task = Object.assign({ id: uid('T'), createdAt: now, updatedAt: now }, patch);
+  DB.tasks.push(task);
+  logHistory('create', 'task', task.id, task.name, `タスク「${task.name}」を追加しました`, task.itemIds);
+  saveDB();
+  return task;
+}
+function updateTask(id, patch) {
+  const task = getTask(id); if (!task) return;
+  const statusChanged = patch.status !== undefined && patch.status !== task.status;
+  const oldStatus = task.status;
+  Object.assign(task, patch, { updatedAt: nowISO() });
+  const msg = statusChanged
+    ? `タスク「${task.name}」のステータスを「${oldStatus}」→「${task.status}」に変更しました`
+    : `タスク「${task.name}」を更新しました`;
+  logHistory(statusChanged ? 'status' : 'update', 'task', task.id, task.name, msg, task.itemIds);
+  saveDB();
+}
+function deleteTask(id) {
+  const task = getTask(id); if (!task) return;
+  if (!confirm(`タスク「${task.name}」を削除します。よろしいですか？`)) return;
+  DB.tasks = DB.tasks.filter(t => t.id !== id);
+  DB.materials.forEach(m => m.taskIds = (m.taskIds || []).filter(x => x !== id));
+  DB.hypotheses.forEach(h => h.taskIds = (h.taskIds || []).filter(x => x !== id));
+  logHistory('delete', 'task', id, task.name, `タスク「${task.name}」を削除しました`, task.itemIds);
+  saveDB();
+  location.hash = '#/tasks';
+}
+
+/* ---- 資料 CRUD ---- */
+function createMaterial(patch) {
+  const now = nowISO();
+  const mat = Object.assign({ id: uid('M'), createdAt: now, updatedAt: now }, patch);
+  DB.materials.push(mat);
+  logHistory('create', 'material', mat.id, mat.name, `資料「${mat.name}」を追加しました`, mat.itemIds);
+  saveDB();
+  return mat;
+}
+function updateMaterial(id, patch) {
+  const mat = getMaterial(id); if (!mat) return;
+  Object.assign(mat, patch, { updatedAt: nowISO() });
+  logHistory('update', 'material', mat.id, mat.name, `資料「${mat.name}」を更新しました`, mat.itemIds);
+  saveDB();
+}
+function deleteMaterial(id) {
+  const mat = getMaterial(id); if (!mat) return;
+  if (!confirm(`資料「${mat.name}」を削除します。よろしいですか？`)) return;
+  DB.materials = DB.materials.filter(m => m.id !== id);
+  DB.knowledge.forEach(k => k.materialIds = (k.materialIds || []).filter(x => x !== id));
+  logHistory('delete', 'material', id, mat.name, `資料「${mat.name}」を削除しました`, mat.itemIds);
+  saveDB();
+  location.hash = '#/materials';
+}
+
+/* ---- 仮説 CRUD ---- */
+function createHypothesis(patch) {
+  const now = nowISO();
+  const hyp = Object.assign({ id: uid('H'), createdAt: now, updatedAt: now }, patch);
+  DB.hypotheses.push(hyp);
+  logHistory('create', 'hypothesis', hyp.id, hyp.name, `仮説「${hyp.name}」を追加しました`, hyp.itemIds);
+  saveDB();
+  return hyp;
+}
+function updateHypothesis(id, patch) {
+  const hyp = getHypothesis(id); if (!hyp) return;
+  const statusChanged = patch.status !== undefined && patch.status !== hyp.status;
+  const oldStatus = hyp.status;
+  Object.assign(hyp, patch, { updatedAt: nowISO() });
+  const msg = statusChanged
+    ? `仮説「${hyp.name}」のステータスを「${oldStatus}」→「${hyp.status}」に変更しました`
+    : `仮説「${hyp.name}」を更新しました`;
+  logHistory(statusChanged ? 'status' : 'update', 'hypothesis', hyp.id, hyp.name, msg, hyp.itemIds);
+  saveDB();
+}
+function deleteHypothesis(id) {
+  const hyp = getHypothesis(id); if (!hyp) return;
+  if (!confirm(`仮説「${hyp.name}」を削除します。よろしいですか？`)) return;
+  DB.hypotheses = DB.hypotheses.filter(h => h.id !== id);
+  DB.tasks.forEach(t => t.hypothesisIds = (t.hypothesisIds || []).filter(x => x !== id));
+  DB.materials.forEach(m => m.hypothesisIds = (m.hypothesisIds || []).filter(x => x !== id));
+  DB.knowledge.forEach(k => k.hypothesisIds = (k.hypothesisIds || []).filter(x => x !== id));
+  logHistory('delete', 'hypothesis', id, hyp.name, `仮説「${hyp.name}」を削除しました`, hyp.itemIds);
+  saveDB();
+  location.hash = '#/hypotheses';
+}
+
+/* ---- 知識 CRUD ---- */
+function createKnowledge(patch) {
+  const now = nowISO();
+  const k = Object.assign({ id: uid('K'), createdAt: now, updatedAt: now }, patch);
+  DB.knowledge.push(k);
+  logHistory('create', 'knowledge', k.id, k.title, `知識「${k.title}」を追加しました`, k.itemIds);
+  saveDB();
+  return k;
+}
+function updateKnowledge(id, patch) {
+  const k = getKnowledge(id); if (!k) return;
+  Object.assign(k, patch, { updatedAt: nowISO() });
+  logHistory('update', 'knowledge', k.id, k.title, `知識「${k.title}」を更新しました`, k.itemIds);
+  saveDB();
+}
+function deleteKnowledge(id) {
+  const k = getKnowledge(id); if (!k) return;
+  if (!confirm(`知識「${k.title}」を削除します。よろしいですか？`)) return;
+  DB.knowledge = DB.knowledge.filter(x => x.id !== id);
+  logHistory('delete', 'knowledge', id, k.title, `知識「${k.title}」を削除しました`, k.itemIds);
+  saveDB();
+  location.hash = '#/knowledge';
+}
+
+/* =========================================================
+   共通レンダリング部品
+========================================================= */
+function statusBadge(s) { return `<span class="badge st-${esc(s)}">${esc(s)}</span>`; }
+function priorityBadge(p) { return `<span class="badge pr-${esc(p)}">${esc(p)}</span>`; }
+function hypStatusBadge(s) { return `<span class="badge hs-${esc(s)}">${esc(s)}</span>`; }
+function stdBadge(s) { return `<span class="badge sr">${esc(s || '未反映')}</span>`; }
+function typeBadge(t) { return `<span class="badge type">${esc(t)}</span>`; }
+
+function progressBar(pct) {
+  return `<div class="progress-wrap"><div class="progress-bar"><div style="width:${pct}%"></div></div><span class="progress-pct">${pct}%</span></div>`;
+}
+
+function selectOptions(list, current) {
+  return list.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('');
+}
+
+function itemChips(ids) {
+  if (!ids || !ids.length) return '<span class="muted small">なし</span>';
+  return `<div class="chip-list">${ids.map(id => {
+    const it = getItem(id);
+    return it ? `<span class="chip"><a href="#/items/${it.id}">${esc(it.name)}</a></span>` : '';
+  }).join('')}</div>`;
+}
+function taskChips(ids) {
+  if (!ids || !ids.length) return '<span class="muted small">なし</span>';
+  return `<div class="chip-list">${ids.map(id => {
+    const t = getTask(id);
+    return t ? `<span class="chip"><a href="#/tasks/${t.id}">${esc(t.name)}</a></span>` : '';
+  }).join('')}</div>`;
+}
+function materialChips(ids) {
+  if (!ids || !ids.length) return '<span class="muted small">なし</span>';
+  return `<div class="chip-list">${ids.map(id => {
+    const m = getMaterial(id);
+    return m ? `<span class="chip"><a href="#/materials/${m.id}">${esc(m.name)}</a></span>` : '';
+  }).join('')}</div>`;
+}
+function hypothesisChips(ids) {
+  if (!ids || !ids.length) return '<span class="muted small">なし</span>';
+  return `<div class="chip-list">${ids.map(id => {
+    const h = getHypothesis(id);
+    return h ? `<span class="chip"><a href="#/hypotheses/${h.id}">${esc(h.name)}</a></span>` : '';
+  }).join('')}</div>`;
+}
+function knowledgeChips(ids) {
+  if (!ids || !ids.length) return '<span class="muted small">なし</span>';
+  return `<div class="chip-list">${ids.map(id => {
+    const k = getKnowledge(id);
+    return k ? `<span class="chip"><a href="#/knowledge/${k.id}">${esc(k.title)}</a></span>` : '';
+  }).join('')}</div>`;
+}
+
+function relPicker(containerId, entities, labelFn, selectedIds) {
+  selectedIds = selectedIds || [];
+  const options = entities.map(e => {
+    const label = labelFn(e);
+    return `<label class="rel-opt" data-label="${esc(label.toLowerCase())}">
+      <input type="checkbox" value="${e.id}" ${selectedIds.includes(e.id) ? 'checked' : ''}>
+      <span>${esc(label)}</span>
+    </label>`;
+  }).join('') || '<div class="rel-empty">データがありません</div>';
+  return `<div class="rel-picker">
+    <input type="text" class="rel-filter" placeholder="絞り込み..." oninput="filterRelOptions('${containerId}', this.value)">
+    <div class="rel-options" id="${containerId}">${options}</div>
+  </div>`;
+}
+function filterRelOptions(containerId, q) {
+  const container = document.getElementById(containerId);
+  const query = q.trim().toLowerCase();
+  container.querySelectorAll('.rel-opt').forEach(el => {
+    el.style.display = (!query || el.dataset.label.includes(query)) ? '' : 'none';
+  });
+}
+function getCheckedValues(containerId) {
+  return Array.from(document.querySelectorAll(`#${containerId} input[type=checkbox]:checked`)).map(i => i.value);
+}
+
+function itemLabel(i) { return i.name; }
+function taskLabel(t) { return t.name; }
+function materialLabel(m) { return m.name; }
+function hypothesisLabel(h) { return h.name; }
+
+/* =========================================================
+   モーダル
+========================================================= */
+function openModal(html) {
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+function closeModal() {
+  document.getElementById('modalOverlay').style.display = 'none';
+  document.getElementById('modalBox').innerHTML = '';
+}
+
+/* ---- 項目フォーム ---- */
+function openItemForm(id) {
+  const item = id ? getItem(id) : null;
+  const title = item ? `項目を編集: ${esc(item.name)}` : '項目を追加';
+  openModal(`
+    <h3>${title}</h3>
+    <form onsubmit="return submitItemForm(event, ${item ? `'${item.id}'` : 'null'})">
+      <label class="field"><span class="label-text">項目名 *</span><input type="text" name="name" required value="${esc(item?.name || '')}"></label>
+      <label class="field"><span class="label-text">目的</span><textarea name="purpose">${esc(item?.purpose || '')}</textarea></label>
+      <label class="field"><span class="label-text">説明</span><textarea name="description">${esc(item?.description || '')}</textarea></label>
+      <div class="field-row">
+        <label class="field"><span class="label-text">ステータス</span><select name="status">${selectOptions(STATUS_LIST, item?.status || '未着手')}</select></label>
+        <label class="field"><span class="label-text">進捗</span><select name="progress">${PROGRESS_LIST.map(p => `<option value="${p}" ${item && item.progress === p ? 'selected' : ''}>${p}%</option>`).join('')}</select></label>
+        <label class="field"><span class="label-text">優先度</span><select name="priority">${selectOptions(PRIORITY_LIST, item?.priority || '中')}</select></label>
+      </div>
+      <label class="field"><span class="label-text">担当者</span><input type="text" name="owner" value="${esc(item?.owner || '')}"></label>
+      <label class="field"><span class="label-text">メモ</span><textarea name="memo">${esc(item?.memo || '')}</textarea></label>
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">キャンセル</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `);
+}
+function submitItemForm(e, id) {
+  e.preventDefault();
+  const f = e.target;
+  const name = f.name.value.trim();
+  if (!name) { alert('項目名は必須です'); return false; }
+  const patch = {
+    name, purpose: f.purpose.value.trim(), description: f.description.value.trim(),
+    status: f.status.value, progress: parseInt(f.progress.value, 10), priority: f.priority.value,
+    owner: f.owner.value.trim(), memo: f.memo.value.trim(),
+  };
+  if (id) updateItem(id, patch); else createItem(patch);
+  closeModal();
+  route();
+  return false;
+}
+
+/* ---- タスクフォーム ---- */
+function openTaskForm(id, presetItemId) {
+  const task = id ? getTask(id) : null;
+  const selectedItems = task ? task.itemIds : (presetItemId ? [presetItemId] : []);
+  const title = task ? `タスクを編集: ${esc(task.name)}` : 'タスクを追加';
+  openModal(`
+    <h3>${title}</h3>
+    <form onsubmit="return submitTaskForm(event, ${task ? `'${task.id}'` : 'null'})">
+      <label class="field"><span class="label-text">タスク名 *</span><input type="text" name="name" required value="${esc(task?.name || '')}"></label>
+      <label class="field"><span class="label-text">紐付く項目 * (1つ以上選択)</span>${relPicker('taskRelItems', DB.items, itemLabel, selectedItems)}</label>
+      <label class="field"><span class="label-text">説明</span><textarea name="description">${esc(task?.description || '')}</textarea></label>
+      <div class="field-row">
+        <label class="field"><span class="label-text">ステータス</span><select name="status">${selectOptions(STATUS_LIST, task?.status || '未着手')}</select></label>
+        <label class="field"><span class="label-text">優先度</span><select name="priority">${selectOptions(PRIORITY_LIST, task?.priority || '中')}</select></label>
+        <label class="field"><span class="label-text">担当者</span><input type="text" name="owner" value="${esc(task?.owner || '')}"></label>
+      </div>
+      <label class="field"><span class="label-text">締切日（任意）</span><input type="date" name="dueDate" value="${esc(task?.dueDate || '')}"></label>
+      <label class="field"><span class="label-text">関連資料</span>${relPicker('taskRelMaterials', DB.materials, materialLabel, task?.materialIds || [])}</label>
+      <label class="field"><span class="label-text">関連仮説</span>${relPicker('taskRelHypotheses', DB.hypotheses, hypothesisLabel, task?.hypothesisIds || [])}</label>
+      <label class="field"><span class="label-text">メモ</span><textarea name="memo">${esc(task?.memo || '')}</textarea></label>
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">キャンセル</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `);
+}
+function submitTaskForm(e, id) {
+  e.preventDefault();
+  const f = e.target;
+  const name = f.name.value.trim();
+  const itemIds = getCheckedValues('taskRelItems');
+  if (!name) { alert('タスク名は必須です'); return false; }
+  if (!itemIds.length) { alert('タスクは1つ以上の項目に紐付けてください'); return false; }
+  const patch = {
+    name, itemIds, description: f.description.value.trim(),
+    status: f.status.value, priority: f.priority.value, owner: f.owner.value.trim(),
+    dueDate: f.dueDate.value || '', memo: f.memo.value.trim(),
+    materialIds: getCheckedValues('taskRelMaterials'),
+    hypothesisIds: getCheckedValues('taskRelHypotheses'),
+  };
+  if (id) updateTask(id, patch); else createTask(patch);
+  closeModal();
+  route();
+  return false;
+}
+
+/* ---- 資料フォーム ---- */
+function openMaterialForm(id, presetItemId) {
+  const mat = id ? getMaterial(id) : null;
+  const title = mat ? `資料を編集: ${esc(mat.name)}` : '資料・メモを追加';
+  const selectedItems = mat ? mat.itemIds : (presetItemId ? [presetItemId] : []);
+  openModal(`
+    <h3>${title}</h3>
+    <form onsubmit="return submitMaterialForm(event, ${mat ? `'${mat.id}'` : 'null'})">
+      <label class="field"><span class="label-text">資料名 *</span><input type="text" name="name" required value="${esc(mat?.name || '')}"></label>
+      <div class="field-row">
+        <label class="field"><span class="label-text">資料種別</span><select name="type" onchange="toggleMaterialUrlField(this.value)">${selectOptions(MATERIAL_TYPES, mat?.type || 'その他')}</select></label>
+      </div>
+      <label class="field"><span class="label-text">説明</span><textarea name="description">${esc(mat?.description || '')}</textarea></label>
+      <label class="field" id="materialUrlField"><span class="label-text">URL（外部資料へのリンク）</span><input type="url" name="url" placeholder="https://..." value="${esc(mat?.url || '')}"></label>
+      <label class="field"><span class="label-text">本文メモ（文章メモとして保存する場合）</span><textarea name="body" placeholder="例）芽数そのものより、芽の立ち方を見ているとのこと。">${esc(mat?.body || '')}</textarea></label>
+      <label class="field"><span class="label-text">関連項目</span>${relPicker('matRelItems', DB.items, itemLabel, selectedItems)}</label>
+      <label class="field"><span class="label-text">関連タスク</span>${relPicker('matRelTasks', DB.tasks, taskLabel, mat?.taskIds || [])}</label>
+      <label class="field"><span class="label-text">関連仮説</span>${relPicker('matRelHypotheses', DB.hypotheses, hypothesisLabel, mat?.hypothesisIds || [])}</label>
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">キャンセル</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `);
+}
+function toggleMaterialUrlField() { /* reserved for future conditional display */ }
+function submitMaterialForm(e, id) {
+  e.preventDefault();
+  const f = e.target;
+  const name = f.name.value.trim();
+  if (!name) { alert('資料名は必須です'); return false; }
+  const patch = {
+    name, type: f.type.value, description: f.description.value.trim(),
+    url: f.url.value.trim(), body: f.body.value.trim(),
+    itemIds: getCheckedValues('matRelItems'),
+    taskIds: getCheckedValues('matRelTasks'),
+    hypothesisIds: getCheckedValues('matRelHypotheses'),
+  };
+  if (id) updateMaterial(id, patch); else createMaterial(patch);
+  closeModal();
+  route();
+  return false;
+}
+
+/* ---- 仮説フォーム ---- */
+function openHypothesisForm(id, presetItemId) {
+  const hyp = id ? getHypothesis(id) : null;
+  const title = hyp ? `仮説を編集: ${esc(hyp.name)}` : '仮説を追加';
+  const selectedItems = hyp ? hyp.itemIds : (presetItemId ? [presetItemId] : []);
+  openModal(`
+    <h3>${title}</h3>
+    <form onsubmit="return submitHypothesisForm(event, ${hyp ? `'${hyp.id}'` : 'null'})">
+      <label class="field"><span class="label-text">仮説名 *</span><input type="text" name="name" required value="${esc(hyp?.name || '')}"></label>
+      <label class="field"><span class="label-text">紐付く項目</span>${relPicker('hypRelItems', DB.items, itemLabel, selectedItems)}</label>
+      <label class="field"><span class="label-text">仮説内容</span><textarea name="content">${esc(hyp?.content || '')}</textarea></label>
+      <label class="field"><span class="label-text">仮説を立てた理由</span><textarea name="reason">${esc(hyp?.reason || '')}</textarea></label>
+      <div class="field-row">
+        <label class="field"><span class="label-text">ステータス</span><select name="status">${selectOptions(HYPOTHESIS_STATUS, hyp?.status || '仮説')}</select></label>
+        <label class="field"><span class="label-text">標準への反映状況</span><select name="standardReflection">${selectOptions(STANDARD_REFLECTION, hyp?.standardReflection || '未反映')}</select></label>
+      </div>
+      <label class="field"><span class="label-text">検証方法</span><textarea name="verificationMethod">${esc(hyp?.verificationMethod || '')}</textarea></label>
+      <label class="field"><span class="label-text">結果</span><textarea name="result">${esc(hyp?.result || '')}</textarea></label>
+      <label class="field"><span class="label-text">結論</span><textarea name="conclusion">${esc(hyp?.conclusion || '')}</textarea></label>
+      <label class="field"><span class="label-text">関連資料</span>${relPicker('hypRelMaterials', DB.materials, materialLabel, hyp?.materialIds || [])}</label>
+      <label class="field"><span class="label-text">関連タスク</span>${relPicker('hypRelTasks', DB.tasks, taskLabel, hyp?.taskIds || [])}</label>
+      <label class="field"><span class="label-text">メモ</span><textarea name="memo">${esc(hyp?.memo || '')}</textarea></label>
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">キャンセル</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `);
+}
+function submitHypothesisForm(e, id) {
+  e.preventDefault();
+  const f = e.target;
+  const name = f.name.value.trim();
+  if (!name) { alert('仮説名は必須です'); return false; }
+  const patch = {
+    name, content: f.content.value.trim(), reason: f.reason.value.trim(),
+    status: f.status.value, standardReflection: f.standardReflection.value,
+    verificationMethod: f.verificationMethod.value.trim(), result: f.result.value.trim(),
+    conclusion: f.conclusion.value.trim(), memo: f.memo.value.trim(),
+    itemIds: getCheckedValues('hypRelItems'),
+    materialIds: getCheckedValues('hypRelMaterials'),
+    taskIds: getCheckedValues('hypRelTasks'),
+  };
+  if (id) updateHypothesis(id, patch); else createHypothesis(patch);
+  closeModal();
+  route();
+  return false;
+}
+
+/* ---- 知識フォーム ---- */
+function openKnowledgeForm(id, presetItemId) {
+  const k = id ? getKnowledge(id) : null;
+  const title = k ? `知識を編集: ${esc(k.title)}` : '知識を追加';
+  const selectedItems = k ? k.itemIds : (presetItemId ? [presetItemId] : []);
+  openModal(`
+    <h3>${title}</h3>
+    <form onsubmit="return submitKnowledgeForm(event, ${k ? `'${k.id}'` : 'null'})">
+      <label class="field"><span class="label-text">タイトル *</span><input type="text" name="title" required value="${esc(k?.title || '')}"></label>
+      <label class="field"><span class="label-text">関連項目</span>${relPicker('knowRelItems', DB.items, itemLabel, selectedItems)}</label>
+      <label class="field"><span class="label-text">知識内容</span><textarea name="content" placeholder="例）熟練者へのヒアリングから、芽数そのものではなく軸の成長状態を重要視していることが分かった。">${esc(k?.content || '')}</textarea></label>
+      <label class="field"><span class="label-text">発見の経緯</span><textarea name="background">${esc(k?.background || '')}</textarea></label>
+      <label class="field"><span class="label-text">根拠</span><textarea name="evidence">${esc(k?.evidence || '')}</textarea></label>
+      <label class="field"><span class="label-text">標準への反映状況</span><select name="standardReflection">${selectOptions(STANDARD_REFLECTION, k?.standardReflection || '未反映')}</select></label>
+      <label class="field"><span class="label-text">関連仮説</span>${relPicker('knowRelHypotheses', DB.hypotheses, hypothesisLabel, k?.hypothesisIds || [])}</label>
+      <label class="field"><span class="label-text">関連資料</span>${relPicker('knowRelMaterials', DB.materials, materialLabel, k?.materialIds || [])}</label>
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">キャンセル</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `);
+}
+function submitKnowledgeForm(e, id) {
+  e.preventDefault();
+  const f = e.target;
+  const title = f.title.value.trim();
+  if (!title) { alert('タイトルは必須です'); return false; }
+  const patch = {
+    title, content: f.content.value.trim(), background: f.background.value.trim(),
+    evidence: f.evidence.value.trim(), standardReflection: f.standardReflection.value,
+    itemIds: getCheckedValues('knowRelItems'),
+    hypothesisIds: getCheckedValues('knowRelHypotheses'),
+    materialIds: getCheckedValues('knowRelMaterials'),
+  };
+  if (id) updateKnowledge(id, patch); else createKnowledge(patch);
+  closeModal();
+  route();
+  return false;
+}
+
+/* ---- プロジェクト情報フォーム ---- */
+function openProjectForm() {
+  const p = DB.project;
+  openModal(`
+    <h3>プロジェクト情報を編集</h3>
+    <form onsubmit="return submitProjectForm(event)">
+      <label class="field"><span class="label-text">プロジェクト名</span><input type="text" name="name" value="${esc(p.name)}"></label>
+      <label class="field"><span class="label-text">プロジェクト目的</span><textarea name="purpose">${esc(p.purpose)}</textarea></label>
+      <label class="field"><span class="label-text">現在のフェーズ</span><input type="text" name="currentPhase" value="${esc(p.currentPhase)}"></label>
+      <label class="field"><span class="label-text">現在の重点テーマ</span><input type="text" name="focusTheme" value="${esc(p.focusTheme)}"></label>
+      <label class="field"><span class="label-text">現在の課題</span><textarea name="currentIssues">${esc(p.currentIssues)}</textarea></label>
+      <div class="modal-actions">
+        <button type="button" onclick="closeModal()">キャンセル</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  `);
+}
+function submitProjectForm(e) {
+  e.preventDefault();
+  const f = e.target;
+  DB.project = {
+    name: f.name.value.trim() || DB.project.name,
+    purpose: f.purpose.value.trim(),
+    currentPhase: f.currentPhase.value.trim(),
+    focusTheme: f.focusTheme.value.trim(),
+    currentIssues: f.currentIssues.value.trim(),
+  };
+  logHistory('update', 'project', null, DB.project.name, 'プロジェクト情報を更新しました', []);
+  saveDB();
+  closeModal();
+  route();
+  return false;
+}
+
+/* =========================================================
+   ダッシュボード
+========================================================= */
+function renderDashboard() {
+  const p = DB.project;
+  const activeTasks = DB.tasks.filter(t => ACTIVE_TASK_STATUSES.includes(t.status))
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+    .slice(0, 8);
+  const recentMaterials = [...DB.materials].sort((a, b) => (b.updatedAt||'').localeCompare(a.updatedAt||'')).slice(0, 5);
+  const recentKnowledge = [...DB.knowledge].sort((a, b) => (b.updatedAt||'').localeCompare(a.updatedAt||'')).slice(0, 5);
+  const recentHistory = DB.history.slice(0, 10);
+
+  return `
+  <div class="panel">
+    <div class="dashboard-hero">
+      <div>
+        <div class="flex-between">
+          <h2 style="border:none;margin:0;padding:0;font-size:18px;">${esc(p.name)}</h2>
+          <button class="small" onclick="openProjectForm()">プロジェクト情報を編集</button>
+        </div>
+        <p class="purpose mt8">${nl2br(p.purpose)}</p>
+      </div>
+      <div class="stat-pills">
+        <div class="stat-pill"><div class="num">${esc(p.currentPhase || '-')}</div><div class="lbl">現在のフェーズ</div></div>
+        <div class="stat-pill"><div class="num">${esc(p.focusTheme || '-')}</div><div class="lbl">現在の重点テーマ</div></div>
+        <div class="stat-pill"><div class="num">${DB.items.length}</div><div class="lbl">項目数</div></div>
+        <div class="stat-pill"><div class="num">${activeTasks.length}</div><div class="lbl">対応待ちタスク</div></div>
+      </div>
+    </div>
+    <hr class="sep">
+    <h3 style="font-size:13px;color:var(--muted);margin:0 0 6px;">現在の課題</h3>
+    <p>${p.currentIssues ? nl2br(p.currentIssues) : '<span class="muted small">未設定（「プロジェクト情報を編集」から入力できます）</span>'}</p>
+  </div>
+
+  <div class="panel">
+    <h2>全体状況（項目）<span class="h2-actions"><a href="#/items">項目一覧へ →</a></span></h2>
+    <table class="list">
+      <thead><tr><th>項目名</th><th>ステータス</th><th>進捗</th><th>優先度</th></tr></thead>
+      <tbody>
+        ${DB.items.map(i => `
+          <tr class="clickable" onclick="location.hash='#/items/${i.id}'">
+            <td>${esc(i.name)}</td><td>${statusBadge(i.status)}</td><td>${progressBar(i.progress)}</td><td>${priorityBadge(i.priority)}</td>
+          </tr>`).join('') || `<tr><td colspan="4" class="empty-msg">項目がありません</td></tr>`}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <h2>次にやるタスク<span class="h2-actions"><a href="#/tasks">タスク管理へ →</a></span></h2>
+      ${activeTasks.length ? `<table class="list"><tbody>
+        ${activeTasks.map(t => `
+          <tr class="clickable" onclick="location.hash='#/tasks/${t.id}'">
+            <td>${esc(t.name)}</td>
+            <td>${itemChips(t.itemIds)}</td>
+            <td>${statusBadge(t.status)}</td>
+            <td>${priorityBadge(t.priority)}</td>
+          </tr>`).join('')}
+      </tbody></table>` : `<div class="empty-msg">対応待ちのタスクはありません</div>`}
+    </div>
+    <div class="panel">
+      <h2>最近の更新履歴<span class="h2-actions"><a href="#/history">履歴一覧へ →</a></span></h2>
+      ${recentHistory.length ? recentHistory.map(h => `
+        <div class="history-item"><span class="history-time">${fmtDate(h.timestamp)}</span><span>${esc(h.message)}</span></div>
+      `).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <h2>最近更新された資料<span class="h2-actions"><a href="#/materials">資料一覧へ →</a></span></h2>
+      ${recentMaterials.length ? recentMaterials.map(m => `
+        <div class="history-item"><span class="history-time">${fmtDateOnly(m.updatedAt)}</span><a href="#/materials/${m.id}">${esc(m.name)}</a> ${typeBadge(m.type)}</div>
+      `).join('') : `<div class="empty-msg">資料はまだありません</div>`}
+    </div>
+    <div class="panel">
+      <h2>最近更新された知識<span class="h2-actions"><a href="#/knowledge">知識一覧へ →</a></span></h2>
+      ${recentKnowledge.length ? recentKnowledge.map(k => `
+        <div class="history-item"><span class="history-time">${fmtDateOnly(k.updatedAt)}</span><a href="#/knowledge/${k.id}">${esc(k.title)}</a></div>
+      `).join('') : `<div class="empty-msg">知識はまだありません</div>`}
+    </div>
+  </div>
+  `;
+}
+
+/* =========================================================
+   項目一覧・詳細
+========================================================= */
+function renderItemsList() {
+  const rows = DB.items.map(i => {
+    const tasks = DB.tasks.filter(t => t.itemIds.includes(i.id));
+    const activeTasks = tasks.filter(t => ACTIVE_TASK_STATUSES.includes(t.status));
+    const mats = DB.materials.filter(m => m.itemIds.includes(i.id));
+    return `<tr class="clickable" onclick="location.hash='#/items/${i.id}'">
+      <td>${esc(i.name)}</td>
+      <td>${statusBadge(i.status)}</td>
+      <td>${progressBar(i.progress)}</td>
+      <td>${priorityBadge(i.priority)}</td>
+      <td>${tasks.length}</td>
+      <td>${activeTasks.length}</td>
+      <td>${mats.length}</td>
+      <td class="small muted">${fmtDateOnly(i.updatedAt)}</td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="panel">
+    <div class="flex-between mb8">
+      <h2 style="border:none;margin:0;padding:0;">項目一覧</h2>
+      <button class="primary small" onclick="openItemForm(null)">＋ 項目を追加</button>
+    </div>
+    <table class="list">
+      <thead><tr><th>項目名</th><th>ステータス</th><th>進捗</th><th>優先度</th><th>タスク数</th><th>未完了</th><th>関連資料</th><th>最終更新日</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="8" class="empty-msg">項目がありません</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+
+function itemHistoryEntries(itemId) {
+  return DB.history.filter(h => h.entityId === itemId || (h.relatedItemIds || []).includes(itemId));
+}
+
+function renderItemDetail(id) {
+  const item = getItem(id);
+  if (!item) return `<div class="panel">項目が見つかりません。<a href="#/items">項目一覧に戻る</a></div>`;
+  const tasks = DB.tasks.filter(t => t.itemIds.includes(id));
+  const mats = DB.materials.filter(m => m.itemIds.includes(id));
+  const hyps = DB.hypotheses.filter(h => h.itemIds.includes(id));
+  const knows = DB.knowledge.filter(k => k.itemIds.includes(id));
+  const hist = itemHistoryEntries(id).slice(0, 30);
+
+  return `
+  <div class="panel">
+    <div class="detail-header">
+      <div>
+        <p class="small muted mb8"><a href="#/items">← 項目一覧</a></p>
+        <h1 class="detail-title">${esc(item.name)}</h1>
+        <div class="chip-list mb8">${statusBadge(item.status)}${priorityBadge(item.priority)}</div>
+      </div>
+      <div class="flex">
+        <button class="small" onclick="openItemForm('${item.id}')">基本情報を編集</button>
+        <button class="small danger" onclick="deleteItem('${item.id}')">削除</button>
+      </div>
+    </div>
+    <hr class="sep">
+    <div class="grid-2">
+      <div>
+        <dl class="kv">
+          <dt>目的</dt><dd>${item.purpose ? nl2br(item.purpose) : '<span class="muted">未設定</span>'}</dd>
+          <dt>説明</dt><dd>${item.description ? nl2br(item.description) : '<span class="muted">未設定</span>'}</dd>
+          <dt>担当者</dt><dd>${esc(item.owner) || '<span class="muted">未設定</span>'}</dd>
+          <dt>作成日</dt><dd>${fmtDateOnly(item.createdAt)}</dd>
+          <dt>最終更新日</dt><dd>${fmtDate(item.updatedAt)}</dd>
+        </dl>
+      </div>
+      <div>
+        <label class="field"><span class="label-text">ステータス（クイック変更）</span>
+          <select onchange="updateItem('${item.id}', {status:this.value}); route();">${selectOptions(STATUS_LIST, item.status)}</select>
+        </label>
+        <label class="field"><span class="label-text">進捗（クイック変更）</span>
+          <select onchange="updateItem('${item.id}', {progress:parseInt(this.value,10)}); route();">${PROGRESS_LIST.map(p => `<option value="${p}" ${item.progress===p?'selected':''}>${p}%</option>`).join('')}</select>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>タスク（${tasks.length}）<span class="h2-actions"><button class="small" onclick="openTaskForm(null,'${item.id}')">＋ タスクを追加</button></span></h2>
+    <table class="list">
+      <thead><tr><th>タスク名</th><th>ステータス</th><th>優先度</th><th>担当者</th><th>最終更新日</th></tr></thead>
+      <tbody>${tasks.map(t => `
+        <tr class="clickable" onclick="location.hash='#/tasks/${t.id}'">
+          <td>${esc(t.name)}</td><td>${statusBadge(t.status)}</td><td>${priorityBadge(t.priority)}</td><td>${esc(t.owner)||'-'}</td><td class="small muted">${fmtDateOnly(t.updatedAt)}</td>
+        </tr>`).join('') || `<tr><td colspan="5" class="empty-msg">タスクはまだありません</td></tr>`}</tbody>
+    </table>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <h2>資料（${mats.length}）<span class="h2-actions"><button class="small" onclick="openMaterialForm(null,'${item.id}')">＋ 資料を追加</button></span></h2>
+      ${mats.length ? mats.map(m => `<div class="history-item"><a href="#/materials/${m.id}">${esc(m.name)}</a> ${typeBadge(m.type)}</div>`).join('') : `<div class="empty-msg">資料はまだありません</div>`}
+    </div>
+    <div class="panel">
+      <h2>仮説（${hyps.length}）<span class="h2-actions"><button class="small" onclick="openHypothesisForm(null,'${item.id}')">＋ 仮説を追加</button></span></h2>
+      ${hyps.length ? hyps.map(h => `<div class="history-item"><a href="#/hypotheses/${h.id}">${esc(h.name)}</a> ${hypStatusBadge(h.status)}</div>`).join('') : `<div class="empty-msg">仮説はまだありません</div>`}
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <h2>知識（${knows.length}）<span class="h2-actions"><button class="small" onclick="openKnowledgeForm(null,'${item.id}')">＋ 知識を追加</button></span></h2>
+      ${knows.length ? knows.map(k => `<div class="history-item"><a href="#/knowledge/${k.id}">${esc(k.title)}</a> ${stdBadge(k.standardReflection)}</div>`).join('') : `<div class="empty-msg">知識はまだありません</div>`}
+    </div>
+    <div class="panel">
+      <h2>メモ</h2>
+      <form onsubmit="event.preventDefault(); updateItem('${item.id}', {memo: this.memo.value}); route();">
+        <textarea name="memo" rows="5">${esc(item.memo)}</textarea>
+        <div class="modal-actions" style="border:none;padding:0;margin-top:8px;"><button type="submit" class="primary small">メモを保存</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>更新履歴</h2>
+    ${hist.length ? hist.map(h => `<div class="history-item"><span class="history-time">${fmtDate(h.timestamp)}</span><span>${esc(h.message)}</span></div>`).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+  </div>
+  `;
+}
+
+/* =========================================================
+   タスク一覧・詳細
+========================================================= */
+let taskFilters = { itemId: '', status: '', priority: '', owner: '' };
+function setTaskFilter(key, val) { taskFilters[key] = val; route(); }
+
+function renderTasksList() {
+  let tasks = DB.tasks.slice();
+  if (taskFilters.itemId) tasks = tasks.filter(t => t.itemIds.includes(taskFilters.itemId));
+  if (taskFilters.status) tasks = tasks.filter(t => t.status === taskFilters.status);
+  if (taskFilters.priority) tasks = tasks.filter(t => t.priority === taskFilters.priority);
+  if (taskFilters.owner) tasks = tasks.filter(t => (t.owner || '') === taskFilters.owner);
+  tasks.sort((a, b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
+
+  const owners = [...new Set(DB.tasks.map(t => t.owner).filter(Boolean))];
+
+  const rows = tasks.map(t => `
+    <tr class="clickable" onclick="location.hash='#/tasks/${t.id}'">
+      <td>${esc(t.name)}</td>
+      <td>${itemChips(t.itemIds)}</td>
+      <td>${statusBadge(t.status)}</td>
+      <td>${priorityBadge(t.priority)}</td>
+      <td>${esc(t.owner) || '-'}</td>
+      <td class="small muted">${fmtDateOnly(t.updatedAt)}</td>
+    </tr>`).join('');
+
+  return `
+  <div class="panel">
+    <div class="flex-between mb8">
+      <h2 style="border:none;margin:0;padding:0;">タスク管理</h2>
+      <button class="primary small" onclick="openTaskForm(null,null)">＋ タスクを追加</button>
+    </div>
+    <div class="filters">
+      <select onchange="setTaskFilter('itemId', this.value)">
+        <option value="">すべての項目</option>
+        ${DB.items.map(i => `<option value="${i.id}" ${taskFilters.itemId===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}
+      </select>
+      <select onchange="setTaskFilter('status', this.value)">
+        <option value="">すべてのステータス</option>
+        ${STATUS_LIST.map(s => `<option value="${s}" ${taskFilters.status===s?'selected':''}>${esc(s)}</option>`).join('')}
+      </select>
+      <select onchange="setTaskFilter('priority', this.value)">
+        <option value="">すべての優先度</option>
+        ${PRIORITY_LIST.map(p => `<option value="${p}" ${taskFilters.priority===p?'selected':''}>${esc(p)}</option>`).join('')}
+      </select>
+      <select onchange="setTaskFilter('owner', this.value)">
+        <option value="">すべての担当者</option>
+        ${owners.map(o => `<option value="${esc(o)}" ${taskFilters.owner===o?'selected':''}>${esc(o)}</option>`).join('')}
+      </select>
+      ${(taskFilters.itemId||taskFilters.status||taskFilters.priority||taskFilters.owner) ? `<button class="small" onclick="taskFilters={itemId:'',status:'',priority:'',owner:''}; route();">フィルターをクリア</button>` : ''}
+    </div>
+    <table class="list">
+      <thead><tr><th>タスク名</th><th>紐付く項目</th><th>ステータス</th><th>優先度</th><th>担当者</th><th>最終更新日</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="empty-msg">該当するタスクがありません</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderTaskDetail(id) {
+  const task = getTask(id);
+  if (!task) return `<div class="panel">タスクが見つかりません。<a href="#/tasks">タスク一覧に戻る</a></div>`;
+  const hist = DB.history.filter(h => h.entityId === id);
+  return `
+  <div class="panel">
+    <div class="detail-header">
+      <div>
+        <p class="small muted mb8"><a href="#/tasks">← タスク一覧</a></p>
+        <h1 class="detail-title">${esc(task.name)}</h1>
+        <div class="chip-list mb8">${statusBadge(task.status)}${priorityBadge(task.priority)}</div>
+      </div>
+      <div class="flex">
+        <button class="small" onclick="openTaskForm('${task.id}')">編集</button>
+        <button class="small danger" onclick="deleteTask('${task.id}')">削除</button>
+      </div>
+    </div>
+    <hr class="sep">
+    <div class="grid-2">
+      <dl class="kv">
+        <dt>紐付く項目</dt><dd>${itemChips(task.itemIds)}</dd>
+        <dt>説明</dt><dd>${task.description ? nl2br(task.description) : '<span class="muted">未設定</span>'}</dd>
+        <dt>担当者</dt><dd>${esc(task.owner) || '<span class="muted">未設定</span>'}</dd>
+        <dt>締切日</dt><dd>${task.dueDate ? esc(task.dueDate) : '<span class="muted">未設定（任意）</span>'}</dd>
+        <dt>作成日</dt><dd>${fmtDateOnly(task.createdAt)}</dd>
+        <dt>最終更新日</dt><dd>${fmtDate(task.updatedAt)}</dd>
+      </dl>
+      <div>
+        <label class="field"><span class="label-text">ステータス（クイック変更）</span>
+          <select onchange="updateTask('${task.id}', {status:this.value}); route();">${selectOptions(STATUS_LIST, task.status)}</select>
+        </label>
+        <p><strong>関連資料</strong></p>${materialChips(task.materialIds)}
+        <p class="mt12"><strong>関連仮説</strong></p>${hypothesisChips(task.hypothesisIds)}
+      </div>
+    </div>
+    <hr class="sep">
+    <p><strong>メモ</strong></p>
+    <p>${task.memo ? nl2br(task.memo) : '<span class="muted">なし</span>'}</p>
+  </div>
+  <div class="panel">
+    <h2>更新履歴</h2>
+    ${hist.length ? hist.map(h => `<div class="history-item"><span class="history-time">${fmtDate(h.timestamp)}</span><span>${esc(h.message)}</span></div>`).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+  </div>`;
+}
+
+/* =========================================================
+   資料一覧・詳細
+========================================================= */
+let materialFilters = { type: '', q: '' };
+function setMaterialFilter(key, val) { materialFilters[key] = val; route(); }
+
+function renderMaterialsList() {
+  let mats = DB.materials.slice();
+  if (materialFilters.type) mats = mats.filter(m => m.type === materialFilters.type);
+  if (materialFilters.q) {
+    const q = materialFilters.q.toLowerCase();
+    mats = mats.filter(m => [m.name, m.description, m.body].some(v => (v||'').toLowerCase().includes(q)));
+  }
+  mats.sort((a, b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
+
+  const rows = mats.map(m => `
+    <tr class="clickable" onclick="location.hash='#/materials/${m.id}'">
+      <td>${esc(m.name)}</td>
+      <td>${typeBadge(m.type)}</td>
+      <td>${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">開く ↗</a>` : (m.body ? '<span class="small muted">文章メモ</span>' : '-')}</td>
+      <td>${itemChips(m.itemIds)}</td>
+      <td class="small muted">${fmtDateOnly(m.createdAt)}</td>
+    </tr>`).join('');
+
+  return `
+  <div class="panel">
+    <div class="flex-between mb8">
+      <h2 style="border:none;margin:0;padding:0;">資料管理</h2>
+      <button class="primary small" onclick="openMaterialForm(null,null)">＋ 資料・メモを追加</button>
+    </div>
+    <div class="filters">
+      <select onchange="setMaterialFilter('type', this.value)">
+        <option value="">すべての種別</option>
+        ${MATERIAL_TYPES.map(t => `<option value="${t}" ${materialFilters.type===t?'selected':''}>${esc(t)}</option>`).join('')}
+      </select>
+      <input type="text" placeholder="資料名・説明・本文で検索" value="${esc(materialFilters.q)}" oninput="setMaterialFilter('q', this.value)">
+    </div>
+    <table class="list">
+      <thead><tr><th>資料名</th><th>種別</th><th>リンク</th><th>関連項目</th><th>登録日</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" class="empty-msg">資料がありません</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderMaterialDetail(id) {
+  const m = getMaterial(id);
+  if (!m) return `<div class="panel">資料が見つかりません。<a href="#/materials">資料一覧に戻る</a></div>`;
+  const hist = DB.history.filter(h => h.entityId === id);
+  return `
+  <div class="panel">
+    <div class="detail-header">
+      <div>
+        <p class="small muted mb8"><a href="#/materials">← 資料一覧</a></p>
+        <h1 class="detail-title">${esc(m.name)}</h1>
+        <div class="chip-list mb8">${typeBadge(m.type)}</div>
+      </div>
+      <div class="flex">
+        <button class="small" onclick="openMaterialForm('${m.id}')">編集</button>
+        <button class="small danger" onclick="deleteMaterial('${m.id}')">削除</button>
+      </div>
+    </div>
+    <hr class="sep">
+    <dl class="kv">
+      <dt>説明</dt><dd>${m.description ? nl2br(m.description) : '<span class="muted">未設定</span>'}</dd>
+      <dt>URL</dt><dd>${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.url)} ↗</a>` : '<span class="muted">なし</span>'}</dd>
+      <dt>本文メモ</dt><dd>${m.body ? nl2br(m.body) : '<span class="muted">なし</span>'}</dd>
+      <dt>関連項目</dt><dd>${itemChips(m.itemIds)}</dd>
+      <dt>関連タスク</dt><dd>${taskChips(m.taskIds)}</dd>
+      <dt>関連仮説</dt><dd>${hypothesisChips(m.hypothesisIds)}</dd>
+      <dt>登録日</dt><dd>${fmtDateOnly(m.createdAt)}</dd>
+      <dt>最終更新日</dt><dd>${fmtDate(m.updatedAt)}</dd>
+    </dl>
+  </div>
+  <div class="panel">
+    <h2>更新履歴</h2>
+    ${hist.length ? hist.map(h => `<div class="history-item"><span class="history-time">${fmtDate(h.timestamp)}</span><span>${esc(h.message)}</span></div>`).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+  </div>`;
+}
+
+/* =========================================================
+   仮説一覧・詳細
+========================================================= */
+let hypFilters = { itemId: '', status: '' };
+function setHypFilter(key, val) { hypFilters[key] = val; route(); }
+
+function renderHypothesesList() {
+  let hyps = DB.hypotheses.slice();
+  if (hypFilters.itemId) hyps = hyps.filter(h => h.itemIds.includes(hypFilters.itemId));
+  if (hypFilters.status) hyps = hyps.filter(h => h.status === hypFilters.status);
+  hyps.sort((a, b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
+
+  const rows = hyps.map(h => `
+    <tr class="clickable" onclick="location.hash='#/hypotheses/${h.id}'">
+      <td>${esc(h.name)}</td><td>${itemChips(h.itemIds)}</td><td>${hypStatusBadge(h.status)}</td><td>${stdBadge(h.standardReflection)}</td><td class="small muted">${fmtDateOnly(h.updatedAt)}</td>
+    </tr>`).join('');
+
+  return `
+  <div class="panel">
+    <div class="flex-between mb8">
+      <h2 style="border:none;margin:0;padding:0;">仮説管理</h2>
+      <button class="primary small" onclick="openHypothesisForm(null,null)">＋ 仮説を追加</button>
+    </div>
+    <div class="filters">
+      <select onchange="setHypFilter('itemId', this.value)">
+        <option value="">すべての項目</option>
+        ${DB.items.map(i => `<option value="${i.id}" ${hypFilters.itemId===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}
+      </select>
+      <select onchange="setHypFilter('status', this.value)">
+        <option value="">すべてのステータス</option>
+        ${HYPOTHESIS_STATUS.map(s => `<option value="${s}" ${hypFilters.status===s?'selected':''}>${esc(s)}</option>`).join('')}
+      </select>
+    </div>
+    <table class="list">
+      <thead><tr><th>仮説名</th><th>紐付く項目</th><th>ステータス</th><th>標準反映</th><th>最終更新日</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" class="empty-msg">仮説がありません</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderHypothesisDetail(id) {
+  const h = getHypothesis(id);
+  if (!h) return `<div class="panel">仮説が見つかりません。<a href="#/hypotheses">仮説一覧に戻る</a></div>`;
+  const relatedKnowledge = DB.knowledge.filter(k => (k.hypothesisIds||[]).includes(id));
+  const hist = DB.history.filter(x => x.entityId === id);
+  return `
+  <div class="panel">
+    <div class="detail-header">
+      <div>
+        <p class="small muted mb8"><a href="#/hypotheses">← 仮説一覧</a></p>
+        <h1 class="detail-title">${esc(h.name)}</h1>
+        <div class="chip-list mb8">${hypStatusBadge(h.status)}${stdBadge(h.standardReflection)}</div>
+      </div>
+      <div class="flex">
+        <button class="small" onclick="openHypothesisForm('${h.id}')">編集</button>
+        <button class="small danger" onclick="deleteHypothesis('${h.id}')">削除</button>
+      </div>
+    </div>
+    <hr class="sep">
+    <div class="grid-2">
+      <dl class="kv">
+        <dt>紐付く項目</dt><dd>${itemChips(h.itemIds)}</dd>
+        <dt>仮説内容</dt><dd>${h.content ? nl2br(h.content) : '<span class="muted">未設定</span>'}</dd>
+        <dt>立てた理由</dt><dd>${h.reason ? nl2br(h.reason) : '<span class="muted">未設定</span>'}</dd>
+        <dt>検証方法</dt><dd>${h.verificationMethod ? nl2br(h.verificationMethod) : '<span class="muted">未設定</span>'}</dd>
+      </dl>
+      <dl class="kv">
+        <dt>結果</dt><dd>${h.result ? nl2br(h.result) : '<span class="muted">未設定</span>'}</dd>
+        <dt>結論</dt><dd>${h.conclusion ? nl2br(h.conclusion) : '<span class="muted">未設定</span>'}</dd>
+        <dt>作成日</dt><dd>${fmtDateOnly(h.createdAt)}</dd>
+        <dt>最終更新日</dt><dd>${fmtDate(h.updatedAt)}</dd>
+      </dl>
+    </div>
+    <hr class="sep">
+    <p><strong>関連資料</strong></p>${materialChips(h.materialIds)}
+    <p class="mt12"><strong>関連タスク</strong></p>${taskChips(h.taskIds)}
+    <p class="mt12"><strong>この仮説から得られた知識</strong></p>${relatedKnowledge.length ? relatedKnowledge.map(k => `<div class="chip"><a href="#/knowledge/${k.id}">${esc(k.title)}</a></div>`).join('') : '<span class="muted small">なし</span>'}
+    <hr class="sep">
+    <p><strong>メモ</strong></p><p>${h.memo ? nl2br(h.memo) : '<span class="muted">なし</span>'}</p>
+  </div>
+  <div class="panel">
+    <h2>更新履歴</h2>
+    ${hist.length ? hist.map(x => `<div class="history-item"><span class="history-time">${fmtDate(x.timestamp)}</span><span>${esc(x.message)}</span></div>`).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+  </div>`;
+}
+
+/* =========================================================
+   知識一覧・詳細
+========================================================= */
+let knowFilters = { itemId: '', standardReflection: '' };
+function setKnowFilter(key, val) { knowFilters[key] = val; route(); }
+
+function renderKnowledgeList() {
+  let knows = DB.knowledge.slice();
+  if (knowFilters.itemId) knows = knows.filter(k => k.itemIds.includes(knowFilters.itemId));
+  if (knowFilters.standardReflection) knows = knows.filter(k => k.standardReflection === knowFilters.standardReflection);
+  knows.sort((a, b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
+
+  const rows = knows.map(k => `
+    <tr class="clickable" onclick="location.hash='#/knowledge/${k.id}'">
+      <td>${esc(k.title)}</td><td>${itemChips(k.itemIds)}</td><td>${stdBadge(k.standardReflection)}</td><td class="small muted">${fmtDateOnly(k.updatedAt)}</td>
+    </tr>`).join('');
+
+  return `
+  <div class="panel">
+    <div class="flex-between mb8">
+      <h2 style="border:none;margin:0;padding:0;">知識管理</h2>
+      <button class="primary small" onclick="openKnowledgeForm(null,null)">＋ 知識を追加</button>
+    </div>
+    <div class="filters">
+      <select onchange="setKnowFilter('itemId', this.value)">
+        <option value="">すべての項目</option>
+        ${DB.items.map(i => `<option value="${i.id}" ${knowFilters.itemId===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}
+      </select>
+      <select onchange="setKnowFilter('standardReflection', this.value)">
+        <option value="">すべての反映状況</option>
+        ${STANDARD_REFLECTION.map(s => `<option value="${s}" ${knowFilters.standardReflection===s?'selected':''}>${esc(s)}</option>`).join('')}
+      </select>
+    </div>
+    <table class="list">
+      <thead><tr><th>タイトル</th><th>関連項目</th><th>標準への反映</th><th>最終更新日</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" class="empty-msg">知識がありません</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderKnowledgeDetail(id) {
+  const k = getKnowledge(id);
+  if (!k) return `<div class="panel">知識が見つかりません。<a href="#/knowledge">知識一覧に戻る</a></div>`;
+  const hist = DB.history.filter(x => x.entityId === id);
+  return `
+  <div class="panel">
+    <div class="detail-header">
+      <div>
+        <p class="small muted mb8"><a href="#/knowledge">← 知識一覧</a></p>
+        <h1 class="detail-title">${esc(k.title)}</h1>
+        <div class="chip-list mb8">${stdBadge(k.standardReflection)}</div>
+      </div>
+      <div class="flex">
+        <button class="small" onclick="openKnowledgeForm('${k.id}')">編集</button>
+        <button class="small danger" onclick="deleteKnowledge('${k.id}')">削除</button>
+      </div>
+    </div>
+    <hr class="sep">
+    <dl class="kv">
+      <dt>知識内容</dt><dd>${k.content ? nl2br(k.content) : '<span class="muted">未設定</span>'}</dd>
+      <dt>発見の経緯</dt><dd>${k.background ? nl2br(k.background) : '<span class="muted">未設定</span>'}</dd>
+      <dt>根拠</dt><dd>${k.evidence ? nl2br(k.evidence) : '<span class="muted">未設定</span>'}</dd>
+      <dt>関連項目</dt><dd>${itemChips(k.itemIds)}</dd>
+      <dt>関連仮説</dt><dd>${hypothesisChips(k.hypothesisIds)}</dd>
+      <dt>関連資料</dt><dd>${materialChips(k.materialIds)}</dd>
+      <dt>作成日</dt><dd>${fmtDateOnly(k.createdAt)}</dd>
+      <dt>最終更新日</dt><dd>${fmtDate(k.updatedAt)}</dd>
+    </dl>
+  </div>
+  <div class="panel">
+    <h2>更新履歴</h2>
+    ${hist.length ? hist.map(x => `<div class="history-item"><span class="history-time">${fmtDate(x.timestamp)}</span><span>${esc(x.message)}</span></div>`).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+  </div>`;
+}
+
+/* =========================================================
+   履歴
+========================================================= */
+let historyFilters = { entityType: '' };
+function setHistoryFilter(key, val) { historyFilters[key] = val; route(); }
+function renderHistory() {
+  let hist = DB.history.slice();
+  if (historyFilters.entityType) hist = hist.filter(h => h.entityType === historyFilters.entityType);
+  return `
+  <div class="panel">
+    <div class="flex-between mb8">
+      <h2 style="border:none;margin:0;padding:0;">更新履歴</h2>
+      <select onchange="setHistoryFilter('entityType', this.value)">
+        <option value="">すべて</option>
+        <option value="item" ${historyFilters.entityType==='item'?'selected':''}>項目</option>
+        <option value="task" ${historyFilters.entityType==='task'?'selected':''}>タスク</option>
+        <option value="material" ${historyFilters.entityType==='material'?'selected':''}>資料</option>
+        <option value="hypothesis" ${historyFilters.entityType==='hypothesis'?'selected':''}>仮説</option>
+        <option value="knowledge" ${historyFilters.entityType==='knowledge'?'selected':''}>知識</option>
+        <option value="project" ${historyFilters.entityType==='project'?'selected':''}>プロジェクト</option>
+      </select>
+    </div>
+    ${hist.length ? hist.map(h => `<div class="history-item"><span class="history-time">${fmtDate(h.timestamp)}</span><span>${esc(h.message)}</span></div>`).join('') : `<div class="empty-msg">履歴はまだありません</div>`}
+  </div>`;
+}
+
+/* =========================================================
+   検索
+========================================================= */
+let searchQuery = '';
+function onGlobalSearchSubmit(e) {
+  e.preventDefault();
+  searchQuery = document.getElementById('globalSearchInput').value.trim();
+  location.hash = '#/search';
+  route();
+  return false;
+}
+function runSearchFromView(val) {
+  searchQuery = val;
+  const resultsEl = document.getElementById('searchResults');
+  if (resultsEl) resultsEl.innerHTML = buildSearchResultsHtml(searchQuery);
+}
+function buildSearchResultsHtml(q) {
+  if (!q) return `<div class="empty-msg">検索キーワードを入力してください</div>`;
+  const ql = q.toLowerCase();
+  const has = (...vals) => vals.some(v => (v||'').toLowerCase().includes(ql));
+
+  const items = DB.items.filter(i => has(i.name, i.purpose, i.description, i.memo));
+  const tasks = DB.tasks.filter(t => has(t.name, t.description, t.memo, t.owner));
+  const mats = DB.materials.filter(m => has(m.name, m.description, m.body, m.url));
+  const hyps = DB.hypotheses.filter(h => has(h.name, h.content, h.reason, h.result, h.conclusion, h.memo));
+  const knows = DB.knowledge.filter(k => has(k.title, k.content, k.background, k.evidence));
+
+  const total = items.length + tasks.length + mats.length + hyps.length + knows.length;
+  if (!total) return `<div class="empty-msg">「${esc(q)}」に一致する情報は見つかりませんでした</div>`;
+
+  const group = (title, list, renderRow) => list.length ? `
+    <div class="search-group"><h3>${title}（${list.length}）</h3>${list.map(renderRow).join('')}</div>` : '';
+
+  return [
+    group('項目', items, i => `<div class="search-result"><a href="#/items/${i.id}">${highlight(i.name, q)}</a> ${statusBadge(i.status)}<div class="snippet">${snippet(i.description || i.purpose, q)}</div></div>`),
+    group('タスク', tasks, t => `<div class="search-result"><a href="#/tasks/${t.id}">${highlight(t.name, q)}</a> ${statusBadge(t.status)}<div class="snippet">${snippet(t.description, q)}</div></div>`),
+    group('資料', mats, m => `<div class="search-result"><a href="#/materials/${m.id}">${highlight(m.name, q)}</a> ${typeBadge(m.type)}<div class="snippet">${snippet(m.body || m.description, q)}</div></div>`),
+    group('仮説', hyps, h => `<div class="search-result"><a href="#/hypotheses/${h.id}">${highlight(h.name, q)}</a> ${hypStatusBadge(h.status)}<div class="snippet">${snippet(h.content, q)}</div></div>`),
+    group('知識', knows, k => `<div class="search-result"><a href="#/knowledge/${k.id}">${highlight(k.title, q)}</a><div class="snippet">${snippet(k.content, q)}</div></div>`),
+  ].join('');
+}
+function renderSearchView() {
+  return `
+  <div class="panel">
+    <h2 style="border:none;margin:0 0 12px;padding:0;">横断検索</h2>
+    <input type="text" id="searchViewInput" placeholder="キーワードを入力..." value="${esc(searchQuery)}" oninput="runSearchFromView(this.value)">
+    <div id="searchResults" class="mt16">${buildSearchResultsHtml(searchQuery)}</div>
+  </div>`;
+}
+
+/* =========================================================
+   データ管理（エクスポート・インポート）
+========================================================= */
+function renderDataView() {
+  const size = new Blob([JSON.stringify(DB)]).size;
+  return `
+  <div class="panel">
+    <h2 style="border:none;margin:0 0 12px;padding:0;">データ管理</h2>
+    <p class="muted small">プロジェクトの全データ（項目・タスク・資料・仮説・知識・履歴）はこのブラウザの localStorage に保存されています（現在 約${Math.round(size/1024)}KB）。長期プロジェクトのため、定期的にバックアップ（エクスポート）してください。</p>
+    <hr class="sep">
+    <div class="grid-2">
+      <div>
+        <h3 style="margin-top:0;">エクスポート</h3>
+        <p class="small muted">プロジェクトデータをJSONファイルとして書き出します。</p>
+        <button class="primary" onclick="exportData()">データを書き出す（JSON）</button>
+      </div>
+      <div>
+        <h3 style="margin-top:0;">インポート</h3>
+        <p class="small muted">エクスポートしたJSONファイルを読み込みます。現在のデータは上書きされます。</p>
+        <input type="file" id="importFile" accept="application/json,.json" onchange="importData(this.files[0])">
+      </div>
+    </div>
+  </div>`;
+}
+function exportData() {
+  const blob = new Blob([JSON.stringify(DB, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  a.href = url;
+  a.download = `shiitake-project-backup-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function importData(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!parsed || !Array.isArray(parsed.items)) throw new Error('形式が正しくありません');
+      if (!confirm('現在のデータを、読み込んだファイルの内容で上書きします。よろしいですか？')) return;
+      DB = parsed;
+      DB.tasks = DB.tasks || []; DB.materials = DB.materials || [];
+      DB.hypotheses = DB.hypotheses || []; DB.knowledge = DB.knowledge || []; DB.history = DB.history || [];
+      logHistory('update', 'project', null, DB.project?.name || '', 'バックアップファイルからデータをインポートしました', []);
+      saveDB();
+      alert('データを読み込みました');
+      route();
+    } catch (e) {
+      alert('読み込みに失敗しました: ' + e.message);
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+/* =========================================================
+   ルーティング
+========================================================= */
+function route() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  const parts = hash.split('/').filter(Boolean);
+  const view = parts[0] || 'dashboard';
+  const id = parts[1];
+  const app = document.getElementById('app');
+
+  document.querySelectorAll('#tabsNav a').forEach(a => {
+    a.classList.toggle('active', a.dataset.view === view);
+  });
+
+  switch (view) {
+    case 'dashboard': app.innerHTML = renderDashboard(); break;
+    case 'items': app.innerHTML = id ? renderItemDetail(id) : renderItemsList(); break;
+    case 'tasks': app.innerHTML = id ? renderTaskDetail(id) : renderTasksList(); break;
+    case 'materials': app.innerHTML = id ? renderMaterialDetail(id) : renderMaterialsList(); break;
+    case 'hypotheses': app.innerHTML = id ? renderHypothesisDetail(id) : renderHypothesesList(); break;
+    case 'knowledge': app.innerHTML = id ? renderKnowledgeDetail(id) : renderKnowledgeList(); break;
+    case 'history': app.innerHTML = renderHistory(); break;
+    case 'search': app.innerHTML = renderSearchView(); break;
+    case 'data': app.innerHTML = renderDataView(); break;
+    default: app.innerHTML = renderDashboard();
+  }
+}
+window.addEventListener('hashchange', route);
+window.addEventListener('DOMContentLoaded', () => {
+  DB = loadDB();
+  if (!location.hash) location.hash = '#/dashboard';
+  route();
+});
+</script>
+</body>
+</html>
