@@ -188,7 +188,9 @@
   mark { background: #fdf0b0; padding: 0 1px; border-radius: 2px; }
 
   .dashboard-hero { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
-  .dashboard-hero .purpose { max-width: 640px; color: var(--muted); }
+  .dashboard-hero .purpose { max-width: 640px; color: var(--text); font-weight: 700; }
+  .dashboard-hero .purpose p { margin: 0 0 8px; }
+  .dashboard-hero .purpose p:last-child { margin-bottom: 0; }
   .stat-pills { display: flex; gap: 10px; flex-wrap: wrap; }
   .stat-pill { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 14px; min-width: 110px; }
   .stat-pill .num { font-size: 22px; font-weight: 700; }
@@ -267,6 +269,9 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function nl2br(s) { return esc(s).replace(/\n/g, '<br>'); }
+function renderParagraphs(s) {
+  return String(s || '').split(/\n+/).filter(Boolean).map(line => `<p>${esc(line)}</p>`).join('') || '';
+}
 function highlight(text, q) {
   if (!q) return esc(text);
   const idx = String(text).toLowerCase().indexOf(q.toLowerCase());
@@ -310,7 +315,7 @@ function seedDB() {
   return {
     project: {
       name: '椎茸栽培標準化プロジェクト',
-      purpose: '品質を落とさず、菌床当たり660～800gを安定して達成するための栽培標準を構築する。「正解をマニュアルにする」のではなく、「正解を生み出す能力を組織に埋め込む」。',
+      purpose: '品質を落とさず、菌床当たり660～800gを安定して達成するための栽培標準を構築する。\n「正解をマニュアルにする」のではなく、「正解を生み出す能力を組織に埋め込む」。',
       currentPhase: '知識収集・仮説形成',
       focusTheme: '最初の20日仮説',
       currentIssues: '',
@@ -874,7 +879,7 @@ function renderDashboard() {
           <h2 style="border:none;margin:0;padding:0;font-size:18px;">${esc(p.name)}</h2>
           <button class="small" onclick="openProjectForm()">プロジェクト情報を編集</button>
         </div>
-        <p class="purpose mt8">${nl2br(p.purpose)}</p>
+        <div class="purpose mt8">${renderParagraphs(p.purpose)}</div>
       </div>
       <div class="stat-pills">
         <div class="stat-pill"><div class="num">${esc(p.currentPhase || '-')}</div><div class="lbl">現在のフェーズ</div></div>
