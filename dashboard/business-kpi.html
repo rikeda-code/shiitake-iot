@@ -290,19 +290,35 @@ const LIVE_SHEETS = {
   sales:    { id: '1iPrycBqvU-gD77QNpezLpyYoDHltI4FsWLXZ858TCxk', tab: '26年度計画①（実績入力用）', label: '売上・菌床代' },
 };
 
-async function fetchSheet(sheetId, sheetName, headers = 1) {
+// 大きいシート(特に売上・菌床代シートは999行×50列超)ではgvizの応答に時間がかかることがあるため、
+// タイムアウトは長めに取り、失敗時は1回だけ再試行する(一時的なネットワーク不調・応答遅延を吸収するため)。
+async function fetchSheetOnce(sheetId, sheetName, headers) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
     const text = await res.text();
     const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
     if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
-    return json.table;
+    const table = json.table;
+    // 応答が極端に短い(行がほぼ無い)場合は、途中で応答が切れた/取得失敗のサインとみなし再試行対象にする
+    if (!table || !table.rows || table.rows.length < 2) {
+      throw new Error(`${sheetName}: 応答データが空または不完全です`);
+    }
+    return table;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function fetchSheet(sheetId, sheetName, headers = 1) {
+  try {
+    return await fetchSheetOnce(sheetId, sheetName, headers);
+  } catch (e) {
+    await new Promise(r => setTimeout(r, 1000));
+    return await fetchSheetOnce(sheetId, sheetName, headers);
   }
 }
 
@@ -327,6 +343,11 @@ function parseBedCountTable(table) {
       result[currentSite] = vals;
     }
   });
+  // 3拠点すべてが空の場合は、シート構成が想定と異なる(または取得内容が不完全な)可能性が高いため
+  // 「取得成功だがデータ無し」を「エラー」として明示的に扱う
+  if (Object.values(result).every(arr => arr.every(v => v == null))) {
+    throw new Error('拠点の合計行が見つかりません');
+  }
   return result;
 }
 
