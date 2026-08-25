@@ -191,13 +191,13 @@
   <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
     <div class="site-tabs" id="site-tabs"></div>
     <span id="last-updated"></span>
-    <button id="refresh-btn" onclick="render()">↻ 更新</button>
+    <button id="refresh-btn" onclick="refreshLiveData()">↻ 更新</button>
   </div>
 </header>
 
 <div class="main-tabs" id="main-tabs"></div>
 
-<div class="coverage-banner">
+<div class="coverage-banner" id="coverage-banner">
   <strong>データ最終反映月：</strong>
   収穫量・出荷量・出荷額＝2026年7月／菌床仕入本数＝2026年8月／売上＝2026年6月／菌床代＝2026年7月（各元シートへの入力状況により異なります）。それ以降は未入力のため「—」表示です。
 </div>
@@ -232,13 +232,16 @@ const TOTAL_SITE = { key: 'total', name: '全社合計', color: '#1f2430' };
 const ALL_LOCS = [TOTAL_SITE, ...SITES];
 
 // ── 実績値 ──
-// 収穫量 (kg) — 収穫量シート「中期計画（7月修正)」 いなべ11行目/群馬27行目/南丹43行目, AV列(2025.1)〜
+// 以下の初期値は前回シート反映時点のフォールバック用。ページ読込時にライブ取得(refreshLiveData)が
+// 成功した項目はここを自動的に上書きする。収穫量シートは行番号のみが頼りでラベル照合ができず、
+// 行がずれると無音で誤ったデータになるリスクがあるため、ライブ取得の対象外(手動更新のまま)。
+// 収穫量 (kg) — 収穫量シート「中期計画（7月修正)」 いなべ11行目/群馬27行目/南丹43行目, AV列(2025.1)〜 ※手動更新
 const HARVEST = {
   inabe:  [12565.0,13083.0,10519.0,11161.0,14106.8,6917.1,7974.0,9202.0,15652.0,17981.0,20719.0,29626.0, 19941.0,18079.0,14571.0,13764.0,15453.0,15516.7,14387.0,null],
   gunma:  [11451.0,9556.5,8853.0,8940.2,7751.0,7752.9,5762.0,8153.0,11686.4,13878.0,15607.0,14827.0,    21367.0,13837.0,16281.0,12082.0,13708.0,16308.3,10036.0,null],
   nantan: [10965.0,10606.0,10965.0,7051.0,10085.4,8011.6,7528.1,8443.0,8356.0,13518.0,13246.0,19404.0,   17186.0,10864.0,12266.0,9044.0,9722.0,11379.8,10658.0,null],
 };
-// 出荷量 (kg) ・出荷額 (円) — 出荷量＆出荷額シート「2026/2025 + 拠点名」タブ B列(出荷量,g→kg換算)/E列(出荷額)
+// 出荷量 (kg) ・出荷額 (円) — 出荷量＆出荷額シート「2026/2025 + 拠点名」タブ B列(出荷量,g→kg換算)/E列(出荷額) ※ライブ取得
 const SHIPMENT = {
   inabe:  [11234.93,12128.28,9130.68,8693.36,11275.06,5512.51,5823.75,7596.91,11913.37,15576.84,16585.79,24439.55, 15501.78,16248.34,13623.74,13220.34,13252.29,13650.16,12736.24,null],
   gunma:  [9807.25,7804.84,7009.85,7524.37,7259.08,5408.6,4062.65,6291.54,8275.95,12508.84,15161.75,16730.57,       18476.72,16252.5,14718.2,12460.8,13040.8,12431.77,10316.63,null],
@@ -249,24 +252,276 @@ const SHIPMENT_VALUE = {
   gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,null],
   nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,null],
 };
-// 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.1)〜
+// g単価 (円/kg) — 出荷量＆出荷額シート 同タブ I列「g単価(出荷額ベース)」(円/g)を1000倍して円/kgに変換
+// ライブ取得できるまではnull。calcSite()内でnullの月は出荷額÷出荷量の計算値にフォールバックする。
+const UNIT_PRICE = {
+  inabe:  Array(N).fill(null),
+  gunma:  Array(N).fill(null),
+  nantan: Array(N).fill(null),
+};
+// 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.1)〜 ※ライブ取得
 const BED_COUNT = {
   inabe:  [24453,25301,3248,24441,21605,10701,13063,23460,24362, 31541,46440,50115, 22680,12960,23063,14930,25646,26133,18900,30179],
   gunma:  [22680,17640,2520,10080,12600,10080,14490,14760,18170, 22610,45360,47880, 27720,22680,20160,17640,23930,18900,20160,16380],
   nantan: [15120,22680,2520,10080,15120,11160,15360,16728,20389, 22502,39418,47834, 19922,11871,20993,12156,13850,18056,20160,17613],
 };
-// 売上 (円) — 売上・菌床代シート「26年度計画①（実績入力用）」 いなべ14行目/群馬(安中)15行目/南丹16行目, Q列(2025.1)〜 実績のみ
+// 売上 (円) — 売上・菌床代シート「26年度計画①（実績入力用）」 いなべ14行目/群馬(安中)15行目/南丹16行目, Q列(2025.1)〜 実績のみ ※ライブ取得
 const REVENUE = {
   inabe:  [10510096,10191882,8742871,7231155,8720873,5162377,5774116,7396001,11146965,15047070,16075945,23960359, 15698105,15986374,13039789,12832284,12526989,12146811,null,null],
   gunma:  [6896257,6374300,6177660,5606524,5307398,4245882,3625088,5760112,7695618,11534373,13863046,15940866,     16288202,15778578,12586789,11408840,12356300,10713760,null,null],
   nantan: [8194037,8095650,8377298,5594517,6365436,5246525,4316604,6730172,6880656,10956651,11745408,18952887,     12247781,11413810,9850296,7465095,8592262,9151246,null,null],
 };
-// 菌床代 (円) — 同シート いなべ26行目/群馬(安中)27行目/南丹28行目, Q列(2025.1)〜 実績のみ
+// 菌床代 (円) — 同シート いなべ26行目/群馬(安中)27行目/南丹28行目, Q列(2025.1)〜 実績のみ ※ライブ取得
 const SUBSTRATE_COST = {
   inabe:  [5500765,5664620,725410,4784825,4672165,2923785,2899060,5082135,6458858,7196051,10894824,11663781, 5335008,3040416,5353681,3308734,5887526,5791467,4433940,null],
   gunma:  [5128410,3982230,568890,2275560,2844450,2275560,3271117,3342570,5122461,5304306,10641456,11232648,   6503112,5342148,4737696,4138344,5613978,4433940,4729536,null],
   nantan: [3428040,5120010,568890,2853910,3386250,2519370,3467520,3742980,4672251,5072346,9116966,11074582,     4628974,2749833,4859239,2771516,3249210,4030216,4729536,null],
 };
+
+// ────────────────────────────────────────────────────────────────
+// ライブ取得（Google Sheets gviz）— 上記フォールバック値を元シートの最新値で上書きする
+// 収穫量シートは行番号のみが頼りでラベル照合ができないため対象外(HARVESTは手動更新のまま)。
+// ────────────────────────────────────────────────────────────────
+const LIVE_SHEETS = {
+  bedCount: { id: '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY', tab: '菌床数集計',              label: '菌床仕入本数' },
+  shipment: { id: '1RyGT1x_qwJnjiKe5PMMn9Eb58wIxWB15XhjowmEcfQM',                                  label: '出荷量・出荷額' },
+  sales:    { id: '1iPrycBqvU-gD77QNpezLpyYoDHltI4FsWLXZ858TCxk', tab: '26年度計画①（実績入力用）', label: '売上・菌床代' },
+};
+
+async function fetchSheet(sheetId, sheetName, headers = 1) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=${headers}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${sheetName}`);
+    const text = await res.text();
+    const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+    if (json.status === 'error') throw new Error(json.errors?.[0]?.detailed_message || 'シートエラー');
+    return json.table;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 菌床数集計タブ: 拠点名(B列)は各ブロック先頭行のみ入っているため直前の値を引き継ぎ、
+// 「合計」行(C列)を見つけたらD列以降N列分(2025.1〜)を月次配列として取り出す。
+// 列は見出しの表記ゆれ(2025.10が"2025.1"と表示される既知の不具合)を避けるためD列起点の位置で判定する。
+function parseBedCountTable(table) {
+  const NAME_MAP = { 'いなべ': 'inabe', '群馬': 'gunma', '南丹': 'nantan' };
+  const result = { inabe: Array(N).fill(null), gunma: Array(N).fill(null), nantan: Array(N).fill(null) };
+  let currentSite = null;
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const siteName = cells[1]?.v != null ? String(cells[1].v).trim() : '';
+    if (siteName) currentSite = NAME_MAP[siteName] || null;
+    const rowType = cells[2]?.v != null ? String(cells[2].v).trim() : '';
+    if (rowType === '合計' && currentSite) {
+      const vals = [];
+      for (let i = 0; i < N; i++) {
+        const v = cells[3 + i]?.v;
+        vals.push(v != null && v !== '' && !isNaN(v) ? Number(v) : null);
+      }
+      result[currentSite] = vals;
+    }
+  });
+  return result;
+}
+
+// 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額)で
+// 特定し、行は「n月」ラベルで特定する(行・列位置に依存しないため多少の行列挿入があっても壊れにくい)。
+async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
+  const tabName = `${year}${siteNameJP}`;
+  const table = await fetchSheet(sheetId, tabName, 1);
+  const rows = table.rows || [];
+  let colB = null, colE = null, colI = null;
+  rows.forEach(row => {
+    (row.c || []).forEach((c, i) => {
+      const label = c && c.v != null ? String(c.v).trim() : '';
+      // 出荷量の見出しはタブによって表記が異なる(いなべ:「出荷量(固定)」／群馬・南丹:「出荷量」)
+      if (label === '出荷量(固定)' || label === '出荷量') colB = i;
+      if (label === '出荷額') colE = i;
+      if (label === 'g単価(出荷額ベース)') colI = i;
+    });
+  });
+  if (colB == null || colE == null) throw new Error(`${tabName}: 列見出しが見つかりません`);
+
+  const shipment = Array(12).fill(null);
+  const shipmentValue = Array(12).fill(null);
+  const unitPrice = Array(12).fill(null);
+  rows.forEach(row => {
+    const cells = row.c || [];
+    const monthLabel = cells[0]?.v != null ? String(cells[0].v) : (cells[0]?.f || '');
+    const m = String(monthLabel).match(/^(\d{1,2})月$/);
+    if (!m) return;
+    const month = parseInt(m[1], 10);
+    if (month < 1 || month > 12) return;
+    const bVal = cells[colB]?.v;
+    const eVal = cells[colE]?.v;
+    shipment[month - 1] = (bVal != null && bVal !== 0) ? +(bVal / 1000).toFixed(2) : null;
+    shipmentValue[month - 1] = (eVal != null && eVal !== 0) ? Math.round(eVal) : null;
+    // I列「g単価(出荷額ベース)」は円/g のため、ダッシュボード表示単位の円/kgに変換(×1000)
+    if (colI != null) {
+      const iVal = cells[colI]?.v;
+      unitPrice[month - 1] = (iVal != null && iVal !== 0) ? Math.round(iVal * 1000) : null;
+    }
+  });
+  return { shipment, shipmentValue, unitPrice };
+}
+
+// 拠点ごとに独立して取得し、1拠点が失敗しても他拠点の成功分は反映する(全滅を避ける)
+async function fetchShipmentAll(sheetId) {
+  const SITE_JP = { inabe: 'いなべ', gunma: '群馬', nantan: '南丹' };
+  const shipment = {}, shipmentValue = {}, unitPrice = {};
+  const failures = [];
+  for (const key of Object.keys(SITE_JP)) {
+    try {
+      const [y25, y26] = await Promise.all([
+        fetchShipmentSiteYear(sheetId, 2025, SITE_JP[key]),
+        fetchShipmentSiteYear(sheetId, 2026, SITE_JP[key]),
+      ]);
+      shipment[key] = [...y25.shipment, ...y26.shipment].slice(0, N);
+      shipmentValue[key] = [...y25.shipmentValue, ...y26.shipmentValue].slice(0, N);
+      unitPrice[key] = [...y25.unitPrice, ...y26.unitPrice].slice(0, N);
+    } catch (e) {
+      failures.push(`${SITE_JP[key]}: ${e.message}`);
+    }
+  }
+  return { shipment, shipmentValue, unitPrice, failures };
+}
+
+// 売上・菌床代シート: 列構成が期間によって変化する(実績のみ1列 → 計画/実績/予実差異/前月差異の4列 →
+// 計画/実績の2列)ため、月ラベル行("R7.1"等)と実績/計画マーカー行を毎回スキャンして「実績」列だけを
+// 特定する。対象行も固定行番号ではなく科目名(売上高（いなべ）等)で照合するため行挿入に強い。
+function parseSalesTable(table) {
+  const REVENUE_LABELS = { '売上高（いなべ）': 'inabe', '売上高（安中）': 'gunma', '売上高（南丹）': 'nantan' };
+  const COST_LABELS = { '売上原価（いなべ）菌床代': 'inabe', '売上原価（安中）菌床代': 'gunma', '売上原価（南丹）菌床代': 'nantan' };
+  const revenue = { inabe: Array(N).fill(null), gunma: Array(N).fill(null), nantan: Array(N).fill(null) };
+  const substrateCost = { inabe: Array(N).fill(null), gunma: Array(N).fill(null), nantan: Array(N).fill(null) };
+
+  const rows = table.rows || [];
+  let monthRowIdx = -1, markerRowIdx = -1;
+  rows.forEach((row, i) => {
+    const joined = (row.c || []).map(c => (c && c.v != null ? String(c.v) : '')).join('|');
+    if (monthRowIdx === -1 && (joined.match(/R\d+\.\d+/g) || []).length >= 10) monthRowIdx = i;
+    if (markerRowIdx === -1 && (joined.match(/実績/g) || []).length >= 5 && (joined.match(/計画/g) || []).length >= 5) markerRowIdx = i;
+  });
+  if (monthRowIdx === -1 || markerRowIdx === -1) throw new Error('月ラベル行/実績列が見つかりません');
+
+  const monthCells = rows[monthRowIdx].c || [];
+  const markerCells = rows[markerRowIdx].c || [];
+  const colToIdx = {};
+  const maxCols = Math.max(monthCells.length, markerCells.length);
+  for (let c = 0; c < maxCols; c++) {
+    const marker = markerCells[c]?.v != null ? String(markerCells[c].v).trim() : '';
+    if (marker !== '実績') continue;
+    const label = monthCells[c]?.v != null ? String(monthCells[c].v).trim() : '';
+    const m = label.match(/^R(\d+)\.(\d+)$/);
+    if (!m) continue;
+    const year = 2018 + parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    const idx = (year - 2025) * 12 + (month - 1);
+    if (idx >= 0 && idx < N) colToIdx[c] = idx;
+  }
+
+  rows.forEach(row => {
+    const cells = row.c || [];
+    const label = cells[0]?.v != null ? String(cells[0].v).trim() : '';
+    const key = REVENUE_LABELS[label] || COST_LABELS[label];
+    if (!key) return;
+    const target = REVENUE_LABELS[label] ? revenue : substrateCost;
+    Object.entries(colToIdx).forEach(([c, idx]) => {
+      const v = cells[c]?.v;
+      target[key][idx] = (v != null && v !== 0) ? Math.round(v) : null;
+    });
+  });
+
+  return { revenue, substrateCost };
+}
+
+let liveStatus = { bedCount: 'pending', shipment: 'pending', sales: 'pending' };
+let liveErrorMsgs = {};
+let lastLiveFetchAt = null;
+
+function coverageText(arr) {
+  const { idx } = lastValid(arr);
+  if (idx < 0) return '未入力';
+  const [yy, mm] = MONTH_LABELS[idx].split('/');
+  return `20${yy}年${mm}月`;
+}
+
+function updateLiveBanner() {
+  const banner = document.getElementById('coverage-banner');
+  if (!banner) return;
+  const statusIcon = key => ({ ok: '🟢', error: '🔴', loading: '⏳', pending: '' }[liveStatus[key]] || '');
+  const errLines = Object.entries(liveErrorMsgs).map(([key, msg]) =>
+    `⚠ ${LIVE_SHEETS[key]?.label || key}のライブ取得に失敗したため前回値を表示しています（${msg}）`
+  );
+  banner.innerHTML = `
+    <strong>データ最終反映月：</strong>
+    収穫量＝${coverageText(DATA.total.harvest)}（手動更新）／
+    出荷量・出荷額＝${coverageText(DATA.total.shipment)}${statusIcon('shipment')}／
+    菌床仕入本数＝${coverageText(DATA.total.bedCount)}${statusIcon('bedCount')}／
+    売上＝${coverageText(DATA.total.revenue)}${statusIcon('sales')}／
+    菌床代＝${coverageText(DATA.total.substrateCost)}${statusIcon('sales')}
+    （各元シートへの入力状況により異なります。それ以降は未入力のため「—」表示です）
+    ${lastLiveFetchAt ? `<br><span style="font-size:0.75rem;color:var(--muted)">最終ライブ取得: ${lastLiveFetchAt.toLocaleString('ja-JP')}</span>` : ''}
+    ${errLines.length ? `<br>${errLines.map(l => `<span style="color:var(--bad)">${l}</span>`).join('<br>')}` : ''}
+  `;
+}
+
+async function refreshLiveData() {
+  liveStatus = { bedCount: 'loading', shipment: 'loading', sales: 'loading' };
+  liveErrorMsgs = {};
+  updateLiveBanner();
+
+  const [bedRes, shipRes, salesRes] = await Promise.allSettled([
+    fetchSheet(LIVE_SHEETS.bedCount.id, LIVE_SHEETS.bedCount.tab, 1).then(parseBedCountTable),
+    fetchShipmentAll(LIVE_SHEETS.shipment.id),
+    fetchSheet(LIVE_SHEETS.sales.id, LIVE_SHEETS.sales.tab, 1).then(parseSalesTable),
+  ]);
+
+  if (bedRes.status === 'fulfilled') {
+    Object.assign(BED_COUNT, bedRes.value);
+    liveStatus.bedCount = 'ok';
+  } else {
+    liveStatus.bedCount = 'error';
+    liveErrorMsgs.bedCount = bedRes.reason?.message || String(bedRes.reason);
+    console.error('菌床仕入本数の取得に失敗:', bedRes.reason);
+  }
+
+  if (shipRes.status === 'fulfilled') {
+    Object.assign(SHIPMENT, shipRes.value.shipment);
+    Object.assign(SHIPMENT_VALUE, shipRes.value.shipmentValue);
+    Object.assign(UNIT_PRICE, shipRes.value.unitPrice);
+    if (shipRes.value.failures.length) {
+      liveStatus.shipment = 'error';
+      liveErrorMsgs.shipment = shipRes.value.failures.join(' / ');
+      console.error('出荷量・出荷額の取得に一部失敗:', shipRes.value.failures);
+    } else {
+      liveStatus.shipment = 'ok';
+    }
+  } else {
+    liveStatus.shipment = 'error';
+    liveErrorMsgs.shipment = shipRes.reason?.message || String(shipRes.reason);
+    console.error('出荷量・出荷額の取得に失敗:', shipRes.reason);
+  }
+
+  if (salesRes.status === 'fulfilled') {
+    Object.assign(REVENUE, salesRes.value.revenue);
+    Object.assign(SUBSTRATE_COST, salesRes.value.substrateCost);
+    liveStatus.sales = 'ok';
+  } else {
+    liveStatus.sales = 'error';
+    liveErrorMsgs.sales = salesRes.reason?.message || String(salesRes.reason);
+    console.error('売上・菌床代の取得に失敗:', salesRes.reason);
+  }
+
+  lastLiveFetchAt = new Date();
+  DATA = buildData();
+  updateLiveBanner();
+  render();
+}
 
 function calcSite(siteKey) {
   const harvest       = HARVEST[siteKey];
@@ -276,8 +531,13 @@ function calcSite(siteKey) {
   const revenue       = REVENUE[siteKey];
   const substrateCost = SUBSTRATE_COST[siteKey];
 
+  const unitPriceLive = UNIT_PRICE[siteKey];
   const yieldRate   = shipment.map((v,i) => (v == null || !harvest[i]) ? null : +(v / harvest[i] * 100).toFixed(1));
-  const unitPrice   = shipment.map((v,i) => (v == null || shipmentValue[i] == null) ? null : Math.round(shipmentValue[i] / v));
+  // g単価は出荷量＆出荷額シートI列(g単価・出荷額ベース)のライブ値を優先し、未取得の月のみ出荷額÷出荷量で補完
+  const unitPrice   = shipment.map((v,i) => {
+    if (unitPriceLive && unitPriceLive[i] != null) return unitPriceLive[i];
+    return (v == null || shipmentValue[i] == null) ? null : Math.round(shipmentValue[i] / v);
+  });
   const costRatio   = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : +(substrateCost[i] / v * 100).toFixed(1));
   const grossProfit = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : v - substrateCost[i]);
   // 1菌床あたり収穫量 (g/本) = 収穫量(kg)×1000 ÷ 菌床仕入本数
@@ -292,9 +552,6 @@ function calcSite(siteKey) {
   return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, unitPrice, costRatio, grossProfit, harvestPerBed, shipmentPerBed, salesCostRatio, bedUnitCost };
 }
 
-const DATA = {};
-SITES.forEach(s => { DATA[s.key] = calcSite(s.key); });
-
 // 全社合計（各配列を月ごとに合算。null月はnull）
 function sumArr(...arrs) {
   return Array.from({length: N}, (_, i) => {
@@ -302,22 +559,32 @@ function sumArr(...arrs) {
     return arrs.reduce((s,a) => s + a[i], 0);
   });
 }
-DATA.total = {
-  harvest:  sumArr(DATA.inabe.harvest, DATA.gunma.harvest, DATA.nantan.harvest),
-  shipment: sumArr(DATA.inabe.shipment, DATA.gunma.shipment, DATA.nantan.shipment),
-  bedCount: sumArr(DATA.inabe.bedCount, DATA.gunma.bedCount, DATA.nantan.bedCount),
-  shipmentValue: sumArr(DATA.inabe.shipmentValue, DATA.gunma.shipmentValue, DATA.nantan.shipmentValue),
-  revenue:  sumArr(DATA.inabe.revenue, DATA.gunma.revenue, DATA.nantan.revenue),
-  substrateCost: sumArr(DATA.inabe.substrateCost, DATA.gunma.substrateCost, DATA.nantan.substrateCost),
-  grossProfit: sumArr(DATA.inabe.grossProfit, DATA.gunma.grossProfit, DATA.nantan.grossProfit),
-};
-DATA.total.yieldRate = DATA.total.shipment.map((v,i) => (v == null || !DATA.total.harvest[i]) ? null : +(v / DATA.total.harvest[i] * 100).toFixed(1));
-DATA.total.unitPrice = DATA.total.shipment.map((v,i) => (v == null || DATA.total.shipmentValue[i] == null) ? null : Math.round(DATA.total.shipmentValue[i] / v));
-DATA.total.costRatio = DATA.total.revenue.map((v,i) => (v == null || DATA.total.substrateCost[i] == null) ? null : +(DATA.total.substrateCost[i] / v * 100).toFixed(1));
-DATA.total.harvestPerBed = DATA.total.harvest.map((v,i) => (v == null || !DATA.total.bedCount[i]) ? null : Math.round(v * 1000 / DATA.total.bedCount[i]));
-DATA.total.shipmentPerBed = DATA.total.shipment.map((v,i) => (v == null || !DATA.total.bedCount[i]) ? null : Math.round(v * 1000 / DATA.total.bedCount[i]));
-DATA.total.salesCostRatio = DATA.total.revenue.map((v,i) => (v == null || !DATA.total.substrateCost[i]) ? null : +(v / DATA.total.substrateCost[i]).toFixed(2));
-DATA.total.bedUnitCost = DATA.total.substrateCost.map((v,i) => (v == null || !DATA.total.bedCount[i]) ? null : Math.round(v / DATA.total.bedCount[i]));
+
+// ライブ取得したシートデータで上書きした後、DATAを再計算するために関数化
+function buildData() {
+  const data = {};
+  SITES.forEach(s => { data[s.key] = calcSite(s.key); });
+
+  data.total = {
+    harvest:  sumArr(data.inabe.harvest, data.gunma.harvest, data.nantan.harvest),
+    shipment: sumArr(data.inabe.shipment, data.gunma.shipment, data.nantan.shipment),
+    bedCount: sumArr(data.inabe.bedCount, data.gunma.bedCount, data.nantan.bedCount),
+    shipmentValue: sumArr(data.inabe.shipmentValue, data.gunma.shipmentValue, data.nantan.shipmentValue),
+    revenue:  sumArr(data.inabe.revenue, data.gunma.revenue, data.nantan.revenue),
+    substrateCost: sumArr(data.inabe.substrateCost, data.gunma.substrateCost, data.nantan.substrateCost),
+    grossProfit: sumArr(data.inabe.grossProfit, data.gunma.grossProfit, data.nantan.grossProfit),
+  };
+  data.total.yieldRate = data.total.shipment.map((v,i) => (v == null || !data.total.harvest[i]) ? null : +(v / data.total.harvest[i] * 100).toFixed(1));
+  data.total.unitPrice = data.total.shipment.map((v,i) => (v == null || data.total.shipmentValue[i] == null) ? null : Math.round(data.total.shipmentValue[i] / v));
+  data.total.costRatio = data.total.revenue.map((v,i) => (v == null || data.total.substrateCost[i] == null) ? null : +(data.total.substrateCost[i] / v * 100).toFixed(1));
+  data.total.harvestPerBed = data.total.harvest.map((v,i) => (v == null || !data.total.bedCount[i]) ? null : Math.round(v * 1000 / data.total.bedCount[i]));
+  data.total.shipmentPerBed = data.total.shipment.map((v,i) => (v == null || !data.total.bedCount[i]) ? null : Math.round(v * 1000 / data.total.bedCount[i]));
+  data.total.salesCostRatio = data.total.revenue.map((v,i) => (v == null || !data.total.substrateCost[i]) ? null : +(v / data.total.substrateCost[i]).toFixed(2));
+  data.total.bedUnitCost = data.total.substrateCost.map((v,i) => (v == null || !data.total.bedCount[i]) ? null : Math.round(v / data.total.bedCount[i]));
+  return data;
+}
+
+let DATA = buildData();
 
 // ────────────────────────────────────────────────────────────────
 // 表示色（指標ごとに固定。全パネル・全カードで共通使用）
@@ -875,6 +1142,8 @@ function render() {
 }
 
 render();
+updateLiveBanner();
+refreshLiveData();
 </script>
 </body>
 </html>
