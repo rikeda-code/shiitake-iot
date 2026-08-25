@@ -10092,19 +10092,21 @@ function renderDecPlanContent(planData, mergeData) {
       && (e.startYm == null || e.startYm <= DECPLAN_TARGET_YM))).length || null;
   }
 
-  // ②標準工数合計：STD_HOURS_TARGET_MONTH（動的算出した実データ最終月）時点の在籍者を
-  // 対象に算出する。3拠点マージシート自身のB列（活動フラグ＝現在のステータス）で
-  // 絞り込むと、過去のSTD_HOURS_TARGET_MONTH時点の在籍者を正しく表せない（PR #332で
-  // 修正した問題と同種）ため、整理済み_M側でSTD_HOURS_TARGET_MONTHに実績がある人を
-  // 対象者として特定し、その人に対応する3拠点マージ側の行（拠点・業務区分・氏名・
-  // 雇用区分の一致、findStdHoursMergeRowForEmployee()経由）からR列を取得して合計する
-  // computeStdHoursLineForDivSite()（4-1で修正済み）をそのまま再利用する。雇用区分
-  // トグル（applyEmpTypeFilter）はcomputeStdHoursLineForDivSite()が内部で使う
-  // getActiveData()が既に適用済みのため、ここで重ねて適用する必要はない
+  // ②標準工数合計：整理済み_MでB=1（在籍）の従業員を対象に算出する（変更B・段階4の
+  // 追加修正）。mergeN()（人数表①）と全く同じ対象者特定ロジックを使う。以前は
+  // computeStdHoursLineForDivSite()（対象月に実績がある＝e.hours[mi] !== nullを条件とする、
+  // 過去月実績専用のロジック）を再利用していたが、これは「B=1なら実績の有無に関わらず
+  // 標準労働時間を計上する」という②の正しい仕様と異なり、①（人数、mergeN()）とも
+  // 判定基準が食い違っていた。各対象者に対応する標準労働時間シート側の行は
+  // findStdHoursMergeRowForEmployee()で検索し、そのR列（stdHours）を合計する
+  // （対応行が見つからない場合は0）
   function stdHoursFromMerge(site) {
-    const total = divs.reduce((s, div) => {
-      const v = computeStdHoursLineForDivSite(div, site, [STD_HOURS_TARGET_MONTH])[0];
-      return s + (v !== null ? v : 0);
+    if (!mergeData) return null;
+    const emps = applyEmpTypeFilter(allData.employees.filter(e => e.base === site && e.flag === 1
+      && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType))));
+    const total = emps.reduce((s, e) => {
+      const row = findStdHoursMergeRowForEmployee(mergeData.rows, e);
+      return s + (row ? row.stdHours : 0);
     }, 0);
     return total > 0 ? Math.round(total * 10) / 10 : null;
   }
