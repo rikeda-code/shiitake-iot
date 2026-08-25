@@ -346,7 +346,7 @@ function parseBedCountTable(table) {
   // 3拠点すべてが空の場合は、シート構成が想定と異なる(または取得内容が不完全な)可能性が高いため
   // 「取得成功だがデータ無し」を「エラー」として明示的に扱う
   if (Object.values(result).every(arr => arr.every(v => v == null))) {
-    throw new Error('拠点の合計行が見つかりません');
+    throw new Error(`拠点の合計行が見つかりません(取得行数=${(table.rows || []).length})`);
   }
   return result;
 }
@@ -369,7 +369,9 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
       if (label === 'g単価(売上ベース)') colUnitPrice = i;
     });
   });
-  if (colB == null || colE == null) throw new Error(`${tabName}: 列見出しが見つかりません`);
+  if (colB == null || colE == null) {
+    throw new Error(`${tabName}: 列見出しが見つかりません(取得行数=${rows.length})`);
+  }
   // ラベルが見つからない場合はJ列(0始まりで9列目)を仮定してフォールバックする
   if (colUnitPrice == null) colUnitPrice = 9;
 
@@ -427,17 +429,18 @@ async function fetchTotalUnitPriceYear(sheetId, year) {
   return unitPrice;
 }
 
-// 拠点ごとに独立して取得し、1拠点が失敗しても他拠点の成功分は反映する(全滅を避ける)
+// 拠点ごとに独立して取得し、1拠点が失敗しても他拠点の成功分は反映する(全滅を避ける)。
+// 同一スプレッドシートへの同時リクエストはgviz側で不安定になることがある(観測: 2つの年を
+// 並列取得すると、どちらか一方だけがランダムに「列見出しが見つからない」応答になる)ため、
+// 同一スプレッドシートIDに対する取得は年単位も含めて完全に直列化する。
 async function fetchShipmentAll(sheetId) {
   const SITE_JP = { inabe: 'いなべ', gunma: '群馬', nantan: '南丹' };
   const shipment = {}, shipmentValue = {}, unitPrice = {};
   const failures = [];
   for (const key of Object.keys(SITE_JP)) {
     try {
-      const [y25, y26] = await Promise.all([
-        fetchShipmentSiteYear(sheetId, 2025, SITE_JP[key]),
-        fetchShipmentSiteYear(sheetId, 2026, SITE_JP[key]),
-      ]);
+      const y25 = await fetchShipmentSiteYear(sheetId, 2025, SITE_JP[key]);
+      const y26 = await fetchShipmentSiteYear(sheetId, 2026, SITE_JP[key]);
       shipment[key] = [...y25.shipment, ...y26.shipment].slice(0, N);
       shipmentValue[key] = [...y25.shipmentValue, ...y26.shipmentValue].slice(0, N);
       unitPrice[key] = [...y25.unitPrice, ...y26.unitPrice].slice(0, N);
@@ -447,11 +450,10 @@ async function fetchShipmentAll(sheetId) {
   }
 
   // 全社合計のg単価は拠点の加重平均ではなく、全拠点タブの「g単価(売上ベース)」を直接採用する
+  // (同一スプレッドシートへの直列化方針に合わせ、こちらも年単位で順に取得する)
   try {
-    const [t25, t26] = await Promise.all([
-      fetchTotalUnitPriceYear(sheetId, 2025),
-      fetchTotalUnitPriceYear(sheetId, 2026),
-    ]);
+    const t25 = await fetchTotalUnitPriceYear(sheetId, 2025);
+    const t26 = await fetchTotalUnitPriceYear(sheetId, 2026);
     unitPrice.total = [...t25, ...t26].slice(0, N);
   } catch (e) {
     failures.push(`全拠点: ${e.message}`);
@@ -476,7 +478,9 @@ function parseSalesTable(table) {
     if (monthRowIdx === -1 && (joined.match(/R\d+\.\d+/g) || []).length >= 10) monthRowIdx = i;
     if (markerRowIdx === -1 && (joined.match(/実績/g) || []).length >= 5 && (joined.match(/計画/g) || []).length >= 5) markerRowIdx = i;
   });
-  if (monthRowIdx === -1 || markerRowIdx === -1) throw new Error('月ラベル行/実績列が見つかりません');
+  if (monthRowIdx === -1 || markerRowIdx === -1) {
+    throw new Error(`月ラベル行/実績列が見つかりません(取得行数=${rows.length})`);
+  }
 
   const monthCells = rows[monthRowIdx].c || [];
   const markerCells = rows[markerRowIdx].c || [];
