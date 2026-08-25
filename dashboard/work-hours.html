@@ -8268,9 +8268,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       tension: 0.3, yAxisID: 'y2', order: 0,
       _volumeLine: true, _unit: DIV_UNIT['出荷'],
     });
-    // 【調査用の一時カウンタ】staffGapSegmentValuesのafterDatasetsDrawが何回目の
-    // 呼び出しかを記録する。原因特定後に除去する
-    let staffGapDrawCallSeq = 0;
     planCmpChartInstances['staffplan-combined'] = new Chart(ctx, {
       data: { labels: vm, datasets },
       options: {
@@ -8318,9 +8315,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           // しまうケース（軸スケールの丸め等の要因で発生しうる）で文字が完全に不可視に
           // なるのを防ぐため、下の補正で使う
           const areaTop = chart.chartArea.top;
-          // 【調査用の一時ログ】afterDatasetsDrawが何回目に呼ばれたか（原因特定後に除去する）
-          staffGapDrawCallSeq++;
-          const callSeq = staffGapDrawCallSeq;
           chart.data.datasets.forEach((ds, dsIndex) => {
             if (!ds._staffGapBar) return;
             const meta = chart.getDatasetMeta(dsIndex);
@@ -8331,7 +8325,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
               // bar.x/y/heightが不正な値（NaN・非数）の場合は描画をスキップする
               // （原因調査用にコンソール警告を残す）
               if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y) || !Number.isFinite(bar.height)) {
-                console.warn('[staffGapSegmentValues] 不正な座標のため描画をスキップしました:', { callSeq, mi, val, bar });
+                console.warn('[staffGapSegmentValues] 不正な座標のため描画をスキップしました:', { mi, val, bar });
                 return;
               }
               const count = ds._staffGapCount ? ds._staffGapCount[mi] : null;
@@ -8356,39 +8350,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
                 firstLineY += shift;
                 lastLineY += shift;
               }
-              // 【調査用の一時ログ】ctx.fillTextを呼ぶ直前の全パラメータを出力する
-              // （原因特定後に除去する）
-              console.debug('[staffGapSegmentValues] fillText直前', {
-                callSeq, mi, val, count,
-                barX: bar.x, barY: bar.y, barHeight: bar.height, barBase: bar.base,
-                fitsInside, firstLineY, lastLineY,
-                canvasWidth: ctx.canvas.width, canvasHeight: ctx.canvas.height,
-              });
-              // 【調査用の一時マーカー】実際にfillTextを呼ぶ座標に、既存のどの色とも
-              // 被らない蛍光マゼンタの小さな円を描く。テキストが見えない原因が
-              // 「その座標に何も残っていない（描画自体が無効）」のか「その座標には
-              // 何か描かれているがテキストの色・フォントの問題で見えない」のか
-              // 「別の要素に後から隠されている」のかを視覚的に切り分けるため
-              // （原因特定後に除去する）
-              ctx.save();
-              ctx.fillStyle = '#ff00ff';
-              lines.forEach((text, li) => {
-                ctx.beginPath();
-                ctx.arc(bar.x, firstLineY + li * LINE_H, 3, 0, Math.PI * 2);
-                ctx.fill();
-              });
-              ctx.restore();
               ctx.save();
               ctx.font = '10px sans-serif';
-              // バー自体がほぼ白（#ffffff）のため、stdHoursSegmentCountsと同じ白文字
-              // では読めない。濃色（グラフの暗背景と同系）にして視認性を確保する
-              ctx.fillStyle = '#1e2235';
+              // fitsInside（セグメント内に収まる）の場合は背景が白いバーのため、
+              // stdHoursSegmentCountsと同じ白文字では読めず、濃色（グラフの暗背景と
+              // 同系）にする必要がある。一方fitsInside=false（セグメント上端の外側、
+              // ダッシュボードの暗い背景の上）にはみ出す場合は、濃色のままだと暗い
+              // 背景に同化して見えなくなるため、明るい色にする
+              ctx.fillStyle = fitsInside ? '#1e2235' : '#e2e8f0';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               lines.forEach((text, li) => ctx.fillText(text, bar.x, firstLineY + li * LINE_H));
               ctx.restore();
-              // 【調査用の一時ログ】描画完了（原因特定後に除去する）
-              console.debug('[staffGapSegmentValues] 描画完了', { callSeq, mi });
             });
           });
         },
