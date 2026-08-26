@@ -4605,7 +4605,7 @@ function parseThreeSiteMergeSheet(json) {
     const stdHours = stdHoursRaw ?? 0; // R列が空の行も0として成立させる
     // stdHoursOriginallyEmpty：R列が元々空だったかどうかのフラグ。比較（繁忙期見込み）
     // タブのB=2新規要員機能（threeSiteMergeAgg）と、26/12計画タブのstdHoursFromMerge/
-    // overtimeH/overtimeNの両方から参照されている。変更する際は両方への影響を確認すること
+    // overtimeH()の両方から参照されている。変更する際は両方への影響を確認すること
     const stdHoursOriginallyEmpty = stdHoursRaw === null;
     if (stdHoursOriginallyEmpty) emptyStdHoursRows.push({ site, div, name, activeFlag });
     const prj = cellText(row, THREE_SITE_MERGE_PRJ_COL);
@@ -10043,7 +10043,7 @@ function renderDecPlanContent(planData, mergeData) {
   const junIdx = planMonths.indexOf(JUN);
   const decIdx = planMonths.indexOf(DEC);
   // 3拠点マージのmaxByYm（年月ラベルを動的に検索して構築された月別列）用のキー。
-  // DECの数値表現（YYYYMM）を1箇所だけで算出し、overtimeH/overtimeNから参照する
+  // DECの数値表現（YYYYMM）を1箇所だけで算出し、overtimeH()から参照する
   const [decY, decM] = DEC.split('/').map(Number);
   const DECPLAN_TARGET_YM = decY * 100 + decM;
 
