@@ -141,7 +141,7 @@
     #transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
-    #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box { margin: 0; }
+    #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box, #plancmp2-changeC-alerts .transfer-alert-box { margin: 0; }
     #plancmp2-sitealerts .transfer-alert-box { margin: 0; }
     .transfer-alert-box {
       margin: 16px 32px 0;
@@ -8709,8 +8709,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           </div>
         </div>
       </div>
+      <div id="plancmp2-changeC-alerts"></div>
       <div id="compare2-content"></div>
     </div>`;
+
+  // 変更C・段階D：5サブタブ共通のデータ整合性アラート。getActiveData()由来の
+  // employees（振替後の仮想従業員を含む）ではなく、整理済み_Mの実データそのもの
+  // であるallData.employeesを使う
+  const changeCAttributeAlerts = collectCrossSheetAttributeAlerts(allData.employees, stdTransferAdjustRecords, stdHoursMergeData ? stdHoursMergeData.rows : []);
+  const changeCStartYmAlerts = collectB2StartYmAlerts(allData.employees);
+  renderChangeCAlertsBox('plancmp2-changeC-alerts', changeCAttributeAlerts, changeCStartYmAlerts);
 
   function syncDropdownLabel() {
     const lbl = document.getElementById('plancmp2-dd-label');
