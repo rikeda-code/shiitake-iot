@@ -252,8 +252,8 @@ const SHIPMENT_VALUE = {
   gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,null],
   nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,null],
 };
-// g単価 (円/kg) — 出荷量＆出荷額シート「g単価(売上ベース)」列(円/g)を1000倍して円/kgに変換。
-// 拠点タブ(いなべ/群馬/南丹)ではJ列、全拠点タブではI列だが、列名(ラベル)で照合するため位置には依存しない。
+// g単価 (円/kg) — シート側の「g単価(売上ベース)」列は参照せず、取得した売上・出荷量から
+// 売上÷出荷量で自前計算する(円/kg = 売上(円) × 1000 ÷ 出荷量(g))。
 // ライブ取得できるまではnull。calcSite()内でnullの月は出荷額÷出荷量の計算値にフォールバックする。
 const UNIT_PRICE = {
   inabe:  Array(N).fill(null),
@@ -362,29 +362,29 @@ function parseBedCountTable(table) {
   return result;
 }
 
-// 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額)で
+// 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額/売上)で
 // 特定し、行は「n月」ラベルで特定する(行・列位置に依存しないため多少の行列挿入があっても壊れにくい)。
-// g単価は「g単価(売上ベース)」列を採用(拠点タブではJ列相当)。ラベル照合を優先し、
-// ラベルが見つからない場合のみJ列(インデックス9)固定にフォールバックする。
+// g単価はシート側の「g単価(売上ベース)」列を読まず、取得した売上・出荷量から自前計算する
+// (円/kg = 売上(円) × 1000 ÷ 出荷量(g))。売上列のラベルが見つからない場合のみF列(インデックス5)にフォールバックする。
 async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const tabName = `${year}${siteNameJP}`;
   const table = await fetchSheet(sheetId, tabName, 1);
   const rows = table.rows || [];
-  let colB = null, colE = null, colUnitPrice = null;
+  let colB = null, colE = null, colF = null;
   rows.forEach(row => {
     (row.c || []).forEach((c, i) => {
       const label = c && c.v != null ? String(c.v).trim() : '';
       // 出荷量の見出しはタブによって表記が異なる(いなべ:「出荷量(固定)」／群馬・南丹:「出荷量」)
       if (label === '出荷量(固定)' || label === '出荷量') colB = i;
       if (label === '出荷額') colE = i;
-      if (label === 'g単価(売上ベース)') colUnitPrice = i;
+      if (label === '売上') colF = i;
     });
   });
   if (colB == null || colE == null) {
     throw new Error(`${tabName}: 列見出しが見つかりません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
   }
-  // ラベルが見つからない場合はJ列(0始まりで9列目)を仮定してフォールバックする
-  if (colUnitPrice == null) colUnitPrice = 9;
+  // 売上列のラベルが見つからない場合はF列(0始まりで5列目)を仮定してフォールバックする
+  if (colF == null) colF = 5;
 
   const shipment = Array(12).fill(null);
   const shipmentValue = Array(12).fill(null);
@@ -398,33 +398,34 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
     if (month < 1 || month > 12) return;
     const bVal = cells[colB]?.v;
     const eVal = cells[colE]?.v;
+    const fVal = cells[colF]?.v;
     shipment[month - 1] = (bVal != null && bVal !== 0) ? +(bVal / 1000).toFixed(2) : null;
     shipmentValue[month - 1] = (eVal != null && eVal !== 0) ? Math.round(eVal) : null;
-    // 「g単価(売上ベース)」は円/g のため、ダッシュボード表示単位の円/kgに変換(×1000)
-    if (colUnitPrice != null) {
-      const uVal = cells[colUnitPrice]?.v;
-      unitPrice[month - 1] = (uVal != null && uVal !== 0) ? Math.round(uVal * 1000) : null;
-    }
+    // 売上(円) × 1000 ÷ 出荷量(g) = 円/kg
+    unitPrice[month - 1] = (bVal != null && bVal !== 0 && fVal != null && fVal !== 0) ? Math.round(fVal * 1000 / bVal) : null;
   });
   return { shipment, shipmentValue, unitPrice };
 }
 
-// 全拠点タブ(例:2025全拠点)から「g単価(売上ベース)」列のみを取得する(全社合計のg単価用)。
-// 全拠点タブでは同じ列名がI列相当。ラベル照合を優先し、見つからない場合のみ
-// I列(インデックス8)固定にフォールバックする。
+// 全拠点タブ(例:2025全拠点)から全社合計のg単価用に出荷量・売上を取得する。
+// シート側の「g単価(売上ベース)」列は読まず、売上÷出荷量で自前計算する(円/kg = 売上(円)×1000÷出荷量(g))。
+// 列はラベル(出荷量(規格値)/売上実績)照合を優先し、見つからない場合のみ位置(出荷量=インデックス1,
+// 売上=インデックス5)にフォールバックする。
 async function fetchTotalUnitPriceYear(sheetId, year) {
   const tabName = `${year}全拠点`;
   const table = await fetchSheet(sheetId, tabName, 1);
   const rows = table.rows || [];
-  let colUnitPrice = null;
+  let colB = null, colF = null;
   rows.forEach(row => {
     (row.c || []).forEach((c, i) => {
       const label = c && c.v != null ? String(c.v).trim() : '';
-      if (label === 'g単価(売上ベース)') colUnitPrice = i;
+      if (label === '出荷量(規格値)') colB = i;
+      if (label === '売上実績') colF = i;
     });
   });
-  // ラベルが見つからない場合はI列(0始まりで8列目)を仮定してフォールバックする
-  if (colUnitPrice == null) colUnitPrice = 8;
+  // ラベルが見つからない場合は出荷量=B列(インデックス1)、売上=F列(インデックス5)を仮定してフォールバックする
+  if (colB == null) colB = 1;
+  if (colF == null) colF = 5;
 
   const unitPrice = Array(12).fill(null);
   rows.forEach(row => {
@@ -434,8 +435,9 @@ async function fetchTotalUnitPriceYear(sheetId, year) {
     if (!m) return;
     const month = parseInt(m[1], 10);
     if (month < 1 || month > 12) return;
-    const uVal = cells[colUnitPrice]?.v;
-    unitPrice[month - 1] = (uVal != null && uVal !== 0) ? Math.round(uVal * 1000) : null;
+    const bVal = cells[colB]?.v;
+    const fVal = cells[colF]?.v;
+    unitPrice[month - 1] = (bVal != null && bVal !== 0 && fVal != null && fVal !== 0) ? Math.round(fVal * 1000 / bVal) : null;
   });
   return unitPrice;
 }
