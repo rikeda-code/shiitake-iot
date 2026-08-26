@@ -901,7 +901,7 @@ let weeklyDrillPersonGroups = null; // 担当者別ドリルの一覧画面(拠�
 let weeklyDrillZoomGroups = null;   // 担当者別ドリルの最終カード(拠点・担当者選択後)→ { label, containers }
 
 // 週別累計タブの各グラフ用「保存」ボタンの共通処理。containersをそのまま凍結して保存グラフに渡す
-function weeklySaveChart(title, containers) {
+function weeklySaveChart(title, containers, fixedMaxDay = null) {
   const frozenContainers = containers.map(c => ({
     siteName: c.siteName, name: c.name, lot: c.lot, startDate: c.startDate, endDate: c.endDate,
     isEnded: c.isEnded, bedCount: c.bedCount,
@@ -911,12 +911,13 @@ function weeklySaveChart(title, containers) {
     kind: 'weekly', title: `週別累計: ${title}`,
     items: frozenContainers,
     targetData: weeklyState ? weeklyState.targetData : null,
+    fixedMaxDay,
   });
 }
 
 function weeklySaveGroupChart(idx) {
   if (!weeklyZoomGroups || !weeklyZoomGroups[idx]) return;
-  weeklySaveChart(weeklyZoomGroups[idx].label, weeklyZoomGroups[idx].containers);
+  weeklySaveChart(weeklyZoomGroups[idx].label, weeklyZoomGroups[idx].containers, weeklyZoomGroups[idx].fixedMaxDay);
 }
 
 function weeklySaveDrillPersonChart(idx) {
@@ -1131,12 +1132,14 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
 
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
+  // 月別グループ表示は、カードごとに横軸の最大日数が揃わず比較しづらいため60日固定にする
+  const fixedMaxDay = groupMode === 'month' ? 60 : null;
   // ズーム用にグループ情報を保存
-  weeklyZoomGroups = groupKeys.map(k => ({ label: groups[k].label, containers: groups[k].containers }));
+  weeklyZoomGroups = groupKeys.map(k => ({ label: groups[k].label, containers: groups[k].containers, fixedMaxDay }));
   groupKeys.forEach((k, idx) => {
     const canvasId = `wc-${idx}`;
     const canvas = document.getElementById(canvasId);
-    if (canvas) buildWeeklyLineChart(canvasId, groups[k].containers, targetData);
+    if (canvas) buildWeeklyLineChart(canvasId, groups[k].containers, targetData, false, fixedMaxDay);
   });
 }
 
@@ -1177,13 +1180,13 @@ function weeklyZoomRender() {
   weeklyZoomDestroyAll();
   if (weeklyZoomMode === 'weight') { weeklyZoomRenderWeight(); return; }
   if (weeklyZoomMode === 'mekaki') { weeklyZoomRenderMekaki(); return; }
-  const { containers } = weeklyZoomGroups[weeklyZoomCurrentIdx];
+  const { containers, fixedMaxDay } = weeklyZoomGroups[weeklyZoomCurrentIdx];
   const body = document.getElementById('weekly-zoom-body');
 
   if (weeklyZoomMode === 'cumul') {
     body.innerHTML = `<div style="position:relative;height:480px"><canvas id="weekly-zoom-canvas"></canvas></div>`;
     setTimeout(() => {
-      weeklyZoomChart = buildWeeklyLineChart('weekly-zoom-canvas', containers, weeklyState?.targetData || null, true);
+      weeklyZoomChart = buildWeeklyLineChart('weekly-zoom-canvas', containers, weeklyState?.targetData || null, true, fixedMaxDay);
     }, 30);
     return;
   }
@@ -1973,7 +1976,7 @@ function weeklyDrillSort(order) {
   if (s && weeklyState) renderDrillSection(s, weeklyState.containerData.filter(c => c.rows.length > 0 && c.bedCount > 0), weeklyState.targetData);
 }
 
-function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) {
+function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false, fixedMaxDay = null) {
   if (typeof Chart === 'undefined') { console.warn('[buildChart] Chart.js not loaded'); return; }
   const canvas = document.getElementById(canvasId);
   if (!canvas) { console.warn('[buildChart] canvas not found:', canvasId); return; }
@@ -1995,18 +1998,24 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false) 
     return false;
   };
 
-  // X軸: コンテナの実際の最大日数に合わせて伸ばす（最低65日）
-  const maxDayInData = containers.reduce((max, c) => {
-    const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
-    const fromRows = c.rows.reduce((m, r) => {
-      if (isFutureRow(r, endD)) return m;
-      return Math.max(m, Math.round(r.dayNum || 0));
+  // X軸: 指定があればその日数に固定(月別グループ表示ではカード間で揃えるため60日固定)。
+  // 指定が無ければ従来通りコンテナの実際の最大日数に合わせて伸ばす（最低65日）
+  let MAX_DAY;
+  if (fixedMaxDay != null) {
+    MAX_DAY = fixedMaxDay;
+  } else {
+    const maxDayInData = containers.reduce((max, c) => {
+      const endD = c.isEnded && c.endDate ? parseDateStr(c.endDate) : null;
+      const fromRows = c.rows.reduce((m, r) => {
+        if (isFutureRow(r, endD)) return m;
+        return Math.max(m, Math.round(r.dayNum || 0));
+      }, 0);
+      const startD = parseDateStr(c.startDate);
+      const fromStart = startD ? Math.round((today - startD) / 86400000) : 0;
+      return Math.max(max, fromRows, fromStart);
     }, 0);
-    const startD = parseDateStr(c.startDate);
-    const fromStart = startD ? Math.round((today - startD) / 86400000) : 0;
-    return Math.max(max, fromRows, fromStart);
-  }, 0);
-  const MAX_DAY = Math.max(65, maxDayInData);
+    MAX_DAY = Math.max(65, maxDayInData);
+  }
   const xLabels = Array.from({ length: MAX_DAY + 1 }, (_, i) => i);
 
   const datasets = containers.map(c => {
@@ -6288,7 +6297,7 @@ function savedOpenZoom(collectionId, chartIdx) {
 
   if (chart.kind === 'weekly') {
     const revived = weeklyReviveContainers(chart.items);
-    savedZoomChart = buildWeeklyLineChart('saved-zoom-canvas', revived, chart.targetData, true);
+    savedZoomChart = buildWeeklyLineChart('saved-zoom-canvas', revived, chart.targetData, true, chart.fixedMaxDay);
     return;
   }
   const cfg = savedBuildChartConfig(chart);
@@ -6461,7 +6470,7 @@ function renderSavedTab() {
     if (!document.getElementById(canvasId)) return;
     if (chart.kind === 'weekly') {
       const revived = weeklyReviveContainers(chart.items);
-      const built = buildWeeklyLineChart(canvasId, revived, chart.targetData, true);
+      const built = buildWeeklyLineChart(canvasId, revived, chart.targetData, true, chart.fixedMaxDay);
       if (built) savedTabCharts.push(built);
       return;
     }
