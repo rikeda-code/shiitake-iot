@@ -141,7 +141,7 @@
     #transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
-    #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box, #plancmp2-changeC-alerts .transfer-alert-box { margin: 0; }
+    #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box, #plancmp2-changeC-alerts .transfer-alert-box, #decplan-changeC-alerts .transfer-alert-box { margin: 0; }
     #plancmp2-sitealerts .transfer-alert-box { margin: 0; }
     .transfer-alert-box {
       margin: 16px 32px 0;
@@ -10549,6 +10549,7 @@ function renderDecPlanContent(planData, mergeData) {
 
   main.innerHTML = `<div class="prod-panel" style="padding:20px">
     <div class="chart-section-label" style="font-size:1rem;margin-bottom:4px">📅 26/12向け計画</div>
+    <div id="decplan-changeC-alerts"></div>
     ${note}
     <div style="display:flex;gap:24px;margin-bottom:28px;flex-wrap:wrap">
       <div style="flex:1;min-width:300px;height:260px;position:relative">
@@ -10569,6 +10570,13 @@ function renderDecPlanContent(planData, mergeData) {
       ${buildTable('n')}
     </div>
   </div>`;
+
+  // 変更C・段階E：26/12向け計画タブのデータ整合性アラート。getActiveData()由来の
+  // employees（振替後の仮想従業員を含む）ではなく、整理済み_Mの実データそのもの
+  // であるallData.employeesを使う
+  const changeCAttributeAlerts = collectCrossSheetAttributeAlerts(allData.employees, stdTransferAdjustRecords, stdHoursMergeData ? stdHoursMergeData.rows : []);
+  const changeCStartYmAlerts = collectB2StartYmAlerts(allData.employees);
+  renderChangeCAlertsBox('decplan-changeC-alerts', changeCAttributeAlerts, changeCStartYmAlerts);
 
   renderDecPlanCharts();
 }
