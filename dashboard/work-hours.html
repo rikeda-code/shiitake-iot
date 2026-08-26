@@ -1319,7 +1319,12 @@ function buildDataset(json) {
     const employment = String(cells[empIdx]?.v ?? '').trim();
     const workType   = String(cells[workIdx]?.v ?? '').trim();
     const empClass   = classifyEmp(employment);
-    const flag       = cells[flagIdx]?.v;
+    // flag：B列（活動フラグ）。標準労働時間シートのactiveFlag（cellNumber()）と同じ
+    // 正規化方式に統一し、空欄セルがnullとundefinedのどちらにもなり得た不整合を解消する
+    // （collectCrossSheetAttributeAlerts()での誤アラートの原因だった）
+    const flagRaw = cells[flagIdx]?.v;
+    const flag = (flagRaw === null || flagRaw === undefined || flagRaw === '') ? null
+      : (isNaN(Number(flagRaw)) ? null : Number(flagRaw));
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
     // B=2（新規要員・追加待ち）は、まだ稼働実績が無く全月nullになるのが通常のため、
@@ -1406,8 +1411,12 @@ function parseAdjustRecords(json) {
     const ym   = parseGvizDateYm(cells[ADJ_YM_COL]);
     const hours = parseDuration(cells[ADJ_HOURS_COL]) || 0;
     // flag：B列（活動フラグ、数値）。employment：C列（雇用区分）。empNo：G列（社員番号）。
-    // いずれもクロスシート属性不一致アラート（collectCrossSheetAttributeAlerts()）用
-    const flag = cells[ADJ_FLAG_COL]?.v;
+    // いずれもクロスシート属性不一致アラート（collectCrossSheetAttributeAlerts()）用。
+    // flagは標準労働時間シートのactiveFlag（cellNumber()）と同じ正規化方式に統一し、
+    // 空欄セルがnullとundefinedのどちらにもなり得た不整合を解消する
+    const flagRaw = cells[ADJ_FLAG_COL]?.v;
+    const flag = (flagRaw === null || flagRaw === undefined || flagRaw === '') ? null
+      : (isNaN(Number(flagRaw)) ? null : Number(flagRaw));
     const employment = String(cells[ADJ_EMP_COL]?.v ?? '').trim();
     const empNo = String(cells[ADJ_EMPNO_COL]?.v ?? '').trim();
 
