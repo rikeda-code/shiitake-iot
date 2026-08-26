@@ -3491,8 +3491,9 @@ function collectCrossSheetAttributeAlerts(employees, adjustRecords, mergeRows) {
 
   // 属性一致・社員番号一致の判定を行い、不一致があればalertsに追加する共通処理。
   // attrMatch：整理済み_M側の候補行(e)を受け取り、他シート側の行と属性が完全一致するかを
-  // 判定する関数（呼び出し側で比較対象フィールドを渡す）
-  function checkOne({ name, empNo, attrMatch, sheet, rowLabel }) {
+  // 判定する関数（呼び出し側で比較対象フィールドを渡す）。fieldsDescription：detail文言に
+  // 表示する比較対象フィールド名（呼び出し側ごとにattrMatchの比較項目が異なるため）
+  function checkOne({ name, empNo, attrMatch, fieldsDescription, sheet, rowLabel }) {
     const key = normalizeName(name);
     const candidates = byName.get(key);
     if (!candidates || !candidates.length) return; // 整理済み_Mに存在しない → 対象外
@@ -3500,7 +3501,7 @@ function collectCrossSheetAttributeAlerts(employees, adjustRecords, mergeRows) {
     if (!candidates.some(attrMatch)) {
       alerts.push({
         type: '属性不一致', sheet, name,
-        detail: `${name}${rowLabel}：整理済み_M側と属性（フラグ・拠点・雇用区分・PRJ・業務区分）が一致する行が見つかりません`,
+        detail: `${name}${rowLabel}：整理済み_M側と属性（${fieldsDescription}）が一致する行が見つかりません`,
       });
     }
 
@@ -3514,28 +3515,32 @@ function collectCrossSheetAttributeAlerts(employees, adjustRecords, mergeRows) {
     }
   }
 
-  // 整理済み_増減の各レコードをチェック
+  // 整理済み_増減の各レコードをチェック（比較対象はB・C・D＝活動フラグ・雇用区分・拠点の
+  // 3項目のみ。E列PRJ・F列役割は振替先の情報であり、本来の所属情報とは別概念のため
+  // 比較対象から除外する：正常な部署間振替を誤って不一致と判定しないようにするため）
   (adjustRecords || []).forEach(rec => {
     checkOne({
       name: rec.rawName,
       empNo: rec.empNo,
       sheet: '整理済み_増減',
       rowLabel: `（行${rec.rowNum}）`,
-      attrMatch: e => e.flag === rec.flag && e.base === rec.base && e.employment === rec.employment
-        && e.prj === rec.prj && e.workType === rec.role,
+      fieldsDescription: 'フラグ・雇用区分・拠点',
+      attrMatch: e => e.flag === rec.flag && e.employment === rec.employment && e.base === rec.base,
     });
   });
 
-  // 標準労働時間シートの各行をチェック（比較対象フィールドをrow.activeFlag・row.site・
-  // row.employment・row.prj・row.divに変え、業務区分はstdHoursMergeDivForWorkType()経由で比較）
+  // 標準労働時間シートの各行をチェック（比較対象はB・C・D・E・F・I＝活動フラグ・雇用区分・
+  // 拠点・PRJ・業務区分・開始月の6項目。F列は丸め済みのrow.divではなく生の文字列
+  // row.divRawとe.workTypeを直接文字列比較する）
   (mergeRows || []).forEach(row => {
     checkOne({
       name: row.name,
       empNo: row.empNo,
       sheet: '標準労働時間',
       rowLabel: '',
-      attrMatch: e => e.flag === row.activeFlag && e.base === row.site && e.employment === row.employment
-        && e.prj === row.prj && stdHoursMergeDivForWorkType(e.workType) === row.div,
+      fieldsDescription: 'フラグ・雇用区分・拠点・PRJ・業務区分・開始月',
+      attrMatch: e => e.flag === row.activeFlag && e.employment === row.employment && e.base === row.site
+        && e.prj === row.prj && e.workType === row.divRaw && e.startYm === row.startYm,
     });
   });
 
@@ -4721,7 +4726,10 @@ function parseThreeSiteMergeSheet(json) {
     // empNo：G列（社員番号）。クロスシート属性不一致アラート
     // （collectCrossSheetAttributeAlerts()）用
     const empNo = cellText(row, colLetterToIndex('G'));
-    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment, fulltimeHours, parttimeHours, empNo });
+    // divRaw：F列の生の文字列（丸め・正規化前）。属性不一致アラートの業務区分比較は
+    // 丸め済みのdivではなくこちらを使う（divは配送・栽培／配送・出荷を「配送」に
+    // まとめてしまい、整理済み_M側の業務区分と直接文字列比較できないため）
+    parsedRows.push({ site, div, divRaw, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment, fulltimeHours, parttimeHours, empNo });
   });
 
   if (emptyStdHoursRows.length) {
