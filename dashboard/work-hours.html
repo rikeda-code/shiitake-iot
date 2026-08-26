@@ -10167,22 +10167,6 @@ function renderDecPlanContent(planData, mergeData) {
     return Math.round(total * 10) / 10;
   }
 
-  // ④残業見込み人数：DECPLAN_TARGET_YM列 > R列 の人数 per site（変更B・段階4：整理済み_M
-  // 基準）。overtimeH()と同じ理由でB=1・B=2のみを対象とする（B=2は開始月フィルタも同様に
-  // 適用、E列PRJ空欄は除外）。※既存の不整合（overtimeH()にはapplyEmpTypeFilter()が
-  // 適用されているが、overtimeN()には無い）は今回維持する。overtimeN()自体が現在どの
-  // 画面からも呼ばれていないデッドコードのため、整合性を取るための修正は別途相談する
-  function overtimeN(site) {
-    if (!mergeData) return null;
-    const emps = allData.employees.filter(e => e.base === site
-      && (e.flag === 1 || (e.flag === 2 && (e.startYm == null || e.startYm <= DECPLAN_TARGET_YM)))
-      && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType)));
-    return emps
-      .map(e => findStdHoursMergeRowForEmployee(mergeData.rows, e))
-      .filter(r => r && !r.stdHoursOriginallyEmpty && typeof r.maxByYm[DECPLAN_TARGET_YM] === 'number' && r.maxByYm[DECPLAN_TARGET_YM] > r.stdHours)
-      .length || null;
-  }
-
   // ⑥12月標準工数時間：生産計画エンジンから算出
   function stdHoursForMonth(site, mi) {
     if (mi < 0) return null;
