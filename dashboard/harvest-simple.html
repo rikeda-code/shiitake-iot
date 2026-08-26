@@ -998,7 +998,10 @@ async function loadWeeklySection() {
 
 let drillState = { site: null, person: null, subMode: 'week', sortOrder: 'desc' };
 
-function renderWeeklySection(section, state, groupMode, sortOrder) {
+// 週別累計タブの横軸(栽培日数)候補。nullは「自動」(月別グループ時は60日固定、それ以外は実データの最大日数に追従)を表す
+const WEEKLY_X_AXIS_DAY_OPTIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+
+function renderWeeklySection(section, state, groupMode, sortOrder, xAxisMaxDayOverride = null) {
   const { containerData, targetData, siteFetchErrors } = state;
   const valid = containerData.filter(c => c.rows.length > 0 && c.bedCount > 0);
   if (!valid.length) {
@@ -1096,6 +1099,9 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
       <button class="sort-btn${groupMode==='site'?' active':''}" onclick="weeklySetGroup('site')">拠点別</button>
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
       <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">ロット別</button>
+      <span class="sort-label" style="margin-left:12px">横軸:</span>
+      <button class="sort-btn${xAxisMaxDayOverride==null?' active':''}" onclick="weeklySetXAxisMaxDay(null)">自動</button>
+      ${WEEKLY_X_AXIS_DAY_OPTIONS.map(d => `<button class="sort-btn${xAxisMaxDayOverride===d?' active':''}" onclick="weeklySetXAxisMaxDay(${d})">${d}日</button>`).join('')}
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
@@ -1129,11 +1135,13 @@ function renderWeeklySection(section, state, groupMode, sortOrder) {
   // Persist current mode for button callbacks
   section.dataset.groupMode = groupMode;
   section.dataset.sortOrder = sortOrder;
+  section.dataset.xAxisMaxDay = xAxisMaxDayOverride == null ? '' : String(xAxisMaxDayOverride);
 
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
-  // 月別グループ表示は、カードごとに横軸の最大日数が揃わず比較しづらいため60日固定にする
-  const fixedMaxDay = groupMode === 'month' ? 60 : null;
+  // 横軸(栽培日数)は、明示的に選ばれていればそれを優先。未指定(自動)の場合は、
+  // 月別グループ表示のときだけカード間で揃えるため60日固定、それ以外は実データに追従する
+  const fixedMaxDay = xAxisMaxDayOverride != null ? xAxisMaxDayOverride : (groupMode === 'month' ? 60 : null);
   // ズーム用にグループ情報を保存
   weeklyZoomGroups = groupKeys.map(k => ({ label: groups[k].label, containers: groups[k].containers, fixedMaxDay }));
   groupKeys.forEach((k, idx) => {
@@ -1698,6 +1706,11 @@ function parseSizeRowsFromTable(table, startDateStr) {
   return result;
 }
 
+// section.dataset.xAxisMaxDayは空文字("自動")または日数の文字列なので、呼び出し側で使いやすい形に戻す
+function weeklyReadXAxisMaxDay(section) {
+  return section.dataset.xAxisMaxDay ? Number(section.dataset.xAxisMaxDay) : null;
+}
+
 function weeklySetSizeMode(mode) {
   const section = document.getElementById('weekly-section');
   if (!section || !weeklyState) return;
@@ -1709,7 +1722,7 @@ function weeklySetSizeMode(mode) {
   if (weeklySizeMode) {
     renderWeeklySizeSection(section, weeklyState, groupMode, sortOrder);
   } else {
-    renderWeeklySection(section, weeklyState, groupMode, sortOrder);
+    renderWeeklySection(section, weeklyState, groupMode, sortOrder, weeklyReadXAxisMaxDay(section));
   }
 }
 
@@ -1812,7 +1825,7 @@ function weeklySetSort(order) {
   if (weeklySizeMode) {
     renderWeeklySizeSection(section, weeklyState, groupMode, order);
   } else {
-    renderWeeklySection(section, weeklyState, groupMode, order);
+    renderWeeklySection(section, weeklyState, groupMode, order, weeklyReadXAxisMaxDay(section));
   }
 }
 
@@ -1823,7 +1836,18 @@ function weeklySetGroup(mode) {
   weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
   weeklyCharts = [];
   weeklySizeMode = null;
-  renderWeeklySection(section, weeklyState, mode, sortOrder);
+  renderWeeklySection(section, weeklyState, mode, sortOrder, weeklyReadXAxisMaxDay(section));
+}
+
+// 横軸(栽培日数)の表示範囲を選ぶ。daysがnullなら「自動」(月別グループ時のみ60日固定、それ以外は実データに追従)に戻す
+function weeklySetXAxisMaxDay(days) {
+  const section = document.getElementById('weekly-section');
+  if (!section || !weeklyState) return;
+  const groupMode = section.dataset.groupMode || 'site';
+  const sortOrder = section.dataset.sortOrder || 'desc';
+  weeklyCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+  weeklyCharts = [];
+  renderWeeklySection(section, weeklyState, groupMode, sortOrder, days);
 }
 
 function renderDrillSection(section, valid, targetData) {
@@ -2479,7 +2503,7 @@ function updateTabVisibility() {
     const section = document.getElementById('weekly-section');
     const groupMode = document.querySelector('.group-btn.active')?.dataset?.mode || 'site';
     const sortOrder = document.querySelector('.sort-btn.active')?.dataset?.order || 'desc';
-    renderWeeklySection(section, weeklyState, groupMode, sortOrder);
+    renderWeeklySection(section, weeklyState, groupMode, sortOrder, weeklyReadXAxisMaxDay(section));
   }
   if (lotTabActive) renderLotTab();
   if (scatterTabActive) renderScatterTab();
