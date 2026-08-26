@@ -1809,6 +1809,32 @@ function renderCompareSiteStdHoursAlerts(alerts) {
     </div>`;
 }
 
+// 変更C・段階B：「比較（3拠点）」の3サブタブ（時間・人数・標準労働時間）共通の
+// データ整合性アラート（属性不一致・社員番号不一致・開始月異常）。
+// renderCompareSiteStdHoursAlerts()と同じ見た目・アコーディオン挙動
+function renderChangeCAlertsBox(containerId, attributeAlerts, startYmAlerts) {
+  const target = document.getElementById(containerId);
+  if (!target) return;
+  const total = (attributeAlerts ? attributeAlerts.length : 0) + (startYmAlerts ? startYmAlerts.length : 0);
+  if (!total) { target.innerHTML = ''; return; }
+
+  const lines = [
+    ...(attributeAlerts || []).map(a => `[${a.sheet}] ${a.detail}`),
+    ...(startYmAlerts || []).map(a => `[整理済み_M] ${a.name}：${a.detail}`),
+  ];
+
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ データ整合性アラート（${total}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${lines.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
 // 「予実＞比較（繁忙期見込み）＞拠点・業務別」タブ専用のアラート（既存の
 // renderCompareSiteStdHoursAlerts()と同じ見た目・アコーディオン挙動）。
 // 3拠点マージシートの行がtierForMergeRow()で判定できなかった場合に表示する
@@ -9532,6 +9558,7 @@ function renderCompareSiteCharts(prodData) {
           <button class="transfer-toggle-btn${compareSiteViewMode === 'stdhours' ? ' active' : ''}" data-tab="stdhours">標準労働時間</button>
         </div>
       </div>
+      <div id="comparesite-changeC-alerts"></div>
       ${compareSiteViewMode === 'time' ? `
       <div class="schart-section">
         <div class="schart-header">実績工数（拠点別、時間）</div>
@@ -9547,6 +9574,13 @@ function renderCompareSiteCharts(prodData) {
         ${chartWrapHtml('comparesite-stdhours', commonMonths.length, { heightPx: 400, inlineHeight: true })}
       </div>`}
     </div>`;
+
+  // 変更C・段階B：3サブタブ共通のデータ整合性アラート。getActiveData()由来の
+  // employees（振替後の仮想従業員を含む）ではなく、整理済み_Mの実データそのもの
+  // であるallData.employeesを使う
+  const changeCAttributeAlerts = collectCrossSheetAttributeAlerts(allData.employees, stdTransferAdjustRecords, stdHoursMergeData ? stdHoursMergeData.rows : []);
+  const changeCStartYmAlerts = collectB2StartYmAlerts(allData.employees);
+  renderChangeCAlertsBox('comparesite-changeC-alerts', changeCAttributeAlerts, changeCStartYmAlerts);
 
   document.querySelectorAll('#comparesite-view-toggle .transfer-toggle-btn').forEach(btn => {
     btn.onclick = () => {
