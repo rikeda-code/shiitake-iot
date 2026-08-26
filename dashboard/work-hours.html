@@ -1333,12 +1333,19 @@ function buildDataset(json) {
     // startYm：I列（開始月）。標準労働時間シート側のパース（parseThreeSiteMergeSheet）
     // と同じ列インデックス定数・同じパース関数を再利用する（A〜I列は各シートで同一構成）
     const startYm = parseGvizDateYm(cells[THREE_SITE_MERGE_START_MONTH_COL]);
+    // startYmRaw：開始月セルの生の表示文字列。開始月が「未入力」か「入力されているが
+    // 日付として解釈できない文字列」かを区別するために保持する（collectB2StartYmAlerts()用）
+    const startYmRaw = String(cells[THREE_SITE_MERGE_START_MONTH_COL]?.f ?? cells[THREE_SITE_MERGE_START_MONTH_COL]?.v ?? '').trim();
 
     // prj：E列（PRJ＝計上先）。空欄は「計上外」（例：他担当の営業等）を意味する。
     // 標準労働時間シート側と同じ列インデックス定数を再利用する
     const prj = String(cells[THREE_SITE_MERGE_PRJ_COL]?.v ?? '').trim();
 
-    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours, startYm, prj });
+    // empNo：G列（社員番号）。クロスシート属性不一致アラート
+    // （collectCrossSheetAttributeAlerts()）用
+    const empNo = String(cells[colLetterToIndex('G')]?.v ?? '').trim();
+
+    employees.push({ name, base, workType, employment, empClass, hours, flag, stdHours, startYm, prj, empNo, startYmRaw });
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
@@ -1383,7 +1390,7 @@ function parseGvizDateYm(cell) {
 }
 
 // 整理済み_増減シートの列位置（固定）
-const ADJ_EMP_COL = 2, ADJ_BASE_COL = 3, ADJ_PRJ_COL = 4, ADJ_ROLE_COL = 5, ADJ_NAME_COL = 7, ADJ_YM_COL = 8, ADJ_HOURS_COL = 9;
+const ADJ_FLAG_COL = 1, ADJ_EMP_COL = 2, ADJ_BASE_COL = 3, ADJ_PRJ_COL = 4, ADJ_ROLE_COL = 5, ADJ_EMPNO_COL = 6, ADJ_NAME_COL = 7, ADJ_YM_COL = 8, ADJ_HOURS_COL = 9;
 
 function parseAdjustRecords(json) {
   const rows = json.table.rows || [];
@@ -1398,10 +1405,15 @@ function parseAdjustRecords(json) {
     const role = String(cells[ADJ_ROLE_COL]?.v ?? '').trim();
     const ym   = parseGvizDateYm(cells[ADJ_YM_COL]);
     const hours = parseDuration(cells[ADJ_HOURS_COL]) || 0;
+    // flag：B列（活動フラグ、数値）。employment：C列（雇用区分）。empNo：G列（社員番号）。
+    // いずれもクロスシート属性不一致アラート（collectCrossSheetAttributeAlerts()）用
+    const flag = cells[ADJ_FLAG_COL]?.v;
+    const employment = String(cells[ADJ_EMP_COL]?.v ?? '').trim();
+    const empNo = String(cells[ADJ_EMPNO_COL]?.v ?? '').trim();
 
     // headers=3でシート実際の1〜3行目がヘッダーとして除外されるため、rows配列の
     // インデックス0は実際のシートの4行目に対応する（i+1ではなくi+4が実際の行番号）
-    records.push({ rowNum: i + 4, rawName, base, prj, role, ym, hours });
+    records.push({ rowNum: i + 4, rawName, base, prj, role, ym, hours, flag, employment, empNo });
   });
   return records;
 }
@@ -3462,6 +3474,90 @@ function findStdHoursMergeRowForEmployee(mergeRows, e) {
     && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
 }
 
+// 整理済み_M・整理済み_増減・標準労働時間シートの間で、氏名（normalizeName()で正規化）は
+// 一致するが、他の属性（B列フラグ・拠点・雇用区分・PRJ・業務区分）や社員番号が食い違って
+// いるケースを検知し、アラート情報の配列を返す（変更C・段階A）。画面表示は次段階以降で
+// 行うため、今回はデータの算出のみ。既存の集計・表示ロジックからは一切参照されない
+function collectCrossSheetAttributeAlerts(employees, adjustRecords, mergeRows) {
+  const alerts = [];
+
+  // 整理済み_Mの従業員一覧を氏名（正規化）でグループ化する（同姓同名は複数行を保持）
+  const byName = new Map();
+  (employees || []).forEach(e => {
+    const key = normalizeName(e.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(e);
+  });
+
+  // 属性一致・社員番号一致の判定を行い、不一致があればalertsに追加する共通処理。
+  // attrMatch：整理済み_M側の候補行(e)を受け取り、他シート側の行と属性が完全一致するかを
+  // 判定する関数（呼び出し側で比較対象フィールドを渡す）
+  function checkOne({ name, empNo, attrMatch, sheet, rowLabel }) {
+    const key = normalizeName(name);
+    const candidates = byName.get(key);
+    if (!candidates || !candidates.length) return; // 整理済み_Mに存在しない → 対象外
+
+    if (!candidates.some(attrMatch)) {
+      alerts.push({
+        type: '属性不一致', sheet, name,
+        detail: `${name}${rowLabel}：整理済み_M側と属性（フラグ・拠点・雇用区分・PRJ・業務区分）が一致する行が見つかりません`,
+      });
+    }
+
+    // 社員番号不一致：両方が空文字列でなく、かつ候補のいずれの社員番号とも一致しない場合のみ
+    const candidateEmpNos = candidates.map(e => e.empNo).filter(v => v);
+    if (empNo && candidateEmpNos.length && !candidateEmpNos.includes(empNo)) {
+      alerts.push({
+        type: '社員番号不一致', sheet, name,
+        detail: `${name}${rowLabel}：${sheet}の社員番号「${empNo}」が整理済み_M側（${candidateEmpNos.join('/')}）と一致しません`,
+      });
+    }
+  }
+
+  // 整理済み_増減の各レコードをチェック
+  (adjustRecords || []).forEach(rec => {
+    checkOne({
+      name: rec.rawName,
+      empNo: rec.empNo,
+      sheet: '整理済み_増減',
+      rowLabel: `（行${rec.rowNum}）`,
+      attrMatch: e => e.flag === rec.flag && e.base === rec.base && e.employment === rec.employment
+        && e.prj === rec.prj && e.workType === rec.role,
+    });
+  });
+
+  // 標準労働時間シートの各行をチェック（比較対象フィールドをrow.activeFlag・row.site・
+  // row.employment・row.prj・row.divに変え、業務区分はstdHoursMergeDivForWorkType()経由で比較）
+  (mergeRows || []).forEach(row => {
+    checkOne({
+      name: row.name,
+      empNo: row.empNo,
+      sheet: '標準労働時間',
+      rowLabel: '',
+      attrMatch: e => e.flag === row.activeFlag && e.base === row.site && e.employment === row.employment
+        && e.prj === row.prj && stdHoursMergeDivForWorkType(e.workType) === row.div,
+    });
+  });
+
+  return alerts;
+}
+
+// 整理済み_MでB=2（新規要員・追加待ち）かつ開始月（startYm）が解釈できない従業員を
+// 検知し、アラート情報の配列を返す（変更C・段階A）。e.startYmRawが空文字列なら
+// 「未入力」、そうでなければ「日付として解釈できない文字列が入力されている」ケースを
+// 区別する。e.startYmが正しく解釈できている場合（過去月・未来月問わず）は対象外
+function collectB2StartYmAlerts(employees) {
+  return (employees || [])
+    .filter(e => e.flag === 2 && e.startYm === null)
+    .map(e => ({
+      type: '開始月異常',
+      name: e.name,
+      detail: e.startYmRaw
+        ? `開始月の値が日付として解釈できません（入力値: ${e.startYmRaw}）`
+        : '開始月が未入力',
+    }));
+}
+
 // 標準労働時間（月ごとに、その月に実績[実質勤務時間]があるスタッフのみを対象に合計）。
 // parseDuration()は0以下の値を既にnullとして返しているため、hours[mi] !== nullの
 // 判定だけで「実質勤務時間が0または未入力のスタッフを除外」の条件を満たせる。
@@ -4622,7 +4718,10 @@ function parseThreeSiteMergeSheet(json) {
     // 0デフォルト化はせず、cellNumber()の生の戻り値（数値またはnull）のまま保持する
     const fulltimeHours = cellNumber(row, THREE_SITE_MERGE_FULLTIME_COL);
     const parttimeHours = cellNumber(row, THREE_SITE_MERGE_PARTTIME_COL);
-    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment, fulltimeHours, parttimeHours });
+    // empNo：G列（社員番号）。クロスシート属性不一致アラート
+    // （collectCrossSheetAttributeAlerts()）用
+    const empNo = cellText(row, colLetterToIndex('G'));
+    parsedRows.push({ site, div, name, stdHours, stdHoursOriginallyEmpty, startYm, maxByYm, activeFlag, prj, employment, fulltimeHours, parttimeHours, empNo });
   });
 
   if (emptyStdHoursRows.length) {
