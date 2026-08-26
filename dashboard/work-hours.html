@@ -141,7 +141,7 @@
     #transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
-    #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box { margin: 0; }
+    #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box { margin: 0; }
     #plancmp2-sitealerts .transfer-alert-box { margin: 0; }
     .transfer-alert-box {
       margin: 16px 32px 0;
@@ -3675,8 +3675,16 @@ function renderSummaryStdHours() {
           </div>
         </div>
       </div>
+      <div id="summarystdhours-changeC-alerts"></div>
       <div id="stdhours-content" style="flex:1;min-height:0;overflow-y:auto"></div>
     </div>`;
+
+  // 変更C・段階C：拠点別・拠点サマリ共通のデータ整合性アラート。getActiveData()由来の
+  // employees（振替後の仮想従業員を含む）ではなく、整理済み_Mの実データそのもの
+  // であるallData.employeesを使う
+  const changeCAttributeAlerts = collectCrossSheetAttributeAlerts(allData.employees, stdTransferAdjustRecords, stdHoursMergeData ? stdHoursMergeData.rows : []);
+  const changeCStartYmAlerts = collectB2StartYmAlerts(allData.employees);
+  renderChangeCAlertsBox('summarystdhours-changeC-alerts', changeCAttributeAlerts, changeCStartYmAlerts);
 
   document.querySelectorAll('#stdhours-metric-toggle .transfer-toggle-btn').forEach(btn => {
     btn.onclick = () => {
