@@ -111,6 +111,19 @@
   table.list tr.clickable { cursor: pointer; }
   .empty-msg { color: var(--muted-2); padding: 18px 4px; text-align: center; font-size: 15.5px; }
 
+  .tree-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; padding: 0; margin-right: 4px;
+    border: none; background: none; color: var(--muted); font-size: 11px; vertical-align: middle;
+  }
+  .tree-toggle:hover { color: var(--accent-d); background: var(--panel-2); border-radius: 4px; }
+  .summary-cell { color: var(--muted); max-width: 220px; }
+  tr.task-subrow { background: var(--panel-2); }
+  tr.task-subrow:hover { background: #f0f2ed; }
+  tr.task-subrow td { padding-top: 6px; padding-bottom: 6px; }
+  .task-subrow-name { color: var(--muted); padding-left: 32px !important; }
+  .task-subrow-empty { color: var(--muted-2); padding-left: 32px !important; font-size: 15px; }
+
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 14.5px; font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
   .badge.st-未着手 { background: #eceeea; color: #5c6258; }
   .badge.st-調査中 { background: #e3ecf5; color: #315a89; }
@@ -176,6 +189,7 @@
 
   .detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
   .detail-title { font-size: 23px; font-weight: 700; margin: 0 0 4px; }
+  .item-summary { color: var(--muted); font-weight: 600; margin: 0 0 8px; }
   .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 16px; }
   .kv dt { color: var(--muted); font-weight: 600; }
   .kv dd { margin: 0; }
@@ -297,19 +311,19 @@ let DB = null;
 function seedDB() {
   const now = nowISO();
   const itemDefs = [
-    ['目標設定', 'プロジェクトの到達目標と成功基準を明確にする'],
-    ['栽培原則の決定', '栽培において譲れない基本原則を定める'],
-    ['暗黙知の収集', '熟練者が持つ経験・勘・判断基準を言語化して集める'],
-    ['菌床状態の定義', '菌床の状態を客観的に判断できる基準を定義する'],
-    ['菌床分類', '菌床の状態や特性に応じた分類軸を確立する'],
-    ['最初の20日仮説検証', '栽培開始から20日間のデータをもとに初期仮説を検証する'],
-    ['栽培戦略', '検証された知見をもとに栽培全体の戦略を組み立てる'],
-    ['標準化', '検証された知識を現場で使える標準として整理する'],
-    ['現場検証', '策定した標準を現場で実践し、有効性を確認する'],
-    ['継続改善', '現場実践から得た新しい知見をもとに標準を継続的に更新する'],
+    ['目標設定', '何を達成するかを決める', 'プロジェクトの到達目標と成功基準を明確にする'],
+    ['栽培原則の決定', '譲れない基本方針を定める', '栽培において譲れない基本原則を定める'],
+    ['暗黙知の収集', '熟練者の勘と経験を言語化する', '熟練者が持つ経験・勘・判断基準を言語化して集める'],
+    ['菌床状態の定義', '菌床の状態を客観的に見分ける', '菌床の状態を客観的に判断できる基準を定義する'],
+    ['菌床分類', '菌床を状態ごとに分類する', '菌床の状態や特性に応じた分類軸を確立する'],
+    ['最初の20日仮説検証', '初期20日間の仮説を検証する', '栽培開始から20日間のデータをもとに初期仮説を検証する'],
+    ['栽培戦略', '知見を戦略として組み立てる', '検証された知見をもとに栽培全体の戦略を組み立てる'],
+    ['標準化', '知識を現場の標準にする', '検証された知識を現場で使える標準として整理する'],
+    ['現場検証', '標準を現場で試し確かめる', '策定した標準を現場で実践し、有効性を確認する'],
+    ['継続改善', '実践から標準を更新し続ける', '現場実践から得た新しい知見をもとに標準を継続的に更新する'],
   ];
-  const items = itemDefs.map(([name, purpose]) => ({
-    id: uid('I'), name, purpose, description: '', status: '未着手', progress: 0,
+  const items = itemDefs.map(([name, summary, purpose]) => ({
+    id: uid('I'), name, summary, purpose, description: '', status: '未着手', progress: 0,
     priority: '中', owner: '', memo: '', createdAt: now, updatedAt: now,
   }));
   return {
@@ -611,6 +625,7 @@ function openItemForm(id) {
     <h3>${title}</h3>
     <form onsubmit="return submitItemForm(event, ${item ? `'${item.id}'` : 'null'})">
       <label class="field"><span class="label-text">項目名 *</span><input type="text" name="name" required value="${esc(item?.name || '')}"></label>
+      <label class="field"><span class="label-text">一言（この項目を一言で表現）</span><input type="text" name="summary" placeholder="例）熟練者の勘と経験を言語化する" value="${esc(item?.summary || '')}"></label>
       <label class="field"><span class="label-text">目的</span><textarea name="purpose">${esc(item?.purpose || '')}</textarea></label>
       <label class="field"><span class="label-text">説明</span><textarea name="description">${esc(item?.description || '')}</textarea></label>
       <div class="field-row">
@@ -633,7 +648,7 @@ function submitItemForm(e, id) {
   const name = f.name.value.trim();
   if (!name) { alert('項目名は必須です'); return false; }
   const patch = {
-    name, purpose: f.purpose.value.trim(), description: f.description.value.trim(),
+    name, summary: f.summary.value.trim(), purpose: f.purpose.value.trim(), description: f.description.value.trim(),
     status: f.status.value, progress: parseInt(f.progress.value, 10), priority: f.priority.value,
     owner: f.owner.value.trim(), memo: f.memo.value.trim(),
   };
@@ -947,13 +962,25 @@ function renderDashboard() {
 /* =========================================================
    項目一覧・詳細
 ========================================================= */
+let expandedItems = new Set();
+function toggleItemExpand(id) {
+  if (expandedItems.has(id)) expandedItems.delete(id); else expandedItems.add(id);
+  route();
+}
+
 function renderItemsList() {
   const rows = DB.items.map(i => {
     const tasks = DB.tasks.filter(t => t.itemIds.includes(i.id));
     const activeTasks = tasks.filter(t => ACTIVE_TASK_STATUSES.includes(t.status));
     const mats = DB.materials.filter(m => m.itemIds.includes(i.id));
-    return `<tr class="clickable" onclick="location.hash='#/items/${i.id}'">
-      <td>${esc(i.name)}</td>
+    const expanded = expandedItems.has(i.id);
+
+    const mainRow = `<tr class="clickable item-row" onclick="location.hash='#/items/${i.id}'">
+      <td>
+        <button class="tree-toggle" onclick="event.stopPropagation(); toggleItemExpand('${i.id}')" title="${expanded ? 'タスクを閉じる' : 'タスクを開く'}">${tasks.length ? (expanded ? '▼' : '▶') : '・'}</button>
+        ${esc(i.name)}
+      </td>
+      <td class="summary-cell">${i.summary ? esc(i.summary) : '<span class="muted small">-</span>'}</td>
       <td>${statusBadge(i.status)}</td>
       <td>${progressBar(i.progress)}</td>
       <td>${priorityBadge(i.priority)}</td>
@@ -962,6 +989,25 @@ function renderItemsList() {
       <td>${mats.length}</td>
       <td class="small muted">${fmtDateOnly(i.updatedAt)}</td>
     </tr>`;
+
+    let subRows = '';
+    if (expanded) {
+      if (tasks.length) {
+        subRows = tasks.map(t => `
+          <tr class="clickable task-subrow" onclick="location.hash='#/tasks/${t.id}'">
+            <td colspan="2" class="task-subrow-name">└ ${esc(t.name)}</td>
+            <td>${statusBadge(t.status)}</td>
+            <td></td>
+            <td>${priorityBadge(t.priority)}</td>
+            <td colspan="2" class="small muted">${esc(t.owner) || '-'}</td>
+            <td></td>
+            <td class="small muted">${fmtDateOnly(t.updatedAt)}</td>
+          </tr>`).join('');
+      } else {
+        subRows = `<tr class="task-subrow"><td colspan="9" class="task-subrow-empty">タスクがありません（<a href="#/items/${i.id}">項目詳細から追加</a>）</td></tr>`;
+      }
+    }
+    return mainRow + subRows;
   }).join('');
   return `
   <div class="panel">
@@ -969,9 +1015,9 @@ function renderItemsList() {
       <h2 style="border:none;margin:0;padding:0;">項目一覧</h2>
       <button class="primary small" onclick="openItemForm(null)">＋ 項目を追加</button>
     </div>
-    <table class="list">
-      <thead><tr><th>項目名</th><th>ステータス</th><th>進捗</th><th>優先度</th><th>タスク数</th><th>未完了</th><th>関連資料</th><th>最終更新日</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="8" class="empty-msg">項目がありません</td></tr>`}</tbody>
+    <table class="list tree-table">
+      <thead><tr><th>項目名</th><th>一言</th><th>ステータス</th><th>進捗</th><th>優先度</th><th>タスク数</th><th>未完了</th><th>関連資料</th><th>最終更新日</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="9" class="empty-msg">項目がありません</td></tr>`}</tbody>
     </table>
   </div>`;
 }
@@ -995,6 +1041,7 @@ function renderItemDetail(id) {
       <div>
         <p class="small muted mb8"><a href="#/items">← 項目一覧</a></p>
         <h1 class="detail-title">${esc(item.name)}</h1>
+        ${item.summary ? `<p class="item-summary">${esc(item.summary)}</p>` : ''}
         <div class="chip-list mb8">${statusBadge(item.status)}${priorityBadge(item.priority)}</div>
       </div>
       <div class="flex">
@@ -1457,7 +1504,7 @@ function buildSearchResultsHtml(q) {
   const ql = q.toLowerCase();
   const has = (...vals) => vals.some(v => (v||'').toLowerCase().includes(ql));
 
-  const items = DB.items.filter(i => has(i.name, i.purpose, i.description, i.memo));
+  const items = DB.items.filter(i => has(i.name, i.summary, i.purpose, i.description, i.memo));
   const tasks = DB.tasks.filter(t => has(t.name, t.description, t.memo, t.owner));
   const mats = DB.materials.filter(m => has(m.name, m.description, m.body, m.url));
   const hyps = DB.hypotheses.filter(h => has(h.name, h.content, h.reason, h.result, h.conclusion, h.memo));
@@ -1470,7 +1517,7 @@ function buildSearchResultsHtml(q) {
     <div class="search-group"><h3>${title}（${list.length}）</h3>${list.map(renderRow).join('')}</div>` : '';
 
   return [
-    group('項目', items, i => `<div class="search-result"><a href="#/items/${i.id}">${highlight(i.name, q)}</a> ${statusBadge(i.status)}<div class="snippet">${snippet(i.description || i.purpose, q)}</div></div>`),
+    group('項目', items, i => `<div class="search-result"><a href="#/items/${i.id}">${highlight(i.name, q)}</a> ${statusBadge(i.status)}<div class="snippet">${snippet(i.summary || i.description || i.purpose, q)}</div></div>`),
     group('タスク', tasks, t => `<div class="search-result"><a href="#/tasks/${t.id}">${highlight(t.name, q)}</a> ${statusBadge(t.status)}<div class="snippet">${snippet(t.description, q)}</div></div>`),
     group('資料', mats, m => `<div class="search-result"><a href="#/materials/${m.id}">${highlight(m.name, q)}</a> ${typeBadge(m.type)}<div class="snippet">${snippet(m.body || m.description, q)}</div></div>`),
     group('仮説', hyps, h => `<div class="search-result"><a href="#/hypotheses/${h.id}">${highlight(h.name, q)}</a> ${hypStatusBadge(h.status)}<div class="snippet">${snippet(h.content, q)}</div></div>`),
