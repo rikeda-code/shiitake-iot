@@ -145,6 +145,11 @@
     }
     .sort-btn:hover { border-color: #4a5568; color: var(--text); }
     .sort-btn.active { background: #3b82f622; border-color: #3b82f6; color: #93c5fd; }
+    .sort-select {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 4px 10px; border-radius: 5px;
+      cursor: pointer; font-size: 0.78rem;
+    }
 
     /* ── Card colors ── */
     .card-cn { font-size: 0.95rem; font-weight: 700; color: var(--text); margin-bottom: 2px; }
@@ -999,7 +1004,7 @@ async function loadWeeklySection() {
 let drillState = { site: null, person: null, subMode: 'week', sortOrder: 'desc' };
 
 // 週別累計タブの横軸(栽培日数)候補。nullは「自動」(月別グループ時は60日固定、それ以外は実データの最大日数に追従)を表す
-const WEEKLY_X_AXIS_DAY_OPTIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+const WEEKLY_X_AXIS_DAY_OPTIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150];
 
 function renderWeeklySection(section, state, groupMode, sortOrder, xAxisMaxDayOverride = null) {
   const { containerData, targetData, siteFetchErrors } = state;
@@ -1100,8 +1105,10 @@ function renderWeeklySection(section, state, groupMode, sortOrder, xAxisMaxDayOv
       <button class="sort-btn${groupMode==='drill'?' active':''}" onclick="weeklySetGroup('drill')">担当者別</button>
       <button class="sort-btn${groupMode==='lot'?' active':''}" onclick="weeklySetGroup('lot')">ロット別</button>
       <span class="sort-label" style="margin-left:12px">横軸:</span>
-      <button class="sort-btn${xAxisMaxDayOverride==null?' active':''}" onclick="weeklySetXAxisMaxDay(null)">自動</button>
-      ${WEEKLY_X_AXIS_DAY_OPTIONS.map(d => `<button class="sort-btn${xAxisMaxDayOverride===d?' active':''}" onclick="weeklySetXAxisMaxDay(${d})">${d}日</button>`).join('')}
+      <select class="sort-select" onchange="weeklySetXAxisMaxDay(this.value ? Number(this.value) : null)">
+        <option value=""${xAxisMaxDayOverride==null?' selected':''}>自動</option>
+        ${WEEKLY_X_AXIS_DAY_OPTIONS.map(d => `<option value="${d}"${xAxisMaxDayOverride===d?' selected':''}>${d}日</option>`).join('')}
+      </select>
     </div>`;
 
   // Use index-based canvas IDs to avoid collisions with non-ASCII group keys
