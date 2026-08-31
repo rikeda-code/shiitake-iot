@@ -62,8 +62,18 @@
     border-bottom: 1px solid var(--border);
     padding: 0 32px;
     overflow-x: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
   }
   .tabs { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
+  .global-filter { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+  .global-filter select {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 0.82rem; font-weight: 600;
+  }
   .tab-btn {
     background: var(--surface); border: 1px solid var(--border); color: var(--muted);
     padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
@@ -230,6 +240,12 @@
     <button class="tab-btn" data-view="rolemap">② 役割マップビュー</button>
     <button class="tab-btn" data-view="site">③ 拠点別ビュー</button>
     <button class="tab-btn" data-view="summary">④ サマリー（勤務表形式）</button>
+  </div>
+  <div class="global-filter">
+    拠点で絞り込み：
+    <select id="global-site-filter">
+      <option value="all">すべての拠点</option>
+    </select>
   </div>
 </div>
 
@@ -412,8 +428,14 @@ const DUMMY_PEOPLE = [
 
 let PEOPLE = [];
 let currentView = 'org';
-let rolemapFilterSite = 'all';
+let globalSiteFilter = 'all'; // 全タブ共通の拠点フィルター('all'またはSITE_LISTのname)
 let rolemapFilterDept = 'all';
+
+/* 拠点フィルターで選ばれた拠点のみを返す（'all'の場合はSITE_LISTをそのまま返す）。
+ * ①②③④すべてのビューがこれを使って表示対象の拠点を絞り込む。 */
+function filteredSites() {
+  return globalSiteFilter === 'all' ? SITE_LIST : SITE_LIST.filter(s => s.name === globalSiteFilter);
+}
 
 /* ============================================================================
  * データ読み込み（共有スプレッドシート優先、未設定/失敗時はダミーデータ）
@@ -552,7 +574,7 @@ function renderOrgView() {
       <div class="org-arrow">↓ ファーム事業部 全拠点統括</div>` : '') + `
       <div class="site-grid">`;
 
-  SITE_LIST.forEach(site => {
+  filteredSites().forEach(site => {
     const sitePeople = PEOPLE.filter(p => p.site === site.name);
     html += `
       <div class="site-block">
@@ -593,15 +615,9 @@ function allRolesFlat() {
   return roles;
 }
 function renderRoleMapControls() {
-  const sites = ['all', ...SITE_LIST.map(s => s.name)];
   const depts = ['all', ...DEPT_LIST];
   return `
     <div class="rolemap-controls">
-      <label>拠点:
-        <select id="rm-site-filter">
-          ${sites.map(s => `<option value="${s}"${s === rolemapFilterSite ? ' selected' : ''}>${s === 'all' ? 'すべて' : s}</option>`).join('')}
-        </select>
-      </label>
       <label>所属:
         <select id="rm-dept-filter">
           ${depts.map(d => `<option value="${d}"${d === rolemapFilterDept ? ' selected' : ''}>${d === 'all' ? 'すべて' : d}</option>`).join('')}
@@ -611,8 +627,8 @@ function renderRoleMapControls() {
 }
 function renderRoleMapView() {
   const roles = allRolesFlat();
-  let people = PEOPLE.filter(p => p.tier !== '生産部長');
-  if (rolemapFilterSite !== 'all') people = people.filter(p => p.site === rolemapFilterSite);
+  const siteNames = filteredSites().map(s => s.name);
+  let people = PEOPLE.filter(p => p.tier !== '生産部長' && siteNames.includes(p.site));
   if (rolemapFilterDept !== 'all') people = people.filter(p => p.dept === rolemapFilterDept);
 
   let html = `
@@ -663,7 +679,6 @@ function renderRoleMapView() {
 
   document.getElementById('view-root').innerHTML = html;
 
-  document.getElementById('rm-site-filter').onchange = e => { rolemapFilterSite = e.target.value; renderRoleMapView(); };
   document.getElementById('rm-dept-filter').onchange = e => { rolemapFilterDept = e.target.value; renderRoleMapView(); };
 }
 
@@ -673,7 +688,7 @@ function renderRoleMapView() {
 function renderSiteView() {
   let html = `<div class="site-summary-grid">`;
 
-  SITE_LIST.forEach(site => {
+  filteredSites().forEach(site => {
     const people = PEOPLE.filter(p => p.site === site.name);
     const empCount = people.filter(p => p.employment === '正社員').length;
     const partCount = people.filter(p => p.employment === 'パート').length;
@@ -770,8 +785,10 @@ function renderSummaryView() {
       </div>`;
   }
 
+  const sites = filteredSites();
+
   DEPT_LIST.forEach(dept => {
-    const deptPeople = PEOPLE.filter(p => p.dept === dept);
+    const deptPeople = PEOPLE.filter(p => p.dept === dept && sites.some(s => s.name === p.site));
     if (!deptPeople.length) return;
     const tierGroups = tierGroupsForDept(dept);
 
@@ -780,13 +797,13 @@ function renderSummaryView() {
         <div class="summary-dept-block-header"><span class="badge badge-dept-${dept}">${dept}</span></div>
         <div class="table-wrap"><table class="summary-table">
           <thead>
-            <tr><th rowspan="2" class="tier-label">階層</th>${SITE_LIST.map(s => `<th colspan="2" class="site-head"><span class="site-dot" style="background:${s.color}"></span> ${s.name}</th>`).join('')}</tr>
-            <tr>${SITE_LIST.map(() => `<th>氏名</th><th>勤務時間</th>`).join('')}</tr>
+            <tr><th rowspan="2" class="tier-label">階層</th>${sites.map(s => `<th colspan="2" class="site-head"><span class="site-dot" style="background:${s.color}"></span> ${s.name}</th>`).join('')}</tr>
+            <tr>${sites.map(() => `<th>氏名</th><th>勤務時間</th>`).join('')}</tr>
           </thead>
           <tbody>`;
 
     tierGroups.forEach(tier => {
-      const siteColumns = SITE_LIST.map(site => deptPeople.filter(p => p.site === site.name && p.tier === tier));
+      const siteColumns = sites.map(site => deptPeople.filter(p => p.site === site.name && p.tier === tier));
       const maxRows = Math.max(1, ...siteColumns.map(arr => arr.length));
       for (let row = 0; row < maxRows; row++) {
         html += `<tr>`;
@@ -820,6 +837,18 @@ document.querySelectorAll('#view-tabs .tab-btn').forEach(btn => {
     renderCurrentView();
   };
 });
+
+/* 拠点フィルターの選択肢をSITE_LISTから生成し、変更時は今表示中のタブをその拠点だけで再描画する */
+(function initGlobalSiteFilter() {
+  const select = document.getElementById('global-site-filter');
+  SITE_LIST.forEach(site => {
+    const opt = document.createElement('option');
+    opt.value = site.name;
+    opt.textContent = site.name;
+    select.appendChild(opt);
+  });
+  select.onchange = e => { globalSiteFilter = e.target.value; renderCurrentView(); };
+})();
 
 async function loadAll() {
   document.getElementById('view-root').innerHTML = `<div class="loading">読み込み中...</div>`;
