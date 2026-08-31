@@ -1009,12 +1009,14 @@ function renderSiteCompareMetric(containerId, key) {
         <div class="chart-wrap" onclick="openZoom('${containerId}-${y}')"><canvas id="${containerId}-${y}"></canvas></div>
       </div>`).join('')}</div>`;
   YEARS.forEach(y => {
-    const series = SITES.map(site => ({
-      label: site.name,
-      data: yearSlice(DATA[site.key][key], y),
-      color: site.color,
+    const locs = def.kind === 'line' ? ALL_LOCS : SITES;
+    const series = locs.map(loc => ({
+      label: loc.name,
+      data: yearSlice(DATA[loc.key][key], y),
+      color: loc.color,
       type: def.kind,
       axis: 'y',
+      dash: loc.key === 'total' ? [6, 4] : undefined,
     }));
     chart(`${containerId}-${y}`, `${def.label} 拠点比較（${y}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
   });
@@ -1023,7 +1025,7 @@ function renderSiteCompareMetric(containerId, key) {
 function renderSiteCompare() {
   document.getElementById('main').innerHTML = `
     <section>
-      <div class="section-title">拠点比較<span class="sub">いなべ／群馬／南丹を項目ごとに比較</span></div>
+      <div class="section-title">拠点比較<span class="sub">いなべ／群馬／南丹を項目ごとに比較（率・単位指標は全拠点の推移も破線で表示）</span></div>
       <div class="panel">
         ${COMPARE_METRIC_KEYS.map(k => `<div id="sitecmp-${k}" style="margin-bottom:20px"></div>`).join('')}
       </div>
