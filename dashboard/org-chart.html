@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>組織図・役割マップ（ドラフト）</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #12141d;
+    --border: #2e3148;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --accent: #38bdf8;
+    --ok: #34d399;
+    --warn: #f59e0b;
+    --danger: #f87171;
+
+    /* 拠点カラー（収穫実績ダッシュボードの配色と統一） */
+    --site-inabe: #38bdf8;
+    --site-gunma: #a78bfa;
+    --site-nantan: #34d399;
+
+    /* 所属カラー */
+    --dept-saibai: #34d399;
+    --dept-shukka: #f59e0b;
+    --dept-haiso: #f472b6;
+
+    /* 階層カラー */
+    --tier-bucho: #facc15;
+    --tier-kacho: #38bdf8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; }
+  header .subtitle { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+  #last-updated { font-size: 0.8rem; color: var(--muted); }
+  .btn {
+    background: var(--border); border: none; color: var(--text);
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: #3a3f5c; }
+
+  .top-tabs-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    overflow-x: auto;
+  }
+  .tabs { display: flex; gap: 8px; padding: 12px 0; flex-wrap: wrap; }
+  .tab-btn {
+    background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+    white-space: nowrap;
+  }
+  .tab-btn.active { color: #0f1117; background: var(--accent); border-color: var(--accent); }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+
+  main { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 20px; }
+
+  .note-banner {
+    background: rgba(245,158,11,0.1);
+    border: 1px solid rgba(245,158,11,0.35);
+    color: #fbbf24;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 0.82rem;
+    line-height: 1.6;
+  }
+  .note-banner b { color: #fde68a; }
+  .note-banner.error { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.35); color: #fca5a5; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 18px; font-size: 0.78rem; color: var(--muted);
+  }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .sym { font-weight: 700; color: var(--text); }
+  .legend .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  /* ── 所属・階層バッジ ── */
+  .badge {
+    display: inline-block; font-size: 0.68rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  }
+  .badge-dept-栽培 { background: rgba(52,211,153,0.15); color: var(--dept-saibai); }
+  .badge-dept-出荷 { background: rgba(245,158,11,0.15); color: var(--dept-shukka); }
+  .badge-dept-配送 { background: rgba(244,114,182,0.15); color: var(--dept-haiso); }
+  .badge-emp-正社員 { background: rgba(56,189,248,0.15); color: var(--accent); }
+  .badge-emp-パート { background: rgba(136,146,164,0.2); color: var(--muted); }
+  .badge-tier-生産部長 { background: rgba(250,204,21,0.18); color: var(--tier-bucho); }
+  .badge-tier-課長 { background: rgba(56,189,248,0.18); color: var(--tier-kacho); }
+  .badge-hire-pending { background: rgba(167,139,250,0.2); color: #a78bfa; }
+  .site-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  /* ── ①組織図ビュー ── */
+  .org-root { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .bucho-card { min-width: 220px; text-align: center; }
+  .org-arrow { color: var(--muted); font-size: 1.1rem; line-height: 1; }
+  .site-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; width: 100%; }
+  .site-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .site-block-header {
+    padding: 12px 16px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border); font-weight: 700; font-size: 0.95rem;
+  }
+  .dept-col { border-top: 1px dashed var(--border); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .dept-col-header { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 700; }
+  .dept-col-header .badge { font-size: 0.68rem; }
+  .dept-empty-note { font-size: 0.74rem; color: var(--muted); font-style: italic; }
+  .person-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+
+  .person-card {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem;
+  }
+  .person-card.pending { border-style: dashed; opacity: 0.85; }
+  .person-card .p-name { font-weight: 700; font-size: 0.86rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .person-card .p-hours { color: var(--muted); font-size: 0.74rem; }
+  .p-roles { display: flex; flex-wrap: wrap; gap: 4px; }
+  .role-chip {
+    font-size: 0.68rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03); white-space: nowrap;
+  }
+  .role-chip.main { border-color: var(--accent); color: var(--accent); font-weight: 700; background: rgba(56,189,248,0.08); }
+  .role-chip.sub { color: var(--muted); }
+  .role-chip.cross { border-style: dashed; border-color: var(--dept-haiso); }
+  .role-chip.cross::after { content: attr(data-dept); margin-left: 4px; opacity: 0.7; }
+
+  /* ── ②役割マップビュー ── */
+  .rolemap-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .rolemap-controls select {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 0.82rem;
+  }
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  table.rolemap { border-collapse: collapse; font-size: 0.8rem; width: 100%; }
+  table.rolemap th, table.rolemap td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
+  table.rolemap th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface); position: sticky; top: 0; }
+  table.rolemap td.rowhead, table.rolemap th.rowhead { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; }
+  table.rolemap td.dept-group-first, table.rolemap th.dept-group-first { border-left: 2px solid var(--border); }
+  table.rolemap tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .rm-name { font-weight: 700; }
+  .rm-cell { font-weight: 700; }
+  .rm-cell.lv3 { color: var(--ok); }
+  .rm-cell.lv2 { color: var(--accent); }
+  .rm-cell.lv1 { color: var(--warn); }
+  .rm-cell.lv0 { color: var(--border); }
+  .rm-cell.main { background: rgba(56,189,248,0.12); border-radius: 6px; }
+  .rm-cell.cross { background: rgba(244,114,182,0.12); border-radius: 6px; }
+
+  /* ── ③拠点別ビュー ── */
+  .site-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .summary-card-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-weight: 700; }
+  .summary-card-body { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .metric-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
+  .metric-row .label { color: var(--muted); }
+  .metric-row.highlight { font-size: 0.95rem; font-weight: 700; padding: 6px 0; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); }
+  .role-coverage-table { width: 100%; font-size: 0.76rem; border-collapse: collapse; }
+  .role-coverage-table th, .role-coverage-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+  .role-coverage-table th { color: var(--muted); font-weight: 600; }
+  .mini-bar-track { background: #0f1117; border-radius: 999px; height: 6px; width: 100%; overflow: hidden; }
+  .mini-bar-fill { background: var(--accent); height: 100%; }
+
+  .loading, .empty-msg { color: var(--muted); font-size: 0.9rem; padding: 20px; text-align: center; }
+
+  @media (max-width: 640px) {
+    header, main, .top-tabs-bar { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🌱 組織図・役割マップ（ドラフト）</h1>
+    <div class="subtitle">ファーム事業部｜拠点・所属・階層・役割・勤務時間を横断して確認する構造ドラフト</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated"></span>
+    <button class="btn" id="refresh-btn">↻ 更新</button>
+  </div>
+</header>
+
+<div class="top-tabs-bar">
+  <div class="tabs" id="view-tabs">
+    <button class="tab-btn active" data-view="org">① 組織図ビュー</button>
+    <button class="tab-btn" data-view="rolemap">② 役割マップビュー</button>
+    <button class="tab-btn" data-view="site">③ 拠点別ビュー</button>
+  </div>
+</div>
+
+<main>
+  <div id="data-source-note"></div>
+  <div id="view-root"></div>
+</main>
+
+<script>
+/* ============================================================================
+ * 組織図・役割マップ ドラフト
+ *
+ * ▼ 設計思想
+ *   「組織図（拠点・所属・階層）」と「個人」と「役割」と「勤務時間」と「スキル」を
+ *   別データとして紐付けて表示する。所属と役割は一致しなくてよく（所属横断の兼務を
+ *   registered可能にする）、1人が複数の役割・複数レベルのスキルを持てる。
+ *
+ * ▼ 実データ・共同編集への移行方法（ファーム勤務時間ダッシュボードと同じ考え方）
+ *   このドラフトはダミーデータ（DUMMY_PEOPLE）で描画されるが、実運用では
+ *   下記のような共有Googleスプレッドシートをチームで直接編集し（＝他アカウントとの
+ *   共同編集）、このページはそれを読み取り専用で可視化するだけにする。
+ *   これは dashboard/index.html が収穫実績シートを共同編集の実データソースとして
+ *   読み込んでいるのと同じ考え方。
+ *
+ *   1. 新しいスプレッドシートを作成し、下記2シートを用意する
+ *      シート「メンバー」列: ID, 拠点, 所属, 階層, 雇用区分, 仮名,
+ *            勤務時間表示, 週勤務時間, 主担当役割, 副担当役割, スキル, 採用状況
+ *        - 主担当役割/副担当役割は「役割名,役割名」のカンマ区切り
+ *        - スキルは「役割名:レベル,役割名:レベル」形式（レベルは0〜3）
+ *      シート「役割マスター」列: 所属, 役割名, 表示順, 必要人数(将来), 必要工数_時間_月(将来)
+ *   2. スプレッドシートを「リンクを知っている全員が閲覧可（またはチームで編集可）」に共有
+ *   3. 下の SHEET_ID にスプレッドシートIDを設定する
+ *   4. ページを開くと自動的に共有シートの内容を読み込むようになる
+ *      （SHEET_ID が空のままの場合は、このドラフト用のダミーデータで表示され続ける）
+ * ========================================================================== */
+
+const SHEET_ID = ''; // ここに共有スプレッドシートのIDを設定すると実データ運用に切り替わる
+const MEMBER_SHEET_NAME = 'メンバー';
+const ROLE_MASTER_SHEET_NAME = '役割マスター';
+
+/* ── 拠点マスター（後から追加可能） ─────────────────────────── */
+const SITE_LIST = [
+  { name: 'いなべ', color: 'var(--site-inabe)' },
+  { name: '群馬', color: 'var(--site-gunma)' },
+  { name: '南丹', color: 'var(--site-nantan)' },
+];
+
+/* ── 所属マスター（後から追加可能） ─────────────────────────── */
+const DEPT_LIST = ['栽培', '出荷', '配送'];
+const DEPT_COLOR_VAR = { 栽培: '--dept-saibai', 出荷: '--dept-shukka', 配送: '--dept-haiso' };
+
+/* ── 役割マスター（所属ごと。後から名称変更・追加・削除できる想定） ─────
+ * 「収穫・芽かき」と「収穫」は現時点で業務定義が重複する可能性があるが、
+ * 現行の役割マスター定義をそのまま反映している（今後名称・定義を整理予定）。
+ * 配送は現時点で役割を設定しない（後から追加できる構造にしてある）。
+ */
+const ROLE_MASTER = {
+  栽培: ['コンテナ担当', '収穫・芽かき', '菌床入れ', '菌床廃棄', '注水', '収穫'],
+  出荷: ['出荷管理者', 'パック詰め', '袋詰め'],
+  配送: [],
+};
+
+/* ── 階層マスター（後から階層を追加・変更できる構造） ─────────────
+ * ファーム事業部 → 生産部長 → 栽培課長/出荷課長 → 社員/パート
+ * 配送は現時点で明確な課長・階層体系を設定しない。
+ */
+const TIER_ORDER = ['生産部長', '栽培課長', '出荷課長', '社員', 'パート'];
+
+function roleOwnerDept(roleName) {
+  for (const dept of DEPT_LIST) {
+    if ((ROLE_MASTER[dept] || []).includes(roleName)) return dept;
+  }
+  return null;
+}
+function isCrossDept(person, roleName) {
+  const owner = roleOwnerDept(roleName);
+  return !!owner && owner !== person.dept;
+}
+function skillSymbol(level) {
+  if (level >= 3) return '◎';
+  if (level === 2) return '○';
+  if (level === 1) return '△';
+  return '－';
+}
+function skillLevelClass(level) {
+  return 'lv' + (level >= 3 ? 3 : level === 2 ? 2 : level === 1 ? 1 : 0);
+}
+
+/* ============================================================================
+ * ダミーデータ（仮名。実在人物ではない）
+ * 複数役割を持つ人・所属横断で業務を担当する人・配送のように役割未設定の拠点・
+ * 採用予定（入社前）の人員を意図的に含めている。
+ * ========================================================================== */
+const DUMMY_PEOPLE = [
+  { id: 'bucho01', name: '生産部長01', site: '全拠点', dept: null, tier: '生産部長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: [], subRoles: [], skills: {}, hiringStatus: '入社済み' },
+
+  // ── いなべ ──────────────────────────────
+  { id: 'kacho-saibai-inabe', name: 'A課長01', site: 'いなべ', dept: '栽培', tier: '栽培課長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['コンテナ担当'], subRoles: ['収穫・芽かき'],
+    skills: { 'コンテナ担当': 3, '収穫・芽かき': 3, '菌床入れ': 2 }, hiringStatus: '入社済み' },
+  { id: 'kacho-shukka-inabe', name: 'B課長01', site: 'いなべ', dept: '出荷', tier: '出荷課長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['出荷管理者'], subRoles: ['パック詰め'],
+    skills: { '出荷管理者': 3, 'パック詰め': 2, '袋詰め': 2 }, hiringStatus: '入社済み' },
+  { id: 'a-emp-01', name: 'A社員01', site: 'いなべ', dept: '栽培', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['コンテナ担当'], subRoles: ['収穫・芽かき', '菌床入れ'],
+    skills: { 'コンテナ担当': 3, '収穫・芽かき': 3, '菌床入れ': 1 }, hiringStatus: '入社済み' },
+  { id: 'a-emp-02', name: 'A社員02', site: 'いなべ', dept: '栽培', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['菌床入れ', '菌床廃棄'], subRoles: ['収穫・芽かき', '注水'],
+    skills: { '菌床入れ': 3, '菌床廃棄': 3, '収穫・芽かき': 2, '注水': 2 }, hiringStatus: '入社済み' },
+  { id: 'a-part-01', name: 'Aパート01', site: 'いなべ', dept: '栽培', tier: 'パート', employment: 'パート',
+    workHoursLabel: '9:00-15:00（週24h）', weeklyHours: 24, mainRoles: ['収穫・芽かき'], subRoles: ['パック詰め'],
+    skills: { '収穫・芽かき': 3, 'パック詰め': 2 }, hiringStatus: '入社済み' }, // ← 栽培所属だが出荷のパック詰めも担当（所属横断）
+  { id: 'b-emp-01', name: 'B社員01', site: 'いなべ', dept: '出荷', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['パック詰め', '袋詰め'], subRoles: [],
+    skills: { 'パック詰め': 3, '袋詰め': 3 }, hiringStatus: '入社済み' },
+  { id: 'b-part-01', name: 'Bパート01', site: 'いなべ', dept: '出荷', tier: 'パート', employment: 'パート',
+    workHoursLabel: '9:00-15:00（週24h）', weeklyHours: 24, mainRoles: ['袋詰め'], subRoles: ['パック詰め'],
+    skills: { '袋詰め': 3, 'パック詰め': 2 }, hiringStatus: '入社済み' },
+  { id: 'c-emp-01', name: 'C社員01', site: 'いなべ', dept: '配送', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:00-17:00（週40h）', weeklyHours: 40, mainRoles: [], subRoles: [], skills: {}, hiringStatus: '入社済み' },
+  { id: 'c-part-01', name: 'Cパート01', site: 'いなべ', dept: '配送', tier: 'パート', employment: 'パート',
+    workHoursLabel: '9:00-13:00（週20h）', weeklyHours: 20, mainRoles: [], subRoles: [], skills: {}, hiringStatus: '入社済み' },
+
+  // ── 群馬 ──────────────────────────────
+  { id: 'kacho-saibai-gunma', name: 'A課長02', site: '群馬', dept: '栽培', tier: '栽培課長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['注水'], subRoles: ['菌床入れ', 'コンテナ担当'],
+    skills: { '注水': 3, '菌床入れ': 3, 'コンテナ担当': 2 }, hiringStatus: '入社済み' },
+  { id: 'kacho-shukka-gunma', name: 'B課長02', site: '群馬', dept: '出荷', tier: '出荷課長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['出荷管理者'], subRoles: ['袋詰め'],
+    skills: { '出荷管理者': 3, '袋詰め': 2 }, hiringStatus: '入社済み' },
+  { id: 'a-emp-03', name: 'A社員03', site: '群馬', dept: '栽培', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['注水'], subRoles: ['菌床入れ', '袋詰め'],
+    skills: { '注水': 3, '菌床入れ': 2, '袋詰め': 1 }, hiringStatus: '入社済み' }, // ← 栽培所属だが出荷の袋詰めを教育中（所属横断）
+  { id: 'a-part-02', name: 'Aパート02', site: '群馬', dept: '栽培', tier: 'パート', employment: 'パート',
+    workHoursLabel: '9:00-15:00（週24h）', weeklyHours: 24, mainRoles: ['収穫'], subRoles: ['菌床廃棄'],
+    skills: { '収穫': 3, '菌床廃棄': 1 }, hiringStatus: '入社済み' },
+  { id: 'b-emp-02', name: 'B社員02', site: '群馬', dept: '出荷', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['袋詰め'], subRoles: ['出荷管理者', 'パック詰め'],
+    skills: { '袋詰め': 3, '出荷管理者': 2, 'パック詰め': 1 }, hiringStatus: '入社済み' },
+  { id: 'c-part-02', name: 'Cパート02', site: '群馬', dept: '配送', tier: 'パート', employment: 'パート',
+    workHoursLabel: '9:00-13:00（週20h）', weeklyHours: 20, mainRoles: [], subRoles: [], skills: {}, hiringStatus: '入社済み' },
+  { id: 'a-part-04', name: 'Aパート04', site: '群馬', dept: '栽培', tier: 'パート', employment: 'パート',
+    workHoursLabel: '未定（入社後に設定）', weeklyHours: 0, mainRoles: [], subRoles: [], skills: {}, hiringStatus: '入社予定' }, // ← 採用予定人員のダミー例
+
+  // ── 南丹 ──────────────────────────────
+  { id: 'kacho-saibai-nantan', name: 'A課長03', site: '南丹', dept: '栽培', tier: '栽培課長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['コンテナ担当'], subRoles: ['収穫'],
+    skills: { 'コンテナ担当': 3, '収穫': 3, '注水': 2 }, hiringStatus: '入社済み' },
+  { id: 'kacho-shukka-nantan', name: 'B課長03', site: '南丹', dept: '出荷', tier: '出荷課長', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['出荷管理者'], subRoles: ['パック詰め'],
+    skills: { '出荷管理者': 3, 'パック詰め': 2 }, hiringStatus: '入社済み' },
+  { id: 'a-part-03', name: 'Aパート03', site: '南丹', dept: '栽培', tier: 'パート', employment: 'パート',
+    workHoursLabel: '9:00-15:00（週24h）', weeklyHours: 24, mainRoles: ['菌床入れ'], subRoles: ['注水', '収穫・芽かき'],
+    skills: { '菌床入れ': 3, '注水': 2, '収穫・芽かき': 1 }, hiringStatus: '入社済み' },
+  { id: 'b-emp-03', name: 'B社員03', site: '南丹', dept: '出荷', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:30-17:30（週40h）', weeklyHours: 40, mainRoles: ['パック詰め'], subRoles: ['出荷管理者'],
+    skills: { 'パック詰め': 3, '出荷管理者': 1 }, hiringStatus: '入社済み' }, // ← 課長候補として指導中（レベル1＝教育中）
+  { id: 'c-emp-02', name: 'C社員02', site: '南丹', dept: '配送', tier: '社員', employment: '正社員',
+    workHoursLabel: '8:00-17:00（週40h）', weeklyHours: 40, mainRoles: [], subRoles: [], skills: {}, hiringStatus: '入社済み' },
+];
+
+let PEOPLE = [];
+let currentView = 'org';
+let rolemapFilterSite = 'all';
+let rolemapFilterDept = 'all';
+
+/* ============================================================================
+ * データ読み込み（共有スプレッドシート優先、未設定/失敗時はダミーデータ）
+ * ========================================================================== */
+async function fetchSheetTable(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&headers=1`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  return json.table;
+}
+
+function parseListField(v) {
+  return String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+function parseSkillField(v) {
+  const skills = {};
+  parseListField(v).forEach(pair => {
+    const [role, lv] = pair.split(':').map(s => s.trim());
+    if (role) skills[role] = parseInt(lv, 10) || 0;
+  });
+  return skills;
+}
+
+function parseMemberTable(table) {
+  const colMap = {};
+  table.cols.forEach((c, i) => {
+    const label = (c.label || '').replace(/\s/g, '');
+    if (label.includes('拠点')) colMap.site = i;
+    if (label === '所属') colMap.dept = i;
+    if (label.includes('階層')) colMap.tier = i;
+    if (label.includes('雇用')) colMap.employment = i;
+    if (label.includes('仮名') || label.includes('名前')) colMap.name = i;
+    if (label.includes('勤務時間表示')) colMap.workHoursLabel = i;
+    if (label.includes('週勤務時間')) colMap.weeklyHours = i;
+    if (label.includes('主担当')) colMap.mainRoles = i;
+    if (label.includes('副担当')) colMap.subRoles = i;
+    if (label === 'スキル') colMap.skills = i;
+    if (label.includes('採用状況')) colMap.hiringStatus = i;
+    if (label === 'ID') colMap.id = i;
+  });
+
+  const get = (cells, key) => (colMap[key] != null ? (cells[colMap[key]]?.v ?? '') : '');
+
+  return (table.rows || []).map((row, idx) => {
+    const cells = row.c || [];
+    const name = String(get(cells, 'name') || '').trim();
+    if (!name) return null;
+    return {
+      id: String(get(cells, 'id') || `row-${idx}`),
+      name,
+      site: String(get(cells, 'site') || '').trim(),
+      dept: String(get(cells, 'dept') || '').trim() || null,
+      tier: String(get(cells, 'tier') || '').trim(),
+      employment: String(get(cells, 'employment') || '').trim(),
+      workHoursLabel: String(get(cells, 'workHoursLabel') || '').trim(),
+      weeklyHours: parseFloat(get(cells, 'weeklyHours')) || 0,
+      mainRoles: parseListField(get(cells, 'mainRoles')),
+      subRoles: parseListField(get(cells, 'subRoles')),
+      skills: parseSkillField(get(cells, 'skills')),
+      hiringStatus: String(get(cells, 'hiringStatus') || '').trim() || '入社済み',
+    };
+  }).filter(Boolean);
+}
+
+async function loadPeople() {
+  const noteEl = document.getElementById('data-source-note');
+  if (!SHEET_ID) {
+    PEOPLE = JSON.parse(JSON.stringify(DUMMY_PEOPLE));
+    noteEl.innerHTML = `<div class="note-banner">
+      <b>ドラフト表示中：</b> このページは共有スプレッドシート未設定のため、構造・UI検証用のダミーデータ（仮名）を表示しています。
+      実データ運用時は、この HTML 冒頭のコメントに記載した形式で共有スプレッドシートを作成し、
+      <code>SHEET_ID</code> を設定すると、ファーム勤務時間ダッシュボードと同様に他アカウントとの共同編集（スプレッドシート上での直接編集）が反映されるようになります。
+    </div>`;
+    return;
+  }
+  try {
+    const table = await fetchSheetTable(MEMBER_SHEET_NAME);
+    const people = parseMemberTable(table);
+    if (!people.length) throw new Error('メンバーが0件でした');
+    PEOPLE = people;
+    noteEl.innerHTML = `<div class="note-banner" style="color:var(--ok);border-color:rgba(52,211,153,0.35);background:rgba(52,211,153,0.08)">
+      共有スプレッドシートからメンバーデータを読み込みました（${people.length}名）。スプレッドシートを編集すると「更新」ボタンで反映されます。
+    </div>`;
+  } catch (e) {
+    PEOPLE = JSON.parse(JSON.stringify(DUMMY_PEOPLE));
+    noteEl.innerHTML = `<div class="note-banner error">
+      共有スプレッドシートの読み込みに失敗したため、ダミーデータを表示しています（${e.message || e}）。
+    </div>`;
+  }
+}
+
+/* ============================================================================
+ * 共通ヘルパー
+ * ========================================================================== */
+function tierBadgeClass(tier) {
+  if (tier === '生産部長') return 'badge-tier-生産部長';
+  if (tier.endsWith('課長')) return 'badge-tier-課長';
+  return '';
+}
+function personRoleChipsHtml(person) {
+  const chips = [];
+  person.mainRoles.forEach(r => {
+    const cross = isCrossDept(person, r);
+    chips.push(`<span class="role-chip main${cross ? ' cross' : ''}"${cross ? ` data-dept="${roleOwnerDept(r)}"` : ''}>◎主 ${r}</span>`);
+  });
+  person.subRoles.forEach(r => {
+    const cross = isCrossDept(person, r);
+    chips.push(`<span class="role-chip sub${cross ? ' cross' : ''}"${cross ? ` data-dept="${roleOwnerDept(r)}"` : ''}>副 ${r}</span>`);
+  });
+  if (!chips.length) chips.push(`<span class="role-chip" style="color:var(--muted)">（役割未設定）</span>`);
+  return chips.join('');
+}
+function personCardHtml(person) {
+  const pending = person.hiringStatus !== '入社済み';
+  return `
+    <div class="person-card${pending ? ' pending' : ''}">
+      <div class="p-name">
+        ${person.name}
+        ${person.tier ? `<span class="badge ${tierBadgeClass(person.tier)}" style="${tierBadgeClass(person.tier) ? '' : 'background:rgba(136,146,164,0.15);color:var(--muted)'}">${person.tier}</span>` : ''}
+        <span class="badge badge-emp-${person.employment || 'パート'}">${person.employment || '-'}</span>
+        ${pending ? `<span class="badge badge-hire-pending">${person.hiringStatus}</span>` : ''}
+      </div>
+      <div class="p-hours">🕒 ${person.workHoursLabel || '未設定'}</div>
+      <div class="p-roles">${personRoleChipsHtml(person)}</div>
+    </div>`;
+}
+
+/* ============================================================================
+ * ① 組織図ビュー
+ * ========================================================================== */
+function renderOrgView() {
+  const bucho = PEOPLE.find(p => p.tier === '生産部長');
+  let html = `<div class="org-root">` + (bucho ? `
+      <div class="bucho-card">${personCardHtml(bucho)}</div>
+      <div class="org-arrow">↓ ファーム事業部 全拠点統括</div>` : '') + `
+      <div class="site-grid">`;
+
+  SITE_LIST.forEach(site => {
+    const sitePeople = PEOPLE.filter(p => p.site === site.name);
+    html += `
+      <div class="site-block">
+        <div class="site-block-header">
+          <span class="site-dot" style="background:${site.color}"></span>${site.name}
+          <span style="margin-left:auto;font-weight:400;font-size:0.75rem;color:var(--muted)">${sitePeople.length}名</span>
+        </div>`;
+
+    DEPT_LIST.forEach(dept => {
+      const deptPeople = sitePeople.filter(p => p.dept === dept);
+      if (!deptPeople.length) return;
+      const manager = deptPeople.find(p => p.tier.endsWith('課長'));
+      const staff = deptPeople.filter(p => p !== manager).sort((a, b) => (a.tier === 'パート' ? 1 : 0) - (b.tier === 'パート' ? 1 : 0));
+      html += `
+        <div class="dept-col">
+          <div class="dept-col-header">
+            <span class="badge badge-dept-${dept}">${dept}</span>
+            ${!manager ? `<span class="dept-empty-note">課長未設定</span>` : ''}
+          </div>
+          ${manager ? `<div class="person-cards" style="grid-template-columns:1fr">${personCardHtml(manager)}</div>` : ''}
+          <div class="person-cards">${staff.map(personCardHtml).join('') || '<span class="dept-empty-note">所属者なし</span>'}</div>
+        </div>`;
+    });
+
+    html += `</div>`;
+  });
+
+  html += `</div></div>`;
+  document.getElementById('view-root').innerHTML = html;
+}
+
+/* ============================================================================
+ * ② 役割マップビュー
+ * ========================================================================== */
+function allRolesFlat() {
+  const roles = [];
+  DEPT_LIST.forEach(dept => (ROLE_MASTER[dept] || []).forEach(r => roles.push({ dept, role: r })));
+  return roles;
+}
+function renderRoleMapControls() {
+  const sites = ['all', ...SITE_LIST.map(s => s.name)];
+  const depts = ['all', ...DEPT_LIST];
+  return `
+    <div class="rolemap-controls">
+      <label>拠点:
+        <select id="rm-site-filter">
+          ${sites.map(s => `<option value="${s}"${s === rolemapFilterSite ? ' selected' : ''}>${s === 'all' ? 'すべて' : s}</option>`).join('')}
+        </select>
+      </label>
+      <label>所属:
+        <select id="rm-dept-filter">
+          ${depts.map(d => `<option value="${d}"${d === rolemapFilterDept ? ' selected' : ''}>${d === 'all' ? 'すべて' : d}</option>`).join('')}
+        </select>
+      </label>
+    </div>`;
+}
+function renderRoleMapView() {
+  const roles = allRolesFlat();
+  let people = PEOPLE.filter(p => p.tier !== '生産部長');
+  if (rolemapFilterSite !== 'all') people = people.filter(p => p.site === rolemapFilterSite);
+  if (rolemapFilterDept !== 'all') people = people.filter(p => p.dept === rolemapFilterDept);
+
+  let html = `
+    ${renderRoleMapControls()}
+    <div class="legend">
+      <span class="item"><span class="sym">◎</span>レベル3：指導可能・主担当</span>
+      <span class="item"><span class="sym">○</span>レベル2：一人で実施可能</span>
+      <span class="item"><span class="sym">△</span>レベル1：補助可能・教育中</span>
+      <span class="item"><span class="sym">－</span>レベル0：未経験・担当不可</span>
+      <span class="item"><span class="dot" style="background:rgba(56,189,248,0.5)"></span>主担当役割</span>
+      <span class="item"><span class="dot" style="background:rgba(244,114,182,0.5)"></span>所属横断（自分の所属外の役割）</span>
+    </div>
+    <div class="table-wrap"><table class="rolemap">
+      <thead><tr>
+        <th class="rowhead">仮名</th><th class="rowhead">拠点</th><th class="rowhead">所属</th><th class="rowhead">階層</th>
+        ${roles.map((r, i) => {
+          const firstOfDept = i === 0 || roles[i - 1].dept !== r.dept;
+          return `<th${firstOfDept ? ' class="dept-group-first"' : ''} title="所属: ${r.dept}">${r.role}</th>`;
+        }).join('')}
+      </tr></thead>
+      <tbody>`;
+
+  if (!people.length) {
+    html += `<tr><td colspan="${4 + roles.length}" class="empty-msg">条件に合うメンバーがいません</td></tr>`;
+  }
+  people.forEach(p => {
+    html += `<tr>
+      <td class="rowhead rm-name">${p.name}${p.hiringStatus !== '入社済み' ? ` <span class="badge badge-hire-pending">${p.hiringStatus}</span>` : ''}</td>
+      <td class="rowhead">${p.site}</td>
+      <td class="rowhead"><span class="badge badge-dept-${p.dept}">${p.dept || '-'}</span></td>
+      <td class="rowhead">${p.tier}</td>
+      ${roles.map((r, i) => {
+        const lv = p.skills[r.role] || 0;
+        const isMain = p.mainRoles.includes(r.role);
+        const cross = lv > 0 && isCrossDept(p, r.role);
+        const firstOfDept = i === 0 || roles[i - 1].dept !== r.dept;
+        const cls = ['rm-cell', skillLevelClass(lv)];
+        if (isMain) cls.push('main');
+        if (cross) cls.push('cross');
+        return `<td${firstOfDept ? ' class="dept-group-first"' : ''}><span class="${cls.join(' ')}" title="${r.role}: レベル${lv}${cross ? '（所属横断）' : ''}">${skillSymbol(lv)}</span></td>`;
+      }).join('')}
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  if (roles.length === 0) html += `<div class="empty-msg">役割が登録されていません</div>`;
+  html += `<div class="dept-empty-note">※ 配送は役割マスター未設定のため列がありません（後から役割を追加できる構造にしています）</div>`;
+
+  document.getElementById('view-root').innerHTML = html;
+
+  document.getElementById('rm-site-filter').onchange = e => { rolemapFilterSite = e.target.value; renderRoleMapView(); };
+  document.getElementById('rm-dept-filter').onchange = e => { rolemapFilterDept = e.target.value; renderRoleMapView(); };
+}
+
+/* ============================================================================
+ * ③ 拠点別ビュー
+ * ========================================================================== */
+function renderSiteView() {
+  let html = `<div class="site-summary-grid">`;
+
+  SITE_LIST.forEach(site => {
+    const people = PEOPLE.filter(p => p.site === site.name);
+    const empCount = people.filter(p => p.employment === '正社員').length;
+    const partCount = people.filter(p => p.employment === 'パート').length;
+    const totalHours = people.reduce((s, p) => s + (p.weeklyHours || 0), 0);
+    const pendingCount = people.filter(p => p.hiringStatus !== '入社済み').length;
+
+    const deptCounts = DEPT_LIST.map(d => ({ dept: d, count: people.filter(p => p.dept === d).length }));
+
+    const roles = allRolesFlat();
+    const roleRows = roles.map(({ dept, role }) => {
+      const withSkill = people.filter(p => (p.skills[role] || 0) > 0);
+      const avgLv = withSkill.length ? (withSkill.reduce((s, p) => s + p.skills[role], 0) / withSkill.length) : 0;
+      const teachers = withSkill.filter(p => p.skills[role] >= 3).length;
+      return { dept, role, count: withSkill.length, avgLv, teachers };
+    });
+
+    html += `
+      <div class="summary-card">
+        <div class="summary-card-header"><span class="site-dot" style="background:${site.color}"></span>${site.name}</div>
+        <div class="summary-card-body">
+          <div class="metric-row highlight"><span class="label">人員数</span><span>${people.length}名${pendingCount ? `（うち入社予定 ${pendingCount}名）` : ''}</span></div>
+          <div class="metric-row"><span class="label">社員 / パート</span><span>${empCount}名 / ${partCount}名</span></div>
+          ${deptCounts.map(d => `<div class="metric-row"><span class="label">所属：${d.dept}</span><span>${d.count}名</span></div>`).join('')}
+          <div class="metric-row highlight"><span class="label">週合計勤務時間</span><span>${totalHours}時間/週</span></div>
+
+          <div>
+            <div style="font-size:0.8rem;font-weight:700;margin-bottom:6px;">役割別 担当者数・スキル状況</div>
+            <table class="role-coverage-table">
+              <thead><tr><th>役割</th><th>担当者数</th><th>平均Lv</th><th>指導可能</th></tr></thead>
+              <tbody>
+                ${roleRows.length ? roleRows.map(r => `
+                  <tr>
+                    <td><span class="badge badge-dept-${r.dept}" style="margin-right:4px">${r.dept}</span>${r.role}</td>
+                    <td>${r.count}名</td>
+                    <td>
+                      <div class="mini-bar-track"><div class="mini-bar-fill" style="width:${(r.avgLv / 3 * 100).toFixed(0)}%"></div></div>
+                    </td>
+                    <td>${r.teachers}名</td>
+                  </tr>`).join('') : `<tr><td colspan="4" class="empty-msg">役割未設定</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+  });
+
+  html += `</div>`;
+  document.getElementById('view-root').innerHTML = html;
+}
+
+/* ============================================================================
+ * ビュー切り替え・初期化
+ * ========================================================================== */
+function renderCurrentView() {
+  if (currentView === 'org') renderOrgView();
+  else if (currentView === 'rolemap') renderRoleMapView();
+  else renderSiteView();
+}
+
+document.querySelectorAll('#view-tabs .tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    currentView = btn.dataset.view;
+    document.querySelectorAll('#view-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderCurrentView();
+  };
+});
+
+async function loadAll() {
+  document.getElementById('view-root').innerHTML = `<div class="loading">読み込み中...</div>`;
+  await loadPeople();
+  renderCurrentView();
+  document.getElementById('last-updated').textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+}
+
+document.getElementById('refresh-btn').onclick = loadAll;
+loadAll();
+</script>
+</body>
+</html>
