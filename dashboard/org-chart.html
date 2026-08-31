@@ -179,6 +179,32 @@
   .mini-bar-track { background: #0f1117; border-radius: 999px; height: 6px; width: 100%; overflow: hidden; }
   .mini-bar-fill { background: var(--accent); height: 100%; }
 
+  /* ── ④サマリービュー（勤務表形式） ── */
+  .role-legend { display: flex; flex-wrap: wrap; gap: 10px; }
+  .role-legend .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(255,255,255,0.25); }
+  .summary-dept-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .summary-dept-block-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; font-weight: 700;
+  }
+  table.summary-table { border-collapse: collapse; font-size: 0.8rem; width: 100%; }
+  table.summary-table th, table.summary-table td {
+    padding: 6px 10px; border: 1px solid var(--border); text-align: left; white-space: nowrap;
+  }
+  table.summary-table thead th { background: var(--surface2); color: var(--muted); font-size: 0.72rem; text-align: center; }
+  table.summary-table thead .site-head { font-size: 0.85rem; color: var(--text); }
+  table.summary-table .tier-label {
+    writing-mode: horizontal-tb; text-align: center; vertical-align: middle;
+    background: var(--surface2); font-weight: 700; font-size: 0.75rem; color: var(--muted);
+    white-space: normal; min-width: 64px;
+  }
+  table.summary-table td.name-cell { font-weight: 700; color: #0f1117; text-align: center; }
+  table.summary-table td.name-cell.empty-slot { background: transparent !important; color: var(--border); font-weight: 400; text-align: center; }
+  table.summary-table td.name-cell.no-role { background: rgba(136,146,164,0.25); color: var(--text); }
+  table.summary-table td.name-cell.pending-slot { background: var(--ok); color: #0f1117; }
+  table.summary-table td.hours-cell { text-align: center; color: var(--muted); }
+  table.summary-table td.tier-cell { text-align: center; color: var(--muted); font-size: 0.74rem; }
+
   .loading, .empty-msg { color: var(--muted); font-size: 0.9rem; padding: 20px; text-align: center; }
 
   @media (max-width: 640px) {
@@ -203,6 +229,7 @@
     <button class="tab-btn active" data-view="org">① 組織図ビュー</button>
     <button class="tab-btn" data-view="rolemap">② 役割マップビュー</button>
     <button class="tab-btn" data-view="site">③ 拠点別ビュー</button>
+    <button class="tab-btn" data-view="summary">④ サマリー（勤務表形式）</button>
   </div>
 </div>
 
@@ -289,6 +316,24 @@ function skillSymbol(level) {
 }
 function skillLevelClass(level) {
   return 'lv' + (level >= 3 ? 3 : level === 2 ? 2 : level === 1 ? 1 : 0);
+}
+
+/* ── 役割ごとの表示色（④サマリービューで氏名セルの背景色分けに使用） ──
+ * 役割マスターに登録された順に自動でパレットを割り当てるため、
+ * 役割を追加してもコード変更なしで色が付く。
+ */
+const ROLE_COLOR_PALETTE = ['#67e8f9', '#fde047', '#fca5a5', '#c4b5fd', '#86efac', '#fdba74', '#93c5fd', '#f0abfc', '#fcd34d', '#5eead4'];
+const ROLE_COLOR_MAP = (() => {
+  const map = {};
+  let i = 0;
+  DEPT_LIST.forEach(dept => (ROLE_MASTER[dept] || []).forEach(role => {
+    map[role] = ROLE_COLOR_PALETTE[i % ROLE_COLOR_PALETTE.length];
+    i++;
+  }));
+  return map;
+})();
+function roleColor(role) {
+  return ROLE_COLOR_MAP[role] || '#8892a4';
 }
 
 /* ============================================================================
@@ -680,11 +725,90 @@ function renderSiteView() {
 }
 
 /* ============================================================================
+ * ④ サマリービュー（勤務表形式）
+ * 既存の勤務時間管理表と同じ見た目（拠点を横並びの列、階層を行のまとまりにした表）で、
+ * 階層・役割（氏名セルの色分け）・名前・勤務時間をまとめて確認できるようにしたもの。
+ * ========================================================================== */
+function tierGroupsForDept(dept) {
+  if (dept === '栽培') return ['栽培課長', '社員', 'パート'];
+  if (dept === '出荷') return ['出荷課長', '社員', 'パート'];
+  return ['社員', 'パート']; // 配送：現時点で課長階層は設定しない
+}
+function renderRoleLegend() {
+  const items = [];
+  DEPT_LIST.forEach(dept => (ROLE_MASTER[dept] || []).forEach(role => {
+    items.push(`<span class="item"><span class="swatch" style="background:${roleColor(role)}"></span>${role}</span>`);
+  }));
+  items.push(`<span class="item"><span class="swatch" style="background:var(--ok)"></span>入社予定（要増員）</span>`);
+  items.push(`<span class="item"><span class="swatch" style="background:rgba(136,146,164,0.5)"></span>役割未設定</span>`);
+  return `<div class="legend role-legend">${items.join('')}</div>`;
+}
+function summaryNameCellHtml(person) {
+  if (!person) return `<td class="name-cell empty-slot">-</td><td class="hours-cell">-</td>`;
+  const pending = person.hiringStatus !== '入社済み';
+  const bg = pending ? 'var(--ok)' : (person.mainRoles.length ? roleColor(person.mainRoles[0]) : null);
+  const cls = ['name-cell'];
+  if (pending) cls.push('pending-slot');
+  else if (!person.mainRoles.length) cls.push('no-role');
+  const roleText = [...person.mainRoles.map(r => `主:${r}`), ...person.subRoles.map(r => `副:${r}`)].join(' / ') || '役割未設定';
+  const title = `${person.name}｜${person.tier}｜${roleText}｜${person.hiringStatus}｜${person.workHoursLabel || '勤務時間未設定'}`;
+  const hours = person.weeklyHours ? `${person.weeklyHours}h/週` : '-';
+  return `<td class="${cls.join(' ')}" style="${bg ? `background:${bg}` : ''}" title="${title}">${person.name}</td><td class="hours-cell" title="${title}">${hours}</td>`;
+}
+function renderSummaryView() {
+  let html = renderRoleLegend();
+
+  const bucho = PEOPLE.find(p => p.tier === '生産部長');
+  if (bucho) {
+    html += `
+      <div class="summary-dept-block">
+        <div class="summary-dept-block-header"><span class="badge badge-tier-生産部長">生産部長</span>全拠点統括</div>
+        <div class="table-wrap"><table class="summary-table">
+          <thead><tr><th class="tier-label">階層</th><th>氏名</th><th>勤務時間</th></tr></thead>
+          <tbody><tr><td class="tier-label">${bucho.tier}</td>${summaryNameCellHtml(bucho)}</tr></tbody>
+        </table></div>
+      </div>`;
+  }
+
+  DEPT_LIST.forEach(dept => {
+    const deptPeople = PEOPLE.filter(p => p.dept === dept);
+    if (!deptPeople.length) return;
+    const tierGroups = tierGroupsForDept(dept);
+
+    html += `
+      <div class="summary-dept-block">
+        <div class="summary-dept-block-header"><span class="badge badge-dept-${dept}">${dept}</span></div>
+        <div class="table-wrap"><table class="summary-table">
+          <thead>
+            <tr><th rowspan="2" class="tier-label">階層</th>${SITE_LIST.map(s => `<th colspan="2" class="site-head"><span class="site-dot" style="background:${s.color}"></span> ${s.name}</th>`).join('')}</tr>
+            <tr>${SITE_LIST.map(() => `<th>氏名</th><th>勤務時間</th>`).join('')}</tr>
+          </thead>
+          <tbody>`;
+
+    tierGroups.forEach(tier => {
+      const siteColumns = SITE_LIST.map(site => deptPeople.filter(p => p.site === site.name && p.tier === tier));
+      const maxRows = Math.max(1, ...siteColumns.map(arr => arr.length));
+      for (let row = 0; row < maxRows; row++) {
+        html += `<tr>`;
+        if (row === 0) html += `<td rowspan="${maxRows}" class="tier-label">${tier}</td>`;
+        siteColumns.forEach(arr => { html += summaryNameCellHtml(arr[row] || null); });
+        html += `</tr>`;
+      }
+    });
+
+    html += `</tbody></table></div></div>`;
+  });
+
+  document.getElementById('view-root').innerHTML = html;
+}
+
+/* ============================================================================
  * ビュー切り替え・初期化
  * ========================================================================== */
 function renderCurrentView() {
   if (currentView === 'org') renderOrgView();
   else if (currentView === 'rolemap') renderRoleMapView();
+  else if (currentView === 'summary') renderSummaryView();
   else renderSiteView();
 }
 
