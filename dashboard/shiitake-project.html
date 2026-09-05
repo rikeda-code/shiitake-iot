@@ -243,7 +243,7 @@
 </nav>
 
 <main id="app"></main>
-<footer class="app-footer">椎茸栽培標準化プロジェクト ダッシュボード ｜ データはこのブラウザ内に保存されます（localStorage）</footer>
+<footer class="app-footer">椎茸栽培標準化プロジェクト ダッシュボード ｜ データはこのブラウザ内に保存されます（IndexedDB）</footer>
 
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this) closeModal()">
   <div class="modal-box" id="modalBox"></div>
@@ -346,32 +346,93 @@ function seedDB() {
   };
 }
 
-function loadDB() {
+/* ---- 保存先: IndexedDB（localStorageは他のダッシュボードとオリジン単位で容量を共有し
+   容量が小さいため、より大きな容量枠を使えるIndexedDBに保存する。壊れている・使えない
+   環境ではlocalStorageにフォールバックする） ---- */
+const IDB_NAME = 'ShiitakeProjectStore';
+const IDB_VERSION = 1;
+const IDB_STORE = 'kv';
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function idbGet(key) {
+  return idbOpen().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+}
+function idbPut(key, value) {
+  return idbOpen().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
+function normalizeDB(parsed) {
+  parsed.tasks = parsed.tasks || [];
+  parsed.materials = parsed.materials || [];
+  parsed.hypotheses = parsed.hypotheses || [];
+  parsed.knowledge = parsed.knowledge || [];
+  parsed.history = parsed.history || [];
+  return parsed;
+}
+function loadDBFromLocalStorageOrSeed() {
   try {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.items)) {
-        parsed.tasks = parsed.tasks || [];
-        parsed.materials = parsed.materials || [];
-        parsed.hypotheses = parsed.hypotheses || [];
-        parsed.knowledge = parsed.knowledge || [];
-        parsed.history = parsed.history || [];
-        return parsed;
-      }
+      if (parsed && Array.isArray(parsed.items)) return normalizeDB(parsed);
     }
   } catch (e) { console.error('DBの読み込みに失敗しました', e); }
   const fresh = seedDB();
-  localStorage.setItem(DB_KEY, JSON.stringify(fresh));
+  try { localStorage.setItem(DB_KEY, JSON.stringify(fresh)); } catch (e) { /* ignore */ }
   return fresh;
 }
-function saveDB() {
+async function loadDB() {
   try {
-    localStorage.setItem(DB_KEY, JSON.stringify(DB));
+    const existing = await idbGet(DB_KEY);
+    if (existing && Array.isArray(existing.items)) return normalizeDB(existing);
+    // IndexedDBにまだ記録がない場合、旧localStorageのデータがあれば移行する
+    let migrated = null;
+    try {
+      const raw = localStorage.getItem(DB_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.items)) migrated = normalizeDB(parsed);
+      }
+    } catch (e) { /* 壊れた旧データは無視して新規作成にフォールバック */ }
+    const data = migrated || seedDB();
+    await idbPut(DB_KEY, data);
+    if (migrated) localStorage.removeItem(DB_KEY); // 共有容量だったlocalStorageを解放
+    return data;
   } catch (e) {
-    console.error('保存に失敗しました', e);
-    alert('データの保存に失敗しました。ブラウザのストレージ容量が上限に達している可能性があります。\n\n「データ管理」画面からバックアップ（エクスポート）を行い、容量の大きい資料・メモを整理してから、もう一度お試しください。\n\nエラー内容: ' + (e && e.message ? e.message : e));
+    console.error('IndexedDBの利用に失敗したためlocalStorageにフォールバックします', e);
+    return loadDBFromLocalStorageOrSeed();
   }
+}
+function saveDB() {
+  idbPut(DB_KEY, DB).catch(e => {
+    console.error('IndexedDBへの保存に失敗しました。localStorageにフォールバックします', e);
+    try {
+      localStorage.setItem(DB_KEY, JSON.stringify(DB));
+    } catch (e2) {
+      console.error('保存に失敗しました', e2);
+      alert('データの保存に失敗しました。ブラウザのストレージ容量が上限に達している可能性があります。\n\n「データ管理」画面からバックアップ（エクスポート）を行ってください。\n\nエラー内容: ' + (e2 && e2.message ? e2.message : e2));
+    }
+  });
 }
 
 function getItem(id) { return DB.items.find(x => x.id === id); }
@@ -1547,11 +1608,25 @@ function renderSearchView() {
 /* =========================================================
    データ管理（エクスポート・インポート）
 ========================================================= */
-const ESTIMATED_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024; // localStorageの実用上の下限目安(Safari等)。ブラウザにより実際は10MB程度まで使えることが多い
+function updateStorageEstimate() {
+  const box = document.getElementById('storageEstimateBox');
+  if (!box) return;
+  if (!(navigator.storage && navigator.storage.estimate)) { box.textContent = ''; return; }
+  navigator.storage.estimate().then(({ usage, quota }) => {
+    const box2 = document.getElementById('storageEstimateBox');
+    if (!box2) return;
+    if (typeof usage !== 'number' || typeof quota !== 'number' || !quota) { box2.textContent = ''; return; }
+    const pct = Math.min(100, Math.round((usage / quota) * 100));
+    const level = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
+    box2.innerHTML = `
+      <div class="flex-between mb8"><span>このブラウザ（オリジン）全体の使用量: 約${(usage/1024/1024).toFixed(1)}MB ／ 上限目安 約${(quota/1024/1024).toFixed(0)}MB（${pct}%）</span></div>
+      <div class="storage-bar"><div class="storage-bar-fill storage-${level}" style="width:${pct}%"></div></div>
+      ${level === 'danger' ? '<p class="small" style="color:var(--danger);margin-top:6px;">ブラウザ全体の空き容量が少なくなっています。念のためエクスポートでバックアップしてください。</p>' : ''}
+    `;
+  }).catch(() => { box.textContent = ''; });
+}
 function renderDataView() {
   const size = new Blob([JSON.stringify(DB)]).size;
-  const pct = Math.min(100, Math.round((size / ESTIMATED_STORAGE_LIMIT_BYTES) * 100));
-  const level = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
   const byType = [
     ['項目', DB.items],
     ['タスク', DB.tasks],
@@ -1563,20 +1638,15 @@ function renderDataView() {
   return `
   <div class="panel">
     <h2 style="border:none;margin:0 0 12px;padding:0;">データ管理</h2>
-    <p class="muted small">プロジェクトの全データ（項目・タスク・資料・仮説・知識・履歴）はこのブラウザの localStorage に保存されています。長期プロジェクトのため、定期的にバックアップ（エクスポート）してください。</p>
+    <p class="muted small">プロジェクトの全データ（項目・タスク・資料・仮説・知識・履歴）はこのブラウザの IndexedDB に保存されています。多くのブラウザで数百MB〜数GBの容量を利用できるため、通常の利用で容量を圧迫することはほとんどありません。長期プロジェクトのため、念のため定期的にバックアップ（エクスポート）してください。</p>
     <div class="storage-meter mt12">
-      <div class="flex-between mb8">
-        <span class="small">使用量の目安: 約${Math.round(size/1024).toLocaleString()}KB ／ 約${Math.round(ESTIMATED_STORAGE_LIMIT_BYTES/1024/1024)}MB（${pct}%）</span>
-      </div>
-      <div class="storage-bar"><div class="storage-bar-fill storage-${level}" style="width:${pct}%"></div></div>
-      ${level === 'danger' ? '<p class="small" style="color:var(--danger);margin-top:6px;">残り容量が少なくなっています。エクスポートで必ずバックアップし、容量の大きい資料・メモの削除を検討してください。</p>' : ''}
-      ${level === 'warn' ? '<p class="small" style="color:var(--warn);margin-top:6px;">使用量が増えてきています。定期的なバックアップをおすすめします。</p>' : ''}
+      <p class="small mb8">このアプリのデータ量: 約${Math.round(size/1024).toLocaleString()}KB</p>
+      <div id="storageEstimateBox" class="small muted">このブラウザの空き容量を確認中...</div>
     </div>
     <table class="list mt12">
       <thead><tr><th>種別</th><th>件数</th><th>データ量（概算）</th></tr></thead>
       <tbody>${byType.map(([label, count, bytes]) => `<tr><td>${label}</td><td>${count}</td><td class="small muted">約${Math.round(bytes/1024).toLocaleString()}KB</td></tr>`).join('')}</tbody>
     </table>
-    <p class="small muted mt8">※ 実際に利用できる容量はブラウザにより異なります（目安5〜10MB程度）。上限に達すると保存時にエラーメッセージが表示されます。</p>
     <hr class="sep">
     <div class="grid-2">
       <div>
@@ -1650,13 +1720,13 @@ function route() {
     case 'knowledge': app.innerHTML = id ? renderKnowledgeDetail(id) : renderKnowledgeList(); break;
     case 'history': app.innerHTML = renderHistory(); break;
     case 'search': app.innerHTML = renderSearchView(); break;
-    case 'data': app.innerHTML = renderDataView(); break;
+    case 'data': app.innerHTML = renderDataView(); updateStorageEstimate(); break;
     default: app.innerHTML = renderDashboard();
   }
 }
 window.addEventListener('hashchange', route);
-window.addEventListener('DOMContentLoaded', () => {
-  DB = loadDB();
+window.addEventListener('DOMContentLoaded', async () => {
+  DB = await loadDB();
   if (!location.hash) location.hash = '#/dashboard';
   route();
 });
