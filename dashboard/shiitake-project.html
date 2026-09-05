@@ -214,6 +214,12 @@
   .icon-btn { background: none; border: none; padding: 2px 6px; color: var(--muted); }
   .icon-btn:hover { color: var(--danger); }
   footer.app-footer { text-align: center; color: var(--muted-2); font-size: 14.5px; padding: 24px 0 40px; }
+
+  .storage-bar { height: 10px; background: #eceeea; border-radius: 5px; overflow: hidden; }
+  .storage-bar-fill { height: 100%; border-radius: 5px; }
+  .storage-bar-fill.storage-ok { background: var(--accent); }
+  .storage-bar-fill.storage-warn { background: var(--warn); }
+  .storage-bar-fill.storage-danger { background: var(--danger); }
 </style>
 </head>
 <body>
@@ -360,7 +366,12 @@ function loadDB() {
   return fresh;
 }
 function saveDB() {
-  localStorage.setItem(DB_KEY, JSON.stringify(DB));
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify(DB));
+  } catch (e) {
+    console.error('保存に失敗しました', e);
+    alert('データの保存に失敗しました。ブラウザのストレージ容量が上限に達している可能性があります。\n\n「データ管理」画面からバックアップ（エクスポート）を行い、容量の大きい資料・メモを整理してから、もう一度お試しください。\n\nエラー内容: ' + (e && e.message ? e.message : e));
+  }
 }
 
 function getItem(id) { return DB.items.find(x => x.id === id); }
@@ -1536,12 +1547,36 @@ function renderSearchView() {
 /* =========================================================
    データ管理（エクスポート・インポート）
 ========================================================= */
+const ESTIMATED_STORAGE_LIMIT_BYTES = 5 * 1024 * 1024; // localStorageの実用上の下限目安(Safari等)。ブラウザにより実際は10MB程度まで使えることが多い
 function renderDataView() {
   const size = new Blob([JSON.stringify(DB)]).size;
+  const pct = Math.min(100, Math.round((size / ESTIMATED_STORAGE_LIMIT_BYTES) * 100));
+  const level = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
+  const byType = [
+    ['項目', DB.items],
+    ['タスク', DB.tasks],
+    ['資料', DB.materials],
+    ['仮説', DB.hypotheses],
+    ['知識', DB.knowledge],
+    ['履歴', DB.history],
+  ].map(([label, arr]) => [label, arr.length, new Blob([JSON.stringify(arr)]).size]);
   return `
   <div class="panel">
     <h2 style="border:none;margin:0 0 12px;padding:0;">データ管理</h2>
-    <p class="muted small">プロジェクトの全データ（項目・タスク・資料・仮説・知識・履歴）はこのブラウザの localStorage に保存されています（現在 約${Math.round(size/1024)}KB）。長期プロジェクトのため、定期的にバックアップ（エクスポート）してください。</p>
+    <p class="muted small">プロジェクトの全データ（項目・タスク・資料・仮説・知識・履歴）はこのブラウザの localStorage に保存されています。長期プロジェクトのため、定期的にバックアップ（エクスポート）してください。</p>
+    <div class="storage-meter mt12">
+      <div class="flex-between mb8">
+        <span class="small">使用量の目安: 約${Math.round(size/1024).toLocaleString()}KB ／ 約${Math.round(ESTIMATED_STORAGE_LIMIT_BYTES/1024/1024)}MB（${pct}%）</span>
+      </div>
+      <div class="storage-bar"><div class="storage-bar-fill storage-${level}" style="width:${pct}%"></div></div>
+      ${level === 'danger' ? '<p class="small" style="color:var(--danger);margin-top:6px;">残り容量が少なくなっています。エクスポートで必ずバックアップし、容量の大きい資料・メモの削除を検討してください。</p>' : ''}
+      ${level === 'warn' ? '<p class="small" style="color:var(--warn);margin-top:6px;">使用量が増えてきています。定期的なバックアップをおすすめします。</p>' : ''}
+    </div>
+    <table class="list mt12">
+      <thead><tr><th>種別</th><th>件数</th><th>データ量（概算）</th></tr></thead>
+      <tbody>${byType.map(([label, count, bytes]) => `<tr><td>${label}</td><td>${count}</td><td class="small muted">約${Math.round(bytes/1024).toLocaleString()}KB</td></tr>`).join('')}</tbody>
+    </table>
+    <p class="small muted mt8">※ 実際に利用できる容量はブラウザにより異なります（目安5〜10MB程度）。上限に達すると保存時にエラーメッセージが表示されます。</p>
     <hr class="sep">
     <div class="grid-2">
       <div>
