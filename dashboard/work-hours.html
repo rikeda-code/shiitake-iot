@@ -6484,7 +6484,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       });
       return out;
     };
-    return { stdTotalB1, newStaffByYm: sumByYmField('newStaffByYm'), deltaByYm: sumByYmField('deltaByYm') };
+    return { stdTotalB1, newStaffByYm: sumByYmField('newStaffByYm'), retiredByYm: sumByYmField('retiredByYm'), deltaByYm: sumByYmField('deltaByYm') };
   }
 
   // renderSiteView()内のローカル関数findMergeRowと同じロジック（拠点(e.base)・
@@ -6519,12 +6519,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const emps = allData.employees.filter(e =>
       stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
       && (e.prj || '').trim() !== '');
-    const matched = emps.filter(e => e.flag === 1);
+    // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
+    // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
+    // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
+    const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
     const newStaffMatched = emps.filter(e => e.flag === 2);
+    const retiringMatched = emps.filter(e => e.flag === 3);
     if (!matched.length && !newStaffMatched.length) return null;
 
     const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
     const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+    const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
     const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
     const newStaffByYm = {};
@@ -6532,11 +6537,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
       if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
     });
+    const retiredByYm = {};
+    mergeData.monthYms.forEach(ym => {
+      const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+      if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
+    });
 
     const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
     const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
     const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-    return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+    return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
   }
 
   // 「拠点・業務別」「拠点サマリ」「3拠点サマリ」「表」の標準労働時間棒（過去月）に
@@ -6570,9 +6580,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     }
     const newStaff = agg.newStaffByYm[ym];
     const delta = agg.deltaByYm[ym];
+    const retired = agg.retiredByYm ? agg.retiredByYm[ym] : undefined;
     const total = agg.stdTotalB1
       + (typeof newStaff === 'number' ? newStaff : 0)
-      + (typeof delta === 'number' ? delta : 0);
+      + (typeof delta === 'number' ? delta : 0)
+      - (typeof retired === 'number' ? retired : 0);
     return Math.round(total * 10) / 10;
   }
 
@@ -6581,7 +6593,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // （過去月の実測値計算に使う、aggの集計に使ったのと同じdiv配列・site）を渡す必要が
   // ある。過去月は整理済み_Mの実測値（computeStdHoursLineForDivSite）、未来月は
   // 3段積み上げ：
-  //   - 青（標準労働時間）：stdTotalB1（固定値）
+  //   - 青（標準労働時間）：stdTotalB1 − retiredByYm[該当月]（退職予定者を退職予定月
+  //     以降に減算した値。退職予定者がいなければstdTotalB1固定のまま）
   //   - 黄（新規要員・開始済み）：newStaffByYm[該当月]（0以下・値なしは非表示）
   //   - 緑（増減）：deltaByYm[該当月]をそのまま使う（0・値なしは非表示。以前のような
   //     「合計との差分」への変換は不要で、シート側の値がすでに増減そのもの）
@@ -6590,7 +6603,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (!agg) return [];
     const stdData = planMonths.map((_, mi) => {
       const ym = mnum(planMonths[mi]);
-      return ym <= ACTUAL_CUTOFF ? threeSiteMergeMonthlyValue(agg, divsForPast, site, mi) : agg.stdTotalB1;
+      if (ym <= ACTUAL_CUTOFF) return threeSiteMergeMonthlyValue(agg, divsForPast, site, mi);
+      const retired = agg.retiredByYm ? agg.retiredByYm[ym] : undefined;
+      return Math.round((agg.stdTotalB1 - (typeof retired === 'number' ? retired : 0)) * 10) / 10;
     });
     const newStaffData = planMonths.map((_, mi) => {
       const ym = mnum(planMonths[mi]);
@@ -6761,14 +6776,20 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const emps = allData.employees.filter(e =>
       stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
       && (e.prj || '').trim() !== '');
-    const matchedWithRow = emps.filter(e => e.flag === 1)
+    // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
+    // （matchedWithRowに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
+    // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
+    const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
       .map(e => ({ e, row: findStdHoursMergeRowForEmployee(mergeData.rows, e) })).filter(x => x.row);
     const newStaffWithRow = emps.filter(e => e.flag === 2)
+      .map(e => ({ e, row: findStdHoursMergeRowForEmployee(mergeData.rows, e) })).filter(x => x.row);
+    const retiringWithRow = emps.filter(e => e.flag === 3)
       .map(e => ({ e, row: findStdHoursMergeRowForEmployee(mergeData.rows, e) })).filter(x => x.row);
     const result = {};
     ['lower', 'fulltime', 'parttime'].forEach(tier => {
       const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
       const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+      const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
       if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
       const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
       const newStaffByYm = {};
@@ -6776,8 +6797,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
         if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
       });
+      const retiredByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
+      });
       const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-      result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     });
     return result;
   }
@@ -6806,9 +6832,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (!tierAgg) return 0;
     const newStaff = tierAgg.newStaffByYm[ym];
     const delta = tierAgg.deltaByYm[ym];
+    const retired = tierAgg.retiredByYm ? tierAgg.retiredByYm[ym] : undefined;
     const total = tierAgg.stdTotalB1
       + (typeof newStaff === 'number' ? newStaff : 0)
-      + (typeof delta === 'number' ? delta : 0);
+      + (typeof delta === 'number' ? delta : 0)
+      - (typeof retired === 'number' ? retired : 0);
     return Math.round(total * 10) / 10;
   }
 
@@ -6820,7 +6848,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (ym <= ACTUAL_CUTOFF) return threeSiteMergeMonthlyValueByTier(aggByTier, divsForPast, site, mi, tier);
     const tierAgg = aggByTier ? aggByTier[tier] : null;
     if (!tierAgg) return 0;
-    return Math.round(tierAgg.stdTotalB1 * 10) / 10;
+    const retired = tierAgg.retiredByYm ? tierAgg.retiredByYm[ym] : undefined;
+    return Math.round((tierAgg.stdTotalB1 - (typeof retired === 'number' ? retired : 0)) * 10) / 10;
   }
 
   // ティア別集計（aggByTier）の新規要員(newStaffByYm)・増減(deltaByYm)を、
@@ -7646,12 +7675,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matched = emps.filter(e => e.flag === 1);
+      // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
+      // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
+      // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
+      const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
       const newStaffMatched = emps.filter(e => e.flag === 2);
+      const retiringMatched = emps.filter(e => e.flag === 3);
       if (!matched.length && !newStaffMatched.length) return null;
 
       const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
       const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+      const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
       const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       const newStaffByYm = {};
@@ -7659,11 +7693,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
         if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
+      const retiredByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
+      });
 
       const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
       const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
       const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-      return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
@@ -7677,14 +7716,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matchedWithRow = emps.filter(e => e.flag === 1)
+      const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const newStaffWithRow = emps.filter(e => e.flag === 2)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
+      const retiringWithRow = emps.filter(e => e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const result = {};
       ['lower', 'fulltime', 'parttime'].forEach(tier => {
         const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+        const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
         const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         const newStaffByYm = {};
@@ -7692,8 +7734,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
           if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
+        const retiredByYm = {};
+        mergeData.monthYms.forEach(ym => {
+          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+          if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
+        });
         const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-        result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+        result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
       });
       return result;
     }
@@ -7962,12 +8009,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matched = emps.filter(e => e.flag === 1);
+      // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
+      // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
+      // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
+      const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
       const newStaffMatched = emps.filter(e => e.flag === 2);
+      const retiringMatched = emps.filter(e => e.flag === 3);
       if (!matched.length && !newStaffMatched.length) return null;
 
       const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
       const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+      const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
       const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       const newStaffByYm = {};
@@ -7975,11 +8027,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
         if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
+      const retiredByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
+      });
 
       const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
       const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
       const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-      return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
@@ -7993,14 +8050,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matchedWithRow = emps.filter(e => e.flag === 1)
+      const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const newStaffWithRow = emps.filter(e => e.flag === 2)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
+      const retiringWithRow = emps.filter(e => e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const result = {};
       ['lower', 'fulltime', 'parttime'].forEach(tier => {
         const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+        const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
         const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         const newStaffByYm = {};
@@ -8008,8 +8068,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
           if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
+        const retiredByYm = {};
+        mergeData.monthYms.forEach(ym => {
+          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+          if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
+        });
         const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-        result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+        result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
       });
       return result;
     }
@@ -8288,12 +8353,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matched = emps.filter(e => e.flag === 1);
+      // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
+      // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
+      // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
+      const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
       const newStaffMatched = emps.filter(e => e.flag === 2);
+      const retiringMatched = emps.filter(e => e.flag === 3);
       if (!matched.length && !newStaffMatched.length) return null;
 
       const matchedWithRow = matched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
       const newStaffWithRow = newStaffMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+      const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
       const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       const newStaffByYm = {};
@@ -8301,11 +8371,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
         if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
+      const retiredByYm = {};
+      mergeData.monthYms.forEach(ym => {
+        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
+      });
 
       const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
       const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
       const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-      return { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
@@ -8319,14 +8394,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matchedWithRow = emps.filter(e => e.flag === 1)
+      const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const newStaffWithRow = emps.filter(e => e.flag === 2)
+        .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
+      const retiringWithRow = emps.filter(e => e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const result = {};
       ['lower', 'fulltime', 'parttime'].forEach(tier => {
         const matchedTier = matchedWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         const newStaffMatchedTier = newStaffWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
+        const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
         const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         const newStaffByYm = {};
@@ -8334,8 +8412,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
           if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
+        const retiredByYm = {};
+        mergeData.monthYms.forEach(ym => {
+          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+          if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
+        });
         const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-        result[tier] = { stdTotalB1, newStaffByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+        result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
       });
       return result;
     }
@@ -10250,9 +10333,13 @@ function renderDecPlanContent(planData, mergeData) {
 
   // 人数表①：整理済み_MのB=1（在籍）の件数（変更B・段階4）。E列（PRJ）が空欄の行
   // （他担当の営業等）は計上外のため除外する。対応行の検索は不要な純粋な人数カウント
-  // のため、mergeDataの存在チェックも不要
+  // のため、mergeDataの存在チェックも不要。
+  // B=3（退職予定）は、DECPLAN_TARGET_YM（12月）時点で退職予定月（e.startYm）に
+  // 未到達（またはe.startYmが空欄）ならB=1と同様に計上する（12月時点で実際に在籍
+  // している人員だけを反映するため）
   function mergeN(site) {
-    return applyEmpTypeFilter(allData.employees.filter(e => e.base === site && e.flag === 1
+    return applyEmpTypeFilter(allData.employees.filter(e => e.base === site
+      && (e.flag === 1 || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM < e.startYm)))
       && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType)))).length || null;
   }
 
@@ -10276,7 +10363,9 @@ function renderDecPlanContent(planData, mergeData) {
   // （対応行が見つからない場合は0）
   function stdHoursFromMerge(site) {
     if (!mergeData) return null;
-    const emps = applyEmpTypeFilter(allData.employees.filter(e => e.base === site && e.flag === 1
+    // mergeN()と同じ対象者特定ロジック（B=3はDECPLAN_TARGET_YM時点で未退職なら算入）
+    const emps = applyEmpTypeFilter(allData.employees.filter(e => e.base === site
+      && (e.flag === 1 || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM < e.startYm)))
       && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType))));
     const total = emps.reduce((s, e) => {
       const row = findStdHoursMergeRowForEmployee(mergeData.rows, e);
@@ -10326,8 +10415,10 @@ function renderDecPlanContent(planData, mergeData) {
     // 含める）。B=1行にはこのフィルタは不要。各対象者に対応する標準労働時間シート側の
     // 行はfindStdHoursMergeRowForEmployee()で検索し、!stdHoursOriginallyEmptyの行のみを対象に
     // maxByYm[DECPLAN_TARGET_YM]を合計する（対応行が見つからない従業員は除外）
+    // B=3（退職予定）は、mergeN()と同じくDECPLAN_TARGET_YM時点で未退職なら対象に含める
     const emps = applyEmpTypeFilter(allData.employees.filter(e => e.base === site
-      && (e.flag === 1 || (e.flag === 2 && (e.startYm == null || e.startYm <= DECPLAN_TARGET_YM)))
+      && (e.flag === 1 || (e.flag === 2 && (e.startYm == null || e.startYm <= DECPLAN_TARGET_YM))
+        || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM < e.startYm)))
       && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType))));
     const siteRows = emps
       .map(e => findStdHoursMergeRowForEmployee(mergeData.rows, e))
