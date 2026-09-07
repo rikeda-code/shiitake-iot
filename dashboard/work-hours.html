@@ -1241,7 +1241,7 @@ function buildDataset(json) {
   const EMP_KEYWORDS  = ['社員', 'アルバイト', 'パート', '技能実習', '正社員', '契約社員'];
 
   // Tally how many rows have each known value type per column
-  const baseScore = {}, workScore = {}, empScore = {}, nameScore = {};
+  const workScore = {}, empScore = {}, nameScore = {};
   const sampleRows = rows.slice(0, 30);
 
   sampleRows.forEach(row => {
@@ -1249,7 +1249,6 @@ function buildDataset(json) {
     for (let i = 0; i < firstMonthIdx; i++) {
       const v = String(cells[i]?.v ?? '').trim();
       if (!v) continue;
-      if (VALID_BASES.has(v))                             baseScore[i] = (baseScore[i] || 0) + 1;
       if (VALID_WORKS.has(v) || ['栽培','出荷','配送'].some(w => v.includes(w)))
                                                           workScore[i] = (workScore[i] || 0) + 1;
       if (EMP_KEYWORDS.some(k => v.includes(k)))         empScore[i]  = (empScore[i]  || 0) + 1;
@@ -1264,10 +1263,9 @@ function buildDataset(json) {
     return best === -1 ? fallback : best;
   }
 
-  // 拠点判定はE列（PRJ、index4）を使用。想定と異なる場合はスコアリングにフォールバック
-  let baseIdx = 4;
-  const col4HasValidBase = sampleRows.some(row => VALID_BASES.has(String(row.c?.[4]?.v ?? '').trim()));
-  if (!col4HasValidBase) baseIdx = bestIdx(baseScore, 3);
+  // 拠点はD列（index3）固定。E列（PRJ）は所属拠点と異なり得る「計上先」の値のため、
+  // 拠点の自動判定・フォールバックには使わない
+  const baseIdx = 3;
 
   const workIdx = bestIdx(workScore, 4);
   const empIdx  = bestIdx(empScore,  2);
