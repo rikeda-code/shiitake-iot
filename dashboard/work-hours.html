@@ -3580,20 +3580,27 @@ function collectCrossSheetAttributeAlerts(employees, adjustRecords, mergeRows) {
   return alerts;
 }
 
-// 整理済み_MでB=2（新規要員・追加待ち）かつ開始月（startYm）が解釈できない従業員を
-// 検知し、アラート情報の配列を返す（変更C・段階A）。e.startYmRawが空文字列なら
-// 「未入力」、そうでなければ「日付として解釈できない文字列が入力されている」ケースを
-// 区別する。e.startYmが正しく解釈できている場合（過去月・未来月問わず）は対象外
+// 整理済み_MでB=2（新規要員・追加待ち）かつ開始月（startYm）が解釈できない従業員、
+// およびB=3（退職予定）かつ退職予定月（同じI列由来のe.startYm）が解釈できない従業員を
+// 検知し、アラート情報の配列を返す（変更C・段階A、B=3対応を追加）。e.startYmRawが
+// 空文字列なら「未入力」、そうでなければ「日付として解釈できない文字列が入力されている」
+// ケースを区別する。e.startYmが正しく解釈できている場合（過去月・未来月問わず）は対象外。
+// B=2はtype: '開始月異常'、B=3はtype: '退職予定月異常'で区別する。flag!==2かつ
+// flag!==3の行（例：flag===1でI列に何か値が入っている等）は対象外
 function collectB2StartYmAlerts(employees) {
   return (employees || [])
-    .filter(e => e.flag === 2 && e.startYm === null)
-    .map(e => ({
-      type: '開始月異常',
-      name: e.name,
-      detail: e.startYmRaw
-        ? `開始月の値が日付として解釈できません（入力値: ${e.startYmRaw}）`
-        : '開始月が未入力',
-    }));
+    .filter(e => (e.flag === 2 || e.flag === 3) && e.startYm === null)
+    .map(e => {
+      const isRetiring = e.flag === 3;
+      const label = isRetiring ? '退職予定月' : '開始月';
+      return {
+        type: isRetiring ? '退職予定月異常' : '開始月異常',
+        name: e.name,
+        detail: e.startYmRaw
+          ? `${label}の値が日付として解釈できません（入力値: ${e.startYmRaw}）`
+          : `${label}が未入力`,
+      };
+    });
 }
 
 // 標準労働時間（月ごとに、その月に実績[実質勤務時間]があるスタッフのみを対象に合計）。
