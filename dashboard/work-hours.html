@@ -2608,7 +2608,11 @@ function renderSummaryTable() {
     </tr></thead><tbody>`;
 
   SITES.forEach(site => {
-    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
+    const siteEmps = employees.filter(e => e.base === site && e.workType
+      && (e.isTransferVirtual || (e.prj || '').trim() !== ''));
     if (!siteEmps.length) return;
 
     const siteWorkTypes = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
@@ -2903,7 +2907,11 @@ function renderSummaryWorkChart() {
   // 各拠点のデータセットを先に組み立てる（ページ内全拠点でY軸を統一するため）
   const perSite = activeSites.map((site, si) => {
     const cid = 'wc_' + si;
-    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
+    const siteEmps = employees.filter(e => e.base === site && e.workType
+      && (e.isTransferVirtual || (e.prj || '').trim() !== ''));
     const siteWTs = orderedWorkTypes.filter(wt => siteEmps.some(e => e.workType === wt));
     const datasetsH = siteWTs.map(wt => ({
       label: wt,
@@ -3002,7 +3010,11 @@ function renderEmpChartSiteView() {
   // 各拠点のデータセットを先に組み立てる（ページ内全拠点でY軸を統一するため）
   const perSite = activeSites.map((site, si) => {
     const cid = 'ec_' + si;
-    const siteEmps = employees.filter(e => e.base === site && e.workType);
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
+    const siteEmps = employees.filter(e => e.base === site && e.workType
+      && (e.isTransferVirtual || (e.prj || '').trim() !== ''));
     const datasetsH = EMP_CHART_TYPES.map(et => ({
       label: et,
       data: months.map((_, mi) => {
@@ -3035,7 +3047,11 @@ function renderEmpChartSummaryView() {
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('empchart-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
-  const allEmps = employees.filter(e => e.workType);
+  // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+  // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+  // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
+  const allEmps = employees.filter(e => e.workType
+    && (e.isTransferVirtual || (e.prj || '').trim() !== ''));
 
   const empDatasetsH = EMP_CHART_TYPES.map(et => ({
     label: et,
@@ -5994,7 +6010,11 @@ function renderProductivityCharts(workData, prodData) {
 
   // Helper: sum hours by workType filter for a site, indexed by表示列(mi)
   function workHours(site, typeFilter) {
-    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType)
+      && (e.isTransferVirtual || (e.prj || '').trim() !== ''));
     return months.map((_, mi) => {
       if (mi >= originalCount) return null;
       const total = emps.reduce((s, e) => s + (e.hours[mi] ?? 0), 0);
@@ -9313,7 +9333,11 @@ function renderCompareSiteCharts(prodData) {
   // 雇用形態（empTypeFilter）はgetActiveData()内で既に反映済み。
   // empFilterで社員＋技能実習生（下段）／アルバイト（上段）をさらに絞り込む
   function workHours(site, typeFilter, empFilter) {
-    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType) && empFilter(e));
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
+    const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType) && empFilter(e)
+      && (e.isTransferVirtual || (e.prj || '').trim() !== ''));
     return commonMonths.map((_, mi) => {
       if (mi >= originalCount) return null;
       const total = emps.reduce((s, e) => s + (e.hours[mi] ?? 0), 0);
@@ -9350,10 +9374,14 @@ function renderCompareSiteCharts(prodData) {
     return availSites.map(site => {
       return commonMonths.map((_, mi) => {
         if (mi >= originalCount) return null;
+        // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+        // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」
+        // 仮想従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
         const n = employees.filter(e =>
           e.base === site &&
           e.workType &&
           empFilter(e) &&
+          (e.isTransferVirtual || (e.prj || '').trim() !== '') &&
           divs.some(div => {
             const cls = div === '栽培' ? 'wt-栽培' : div === '配送' ? 'wt-配送' : 'wt-出荷';
             return workTypeClass(e.workType) === cls;
@@ -9455,8 +9483,12 @@ function renderCompareSiteCharts(prodData) {
       : div === '配送'
         ? wt => workTypeClass(wt) === 'wt-配送'
         : wt => workTypeClass(wt) === 'wt-出荷';
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
     const emps = activeEmployees
-      .filter(e => typeFilter(e.workType) && (site == null || e.base === site) && empFilter(e))
+      .filter(e => typeFilter(e.workType) && (site == null || e.base === site) && empFilter(e)
+        && (e.isTransferVirtual || (e.prj || '').trim() !== ''))
       .map(e => ({
         ...e,
         hours: months.map(planMonth => {
@@ -9520,8 +9552,12 @@ function renderCompareSiteCharts(prodData) {
       : div === '配送'
         ? wt => workTypeClass(wt) === 'wt-配送'
         : wt => workTypeClass(wt) === 'wt-出荷';
+    // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+    // （予実側のthreeSiteMergeAgg()等と同じ扱い）。ただし拠点間振替の「応援」仮想
+    // 従業員（isTransferVirtual）はprjを持たないため、この条件からは除外する
     return activeEmployees
-      .filter(e => typeFilter(e.workType) && (site == null || e.base === site) && empFilter(e))
+      .filter(e => typeFilter(e.workType) && (site == null || e.base === site) && empFilter(e)
+        && (e.isTransferVirtual || (e.prj || '').trim() !== ''))
       .map(e => ({
         ...e,
         hours: months.map(planMonth => {
@@ -9585,11 +9621,15 @@ function renderCompareSiteCharts(prodData) {
   function countBySiteForExclTransferVirtual(empFilter) {
     return availSites.map(site => commonMonths.map((_, mi) => {
       if (mi >= originalCount) return null;
+      // PRJ（e.prj、計上先）が空欄の従業員は「計上先が不明のため計上対象外」
+      // （予実側のthreeSiteMergeAgg()等と同じ扱い）。isTransferVirtualは既に
+      // 除外済みのため、ここではprjチェックのみでよい
       const n = employees.filter(e =>
         e.base === site &&
         e.workType &&
         empFilter(e) &&
         !e.isTransferVirtual &&
+        (e.prj || '').trim() !== '' &&
         divs.some(div => {
           const cls = div === '栽培' ? 'wt-栽培' : div === '配送' ? 'wt-配送' : 'wt-出荷';
           return workTypeClass(e.workType) === cls;
