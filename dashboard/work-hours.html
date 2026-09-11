@@ -6566,7 +6566,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
     const retiredByYm = {};
     mergeData.monthYms.forEach(ym => {
-      const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+      const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
       if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
     });
 
@@ -6826,7 +6826,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       });
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
       });
       const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
@@ -7722,7 +7722,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       });
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
 
@@ -7763,7 +7763,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         });
         const retiredByYm = {};
         mergeData.monthYms.forEach(ym => {
-          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
           if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
         const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
@@ -8056,7 +8056,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       });
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
 
@@ -8097,7 +8097,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         });
         const retiredByYm = {};
         mergeData.monthYms.forEach(ym => {
-          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
           if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
         const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
@@ -8400,7 +8400,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       });
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
-        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+        const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
 
@@ -8441,7 +8441,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         });
         const retiredByYm = {};
         mergeData.monthYms.forEach(ym => {
-          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm <= ym);
+          const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
           if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
         const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
@@ -10386,7 +10386,7 @@ function renderDecPlanContent(planData, mergeData) {
   // している人員だけを反映するため）
   function mergeN(site) {
     return applyEmpTypeFilter(allData.employees.filter(e => e.base === site
-      && (e.flag === 1 || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM < e.startYm)))
+      && (e.flag === 1 || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM <= e.startYm)))
       && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType)))).length || null;
   }
 
@@ -10412,7 +10412,7 @@ function renderDecPlanContent(planData, mergeData) {
     if (!mergeData) return null;
     // mergeN()と同じ対象者特定ロジック（B=3はDECPLAN_TARGET_YM時点で未退職なら算入）
     const emps = applyEmpTypeFilter(allData.employees.filter(e => e.base === site
-      && (e.flag === 1 || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM < e.startYm)))
+      && (e.flag === 1 || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM <= e.startYm)))
       && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType))));
     const total = emps.reduce((s, e) => {
       const row = findStdHoursMergeRowForEmployee(mergeData.rows, e);
@@ -10465,7 +10465,7 @@ function renderDecPlanContent(planData, mergeData) {
     // B=3（退職予定）は、mergeN()と同じくDECPLAN_TARGET_YM時点で未退職なら対象に含める
     const emps = applyEmpTypeFilter(allData.employees.filter(e => e.base === site
       && (e.flag === 1 || (e.flag === 2 && (e.startYm == null || e.startYm <= DECPLAN_TARGET_YM))
-        || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM < e.startYm)))
+        || (e.flag === 3 && (e.startYm == null || DECPLAN_TARGET_YM <= e.startYm)))
       && (e.prj || '').trim() !== '' && divs.includes(stdHoursMergeDivForWorkType(e.workType))));
     const siteRows = emps
       .map(e => findStdHoursMergeRowForEmployee(mergeData.rows, e))
