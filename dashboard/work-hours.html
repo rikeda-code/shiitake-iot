@@ -858,6 +858,13 @@ function classifyEmp(emp) {
   return 'パート'; // アルバイト, パート, etc.
 }
 
+// 雇用区分（C列）が「パート」（旧表記「アルバイト」から変更）かどうかを判定する共通関数。
+// 従来は各所で(employment || '').includes('アルバイト')という判定が散在していたが、
+// シート側の表記変更（アルバイト→パート）に伴い、この関数経由に統一した
+function isPartTimeEmployment(employment) {
+  return (employment || '').includes('パート');
+}
+
 // Work-type color class
 function workTypeClass(wt) {
   if (!wt) return '';
@@ -1617,9 +1624,9 @@ function computeStdHoursSiteTransferDeltaBuckets(adjustRecords, employees) {
 function findFulltimePartTimeRowForEmployee(div, e) {
   if (!stdHoursMergeData) return null;
   const key = normalizeName(e.name);
-  const wantsPartTime = (e.employment || '').includes('アルバイト');
+  const wantsPartTime = isPartTimeEmployment(e.employment);
   return stdHoursMergeData.rows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
-    && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+    && isPartTimeEmployment(r.employment) === wantsPartTime) || null;
 }
 
 // 「標準労働時間」タブ（社員+実習生／アルバイト・フルタイム／アルバイト・
@@ -1634,7 +1641,7 @@ function findFulltimePartTimeRowForEmployee(div, e) {
 // 同様に無警告でスキップする＝配列に含めない）
 function resolveStdHoursTierAdjustRecords(adjustRecords, employees) {
   const divLabel = wt => workTypeClass(wt).replace(/^wt-/, '');
-  const isPartTimeEmp = e => (e.employment || '').includes('アルバイト');
+  const isPartTimeEmp = e => isPartTimeEmployment(e.employment);
 
   const byName = new Map();
   employees.forEach(e => {
@@ -2260,7 +2267,7 @@ function buildCountChart() {
   ];
   const ET_SERIES = [
     { label: '社員',       match: e => (e.employment||'').includes('社員') && !(e.employment||'').includes('技能'), color: '#60a5fa' },
-    { label: 'パート',     match: e => ['パート','アルバイト'].some(k => (e.employment||'').includes(k)),          color: '#fb923c' },
+    { label: 'パート',     match: e => isPartTimeEmployment(e.employment),          color: '#fb923c' },
     { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
   ];
 
@@ -3518,9 +3525,9 @@ function findStdHoursMergeRowForEmployee(mergeRows, e) {
   const div = stdHoursMergeDivForWorkType(e.workType);
   if (div == null) return null;
   const key = normalizeName(e.name);
-  const wantsPartTime = (e.employment || '').includes('アルバイト');
+  const wantsPartTime = isPartTimeEmployment(e.employment);
   return mergeRows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
-    && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+    && isPartTimeEmployment(r.employment) === wantsPartTime) || null;
 }
 
 // 整理済み_M・整理済み_増減・標準労働時間シートの間で、氏名（normalizeName()で正規化）は
@@ -6521,9 +6528,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function findStdHoursMergeRowInDiv(mergeRows, div, e) {
     if (!mergeRows) return null;
     const key = normalizeName(e.name);
-    const wantsPartTime = (e.employment || '').includes('アルバイト');
+    const wantsPartTime = isPartTimeEmployment(e.employment);
     return mergeRows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
-      && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+      && isPartTimeEmployment(r.employment) === wantsPartTime) || null;
   }
 
   // 拠点×業務区分(栽培/出荷/配送)ごとの集計を返す。site=nullなら3拠点合算（全拠点合計
@@ -6710,7 +6717,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 変更前の合計より少なくなる。collectStdHoursTierAlertsForMerge()で
   // 検知してアラート表示する）
   function tierForMergeRow(r) {
-    if (!(r.employment || '').includes('アルバイト')) return 'lower';
+    if (!isPartTimeEmployment(r.employment)) return 'lower';
     if (r.fulltimeHours > 0) return 'fulltime';
     if (r.parttimeHours > 0) return 'parttime';
     return null;
@@ -6767,9 +6774,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const findMergeRow = e => {
       if (!mergeData) return null;
       const key = normalizeName(e.name);
-      const wantsPartTime = (e.employment || '').includes('アルバイト');
+      const wantsPartTime = isPartTimeEmployment(e.employment);
       return mergeData.rows.find(r => r.div === div && r.site === e.base && normalizeName(r.name) === key
-        && (r.employment || '').includes('アルバイト') === wantsPartTime) || null;
+        && isPartTimeEmployment(r.employment) === wantsPartTime) || null;
     };
 
     return months.map((_, mi) => {
@@ -6780,7 +6787,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           // 社員・技能実習生はlower固定。アルバイトは整理済み_M側にフル/パートの
           // 区別が無いため、標準労働時間シート側のM列/Q列（tierForMergeRow()）で
           // 判定する
-          const empTier = (e.employment || '').includes('アルバイト')
+          const empTier = isPartTimeEmployment(e.employment)
             ? (row ? tierForMergeRow(row) : null)
             : 'lower';
           return empTier === tier ? (row ? row.stdHours : 0) : null;
@@ -7035,7 +7042,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 雇用区分シリーズ定義（社員・パート・技能実習生）
   const EMP_SERIES = [
     { label: '社員',       match: e => (e.employment||'').includes('社員') && !(e.employment||'').includes('技能'), color: '#60a5fa' },
-    { label: 'パート',     match: e => ['パート','アルバイト'].some(k => (e.employment||'').includes(k)),          color: '#fb923c' },
+    { label: 'パート',     match: e => isPartTimeEmployment(e.employment),          color: '#fb923c' },
     { label: '技能実習生', match: e => (e.employment||'').includes('技能実習'),                                    color: '#c084fc' },
   ];
 
@@ -9345,7 +9352,7 @@ function renderCompareSiteCharts(prodData) {
     });
   }
 
-  const isPartTime = e => (e.employment || '').includes('アルバイト');
+  const isPartTime = e => isPartTimeEmployment(e.employment);
 
   // 拠点ごとに、選択中のdivsに対応する実績工数を合算する
   // （雇用形態で下段＝社員＋技能実習生／上段＝アルバイトに分割する）
