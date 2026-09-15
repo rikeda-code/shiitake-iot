@@ -1742,8 +1742,6 @@ function collectStdHoursTierTransferAlerts(adjustRecords, employees) {
     .forEach(({ rec, reason, emp }) => {
       if (reason === 'ambiguous') {
         alerts.push(`同姓同名で特定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」（対象月に実績がある候補が0件、または2件以上あります）`);
-      } else if (reason === 'div-unresolvable') {
-        alerts.push(`業務区分が判定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」（本人の業務区分「${emp.workType || ''}」が栽培/出荷/配送/拠点のいずれにも該当しません）`);
       } else if (reason === 'tier-unresolvable') {
         alerts.push(`アルバイトの区分（フルタイム/パートタイム）が判定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」`);
       }
