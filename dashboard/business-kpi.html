@@ -126,6 +126,8 @@
   .metric-block-title { font-size: 0.85rem; font-weight: 700; margin: 14px 0 8px; }
   .metric-block-title:first-child { margin-top: 0; }
 
+  .period-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 12px 0 8px; }
+
   .year-select-row { display: flex; gap: 20px; margin-bottom: 16px; font-size: 0.85rem; flex-wrap: wrap; }
   .year-select-row label { display: flex; align-items: center; gap: 6px; }
   .year-select-row select { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; background: #fff; color: var(--text); }
@@ -252,6 +254,15 @@ const SHIPMENT_VALUE = {
   gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,11234402],
   nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,9562183],
 };
+// 売上単価 (円/g) — 出荷量＆出荷額シート「g単価(売上ベース)」列の値をそのまま採用する。
+// 拠点タブ(いなべ/群馬/南丹)はJ列、全拠点タブはI列。全社合計も各拠点から算出せず全拠点タブの値を使う。
+// ※シート側の計算結果をそのまま表示する項目のため、コード側では一切計算しない ※ライブ取得
+const UNIT_PRICE = {
+  inabe:  [0.9355,0.8403,0.9575,0.7763,0.7735,0.9365,0.9915,0.9756,0.9001,0.958,0.9763,0.9804, 1.0127,0.9839,0.9571,0.9706,0.9453,0.8899,0.8894,null],
+  gunma:  [0.7195,0.8167,0.8841,0.7433,0.7311,0.785,0.9513,0.9155,0.947,0.919,0.9143,0.9608,   0.8816,0.9708,0.8684,0.9156,0.9231,0.8651,0.8435,null],
+  nantan: [0.9507,0.9011,0.9273,0.825,0.743,0.7823,0.7849,0.9141,0.9796,0.9561,1.0454,0.9612,  0.9519,0.9504,0.8909,0.8945,0.9546,0.909,0.9832,null],
+  total:  [0.8902,0.8528,0.9263,0.7863,0.7471,0.8314,0.907,0.9365,0.899,0.9451,0.9725,0.9688,  0.9443,0.9701,0.9054,0.9318,0.9392,0.8896,0.9024,null],
+};
 // 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.1)〜 ※ライブ取得
 const BED_COUNT = {
   inabe:  [24453,25301,3248,24441,21605,10701,13063,23460,24362, 31541,46440,50115, 22680,12960,23063,14930,25646,26133,18900,30179],
@@ -359,21 +370,25 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const tabName = `${year}${siteNameJP}`;
   const table = await fetchSheet(sheetId, tabName, 1);
   const rows = table.rows || [];
-  let colB = null, colE = null;
+  let colB = null, colE = null, colJ = null;
   rows.forEach(row => {
     (row.c || []).forEach((c, i) => {
       const label = c && c.v != null ? String(c.v).trim() : '';
       // 出荷量の見出しはタブによって表記が異なる(いなべ:「出荷量(固定)」／群馬・南丹:「出荷量」)
       if (label === '出荷量(固定)' || label === '出荷量') colB = i;
       if (label === '出荷額') colE = i;
+      if (label === 'g単価(売上ベース)') colJ = i;
     });
   });
   if (colB == null || colE == null) {
     throw new Error(`${tabName}: 列見出しが見つかりません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
   }
+  // 売上単価は見出しが変わっても取得を続けられるよう、見つからない場合はJ列(0始まりで9)を採用する
+  if (colJ == null) colJ = 9;
 
   const shipment = Array(12).fill(null);
   const shipmentValue = Array(12).fill(null);
+  const unitPrice = Array(12).fill(null);
   rows.forEach(row => {
     const cells = row.c || [];
     const monthLabel = cells[0]?.v != null ? String(cells[0].v) : (cells[0]?.f || '');
@@ -383,10 +398,43 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
     if (month < 1 || month > 12) return;
     const bVal = cells[colB]?.v;
     const eVal = cells[colE]?.v;
+    const jVal = cells[colJ]?.v;
     shipment[month - 1] = (bVal != null && bVal !== 0) ? +(bVal / 1000).toFixed(2) : null;
     shipmentValue[month - 1] = (eVal != null && eVal !== 0) ? Math.round(eVal) : null;
+    // 売上単価はシートの値をそのまま採用する(丸めのみ。0や数値以外は未入力として扱う)
+    unitPrice[month - 1] = (typeof jVal === 'number' && jVal !== 0) ? +jVal.toFixed(4) : null;
   });
-  return { shipment, shipmentValue };
+  return { shipment, shipmentValue, unitPrice };
+}
+
+// 出荷量＆出荷額シート「{年}全拠点」タブ: 全社合計の売上単価は各拠点から算出せず、
+// このタブの「g単価(売上ベース)」列(I列)の値をそのまま採用する。
+async function fetchTotalUnitPriceYear(sheetId, year) {
+  const tabName = `${year}全拠点`;
+  const table = await fetchSheet(sheetId, tabName, 1);
+  const rows = table.rows || [];
+  let colI = null;
+  rows.forEach(row => {
+    (row.c || []).forEach((c, i) => {
+      const label = c && c.v != null ? String(c.v).trim() : '';
+      if (label === 'g単価(売上ベース)') colI = i;
+    });
+  });
+  // 見出しが見つからない場合はI列(0始まりで8)を採用する
+  if (colI == null) colI = 8;
+
+  const unitPrice = Array(12).fill(null);
+  rows.forEach(row => {
+    const cells = row.c || [];
+    const monthLabel = cells[0]?.v != null ? String(cells[0].v) : (cells[0]?.f || '');
+    const m = String(monthLabel).match(/^(\d{1,2})月$/);
+    if (!m) return;
+    const month = parseInt(m[1], 10);
+    if (month < 1 || month > 12) return;
+    const v = cells[colI]?.v;
+    unitPrice[month - 1] = (typeof v === 'number' && v !== 0) ? +v.toFixed(4) : null;
+  });
+  return unitPrice;
 }
 
 // 拠点ごとに独立して取得し、1拠点が失敗しても他拠点の成功分は反映する(全滅を避ける)。
@@ -395,7 +443,7 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
 // 同一スプレッドシートIDに対する取得は年単位も含めて完全に直列化する。
 async function fetchShipmentAll(sheetId) {
   const SITE_JP = { inabe: 'いなべ', gunma: '群馬', nantan: '南丹' };
-  const shipment = {}, shipmentValue = {};
+  const shipment = {}, shipmentValue = {}, unitPrice = {};
   const failures = [];
   for (const key of Object.keys(SITE_JP)) {
     try {
@@ -403,12 +451,20 @@ async function fetchShipmentAll(sheetId) {
       const y26 = await fetchShipmentSiteYear(sheetId, 2026, SITE_JP[key]);
       shipment[key] = [...y25.shipment, ...y26.shipment].slice(0, N);
       shipmentValue[key] = [...y25.shipmentValue, ...y26.shipmentValue].slice(0, N);
+      unitPrice[key] = [...y25.unitPrice, ...y26.unitPrice].slice(0, N);
     } catch (e) {
       failures.push(`${SITE_JP[key]}: ${e.message}`);
     }
   }
+  try {
+    const t25 = await fetchTotalUnitPriceYear(sheetId, 2025);
+    const t26 = await fetchTotalUnitPriceYear(sheetId, 2026);
+    unitPrice.total = [...t25, ...t26].slice(0, N);
+  } catch (e) {
+    failures.push(`全拠点(売上単価): ${e.message}`);
+  }
 
-  return { shipment, shipmentValue, failures };
+  return { shipment, shipmentValue, unitPrice, failures };
 }
 
 // 売上・菌床代シート: 列構成が期間によって変化する(実績のみ1列 → 計画/実績/予実差異/前月差異の4列 →
@@ -516,6 +572,7 @@ async function refreshLiveData() {
   if (shipRes.status === 'fulfilled') {
     Object.assign(SHIPMENT, shipRes.value.shipment);
     Object.assign(SHIPMENT_VALUE, shipRes.value.shipmentValue);
+    Object.assign(UNIT_PRICE, shipRes.value.unitPrice);
     if (shipRes.value.failures.length) {
       liveStatus.shipment = 'error';
       liveErrorMsgs.shipment = shipRes.value.failures.join(' / ');
@@ -552,6 +609,8 @@ function calcSite(siteKey) {
   const shipmentValue = SHIPMENT_VALUE[siteKey];
   const revenue       = REVENUE[siteKey];
   const substrateCost = SUBSTRATE_COST[siteKey];
+  // 売上単価はシート「g単価(売上ベース)」列の値をそのまま使う(コード側では計算しない)
+  const unitPrice     = UNIT_PRICE[siteKey];
 
   const yieldRate   = shipment.map((v,i) => (v == null || !harvest[i]) ? null : +(v / harvest[i] * 100).toFixed(1));
   const costRatio   = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : +(substrateCost[i] / v * 100).toFixed(1));
@@ -565,7 +624,7 @@ function calcSite(siteKey) {
   // 1菌床単価 (円/本) = 菌床仕入額 ÷ 菌床仕入本数
   const bedUnitCost = substrateCost.map((v,i) => (v == null || !bedCount[i]) ? null : Math.round(v / bedCount[i]));
 
-  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, yieldRate, costRatio, grossProfit, harvestPerBed, shipmentPerBed, salesCostRatio, bedUnitCost };
+  return { harvest, shipment, bedCount, shipmentValue, revenue, substrateCost, unitPrice, yieldRate, costRatio, grossProfit, harvestPerBed, shipmentPerBed, salesCostRatio, bedUnitCost };
 }
 
 // 全社合計（各配列を月ごとに合算。null月はnull）
@@ -589,6 +648,8 @@ function buildData() {
     revenue:  sumArr(data.inabe.revenue, data.gunma.revenue, data.nantan.revenue),
     substrateCost: sumArr(data.inabe.substrateCost, data.gunma.substrateCost, data.nantan.substrateCost),
     grossProfit: sumArr(data.inabe.grossProfit, data.gunma.grossProfit, data.nantan.grossProfit),
+    // 売上単価は合算できないため、全拠点タブから取得した値をそのまま使う
+    unitPrice: UNIT_PRICE.total,
   };
   data.total.yieldRate = data.total.shipment.map((v,i) => (v == null || !data.total.harvest[i]) ? null : +(v / data.total.harvest[i] * 100).toFixed(1));
   data.total.costRatio = data.total.revenue.map((v,i) => (v == null || data.total.substrateCost[i] == null) ? null : +(data.total.substrateCost[i] / v * 100).toFixed(1));
@@ -612,6 +673,7 @@ const COLORS = {
   bedCount:       '#0891b2', // 菌床仕入数
   substrateCost:  '#b45309', // 菌床仕入額
   bedUnitCost:    '#dc2626', // 1菌床単価
+  unitPrice:      '#d97706', // 売上単価
   harvestPerBed:  '#16a34a', // 1菌床あたり収穫量
   shipmentPerBed: '#0d9488', // 1菌床あたり出荷量
   yieldRate:      '#0284c7', // 出荷歩留まり
@@ -898,6 +960,69 @@ function buildMonthlyTableHtml(d) {
   return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows}${footer}</tbody></table></div>`;
 }
 
+// ── 菌床投資売上倍率テーブル(表1: 各拠点×期間) ──
+// 1ヶ月/2ヶ月/3ヶ月単位を切り替えられる。複数月の倍率は各月の倍率の平均ではなく、
+// 期間合計の売上 ÷ 期間合計の菌床仕入額で算出する(月ごとの規模差に左右されないため)。
+// 期間の区切りは年をまたがないよう各年の1月起点で区切る。
+let salesCostPeriod = 1;
+
+function salesCostBuckets(period) {
+  const buckets = [];
+  YEARS.forEach((year, yi) => {
+    for (let start = 0; start < 12; start += period) {
+      const idxs = [];
+      for (let k = start; k < start + period && k < 12; k++) {
+        const idx = yi * 12 + k;
+        if (idx < N) idxs.push(idx);
+      }
+      if (!idxs.length) continue;
+      const first = MONTH_LABELS[idxs[0]];
+      const last = MONTH_LABELS[idxs[idxs.length - 1]];
+      buckets.push({ label: idxs.length === 1 ? first : `${first}-${last.split('/')[1]}`, idxs });
+    }
+  });
+  return buckets;
+}
+
+function salesCostRatioFor(siteKey, idxs) {
+  const d = DATA[siteKey];
+  let revenue = 0, cost = 0, months = 0;
+  idxs.forEach(i => {
+    if (d.revenue[i] == null || d.substrateCost[i] == null) return;
+    revenue += d.revenue[i];
+    cost += d.substrateCost[i];
+    months++;
+  });
+  if (!months || !cost) return null;
+  return +(revenue / cost).toFixed(2);
+}
+
+function buildSalesCostTableHtml(period) {
+  const cols = [...SITES, TOTAL_SITE];
+  const head = `<th>期間</th>` + cols.map(c => `<th class="num">${c.name}</th>`).join('');
+  const rows = salesCostBuckets(period).map(b =>
+    `<tr><td class="dim">${b.label}</td>${cols.map(c => `<td class="num">${fmt(salesCostRatioFor(c.key, b.idxs), 2)}</td>`).join('')}</tr>`
+  ).join('');
+  const allIdxs = Array.from({ length: N }, (_, i) => i);
+  const footer = `<tr class="footer-row"><td class="dim">全期間</td>${cols.map(c =>
+    `<td class="num">${fmt(salesCostRatioFor(c.key, allIdxs), 2)}</td>`).join('')}</tr>`;
+  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows}${footer}</tbody></table></div>`;
+}
+
+function renderSalesCostTable() {
+  const el = document.getElementById('salescost-table');
+  if (!el) return;
+  el.innerHTML = buildSalesCostTableHtml(salesCostPeriod);
+  document.querySelectorAll('#salescost-period .site-tab').forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.period) === salesCostPeriod);
+  });
+}
+
+function setSalesCostPeriod(period) {
+  salesCostPeriod = period;
+  renderSalesCostTable();
+}
+
 // ────────────────────────────────────────────────────────────────
 // タブ① 概要
 // ────────────────────────────────────────────────────────────────
@@ -914,7 +1039,7 @@ function renderOverview() {
     <div class="panel-grid">
       <div class="panel">
         <div class="panel-title">① 売上推移</div>
-        <div class="panel-sub">${CURRENT_YEAR}年・売上の推移。グラフをタップすると拡大表示します（年度比較は「年度比較」タブへ）</div>
+        <div class="panel-sub">${CURRENT_YEAR}年・売上(棒・左軸)と売上単価(折れ線・右軸)の推移。売上単価は出荷量＆出荷額シートの「g単価(売上ベース)」列の値をそのまま表示しています</div>
         <div id="panel-sales"></div>
       </div>
       <div class="panel">
@@ -953,9 +1078,10 @@ function renderOverview() {
 
   document.getElementById('kpi-grid').innerHTML = KPI_CARDS.map(c => kpiCardHtml(d, c)).join('');
 
-  // ①売上推移: 売上(棒)のみ（当年のみ。年別比較は「年度比較」タブで行う）
+  // ①売上推移: 売上(棒・左軸) + 売上単価(折れ線・右軸)。売上単価はシートの値をそのまま表示する
   renderCurrentYearCombo('panel-sales', '売上推移', ds => [
-    { label: '売上(円)', data: ds.revenue, color: COLORS.revenue, type: 'bar', axis: 'y' },
+    { label: '売上(円)',       data: ds.revenue,   color: COLORS.revenue,   type: 'bar',  axis: 'y' },
+    { label: '売上単価(円/g)', data: ds.unitPrice, color: COLORS.unitPrice, type: 'line', axis: 'y2' },
   ], d);
 
   // ②生産推移: 収穫量(棒) + 出荷量(棒)
@@ -975,6 +1101,13 @@ function renderOverview() {
   compositeEl.innerHTML = `
     <div class="metric-block-title">菌床投資売上倍率（売上÷菌床仕入額）</div>
     <div id="composite-salescost"></div>
+    <div class="period-tabs" id="salescost-period">
+      <button class="site-tab" data-period="1" onclick="setSalesCostPeriod(1)">月次</button>
+      <button class="site-tab" data-period="2" onclick="setSalesCostPeriod(2)">2ヶ月単位</button>
+      <button class="site-tab" data-period="3" onclick="setSalesCostPeriod(3)">3ヶ月単位</button>
+    </div>
+    <div class="panel-sub">表1: 各拠点の菌床投資売上倍率（拠点フィルタに関わらず全拠点を表示。複数月は期間合計の売上÷期間合計の菌床仕入額）</div>
+    <div id="salescost-table"></div>
     <div class="metric-block-title">菌床原価率</div>
     <div id="composite-costratio"></div>
     <div class="metric-block-title">出荷歩留まり</div>
@@ -983,6 +1116,7 @@ function renderOverview() {
   renderCurrentYearCombo('composite-salescost', '菌床投資売上倍率', ds => [
     { label: '菌床投資売上倍率(倍)', data: ds.salesCostRatio, color: COLORS.salesCostRatio, type: 'line', axis: 'y' },
   ], d);
+  renderSalesCostTable();
   renderCurrentYearCombo('composite-costratio', '菌床原価率', ds => [
     { label: '菌床原価率(%)', data: ds.costRatio, color: COLORS.costRatio, type: 'line', axis: 'y' },
   ], d);
