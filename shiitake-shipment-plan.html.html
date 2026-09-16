@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>椎茸 日々の過不足確認シート</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#2b2420;
+    --ink-soft:#5c5248;
+    --paper:#f7f2e7;
+    --panel:#fffdf8;
+    --line:#ddd0b6;
+    --line-soft:#ece2c9;
+    --brown:#7a4a26;
+    --brown-deep:#5a341a;
+    --amber:#f6d98a;
+    --amber-soft:#fbecc2;
+    --green:#3f6b4c;
+    --green-soft:#e3ede2;
+    --green-deep:#2c4c36;
+    --red:#b3402f;
+    --shadow: 0 1px 0 rgba(43,36,32,.06);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(122,74,38,.06) 1px, transparent 0);
+    background-size: 22px 22px;
+    color:var(--ink);
+    font-family:"Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding: 28px 18px 60px;
+  }
+
+  .wrap{ max-width:1180px; margin:0 auto; }
+
+  /* ---------- Header ---------- */
+  header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    padding-bottom:18px;
+    border-bottom:2px solid var(--brown);
+    margin-bottom:22px;
+    flex-wrap:wrap;
+  }
+  .title-block .eyebrow{
+    font-size:12px;
+    letter-spacing:.14em;
+    color:var(--brown);
+    margin:0 0 6px;
+  }
+  h1{
+    font-family:"Shippori Mincho", serif;
+    font-weight:700;
+    font-size:clamp(24px,3.4vw,34px);
+    margin:0;
+    color:var(--brown-deep);
+    letter-spacing:.02em;
+  }
+  h1 small{
+    display:block;
+    font-family:"Zen Kaku Gothic New", sans-serif;
+    font-weight:500;
+    font-size:14px;
+    color:var(--ink-soft);
+    margin-top:4px;
+    letter-spacing:.04em;
+  }
+
+  .day-nav{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:10px 12px;
+    box-shadow: var(--shadow);
+    flex-wrap:wrap;
+  }
+  .day-nav button{
+    width:30px; height:30px;
+    border-radius:7px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--brown);
+    font-size:14px;
+    cursor:pointer;
+    transition:background .15s ease, transform .1s ease, opacity .15s ease;
+  }
+  .day-nav button:hover:not(:disabled){ background:var(--amber-soft); }
+  .day-nav button:active:not(:disabled){ transform:scale(.94); }
+  .day-nav button:disabled{ opacity:.32; cursor:not-allowed; }
+  .day-nav .label{
+    font-size:12px;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .day-nav input[type="date"]{
+    font-family:"Zen Kaku Gothic New", sans-serif;
+    font-size:13.5px;
+    font-weight:700;
+    color:var(--ink);
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:5px 8px;
+    background:#fffef9;
+  }
+  .day-nav .today-btn{
+    width:auto;
+    padding:0 10px;
+    font-size:12px;
+    font-weight:700;
+  }
+
+  /* ---------- Panels ---------- */
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    margin-bottom:22px;
+    overflow:hidden;
+    box-shadow: 0 1px 2px rgba(43,36,32,.05);
+  }
+  .panel-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    padding:14px 18px 12px;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .panel-head h2{
+    font-family:"Shippori Mincho", serif;
+    font-size:16px;
+    font-weight:700;
+    margin:0;
+    color:var(--brown-deep);
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .panel-head h2::before{
+    content:"";
+    width:8px; height:8px;
+    border-radius:2px;
+    background:var(--brown);
+    display:inline-block;
+  }
+  .panel-head .note{ font-size:11.5px; color:var(--ink-soft); }
+
+  .table-scroll{ overflow-x:auto; }
+
+  table{
+    border-collapse:separate;
+    border-spacing:0;
+    width:100%;
+    min-width:920px;
+    font-variant-numeric: tabular-nums;
+  }
+  thead th{
+    background:var(--amber-soft);
+    color:var(--brown-deep);
+    font-weight:700;
+    font-size:12.5px;
+    text-align:center;
+    padding:9px 10px;
+    border-bottom:1px solid var(--line);
+    border-right:1px solid var(--line-soft);
+    white-space:nowrap;
+  }
+  thead tr.weekday th{
+    background:#fffaf0;
+    font-weight:500;
+    color:var(--ink-soft);
+    font-size:11.5px;
+    padding:5px 10px 8px;
+  }
+  tbody td, tbody th{
+    padding:9px 10px;
+    text-align:right;
+    font-size:13px;
+    border-bottom:1px solid var(--line-soft);
+    border-right:1px solid var(--line-soft);
+    white-space:nowrap;
+  }
+  tbody th{
+    text-align:left;
+    font-weight:700;
+    background:#fbf7ee;
+    color:var(--brown-deep);
+  }
+  tbody tr:last-child td, tbody tr:last-child th{
+    border-bottom:none;
+    background:#f3ead4;
+    font-weight:700;
+  }
+  .sticky-1{ position:sticky; left:0; z-index:2; }
+  .sticky-2{ position:sticky; left:96px; z-index:2; }
+
+  col.size-col{ width:74px; }
+
+  .sched td.today-col{ background:var(--amber-soft); font-weight:700; }
+  .sched th.today-col{ background:var(--amber-soft); font-weight:700; }
+  .sched td.zero{ color:#c8bda2; }
+
+  .group-table{ position:relative; }
+  .group-label{
+    position:sticky;
+    left:0;
+    z-index:3;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-family:"Shippori Mincho", serif;
+    font-weight:700;
+    font-size:13px;
+    letter-spacing:.08em;
+    text-align:center;
+    padding:10px 6px;
+    color:#fff;
+  }
+  .harvest .group-label{ background:var(--brown); }
+  .stock .group-label{ background:var(--green-deep); }
+
+  .harvest thead th{ background:var(--amber-soft); }
+  .harvest tbody th{ background:#fbf3e3; }
+  .harvest tbody tr:last-child td, .harvest tbody tr:last-child th{ background:#f3e6c4; }
+
+  .stock thead th{ background:var(--green-soft); color:var(--green-deep); }
+  .stock tbody th{ background:#eef4ec; color:var(--green-deep); }
+  .stock tbody td{ background:#f5f9f4; }
+  .stock tbody tr:last-child td, .stock tbody tr:last-child th{ background:#dfeadd; }
+  .stock tbody td.neg{ color:var(--red); }
+  .stock tbody td.pos{ color:var(--green); }
+
+  .ratio-col{ color:var(--ink-soft); font-size:12px; }
+
+  footer{
+    margin-top:30px;
+    padding-top:14px;
+    border-top:1px solid var(--line-soft);
+    font-size:11.5px;
+    color:var(--ink-soft);
+    display:flex;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  footer .tag{
+    display:inline-block;
+    padding:2px 9px;
+    border-radius:20px;
+    background:var(--amber-soft);
+    color:var(--brown-deep);
+    font-weight:500;
+  }
+
+  @media (max-width:640px){
+    body{ padding:18px 10px 40px; }
+    header{ align-items:flex-start; }
+    .day-nav{ width:100%; justify-content:space-between; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="title-block">
+      <p class="eyebrow">出荷計画ダッシュボード ー サンプル表示</p>
+      <h1>椎茸 日々の過不足確認シート
+        <small>SHIITAKE DAILY SUPPLY &amp; DEMAND SHEET</small>
+      </h1>
+    </div>
+    <div class="day-nav">
+      <button id="prevMonth" aria-label="前月">«</button>
+      <button id="prevDay" aria-label="前日">‹</button>
+      <span class="label">基準日</span>
+      <input type="date" id="refDateInput">
+      <button id="nextDay" aria-label="翌日">›</button>
+      <button id="nextMonth" aria-label="翌月">»</button>
+      <button id="todayBtn" class="today-btn">今日</button>
+    </div>
+  </header>
+
+  <!-- ============ 出荷予定 ============ -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>在庫 ・ 出荷予定</h2>
+      <span class="note">単位：kg　/　当日〜7日後の出荷予定</span>
+    </div>
+    <div class="table-scroll">
+      <table class="sched" id="table1">
+        <colgroup>
+          <col class="size-col">
+          <col span="10">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1">サイズ</th>
+            <th>製品在庫</th>
+            <th>生在庫</th>
+            <th class="today-col">当日出荷予定</th>
+            <th>翌日出荷予定</th>
+            <th>2日後出荷予定</th>
+            <th>3日後出荷予定</th>
+            <th>4日後出荷予定</th>
+            <th>5日後出荷予定</th>
+            <th>6日後出荷予定</th>
+            <th>7日後出荷予定</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1">日付／曜日</th>
+            <th class="dcol" data-offset="-1"></th>
+            <th class="dcol" data-offset="-1"></th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th>
+            <th class="dcol" data-offset="2"></th>
+            <th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th>
+            <th class="dcol" data-offset="5"></th>
+            <th class="dcol" data-offset="6"></th>
+            <th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="sticky-1">M</th>
+            <td>6.6</td><td>104</td><td class="today-col">30.9</td><td>195.0</td><td>41.3</td><td>209.9</td><td>18.2</td><td class="zero">0.0</td><td>220.5</td><td>32.6</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">L</th>
+            <td>194.4</td><td>368</td><td class="today-col">46.2</td><td>398.5</td><td>268.4</td><td>576.2</td><td>78.2</td><td class="zero">0.0</td><td>512.5</td><td>47.9</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">2L</th>
+            <td>0.00kg</td><td>205</td><td class="today-col">1.0</td><td>71.2</td><td>12.6</td><td>153.5</td><td>95.1</td><td class="zero">0.0</td><td>142.3</td><td>15.0</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">袋</th>
+            <td>256.0</td><td class="zero">0</td><td class="today-col">116.0</td><td>157.3</td><td>183.5</td><td>169.0</td><td>279.0</td><td class="zero">0.0</td><td>199.0</td><td>104.0</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">合計</th>
+            <td>457.0</td><td>1,117.0</td><td class="today-col">194.1</td><td>822.0</td><td>505.8</td><td>1,108.6</td><td>470.5</td><td>0.0</td><td>1,074.3</td><td>199.5</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 収穫予測 ============ -->
+  <section class="panel harvest">
+    <div class="panel-head">
+      <h2>収穫予測</h2>
+      <span class="note">実績 ・ 比率 ／ 日別収穫予測（kg）</span>
+    </div>
+    <div class="table-scroll">
+      <table id="table2">
+        <colgroup>
+          <col class="size-col">
+          <col style="width:78px;">
+          <col style="width:64px;">
+          <col span="9">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1">サイズ</th>
+            <th>収穫実績</th>
+            <th class="ratio-col">収穫比率</th>
+            <th class="dcol" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th>
+            <th class="dcol" data-offset="2"></th>
+            <th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th>
+            <th class="dcol" data-offset="5"></th>
+            <th class="dcol" data-offset="6"></th>
+            <th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="8"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="sticky-1">M</th>
+            <td>33.16kg</td><td class="ratio-col">6.08%</td>
+            <td>27.64</td><td>35.51</td><td>40.60</td><td>34.12</td><td>34.12</td><td>25.80</td><td>20.78</td><td>18.61</td><td>17.20</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">L</th>
+            <td>213.60kg</td><td class="ratio-col">39.18%</td>
+            <td>178.08</td><td>228.74</td><td>261.53</td><td>219.76</td><td>219.76</td><td>166.20</td><td>133.88</td><td>119.89</td><td>110.76</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">2L</th>
+            <td>88.34kg</td><td class="ratio-col">16.20%</td>
+            <td>73.65</td><td>94.60</td><td>108.16</td><td>90.89</td><td>90.89</td><td>68.74</td><td>55.37</td><td>49.58</td><td>45.81</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">袋</th>
+            <td>210.07kg</td><td class="ratio-col">38.53%</td>
+            <td>175.13</td><td>224.96</td><td>257.21</td><td>216.13</td><td>216.13</td><td>163.46</td><td>131.67</td><td>117.91</td><td>108.93</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">合計</th>
+            <td>545.17</td><td class="ratio-col">1.00</td>
+            <td>455</td><td>584</td><td>668</td><td>561</td><td>561</td><td>424</td><td>342</td><td>306</td><td>283</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 在庫予測 ============ -->
+  <section class="panel stock">
+    <div class="panel-head">
+      <h2>在庫予測</h2>
+      <span class="note">実績 ・ 比率 ／ 日別過不足予測（kg・＋過剰／−不足）</span>
+    </div>
+    <div class="table-scroll">
+      <table id="table3">
+        <colgroup>
+          <col class="size-col">
+          <col style="width:78px;">
+          <col style="width:64px;">
+          <col span="9">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1">サイズ</th>
+            <th>在庫実績</th>
+            <th class="ratio-col">在庫比率</th>
+            <th class="dcol" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th>
+            <th class="dcol" data-offset="2"></th>
+            <th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th>
+            <th class="dcol" data-offset="5"></th>
+            <th class="dcol" data-offset="6"></th>
+            <th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="8"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="sticky-1">M</th>
+            <td>110.6</td><td class="ratio-col">7.03%</td>
+            <td class="neg">-3</td><td class="neg">-163</td><td class="neg">-163</td><td class="neg">-339</td><td class="neg">-323</td><td class="neg">-297</td><td class="neg">-497</td><td class="neg">-511</td><td class="neg">-674</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">L</th>
+            <td>562.4</td><td class="ratio-col">35.73%</td>
+            <td class="pos">132</td><td class="neg">-38</td><td class="neg">-44</td><td class="neg">-401</td><td class="neg">-259</td><td class="neg">-93</td><td class="neg">-472</td><td class="neg">-400</td><td class="neg">-662</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">2L</th>
+            <td>205.00kg</td><td class="ratio-col">13.02%</td>
+            <td class="pos">73</td><td class="pos">96</td><td class="pos">192</td><td class="pos">129</td><td class="pos">125</td><td class="pos">194</td><td class="pos">107</td><td class="pos">141</td><td class="pos">111</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">袋</th>
+            <td>696.0</td><td class="ratio-col">44.22%</td>
+            <td class="pos">60</td><td class="pos">217</td><td class="pos">381</td><td class="pos">428</td><td class="pos">365</td><td class="pos">529</td><td class="pos">461</td><td class="pos">475</td><td class="pos">412</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">合計</th>
+            <td>1,574.0</td><td class="ratio-col">1.00</td>
+            <td class="pos">261</td><td class="pos">113</td><td class="pos">365</td><td class="neg">-183</td><td class="neg">-92</td><td class="pos">332</td><td class="neg">-401</td><td class="neg">-294</td><td class="neg">-813</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span><span class="tag">サンプルデータ</span>　実データ連携前のデザイン確認用です（日付ラベルのみ基準日に連動、数値はダミー）</span>
+    <span id="lastUpdated"></span>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  var WEEKDAYS = ['日','月','火','水','木','金','土'];
+
+  function toISO(d){
+    var y = d.getFullYear();
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    return y + '-' + m + '-' + day;
+  }
+  function fromISO(s){
+    var parts = s.split('-').map(Number);
+    return new Date(parts[0], parts[1]-1, parts[2]);
+  }
+  function addDays(d, n){
+    var r = new Date(d);
+    r.setDate(r.getDate()+n);
+    return r;
+  }
+  function addMonths(d, n){
+    var r = new Date(d);
+    r.setMonth(r.getMonth()+n);
+    return r;
+  }
+  function fmt(d){
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    return m + '/' + day + ' ' + WEEKDAYS[d.getDay()];
+  }
+
+  var today = new Date();
+  today.setHours(0,0,0,0);
+  var todayISO = toISO(today);
+
+  var input = document.getElementById('refDateInput');
+  input.max = todayISO;
+  input.value = todayISO;
+
+  var dcols = document.querySelectorAll('.dcol');
+
+  function render(){
+    var ref = fromISO(input.value);
+    dcols.forEach(function(cell){
+      var offset = parseInt(cell.getAttribute('data-offset'), 10);
+      cell.textContent = fmt(addDays(ref, offset));
+    });
+    var isToday = input.value === todayISO;
+    document.getElementById('nextDay').disabled = isToday;
+    document.getElementById('nextMonth').disabled = isToday;
+    document.getElementById('lastUpdated').textContent =
+      '表示基準日：' + input.value.replace(/-/g,'/') + (isToday ? '（本日）' : '（過去日を表示中）');
+  }
+
+  function clamp(){
+    if (input.value > todayISO) input.value = todayISO;
+  }
+
+  document.getElementById('prevDay').addEventListener('click', function(){
+    input.value = toISO(addDays(fromISO(input.value), -1));
+    clamp(); render();
+  });
+  document.getElementById('nextDay').addEventListener('click', function(){
+    input.value = toISO(addDays(fromISO(input.value), 1));
+    clamp(); render();
+  });
+  document.getElementById('prevMonth').addEventListener('click', function(){
+    input.value = toISO(addMonths(fromISO(input.value), -1));
+    clamp(); render();
+  });
+  document.getElementById('nextMonth').addEventListener('click', function(){
+    input.value = toISO(addMonths(fromISO(input.value), 1));
+    clamp(); render();
+  });
+  document.getElementById('todayBtn').addEventListener('click', function(){
+    input.value = todayISO;
+    render();
+  });
+  input.addEventListener('change', function(){ clamp(); render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>
