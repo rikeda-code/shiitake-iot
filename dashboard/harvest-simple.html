@@ -58,6 +58,22 @@
     }
     .tab-btn:hover:not(.active) { color: var(--text); }
 
+    /* ── Sub tabs (サマリー内の入れ子タブ) ── */
+    .subtabs {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+    .subtab-btn {
+      padding: 8px 16px;
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 0.85rem; font-weight: 500;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .subtab-btn:hover:not(.active) { color: var(--text); }
+    .subtab-btn.active { color: #e879f9; border-bottom-color: #e879f9; }
+
     /* ── Main ── */
     main { padding: 28px 32px; display: flex; flex-direction: column; gap: 28px; }
 
@@ -232,7 +248,12 @@
 <main id="main"></main>
 <section id="weekly-section" style="margin:0 32px 40px;"></section>
 <section id="lot-section" style="display:none;margin:0 32px 40px;"></section>
-<section id="scatter-section" style="display:none;margin:0 32px 40px;"></section>
+<section id="summary-section" style="display:none;margin:0 32px 40px;">
+  <div class="section-title" style="margin-bottom:12px">サマリー<span class="sub">実績・散布図</span></div>
+  <div class="subtabs" id="summary-subtabs"></div>
+  <div id="jisseki-wrap" style="display:none"></div>
+  <section id="scatter-section" style="display:none"></section>
+</section>
 <section id="weight-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="mekaki-section" style="display:none;margin:0 32px 40px;"></section>
 <section id="analysis-section" style="display:none;margin:0 32px 40px;"></section>
@@ -520,6 +541,9 @@ async function fetchSummaryRows(site) {
     const endDate   = edCell?.v ? (gvizDateStr(edCell.v, null) ?? '') : '';
     const days      = cells[4]?.v != null ? parseInt(cells[4].v) : null;
     const harvest   = cells[9]?.v != null ? parseFloat(cells[9].v) : null;
+    // I(8)=菌床数。実績サマリーの加重平均(Σ(収穫量×菌床数)÷Σ菌床数)に使う
+    const bedCountRaw = cells[8]?.v != null ? parseFloat(cells[8].v) : null;
+    const summaryBedCount = bedCountRaw != null && !isNaN(bedCountRaw) && bedCountRaw > 0 ? bedCountRaw : null;
     const person    = cells[1]?.v != null ? String(cells[1].v).trim() : '';
     const lot       = cells[7]?.v != null ? String(cells[7].v).trim() : '';
     const packRaw   = cells[12]?.v;
@@ -529,7 +553,7 @@ async function fetchSummaryRows(site) {
       const n = parseFloat(packRaw);
       if (!isNaN(n)) packRate = n <= 1 ? Math.round(n * 100) : Math.round(n);
     }
-    raw.push({ name, startDate, endDate, days, harvest, packRate, person, lot, no: extractContainerNo(name) });
+    raw.push({ name, startDate, endDate, days, harvest, packRate, person, lot, summaryBedCount, no: extractContainerNo(name) });
   });
 
   // 同一シート名が集計表に複数行記載されているケース（入力ミス等）の重複除去。
@@ -2467,7 +2491,9 @@ async function loadCurrentSite(forceRefresh = false) {
 
 let weeklyTabActive = false;
 let lotTabActive = false;
-let scatterTabActive = false;
+let scatterTabActive = false;   // サマリー内「散布図」サブタブが表示中か
+let summaryTabActive = false;   // メインタブ「サマリー」が選択中か
+let summarySubTab = 'jisseki';  // 'jisseki'(実績) | 'scatter'(散布図)
 let weightTabActive = false;
 let mekakiTabActive = false;
 let analysisTabActive = false;
@@ -2482,8 +2508,10 @@ function refreshActiveTab() {
   mekakiRows = null;
   analysisDataset = null;
   tempDataset = null;
+  jissekiData = null;
   loadWeeklySection().catch(() => {});
   if (scatterTabActive) renderScatterTab();
+  if (summaryTabActive && summarySubTab === 'jisseki') renderJissekiTab();
   if (weightTabActive) renderWeightTab();
   if (mekakiTabActive) renderMekakiTab();
   if (analysisTabActive) renderAnalysisTab();
@@ -2491,11 +2519,19 @@ function refreshActiveTab() {
 }
 
 function updateTabVisibility() {
-  const anyAlt = weeklyTabActive || lotTabActive || scatterTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive || savedTabActive;
+  // サマリータブの中身は「実績」か「散布図」のどちらか一方を表示する
+  scatterTabActive = summaryTabActive && summarySubTab === 'scatter';
+  const jissekiActive = summaryTabActive && summarySubTab === 'jisseki';
+
+  const anyAlt = weeklyTabActive || lotTabActive || summaryTabActive || weightTabActive || mekakiTabActive || analysisTabActive || tempTabActive || savedTabActive;
   document.getElementById('main').style.display = anyAlt ? 'none' : '';
   document.getElementById('weekly-section').style.display = weeklyTabActive ? '' : 'none';
   document.getElementById('lot-section').style.display = lotTabActive ? '' : 'none';
+  document.getElementById('summary-section').style.display = summaryTabActive ? '' : 'none';
+  document.getElementById('jisseki-wrap').style.display = jissekiActive ? '' : 'none';
   document.getElementById('scatter-section').style.display = scatterTabActive ? '' : 'none';
+  if (summaryTabActive) renderSummarySubTabs();
+  if (jissekiActive) renderJissekiTab();
   document.getElementById('weight-section').style.display = weightTabActive ? '' : 'none';
   document.getElementById('mekaki-section').style.display = mekakiTabActive ? '' : 'none';
   document.getElementById('analysis-section').style.display = analysisTabActive ? '' : 'none';
@@ -2803,20 +2839,372 @@ function renderLotTab() {
     ${html}`;
 }
 
+// ── サマリータブ(実績 / 散布図) ────────────────────────────────────────────────
+
+const SUMMARY_SUB_TABS = [
+  { key: 'jisseki', label: '実績' },
+  { key: 'scatter', label: '散布図' },
+];
+
+function renderSummarySubTabs() {
+  const el = document.getElementById('summary-subtabs');
+  if (!el) return;
+  el.innerHTML = SUMMARY_SUB_TABS.map(t =>
+    `<button class="subtab-btn${summarySubTab === t.key ? ' active' : ''}" onclick="summarySetSubTab('${t.key}')">${t.label}</button>`
+  ).join('');
+}
+
+function summarySetSubTab(key) {
+  if (summarySubTab === key) return;
+  summarySubTab = key;
+  updateTabVisibility(); // 表示切替と該当サブタブの描画はここで行われる
+}
+
+// ── 実績タブ ──────────────────────────────────────────────────────────────────
+// 栽培が終了したコンテナだけを対象に、栽培開始月ごとの実績をまとめる。
+// 月別平均は「その月に開始したコンテナ全体の収穫量 ÷ その月に開始した菌床数の合計」
+// という加重平均で算出する(菌床数の多いコンテナが正しく重く効くようにするため)。
+
+let jissekiData = null;
+let jissekiSubTab = 'table';        // 'table' | 'chart' | 'ranking'
+let jissekiSite = 'all';
+let jissekiChartMode = 'month';     // 'month'(月別平均) | 'container'(コンテナ別)
+let jissekiRankPeriod = 'monthly';  // 'monthly'(毎月) | 'total'(累計)
+let jissekiRankMetric = 'harvest';  // 'harvest'(収穫量) | 'packRate'(パック品率)
+let jissekiCharts = [];
+
+const JISSEKI_SUB_TABS = [
+  { key: 'table', label: '表' },
+  { key: 'chart', label: 'グラフ' },
+  { key: 'ranking', label: '担当者ランキング' },
+];
+
+async function ensureJissekiData() {
+  if (jissekiData !== null) return jissekiData;
+  const rows = [];
+  for (const site of SITES) {
+    let ended = cache[site.id]?.ended;
+    if (!ended) {
+      try {
+        const result = await fetchSummaryRows(site);
+        cache[site.id] = { ...(cache[site.id] || {}), ...result };
+        ended = result.ended;
+      } catch (e) { ended = []; }
+    }
+    (ended || []).forEach(r => {
+      if (r.harvest == null || isNaN(r.harvest)) return;
+      const sd = parseDateStr(r.startDate);
+      if (!sd) return;
+      rows.push({
+        siteName: site.name,
+        person: r.person || '未設定',
+        no: r.no || r.name,
+        name: r.name,
+        startDate: r.startDate,
+        startMonth: `${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, '0')}`,
+        endDate: r.endDate,
+        bedCount: r.summaryBedCount,
+        harvest: r.harvest,
+        packRate: r.packRate,
+      });
+    });
+  }
+  rows.sort((a, b) => (parseDateStr(b.startDate) || 0) - (parseDateStr(a.startDate) || 0));
+  jissekiData = rows;
+  return rows;
+}
+
+// 菌床数で重み付けした平均。菌床数が1件も無い場合のみ単純平均にフォールバックする
+function jissekiWeightedAvg(rows, key) {
+  let sum = 0, weight = 0;
+  rows.forEach(r => {
+    const v = r[key];
+    if (v == null || isNaN(v)) return;
+    if (r.bedCount == null || !(r.bedCount > 0)) return;
+    sum += v * r.bedCount;
+    weight += r.bedCount;
+  });
+  if (weight > 0) return sum / weight;
+  const plain = rows.map(r => r[key]).filter(v => v != null && !isNaN(v));
+  return plain.length ? plain.reduce((a, b) => a + b, 0) / plain.length : null;
+}
+
+function jissekiSumBedCount(rows) {
+  return rows.reduce((s, r) => s + (r.bedCount > 0 ? r.bedCount : 0), 0);
+}
+
+function jissekiFilteredRows() {
+  const rows = jissekiData || [];
+  return jissekiSite === 'all' ? rows : rows.filter(r => r.siteName === jissekiSite);
+}
+
+// 栽培開始月ごとにまとめる(新しい月が先頭)
+function jissekiGroupByMonth(rows) {
+  const map = {};
+  rows.forEach(r => { (map[r.startMonth] ||= []).push(r); });
+  return Object.keys(map).sort().reverse().map(month => ({
+    month,
+    rows: map[month],
+    bedCount: jissekiSumBedCount(map[month]),
+    harvest: jissekiWeightedAvg(map[month], 'harvest'),
+    packRate: jissekiWeightedAvg(map[month], 'packRate'),
+  }));
+}
+
+function jissekiMonthLabel(month) {
+  const [y, m] = month.split('-');
+  return `${y}年${parseInt(m)}月`;
+}
+
+function jissekiFmt(v, digits, suffix) {
+  if (v == null || isNaN(v)) return '—';
+  return v.toFixed(digits) + (suffix || '');
+}
+
+function jissekiSetSubTab(key) { jissekiSubTab = key; renderJissekiTab(); }
+function jissekiSetSite(site) { jissekiSite = site; renderJissekiTab(); }
+function jissekiSetChartMode(mode) { jissekiChartMode = mode; renderJissekiTab(); }
+function jissekiSetRankPeriod(p) { jissekiRankPeriod = p; renderJissekiTab(); }
+function jissekiSetRankMetric(m) { jissekiRankMetric = m; renderJissekiTab(); }
+
+async function renderJissekiTab() {
+  const wrap = document.getElementById('jisseki-wrap');
+  if (!wrap) return;
+  if (jissekiData === null) {
+    wrap.innerHTML = '<div class="loading">実績データを読み込み中...</div>';
+    await ensureJissekiData();
+    if (!(summaryTabActive && summarySubTab === 'jisseki')) return;
+  }
+
+  jissekiCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+  jissekiCharts = [];
+
+  const subTabsHtml = JISSEKI_SUB_TABS.map(t =>
+    `<button class="sort-btn${jissekiSubTab === t.key ? ' active' : ''}" onclick="jissekiSetSubTab('${t.key}')">${t.label}</button>`
+  ).join('');
+
+  const siteBtns = [['all', '全拠点'], ...SITES.map(s => [s.name, s.name])].map(([k, v]) =>
+    `<button class="sort-btn${jissekiSite === k ? ' active' : ''}" onclick="jissekiSetSite('${k}')">${v}</button>`
+  ).join('');
+
+  const rows = jissekiFilteredRows();
+  const groups = jissekiGroupByMonth(rows);
+
+  let bodyHtml = '';
+  if (!rows.length) {
+    bodyHtml = '<div style="padding:24px;color:#64748b;font-size:0.85rem;text-align:center">栽培終了済みのコンテナ実績がありません。</div>';
+  } else if (jissekiSubTab === 'table') {
+    bodyHtml = jissekiTableHtml(groups);
+  } else if (jissekiSubTab === 'chart') {
+    bodyHtml = jissekiChartHtml(groups);
+  } else {
+    bodyHtml = jissekiRankingHtml(rows);
+  }
+
+  wrap.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${subTabsHtml}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:16px">
+      <span class="sort-label">拠点:</span>${siteBtns}
+    </div>
+    ${bodyHtml}`;
+
+  if (jissekiSubTab === 'chart' && rows.length) jissekiDrawChart(groups);
+}
+
+// ── 実績: 表 ──────────────────────────────────────────────────────────────────
+function jissekiTableHtml(groups) {
+  const th = 'padding:8px 10px;font-size:0.75rem;color:#94a3b8;font-weight:600;text-align:left;white-space:nowrap;border-bottom:1px solid #2e3148';
+  const td = 'padding:7px 10px;font-size:0.82rem;color:#cbd5e1;white-space:nowrap;border-bottom:1px solid #1e2235';
+  const tdNum = td + ';text-align:right';
+
+  const sections = groups.map(g => {
+    const avgRow = `
+      <tr style="background:#1a1d27">
+        <td style="${td};font-weight:700;color:#e2e8f0" colspan="5">${jissekiMonthLabel(g.month)} 平均(${g.rows.length}台)</td>
+        <td style="${tdNum};font-weight:700;color:#e2e8f0">${g.bedCount ? g.bedCount.toLocaleString() : '—'}</td>
+        <td style="${tdNum};font-weight:700;color:#4ade80">${jissekiFmt(g.harvest, 1, 'g')}</td>
+        <td style="${tdNum};font-weight:700;color:#facc15">${jissekiFmt(g.packRate, 1, '%')}</td>
+      </tr>`;
+    const detailRows = g.rows.map(r => `
+      <tr>
+        <td style="${td}">${r.siteName}</td>
+        <td style="${td}">${r.person}</td>
+        <td style="${td}">${r.name}</td>
+        <td style="${td}">${r.startDate || '—'}</td>
+        <td style="${td}">${jissekiMonthLabel(r.startMonth)}</td>
+        <td style="${tdNum}">${r.bedCount != null ? r.bedCount.toLocaleString() : '—'}</td>
+        <td style="${tdNum}">${jissekiFmt(r.harvest, 2, 'g')}</td>
+        <td style="${tdNum}">${jissekiFmt(r.packRate, 1, '%')}</td>
+      </tr>`).join('');
+    return avgRow + detailRows;
+  }).join('');
+
+  return `
+    <div style="overflow-x:auto;background:#13151f;border-radius:12px;padding:8px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr>
+            <th style="${th}">拠点</th>
+            <th style="${th}">担当者</th>
+            <th style="${th}">号機</th>
+            <th style="${th}">栽培開始日</th>
+            <th style="${th}">栽培開始月</th>
+            <th style="${th};text-align:right">菌床数</th>
+            <th style="${th};text-align:right">1菌床当たり収穫量</th>
+            <th style="${th};text-align:right">パック品比率</th>
+          </tr>
+        </thead>
+        <tbody>${sections}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── 実績: グラフ ──────────────────────────────────────────────────────────────
+function jissekiChartHtml() {
+  const modeBtns = [['month', '月別平均'], ['container', 'コンテナ別']].map(([k, v]) =>
+    `<button class="sort-btn${jissekiChartMode === k ? ' active' : ''}" onclick="jissekiSetChartMode('${k}')">${v}</button>`
+  ).join('');
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${modeBtns}</div>
+    <div style="position:relative;height:460px;background:#13151f;border-radius:12px;padding:16px">
+      <canvas id="jisseki-chart"></canvas>
+    </div>`;
+}
+
+function jissekiDrawChart(groups) {
+  const canvas = document.getElementById('jisseki-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  let labels, harvestData, packData;
+  if (jissekiChartMode === 'month') {
+    const asc = [...groups].reverse();
+    labels = asc.map(g => jissekiMonthLabel(g.month));
+    harvestData = asc.map(g => g.harvest != null ? +g.harvest.toFixed(1) : null);
+    packData = asc.map(g => g.packRate != null ? +g.packRate.toFixed(1) : null);
+  } else {
+    const rows = [...jissekiFilteredRows()].reverse();
+    labels = rows.map(r => `${r.siteName}${r.name}`);
+    harvestData = rows.map(r => r.harvest != null ? +r.harvest.toFixed(1) : null);
+    packData = rows.map(r => r.packRate != null ? +r.packRate.toFixed(1) : null);
+  }
+
+  jissekiCharts.push(new Chart(canvas, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'bar', label: '1菌床当たり収穫量(g)', data: harvestData, backgroundColor: '#38bdf8cc', yAxisID: 'y', order: 2 },
+        { type: 'line', label: 'パック品率(%)', data: packData, borderColor: '#facc15', backgroundColor: '#facc15',
+          pointBackgroundColor: '#facc15', pointRadius: 3, yAxisID: 'y1', order: 1 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
+      scales: {
+        x: { ticks: { color: '#8892a4', font: { size: 10 }, maxRotation: 90, minRotation: 45 }, grid: { color: '#1e2235' } },
+        y: { position: 'left', ticks: { color: '#8892a4', font: { size: 10 }, callback: v => `${v}g` }, grid: { color: '#1e2235' } },
+        y1: { position: 'right', min: 0, max: 100, ticks: { color: '#facc15', font: { size: 10 }, callback: v => `${v}%` }, grid: { display: false } },
+      },
+    },
+  }));
+}
+
+// ── 実績: 担当者ランキング ────────────────────────────────────────────────────
+// 担当者ごとに菌床数で加重平均した収穫量・パック品率で順位付けする
+function jissekiRankPersons(rows) {
+  const byPerson = {};
+  rows.forEach(r => { (byPerson[r.person] ||= []).push(r); });
+  return Object.keys(byPerson).map(person => {
+    const list = byPerson[person];
+    return {
+      person,
+      count: list.length,
+      bedCount: jissekiSumBedCount(list),
+      harvest: jissekiWeightedAvg(list, 'harvest'),
+      packRate: jissekiWeightedAvg(list, 'packRate'),
+    };
+  }).filter(p => p[jissekiRankMetric] != null)
+    .sort((a, b) => b[jissekiRankMetric] - a[jissekiRankMetric]);
+}
+
+function jissekiRankTableHtml(ranked) {
+  if (!ranked.length) return '<div style="padding:16px;color:#64748b;font-size:0.82rem">対象データがありません。</div>';
+  const th = 'padding:8px 10px;font-size:0.75rem;color:#94a3b8;font-weight:600;text-align:left;white-space:nowrap;border-bottom:1px solid #2e3148';
+  const td = 'padding:7px 10px;font-size:0.82rem;color:#cbd5e1;white-space:nowrap;border-bottom:1px solid #1e2235';
+  const tdNum = td + ';text-align:right';
+  const medals = ['🥇', '🥈', '🥉'];
+  const body = ranked.map((p, i) => `
+    <tr>
+      <td style="${td};width:52px">${medals[i] || (i + 1)}</td>
+      <td style="${td};font-weight:600">${p.person}</td>
+      <td style="${tdNum};color:${jissekiRankMetric === 'harvest' ? '#4ade80' : '#facc15'};font-weight:700">
+        ${jissekiRankMetric === 'harvest' ? jissekiFmt(p.harvest, 1, 'g') : jissekiFmt(p.packRate, 1, '%')}
+      </td>
+      <td style="${tdNum};color:#8892a4">${jissekiRankMetric === 'harvest' ? jissekiFmt(p.packRate, 1, '%') : jissekiFmt(p.harvest, 1, 'g')}</td>
+      <td style="${tdNum};color:#8892a4">${p.count}台</td>
+      <td style="${tdNum};color:#8892a4">${p.bedCount ? p.bedCount.toLocaleString() : '—'}</td>
+    </tr>`).join('');
+  const mainLabel = jissekiRankMetric === 'harvest' ? '1菌床当たり収穫量' : 'パック品率';
+  const subLabel = jissekiRankMetric === 'harvest' ? 'パック品率' : '1菌床当たり収穫量';
+  return `
+    <div style="overflow-x:auto;background:#13151f;border-radius:12px;padding:8px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr>
+            <th style="${th}">順位</th>
+            <th style="${th}">担当者</th>
+            <th style="${th};text-align:right">${mainLabel}</th>
+            <th style="${th};text-align:right">${subLabel}</th>
+            <th style="${th};text-align:right">台数</th>
+            <th style="${th};text-align:right">菌床数</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+}
+
+function jissekiRankingHtml(rows) {
+  const periodBtns = [['monthly', '毎月'], ['total', '累計']].map(([k, v]) =>
+    `<button class="sort-btn${jissekiRankPeriod === k ? ' active' : ''}" onclick="jissekiSetRankPeriod('${k}')">${v}</button>`
+  ).join('');
+  const metricBtns = [['harvest', '収穫量'], ['packRate', 'パック品率']].map(([k, v]) =>
+    `<button class="sort-btn${jissekiRankMetric === k ? ' active' : ''}" onclick="jissekiSetRankMetric('${k}')">${v}</button>`
+  ).join('');
+
+  let listHtml;
+  if (jissekiRankPeriod === 'total') {
+    listHtml = jissekiRankTableHtml(jissekiRankPersons(rows));
+  } else {
+    listHtml = jissekiGroupByMonth(rows).map(g => `
+      <div style="margin-bottom:24px">
+        <div style="color:#cbd5e1;font-size:0.88rem;font-weight:600;margin-bottom:8px">${jissekiMonthLabel(g.month)}開始分</div>
+        ${jissekiRankTableHtml(jissekiRankPersons(g.rows))}
+      </div>`).join('');
+  }
+
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px">
+      <span class="sort-label">期間:</span>${periodBtns}
+      <span class="sort-label" style="margin-left:12px">項目:</span>${metricBtns}
+    </div>
+    ${listHtml}`;
+}
+
 function initTabs() {
   const tabsEl = document.getElementById('tabs');
 
-  // 散布図 tab (default)
+  // サマリー tab (default) — 中に「実績」「散布図」のサブタブを持つ
   const scatterBtn = document.createElement('button');
   scatterBtn.className = 'tab-btn active';
-  scatterBtn.textContent = '散布図';
+  scatterBtn.textContent = 'サマリー';
   scatterBtn.style.color = '#e879f9';
   scatterBtn.style.borderBottomColor = '#e879f9';
   scatterBtn.addEventListener('click', () => {
-    if (scatterTabActive) return;
+    if (summaryTabActive) return;
     weeklyTabActive = false;
     lotTabActive = false;
-    scatterTabActive = true;
+    summaryTabActive = true;
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = false;
@@ -2842,7 +3230,7 @@ function initTabs() {
     if (weightTabActive) return;
     weeklyTabActive = false;
     lotTabActive = false;
-    scatterTabActive = false;
+    summaryTabActive = false;
     weightTabActive = true;
     mekakiTabActive = false;
     analysisTabActive = false;
@@ -2866,7 +3254,7 @@ function initTabs() {
   mekakiBtn.textContent = '芽かき量';
   mekakiBtn.addEventListener('click', () => {
     if (mekakiTabActive) return;
-    weeklyTabActive = false; lotTabActive = false; scatterTabActive = false;
+    weeklyTabActive = false; lotTabActive = false; summaryTabActive = false;
     weightTabActive = false; mekakiTabActive = true; analysisTabActive = false; tempTabActive = false; savedTabActive = false;
     tabsEl.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.style.color = ''; b.style.borderBottomColor = ''; });
     mekakiBtn.classList.add('active');
@@ -2885,7 +3273,7 @@ function initTabs() {
     if (weeklyTabActive) return;
     weeklyTabActive = true;
     lotTabActive = false;
-    scatterTabActive = false;
+    summaryTabActive = false;
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = false;
@@ -2912,7 +3300,7 @@ function initTabs() {
     if (analysisTabActive) return;
     weeklyTabActive = false;
     lotTabActive = false;
-    scatterTabActive = false;
+    summaryTabActive = false;
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = true;
@@ -2939,7 +3327,7 @@ function initTabs() {
     if (tempTabActive) return;
     weeklyTabActive = false;
     lotTabActive = false;
-    scatterTabActive = false;
+    summaryTabActive = false;
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = false;
@@ -2967,7 +3355,7 @@ function initTabs() {
     if (savedTabActive) return;
     weeklyTabActive = false;
     lotTabActive = false;
-    scatterTabActive = false;
+    summaryTabActive = false;
     weightTabActive = false;
     mekakiTabActive = false;
     analysisTabActive = false;
@@ -6783,7 +7171,7 @@ try { initTabs(); } catch(e) {
 let sharedCollectionImported = false;
 try { sharedCollectionImported = savedImportFromHash(); } catch(e) { console.error('[savedImportFromHash error]', e); }
 if (!sharedCollectionImported) {
-  scatterTabActive = true;
+  summaryTabActive = true;
   try { updateTabVisibility(); } catch(e) { console.error('[updateTabVisibility error]', e); }
 }
 
