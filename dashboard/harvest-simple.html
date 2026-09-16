@@ -3075,28 +3075,52 @@ function jissekiDrawChart(groups) {
   const canvas = document.getElementById('jisseki-chart');
   if (!canvas || typeof Chart === 'undefined') return;
 
-  let labels, harvestData, packData;
+  const rows = jissekiFilteredRows();
+  // 実際にデータがある拠点だけを対象にする(空の系列で凡例が埋まらないように)
+  const activeSites = SITES.filter(s => rows.some(r => r.siteName === s.name));
+  const siteColor = name => (SITES.find(s => s.name === name) || {}).color || '#38bdf8';
+
+  let labels, datasets;
   if (jissekiChartMode === 'month') {
+    // 月ごとに拠点別の棒を並べ、拠点色で塗り分ける(パック品率は同色の破線)
     const asc = [...groups].reverse();
     labels = asc.map(g => jissekiMonthLabel(g.month));
-    harvestData = asc.map(g => g.harvest != null ? +g.harvest.toFixed(1) : null);
-    packData = asc.map(g => g.packRate != null ? +g.packRate.toFixed(1) : null);
+    const perSiteMonthRows = activeSites.map(site =>
+      asc.map(g => g.rows.filter(r => r.siteName === site.name)));
+
+    const barSets = activeSites.map((site, i) => ({
+      type: 'bar', label: `${site.name} 収穫量(g)`, yAxisID: 'y', order: 2,
+      backgroundColor: site.color + 'cc',
+      data: perSiteMonthRows[i].map(list => {
+        const v = jissekiWeightedAvg(list, 'harvest');
+        return v != null ? +v.toFixed(1) : null;
+      }),
+    }));
+    const lineSets = activeSites.map((site, i) => ({
+      type: 'line', label: `${site.name} パック品率(%)`, yAxisID: 'y1', order: 1,
+      borderColor: site.color, backgroundColor: site.color, pointBackgroundColor: site.color,
+      pointRadius: 3, borderDash: [4, 3], fill: false,
+      data: perSiteMonthRows[i].map(list => {
+        const v = jissekiWeightedAvg(list, 'packRate');
+        return v != null ? +v.toFixed(1) : null;
+      }),
+    }));
+    datasets = [...barSets, ...lineSets];
   } else {
-    const rows = [...jissekiFilteredRows()].reverse();
-    labels = rows.map(r => `${r.siteName}${r.name}`);
-    harvestData = rows.map(r => r.harvest != null ? +r.harvest.toFixed(1) : null);
-    packData = rows.map(r => r.packRate != null ? +r.packRate.toFixed(1) : null);
+    const list = [...rows].reverse();
+    labels = list.map(r => `${r.siteName}${r.name}`);
+    datasets = [
+      { type: 'bar', label: '1菌床当たり収穫量(g)', yAxisID: 'y', order: 2,
+        backgroundColor: list.map(r => siteColor(r.siteName) + 'cc'),
+        data: list.map(r => r.harvest != null ? +r.harvest.toFixed(1) : null) },
+      { type: 'line', label: 'パック品率(%)', yAxisID: 'y1', order: 1,
+        borderColor: '#facc15', backgroundColor: '#facc15', pointBackgroundColor: '#facc15', pointRadius: 3,
+        data: list.map(r => r.packRate != null ? +r.packRate.toFixed(1) : null) },
+    ];
   }
 
   jissekiCharts.push(new Chart(canvas, {
-    data: {
-      labels,
-      datasets: [
-        { type: 'bar', label: '1菌床当たり収穫量(g)', data: harvestData, backgroundColor: '#38bdf8cc', yAxisID: 'y', order: 2 },
-        { type: 'line', label: 'パック品率(%)', data: packData, borderColor: '#facc15', backgroundColor: '#facc15',
-          pointBackgroundColor: '#facc15', pointRadius: 3, yAxisID: 'y1', order: 1 },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#8892a4', font: { size: 11 } } }, tooltip: tooltipDefaults },
