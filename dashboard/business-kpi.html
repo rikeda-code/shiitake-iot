@@ -364,6 +364,25 @@ function parseBedCountTable(table) {
   return result;
 }
 
+// 「n月」行の判定。月セルが日付書式の場合、gvizは生値(v)を"Date(2026,0,1)"形式で返し
+// 表示文字列(f)にだけ"1月"が入るため、f→vの順で照合する。
+function monthFromCell(cell) {
+  if (!cell) return null;
+  for (const raw of [cell.f, cell.v]) {
+    const m = String(raw ?? '').trim().match(/^(\d{1,2})月$/);
+    if (!m) continue;
+    const month = parseInt(m[1], 10);
+    if (month >= 1 && month <= 12) return month;
+  }
+  return null;
+}
+
+// 数値セルの取り出し。gvizが数値を文字列で返す場合にも備える(0・数値以外は未入力扱い)。
+function numOrNull(v) {
+  const n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+  return Number.isFinite(n) && n !== 0 ? n : null;
+}
+
 // 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額/売上)で
 // 特定し、行は「n月」ラベルで特定する(行・列位置に依存しないため多少の行列挿入があっても壊れにくい)。
 async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
@@ -391,20 +410,17 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const unitPrice = Array(12).fill(null);
   rows.forEach(row => {
     const cells = row.c || [];
-    const monthLabel = cells[0]?.v != null ? String(cells[0].v) : (cells[0]?.f || '');
-    const m = String(monthLabel).match(/^(\d{1,2})月$/);
-    if (!m) return;
-    const month = parseInt(m[1], 10);
-    if (month < 1 || month > 12) return;
-    const bVal = cells[colB]?.v;
-    const eVal = cells[colE]?.v;
-    const jVal = cells[colJ]?.v;
-    shipment[month - 1] = (bVal != null && bVal !== 0) ? +(bVal / 1000).toFixed(2) : null;
-    shipmentValue[month - 1] = (eVal != null && eVal !== 0) ? Math.round(eVal) : null;
-    // 売上単価はシートの値をそのまま採用する(丸めのみ。0や数値以外は未入力として扱う)
-    unitPrice[month - 1] = (typeof jVal === 'number' && jVal !== 0) ? +jVal.toFixed(4) : null;
+    const month = monthFromCell(cells[0]);
+    if (month == null) return;
+    const bVal = numOrNull(cells[colB]?.v);
+    const eVal = numOrNull(cells[colE]?.v);
+    const jVal = numOrNull(cells[colJ]?.v);
+    shipment[month - 1] = bVal != null ? +(bVal / 1000).toFixed(2) : null;
+    shipmentValue[month - 1] = eVal != null ? Math.round(eVal) : null;
+    // 売上単価はシートの値をそのまま採用する(丸めのみ。計算は一切しない)
+    unitPrice[month - 1] = jVal != null ? +jVal.toFixed(4) : null;
   });
-  return { shipment, shipmentValue, unitPrice };
+  return { shipment, shipmentValue, unitPrice, rows };
 }
 
 // 出荷量＆出荷額シート「{年}全拠点」タブ: 全社合計の売上単価は各拠点から算出せず、
@@ -426,14 +442,16 @@ async function fetchTotalUnitPriceYear(sheetId, year) {
   const unitPrice = Array(12).fill(null);
   rows.forEach(row => {
     const cells = row.c || [];
-    const monthLabel = cells[0]?.v != null ? String(cells[0].v) : (cells[0]?.f || '');
-    const m = String(monthLabel).match(/^(\d{1,2})月$/);
-    if (!m) return;
-    const month = parseInt(m[1], 10);
-    if (month < 1 || month > 12) return;
-    const v = cells[colI]?.v;
-    unitPrice[month - 1] = (typeof v === 'number' && v !== 0) ? +v.toFixed(4) : null;
+    const month = monthFromCell(cells[0]);
+    if (month == null) return;
+    const v = numOrNull(cells[colI]?.v);
+    unitPrice[month - 1] = v != null ? +v.toFixed(4) : null;
   });
+  // 1件も取れなかった場合は「取得成功・データ0件」ではなく取得失敗として扱う
+  // (黙ってフォールバック値をnullで上書きするとグラフから線が消えて原因が分からなくなるため)
+  if (unitPrice.every(v => v == null)) {
+    throw new Error(`${tabName}: 売上単価(g単価(売上ベース))の値が取得できません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
+  }
   return unitPrice;
 }
 
@@ -451,7 +469,13 @@ async function fetchShipmentAll(sheetId) {
       const y26 = await fetchShipmentSiteYear(sheetId, 2026, SITE_JP[key]);
       shipment[key] = [...y25.shipment, ...y26.shipment].slice(0, N);
       shipmentValue[key] = [...y25.shipmentValue, ...y26.shipmentValue].slice(0, N);
-      unitPrice[key] = [...y25.unitPrice, ...y26.unitPrice].slice(0, N);
+      // 売上単価が1件も取れなかった場合はフォールバック値を維持し、失敗として明示する
+      const up = [...y25.unitPrice, ...y26.unitPrice].slice(0, N);
+      if (up.some(v => v != null)) {
+        unitPrice[key] = up;
+      } else {
+        failures.push(`${SITE_JP[key]}(売上単価): 「g単価(売上ベース)」列の値が取得できません ${sampleRowStrings(y26.rows)}`);
+      }
     } catch (e) {
       failures.push(`${SITE_JP[key]}: ${e.message}`);
     }
@@ -688,6 +712,7 @@ const METRIC_DEFS = {
   harvest:        { label: '収穫量',         unit: 'kg',    kind: 'bar',  digits: 0 },
   bedCount:       { label: '菌床仕入数',     unit: '本',    kind: 'bar',  digits: 0 },
   substrateCost:  { label: '菌床仕入額',     unit: '円',    kind: 'bar',  digits: 0 },
+  unitPrice:      { label: '売上単価',       unit: '円/g',  kind: 'line', digits: 3 },
   harvestPerBed:  { label: '1菌床あたり収穫量', unit: 'g',  kind: 'line', digits: 0 },
   shipmentPerBed: { label: '1菌床あたり出荷量', unit: 'g',  kind: 'line', digits: 0 },
   costRatio:      { label: '菌床原価率',     unit: '%',     kind: 'line', digits: 1 },
