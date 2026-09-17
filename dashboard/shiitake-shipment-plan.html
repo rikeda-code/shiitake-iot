@@ -4,9 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>椎茸 日々の過不足確認シート</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
   :root{
     --ink:#2b2420;
@@ -34,7 +31,7 @@
       radial-gradient(circle at 1px 1px, rgba(122,74,38,.06) 1px, transparent 0);
     background-size: 22px 22px;
     color:var(--ink);
-    font-family:"Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", sans-serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     -webkit-font-smoothing:antialiased;
     padding: 28px 18px 60px;
   }
@@ -53,13 +50,13 @@
     flex-wrap:wrap;
   }
   .title-block .eyebrow{
-    font-size:12px;
+    font-size:13px;
     letter-spacing:.14em;
     color:var(--brown);
     margin:0 0 6px;
   }
   h1{
-    font-family:"Shippori Mincho", serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     font-weight:700;
     font-size:clamp(24px,3.4vw,34px);
     margin:0;
@@ -68,7 +65,7 @@
   }
   h1 small{
     display:block;
-    font-family:"Zen Kaku Gothic New", sans-serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     font-weight:500;
     font-size:14px;
     color:var(--ink-soft);
@@ -93,7 +90,7 @@
     border:1px solid var(--line);
     background:#fff;
     color:var(--brown);
-    font-size:14px;
+    font-size:15px;
     cursor:pointer;
     transition:background .15s ease, transform .1s ease, opacity .15s ease;
   }
@@ -101,13 +98,13 @@
   .day-nav button:active:not(:disabled){ transform:scale(.94); }
   .day-nav button:disabled{ opacity:.32; cursor:not-allowed; }
   .day-nav .label{
-    font-size:12px;
+    font-size:13px;
     color:var(--ink-soft);
     white-space:nowrap;
   }
   .day-nav input[type="date"]{
-    font-family:"Zen Kaku Gothic New", sans-serif;
-    font-size:13.5px;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size:14.5px;
     font-weight:700;
     color:var(--ink);
     border:1px solid var(--line);
@@ -118,12 +115,12 @@
   .day-nav .today-btn{
     width:auto;
     padding:0 10px;
-    font-size:12px;
+    font-size:13px;
     font-weight:700;
   }
   .day-nav.day-nav-compact{ padding:6px 8px; }
-  .day-nav.day-nav-compact input[type="date"]{ font-size:12.5px; padding:4px 6px; }
-  .day-nav.day-nav-compact button{ width:26px; height:26px; font-size:12.5px; }
+  .day-nav.day-nav-compact input[type="date"]{ font-size:13.5px; padding:4px 6px; }
+  .day-nav.day-nav-compact button{ width:26px; height:26px; font-size:13.5px; }
 
   /* ---------- Site toggle ---------- */
   .site-toggle{
@@ -141,9 +138,9 @@
     border:1px solid transparent;
     background:transparent;
     color:var(--ink-soft);
-    font-size:13px;
+    font-size:14px;
     font-weight:600;
-    font-family:"Zen Kaku Gothic New", sans-serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     cursor:pointer;
     transition:background .15s ease, color .15s ease;
     white-space:nowrap;
@@ -185,7 +182,7 @@
     flex-wrap:wrap;
   }
   .panel-head h2{
-    font-family:"Shippori Mincho", serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     font-size:16px;
     font-weight:700;
     margin:0;
@@ -201,7 +198,7 @@
     background:var(--brown);
     display:inline-block;
   }
-  .panel-head .note{ font-size:11.5px; color:var(--ink-soft); }
+  .panel-head .note{ font-size:12.5px; color:var(--ink-soft); }
 
   .table-scroll{ overflow-x:auto; }
 
@@ -216,7 +213,7 @@
     background:var(--amber-soft);
     color:var(--brown-deep);
     font-weight:700;
-    font-size:12.5px;
+    font-size:13.5px;
     text-align:center;
     padding:9px 10px;
     border-bottom:1px solid var(--line);
@@ -227,13 +224,13 @@
     background:#fffaf0;
     font-weight:500;
     color:var(--ink-soft);
-    font-size:11.5px;
+    font-size:12.5px;
     padding:5px 10px 8px;
   }
   tbody td, tbody th{
     padding:9px 10px;
     text-align:right;
-    font-size:13px;
+    font-size:14.5px;
     border-bottom:1px solid var(--line-soft);
     border-right:1px solid var(--line-soft);
     white-space:nowrap;
@@ -265,7 +262,7 @@
     z-index:3;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    font-family:"Shippori Mincho", serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
     font-weight:700;
     font-size:13px;
     letter-spacing:.08em;
@@ -287,13 +284,13 @@
   .stock tbody td.neg{ color:var(--red); }
   .stock tbody td.pos{ color:var(--green); }
 
-  .ratio-col{ color:var(--ink-soft); font-size:12px; }
+  .ratio-col{ color:var(--ink-soft); font-size:13px; }
 
   footer{
     margin-top:30px;
     padding-top:14px;
     border-top:1px solid var(--line-soft);
-    font-size:11.5px;
+    font-size:12.5px;
     color:var(--ink-soft);
     display:flex;
     justify-content:space-between;
