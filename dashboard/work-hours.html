@@ -1332,17 +1332,20 @@ function buildDataset(json) {
       : (isNaN(Number(flagRaw)) ? null : Number(flagRaw));
 
     const hours = jissituCols.map(({ idx }) => parseDuration(cells[idx]));
-    // B=2（新規要員・追加待ち）は、まだ稼働実績が無く全月nullになるのが通常のため、
-    // 除外対象から外す（変更B・段階3の追加修正）。hours配列自体は全てnullのまま
-    // 変更しないため、実績集計・実績人数等（e.hours[mi] !== nullを条件にする箇所）
-    // には一切現れない
-    if (hours.every(h => h === null) && flag !== 2) return;
-
-    const stdHours = stdHoursIdx >= 0 ? parsePlainHours(cells[stdHoursIdx]) : null;
 
     // startYm：I列（開始月）。標準労働時間シート側のパース（parseThreeSiteMergeSheet）
     // と同じ列インデックス定数・同じパース関数を再利用する（A〜I列は各シートで同一構成）
     const startYm = parseGvizDateYm(cells[THREE_SITE_MERGE_START_MONTH_COL]);
+    // B=2（新規要員・追加待ち）は、まだ稼働実績が無く全月nullになるのが通常のため、
+    // 除外対象から外す（変更B・段階3の追加修正）。hours配列自体は全てnullのまま
+    // 変更しないため、実績集計・実績人数等（e.hours[mi] !== nullを条件にする箇所）
+    // には一切現れない。開始月（startYm）が入力されている行（flag===1のまま雇用形態
+    // 変更等の新しい行を先行登録したケース等）も、まだ開始月に達しておらず実績が
+    // 無いだけの可能性があるため、同様に除外対象から外す
+    if (hours.every(h => h === null) && flag !== 2 && startYm == null) return;
+
+    const stdHours = stdHoursIdx >= 0 ? parsePlainHours(cells[stdHoursIdx]) : null;
+
     // startYmRaw：開始月セルの生の表示文字列。開始月が「未入力」か「入力されているが
     // 日付として解釈できない文字列」かを区別するために保持する（collectB2StartYmAlerts()用）
     const startYmRaw = String(cells[THREE_SITE_MERGE_START_MONTH_COL]?.f ?? cells[THREE_SITE_MERGE_START_MONTH_COL]?.v ?? '').trim();
