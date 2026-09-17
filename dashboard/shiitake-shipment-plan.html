@@ -121,6 +121,50 @@
     font-size:12px;
     font-weight:700;
   }
+  .day-nav.day-nav-compact{ padding:6px 8px; }
+  .day-nav.day-nav-compact input[type="date"]{ font-size:12.5px; padding:4px 6px; }
+  .day-nav.day-nav-compact button{ width:26px; height:26px; font-size:12.5px; }
+
+  /* ---------- Site toggle ---------- */
+  .site-toggle{
+    display:flex;
+    gap:4px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:5px;
+    box-shadow: var(--shadow);
+  }
+  .site-toggle button{
+    padding:7px 16px;
+    border-radius:7px;
+    border:1px solid transparent;
+    background:transparent;
+    color:var(--ink-soft);
+    font-size:13px;
+    font-weight:600;
+    font-family:"Zen Kaku Gothic New", sans-serif;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+    white-space:nowrap;
+  }
+  .site-toggle button.active{
+    background:var(--brown);
+    color:#fff;
+  }
+  .site-toggle button:hover:not(.active){ background:var(--amber-soft); }
+
+  /* ---------- Panel head right cluster (note + date nav) ---------- */
+  .panel-head-right{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+
+  /* ---------- Harvest actual column highlight (matches today-col) ---------- */
+  .actual-col{ background:var(--amber-soft) !important; font-weight:700; }
 
   /* ---------- Panels ---------- */
   .panel{
@@ -133,10 +177,12 @@
   }
   .panel-head{
     display:flex;
-    align-items:baseline;
+    align-items:center;
     justify-content:space-between;
+    gap:12px;
     padding:14px 18px 12px;
     border-bottom:1px solid var(--line-soft);
+    flex-wrap:wrap;
   }
   .panel-head h2{
     font-family:"Shippori Mincho", serif;
@@ -267,6 +313,8 @@
     body{ padding:18px 10px 40px; }
     header{ align-items:flex-start; }
     .day-nav{ width:100%; justify-content:space-between; }
+    .panel-head-right{ width:100%; justify-content:space-between; }
+    .site-toggle{ width:100%; justify-content:center; }
   }
 </style>
 </head>
@@ -280,14 +328,10 @@
         <small>SHIITAKE DAILY SUPPLY &amp; DEMAND SHEET</small>
       </h1>
     </div>
-    <div class="day-nav">
-      <button id="prevMonth" aria-label="前月">«</button>
-      <button id="prevDay" aria-label="前日">‹</button>
-      <span class="label">基準日</span>
-      <input type="date" id="refDateInput">
-      <button id="nextDay" aria-label="翌日">›</button>
-      <button id="nextMonth" aria-label="翌月">»</button>
-      <button id="todayBtn" class="today-btn">今日</button>
+    <div class="site-toggle" id="siteToggle">
+      <button type="button" class="active" data-site="いなべ">いなべ</button>
+      <button type="button" data-site="群馬">群馬</button>
+      <button type="button" data-site="南丹">南丹</button>
     </div>
   </header>
 
@@ -295,7 +339,18 @@
   <section class="panel">
     <div class="panel-head">
       <h2>在庫 ・ 出荷予定</h2>
-      <span class="note">単位：kg　/　当日〜7日後の出荷予定</span>
+      <div class="panel-head-right">
+        <span class="note">単位：kg　/　当日〜7日後の出荷予定</span>
+        <div class="day-nav day-nav-compact">
+          <button id="prevMonth" aria-label="前月">«</button>
+          <button id="prevDay" aria-label="前日">‹</button>
+          <span class="label">基準日</span>
+          <input type="date" id="refDateInput">
+          <button id="nextDay" aria-label="翌日">›</button>
+          <button id="nextMonth" aria-label="翌月">»</button>
+          <button id="todayBtn" class="today-btn">今日</button>
+        </div>
+      </div>
     </div>
     <div class="table-scroll">
       <table class="sched" id="table1">
@@ -361,7 +416,18 @@
   <section class="panel harvest">
     <div class="panel-head">
       <h2>収穫予測</h2>
-      <span class="note">実績 ・ 比率 ／ 日別収穫予測（kg）</span>
+      <div class="panel-head-right">
+        <span class="note">実績 ・ 比率 ／ 日別収穫予測（kg）</span>
+        <div class="day-nav day-nav-compact">
+          <button id="harvestPrevMonth" aria-label="前月">«</button>
+          <button id="harvestPrevDay" aria-label="前日">‹</button>
+          <span class="label">実績日</span>
+          <input type="date" id="harvestRefDateInput">
+          <button id="harvestNextDay" aria-label="翌日">›</button>
+          <button id="harvestNextMonth" aria-label="翌月">»</button>
+          <button id="harvestTodayBtn" class="today-btn">今日</button>
+        </div>
+      </div>
     </div>
     <div class="table-scroll">
       <table id="table2">
@@ -374,7 +440,7 @@
         <thead>
           <tr>
             <th class="sticky-1">サイズ</th>
-            <th>収穫実績</th>
+            <th class="actual-col">収穫実績</th>
             <th class="ratio-col">収穫比率</th>
             <th class="dcol" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th>
@@ -390,27 +456,27 @@
         <tbody>
           <tr>
             <th class="sticky-1">M</th>
-            <td>33.16kg</td><td class="ratio-col">6.08%</td>
+            <td class="actual-col">33.16kg</td><td class="ratio-col">6.08%</td>
             <td>27.64</td><td>35.51</td><td>40.60</td><td>34.12</td><td>34.12</td><td>25.80</td><td>20.78</td><td>18.61</td><td>17.20</td>
           </tr>
           <tr>
             <th class="sticky-1">L</th>
-            <td>213.60kg</td><td class="ratio-col">39.18%</td>
+            <td class="actual-col">213.60kg</td><td class="ratio-col">39.18%</td>
             <td>178.08</td><td>228.74</td><td>261.53</td><td>219.76</td><td>219.76</td><td>166.20</td><td>133.88</td><td>119.89</td><td>110.76</td>
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
-            <td>88.34kg</td><td class="ratio-col">16.20%</td>
+            <td class="actual-col">88.34kg</td><td class="ratio-col">16.20%</td>
             <td>73.65</td><td>94.60</td><td>108.16</td><td>90.89</td><td>90.89</td><td>68.74</td><td>55.37</td><td>49.58</td><td>45.81</td>
           </tr>
           <tr>
             <th class="sticky-1">袋</th>
-            <td>210.07kg</td><td class="ratio-col">38.53%</td>
+            <td class="actual-col">210.07kg</td><td class="ratio-col">38.53%</td>
             <td>175.13</td><td>224.96</td><td>257.21</td><td>216.13</td><td>216.13</td><td>163.46</td><td>131.67</td><td>117.91</td><td>108.93</td>
           </tr>
           <tr>
             <th class="sticky-1">合計</th>
-            <td>545.17</td><td class="ratio-col">1.00</td>
+            <td class="actual-col">545.17</td><td class="ratio-col">1.00</td>
             <td>455</td><td>584</td><td>668</td><td>561</td><td>561</td><td>424</td><td>342</td><td>306</td><td>283</td>
           </tr>
         </tbody>
@@ -566,6 +632,78 @@
   input.addEventListener('change', function(){ clamp(); render(); });
 
   render();
+})();
+
+// ── 拠点切り替えトグル（見た目のみ。データ連携ロジックは今後実装） ──
+(function(){
+  const buttons = document.querySelectorAll('#siteToggle button');
+  buttons.forEach(btn => {
+    btn.addEventListener('click', function(){
+      buttons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      // TODO: 拠点切り替え時のデータ取得・再描画ロジックをここに実装予定
+    });
+  });
+})();
+
+// ── 収穫実績「実績日」ナビゲーション（見た目のみ。取得ロジックは今後実装） ──
+(function(){
+  const input = document.getElementById('harvestRefDateInput');
+  if (!input) return;
+
+  function toISO(d){
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return y + '-' + m + '-' + day;
+  }
+  function fromISO(s){
+    const parts = s.split('-').map(Number);
+    return new Date(parts[0], parts[1]-1, parts[2]);
+  }
+  function addDays(d, n){
+    const r = new Date(d);
+    r.setDate(r.getDate()+n);
+    return r;
+  }
+  function addMonths(d, n){
+    const r = new Date(d);
+    r.setMonth(r.getMonth()+n);
+    return r;
+  }
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayISO = toISO(today);
+  input.max = todayISO;
+  input.value = todayISO;
+
+  function clamp(){
+    if (input.value > todayISO) input.value = todayISO;
+    const isToday = input.value === todayISO;
+    document.getElementById('harvestNextDay').disabled = isToday;
+    document.getElementById('harvestNextMonth').disabled = isToday;
+    // TODO: 実績日変更時の収穫実績データ再取得・再描画ロジックをここに実装予定
+  }
+
+  document.getElementById('harvestPrevDay').addEventListener('click', function(){
+    input.value = toISO(addDays(fromISO(input.value), -1)); clamp();
+  });
+  document.getElementById('harvestNextDay').addEventListener('click', function(){
+    input.value = toISO(addDays(fromISO(input.value), 1)); clamp();
+  });
+  document.getElementById('harvestPrevMonth').addEventListener('click', function(){
+    input.value = toISO(addMonths(fromISO(input.value), -1)); clamp();
+  });
+  document.getElementById('harvestNextMonth').addEventListener('click', function(){
+    input.value = toISO(addMonths(fromISO(input.value), 1)); clamp();
+  });
+  document.getElementById('harvestTodayBtn').addEventListener('click', function(){
+    input.value = todayISO; clamp();
+  });
+  input.addEventListener('change', clamp);
+
+  clamp();
 })();
 </script>
 </body>
