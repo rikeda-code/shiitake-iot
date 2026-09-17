@@ -120,7 +120,8 @@
   }
   .day-nav.day-nav-compact{ padding:6px 8px; }
   .day-nav.day-nav-compact input[type="date"]{ font-size:13.5px; padding:4px 6px; }
-  .day-nav.day-nav-compact button{ width:26px; height:26px; font-size:13.5px; }
+  .day-nav.day-nav-compact button:not(.today-btn){ width:26px; height:26px; font-size:13.5px; }
+  .day-nav.day-nav-compact .today-btn{ width:auto; padding:0 10px; font-size:13.5px; }
 
   /* ---------- Site toggle ---------- */
   .site-toggle{
