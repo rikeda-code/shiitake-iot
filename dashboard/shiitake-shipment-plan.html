@@ -608,13 +608,24 @@
     '袋':  { product: 66, raw: 62 }, // 67行目=袋製品在庫、63行目=袋生在庫
   };
 
-  // gvizのDate型セル（"Date(2026,8,16)"のような文字列。月は0始まり）をJavaScriptの
-  // Dateオブジェクトに変換する
+  // gvizの日付セルをJavaScriptのDateオブジェクトに変換する。2つの形式に対応する：
+  // ①文字列のDate(...)形式（例："Date(2026,8,16)"。月は0始まり）
+  // ②数値のシリアル値形式（例：46129.0。実際の本番相当シートで確認された形式で、
+  //   "1899年12月30日を0とした日数"。小数部（時刻情報）が含まれる場合があるため、
+  //   変換後は年月日だけを見る）
   function gvizCellToDate(cell){
-    if (!cell || typeof cell.v !== 'string') return null;
-    var m = cell.v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
-    if (!m) return null;
-    return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+    if (!cell || cell.v === null || cell.v === undefined) return null;
+    var v = cell.v;
+    if (typeof v === 'string') {
+      var m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
+      if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+    }
+    var serial = typeof v === 'number' ? v
+      : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : null);
+    if (serial === null) return null;
+    var epoch = new Date(1899, 11, 30);
+    var d = new Date(epoch.getTime() + serial * 24 * 60 * 60 * 1000);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
 
   function sameDate(a, b){
