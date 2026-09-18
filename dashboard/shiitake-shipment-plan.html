@@ -594,8 +594,8 @@
      引き続きサンプル値のまま ── -->
 <script>
 (function(){
-  var STOCK_SHEET_ID = '1I6WoAoh1-V7AWy8DU9-l_qwx6Dxi7d0lnehYGNaQvAI';
-  var STOCK_SHEET_NAME = '椎茸在庫';
+  var STOCK_SHEET_ID = '1ecjNSdIIT3BzQpUIq5T25v1IjEV8eYwZpC1XwU5bacE';
+  var STOCK_SHEET_GID = '0'; // 「椎茸在庫」シートのgid
   var STOCK_DASH = '－';
 
   // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
@@ -614,17 +614,28 @@
     '袋':  { product: '袋製品在庫', raw: '袋生在庫' },
   };
 
-  // gvizの日付セルをJavaScriptのDateオブジェクトに変換する。2つの形式に対応する：
-  // ①文字列のDate(...)形式（例："Date(2026,8,16)"。月は0始まり）
-  // ②数値のシリアル値形式（例：46129.0。実際の本番相当シートで確認された形式で、
-  //   "1899年12月30日を0とした日数"。小数部（時刻情報）が含まれる場合があるため、
-  //   変換後は年月日だけを見る）
+  // 日付セルをJavaScriptのDateオブジェクトに変換する。3つの形式に対応する：
+  // ①文字列のDate(...)形式（gviz形式。例："Date(2026,8,16)"。月は0始まり）
+  // ②数値のシリアル値形式（gviz形式。例：46129.0。"1899年12月30日を0とした日数"）
+  // ③「m/d」表示文字列形式（/export?format=csvで取得した場合。年を含まないため、
+  //   「今日から見て極端に未来／過去にならない年」を選んで補う）
   function gvizCellToDate(cell){
     if (!cell || cell.v === null || cell.v === undefined) return null;
     var v = cell.v;
     if (typeof v === 'string') {
       var m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
       if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+      var md = v.trim().match(/^(\d{1,2})\/(\d{1,2})$/);
+      if (md) {
+        var month = parseInt(md[1], 10) - 1;
+        var day = parseInt(md[2], 10);
+        var today = new Date();
+        var candidate = new Date(today.getFullYear(), month, day);
+        var diffDays = (candidate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000);
+        if (diffDays > 240) candidate = new Date(today.getFullYear() - 1, month, day);
+        else if (diffDays < -240) candidate = new Date(today.getFullYear() + 1, month, day);
+        return candidate;
+      }
     }
     var serial = typeof v === 'number' ? v
       : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : null);
@@ -638,17 +649,55 @@
     return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
 
-  // Googleのgvizエンドポイントは応答をキャッシュすることがあり、シート更新後も
-  // 古いスナップショットが返ってくる場合がある。URLに毎回変わる値（現在時刻）を
-  // クエリパラメータとして付け、あわせてfetch自体もキャッシュを使わないよう
-  // 指定することで、常に最新のシート内容を取得する
+  // 簡易なRFC4180準拠CSVパーサー（ダブルクォートで囲まれたフィールド内の
+  // カンマ・改行・エスケープされたダブルクォート""に対応）。work-hours.htmlの
+  // 「人数_過去実績」シート取得で使っているものと同じ実装
+  function parseCsv(text){
+    var rows = [];
+    var row = [];
+    var field = '';
+    var inQuotes = false;
+    var i = 0;
+    var len = text.length;
+    while (i < len) {
+      var ch = text[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }
+      if (ch === '"') { inQuotes = true; i++; continue; }
+      if (ch === ',') { row.push(field); field = ''; i++; continue; }
+      if (ch === '\r') { i++; continue; }
+      if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+      field += ch; i++;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  // 【gviz/tq（sheet=名前指定）をやめてexport?format=csv（gid指定）に切り替えた理由】
+  // work-hours.htmlの「人数_過去実績」シート取得（fetchPastYearCountSheet()）で
+  // 実データにより確認済みの問題と同じものが、このシートの取得でも発生していた：
+  // gviz/tqのsheet=名前指定エンドポイントは、シート編集後も古い内容を長時間
+  // （半日〜1日程度）キャッシュし続け、cache-busterやfetchのno-store指定では
+  // 回避できない（Google側サーバーの内部キャッシュのため）。
+  // 同じ内容を/export?format=csv&gid=で取得すると最新の内容が正しく反映されるため、
+  // gid指定のexportエンドポイントに切り替える。取得したCSVの2次元配列を、
+  // 既存のfindDateColIndex()・findRowIndexByLabel()・readCellNumber()がそのまま
+  // 使えるよう、gvizのJSON形式相当（table.rows[].c[].v）に詰め替えて返す
   async function fetchStockSheet(){
     var url = 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID +
-      '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(STOCK_SHEET_NAME) + '&headers=0&range=A1:ZZ67' +
-      '&_cb=' + Date.now();
+      '/export?format=csv&gid=' + STOCK_SHEET_GID;
     var res = await fetch(url, { cache: 'no-store' });
     var text = await res.text();
-    return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // /exportはUTF-8 BOM付きで返ることがあるため除去
+    var csvRows = parseCsv(text);
+    return { table: { rows: csvRows.map(function(cells){
+      return { c: cells.map(function(v){ return { v: v }; }) };
+    }) } };
   }
 
   // 1行目（日付行）からtargetDateに一致する列を検索する（列位置は決め打ちしない）
@@ -678,8 +727,11 @@
     if (colIdx < 0 || rowIdx < 0) return null;
     var row = json.table.rows && json.table.rows[rowIdx];
     var cell = row && row.c && row.c[colIdx];
-    if (!cell || cell.v === null || cell.v === undefined) return null;
-    var v = typeof cell.v === 'number' ? cell.v : parseFloat(cell.v);
+    if (!cell || cell.v === null || cell.v === undefined || cell.v === '') return null;
+    // CSVエクスポートのセル値は常に文字列で、桁区切りのカンマ（例："1,234"）を
+    // 含む場合があるため、数値変換の前に取り除く
+    var raw = typeof cell.v === 'string' ? cell.v.replace(/,/g, '') : cell.v;
+    var v = typeof raw === 'number' ? raw : parseFloat(raw);
     return isNaN(v) ? null : v;
   }
 
