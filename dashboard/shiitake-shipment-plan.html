@@ -599,13 +599,19 @@
   var STOCK_DASH = '－';
 
   // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
-  // range=A1:ZZ67・headers=0で取得するため、table.rows[i]はシートの(i+1)行目に
-  // そのまま対応する（0始まりのため60行目=idx59、67行目=idx66）
-  var STOCK_ROW_IDX = {
-    'M':   { product: 65, raw: 61 }, // 66行目=M製品在庫、62行目=M生在庫
-    'L':   { product: 64, raw: 60 }, // 65行目=L製品在庫、61行目=L生在庫
-    '2L':  { product: 63, raw: 59 }, // 64行目=2L製品在庫、60行目=2L生在庫
-    '袋':  { product: 66, raw: 62 }, // 67行目=袋製品在庫、63行目=袋生在庫
+  //
+  // 【行番号を決め打ちにしない理由】
+  // gvizのレスポンスは、全期間にわたって一度もデータが入っていない行を
+  // 自動的に間引いて詰めてしまう（例：M(緑+黒)・2L(緑+黒)・秀2L4・大袋500gなど、
+  // 未使用の行はレスポンスに出てこない）。そのためtable.rows[]内での位置は
+  // シート上の実際の行番号と一致せず、シート側の空行の増減で毎回ズレる。
+  // 日付列をfindDateColIndex()で毎回検索しているのと同じ考え方で、
+  // 行についてもB列の文字列を毎回検索して特定する（findRowIndexByLabel()）。
+  var STOCK_ROW_LABELS = {
+    'M':   { product: 'M製品在庫', raw: 'M生在庫' },
+    'L':   { product: 'L製品在庫', raw: 'L生在庫' },
+    '2L':  { product: '2L製品在庫', raw: '2L生在庫' },
+    '袋':  { product: '袋製品在庫', raw: '袋生在庫' },
   };
 
   // gvizの日付セルをJavaScriptのDateオブジェクトに変換する。2つの形式に対応する：
@@ -650,8 +656,21 @@
     return -1;
   }
 
+  // B列（c[1]）の文字列labelと完全一致する行を検索し、その行番号を返す。
+  // 見つからない場合は-1を返す（gvizが行を間引くため、番号ではなく
+  // 毎回この検索で特定する。findDateColIndex()の行版）
+  function findRowIndexByLabel(json, label){
+    var rows = (json.table && json.table.rows) || [];
+    for (var i = 0; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      var b = c && c[1];
+      if (b && b.v === label) return i;
+    }
+    return -1;
+  }
+
   function readCellNumber(json, rowIdx, colIdx){
-    if (colIdx < 0) return null;
+    if (colIdx < 0 || rowIdx < 0) return null;
     var row = json.table.rows && json.table.rows[rowIdx];
     var cell = row && row.c && row.c[colIdx];
     if (!cell || cell.v === null || cell.v === undefined) return null;
@@ -661,6 +680,16 @@
 
   function fmtStockNumber(v){
     return v === null ? STOCK_DASH : String(Math.round(v * 10) / 10);
+  }
+
+  // サンプルHTML側で「値が0の列は薄い色で表示する」ためのzeroクラスが
+  // 一部のセル（例：data-stock-raw="袋"）に元々付いている。JSはtextContentしか
+  // 書き換えないため、そのままだと実データが0以外でも薄字のまま＝見えづらく
+  // なる。値に応じてzeroクラスを付け外しして常に見た目を実データに合わせる
+  function applyZeroClass(el, v){
+    if (!el) return;
+    if (v === 0) el.classList.add('zero');
+    else el.classList.remove('zero');
   }
 
   function getStockCells(){
@@ -677,8 +706,8 @@
   function showStockFallback(){
     var cells = getStockCells();
     ['M', 'L', '2L', '袋'].forEach(function(size){
-      if (cells[size].product) cells[size].product.textContent = STOCK_DASH;
-      if (cells[size].raw) cells[size].raw.textContent = STOCK_DASH;
+      if (cells[size].product) { cells[size].product.textContent = STOCK_DASH; cells[size].product.classList.remove('zero'); }
+      if (cells[size].raw) { cells[size].raw.textContent = STOCK_DASH; cells[size].raw.classList.remove('zero'); }
     });
   }
 
@@ -693,9 +722,13 @@
       if (colIdx < 0) { showStockFallback(); return; }
       var cells = getStockCells();
       ['M', 'L', '2L', '袋'].forEach(function(size){
-        var rows = STOCK_ROW_IDX[size];
-        if (cells[size].product) cells[size].product.textContent = fmtStockNumber(readCellNumber(json, rows.product, colIdx));
-        if (cells[size].raw) cells[size].raw.textContent = fmtStockNumber(readCellNumber(json, rows.raw, colIdx));
+        var labels = STOCK_ROW_LABELS[size];
+        var productRowIdx = findRowIndexByLabel(json, labels.product);
+        var rawRowIdx = findRowIndexByLabel(json, labels.raw);
+        var productVal = readCellNumber(json, productRowIdx, colIdx);
+        var rawVal = readCellNumber(json, rawRowIdx, colIdx);
+        if (cells[size].product) { cells[size].product.textContent = fmtStockNumber(productVal); applyZeroClass(cells[size].product, productVal); }
+        if (cells[size].raw) { cells[size].raw.textContent = fmtStockNumber(rawVal); applyZeroClass(cells[size].raw, rawVal); }
       });
     } catch (err) {
       console.error('[椎茸在庫] 取得エラー:', err);
