@@ -397,11 +397,11 @@
         <tbody>
           <tr>
             <th class="sticky-1">M</th>
-            <td>6.6</td><td>104</td><td class="today-col">30.9</td><td>195.0</td><td>41.3</td><td>209.9</td><td>18.2</td><td class="zero">0.0</td><td>220.5</td><td>32.6</td>
+            <td data-stock-product="M">6.6</td><td data-stock-raw="M">104</td><td class="today-col">30.9</td><td>195.0</td><td>41.3</td><td>209.9</td><td>18.2</td><td class="zero">0.0</td><td>220.5</td><td>32.6</td>
           </tr>
           <tr>
             <th class="sticky-1">L</th>
-            <td>194.4</td><td>368</td><td class="today-col">46.2</td><td>398.5</td><td>268.4</td><td>576.2</td><td>78.2</td><td class="zero">0.0</td><td>512.5</td><td>47.9</td>
+            <td data-stock-product="L">194.4</td><td data-stock-raw="L">368</td><td class="today-col">46.2</td><td>398.5</td><td>268.4</td><td>576.2</td><td>78.2</td><td class="zero">0.0</td><td>512.5</td><td>47.9</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">秀</th>
@@ -413,11 +413,11 @@
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
-            <td>0.00kg</td><td>205</td><td class="today-col">1.0</td><td>71.2</td><td>12.6</td><td>153.5</td><td>95.1</td><td class="zero">0.0</td><td>142.3</td><td>15.0</td>
+            <td data-stock-product="2L">0.00kg</td><td data-stock-raw="2L">205</td><td class="today-col">1.0</td><td>71.2</td><td>12.6</td><td>153.5</td><td>95.1</td><td class="zero">0.0</td><td>142.3</td><td>15.0</td>
           </tr>
           <tr>
             <th class="sticky-1">袋</th>
-            <td>256.0</td><td class="zero">0</td><td class="today-col">116.0</td><td>157.3</td><td>183.5</td><td>169.0</td><td>279.0</td><td class="zero">0.0</td><td>199.0</td><td>104.0</td>
+            <td data-stock-product="袋">256.0</td><td class="zero" data-stock-raw="袋">0</td><td class="today-col">116.0</td><td>157.3</td><td>183.5</td><td>169.0</td><td>279.0</td><td class="zero">0.0</td><td>199.0</td><td>104.0</td>
           </tr>
           <tr>
             <th class="sticky-1">合計</th>
@@ -588,6 +588,161 @@
 
 </div>
 
+<!-- ── 在庫・出荷予定パネルの「製品在庫」「生在庫」列（M・L・2L・袋の本行のみ）を、
+     スプレッドシート「椎茸在庫」からgvizで直接取得して実データ表示する。
+     収穫予測・在庫予測パネル（table2・table3）・秀/優の内訳行・出荷予定列は対象外で、
+     引き続きサンプル値のまま ── -->
+<script>
+(function(){
+  var STOCK_SHEET_ID = '1I6WoAoh1-V7AWy8DU9-l_qwx6Dxi7d0lnehYGNaQvAI';
+  var STOCK_SHEET_NAME = '椎茸在庫';
+  var STOCK_DASH = '－';
+
+  // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
+  //
+  // 【行番号を決め打ちにしない理由】
+  // gvizのレスポンスは、全期間にわたって一度もデータが入っていない行を
+  // 自動的に間引いて詰めてしまう（例：M(緑+黒)・2L(緑+黒)・秀2L4・大袋500gなど、
+  // 未使用の行はレスポンスに出てこない）。そのためtable.rows[]内での位置は
+  // シート上の実際の行番号と一致せず、シート側の空行の増減で毎回ズレる。
+  // 日付列をfindDateColIndex()で毎回検索しているのと同じ考え方で、
+  // 行についてもB列の文字列を毎回検索して特定する（findRowIndexByLabel()）。
+  var STOCK_ROW_LABELS = {
+    'M':   { product: 'M製品在庫', raw: 'M生在庫' },
+    'L':   { product: 'L製品在庫', raw: 'L生在庫' },
+    '2L':  { product: '2L製品在庫', raw: '2L生在庫' },
+    '袋':  { product: '袋製品在庫', raw: '袋生在庫' },
+  };
+
+  // gvizの日付セルをJavaScriptのDateオブジェクトに変換する。2つの形式に対応する：
+  // ①文字列のDate(...)形式（例："Date(2026,8,16)"。月は0始まり）
+  // ②数値のシリアル値形式（例：46129.0。実際の本番相当シートで確認された形式で、
+  //   "1899年12月30日を0とした日数"。小数部（時刻情報）が含まれる場合があるため、
+  //   変換後は年月日だけを見る）
+  function gvizCellToDate(cell){
+    if (!cell || cell.v === null || cell.v === undefined) return null;
+    var v = cell.v;
+    if (typeof v === 'string') {
+      var m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
+      if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+    }
+    var serial = typeof v === 'number' ? v
+      : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : null);
+    if (serial === null) return null;
+    var epoch = new Date(1899, 11, 30);
+    var d = new Date(epoch.getTime() + serial * 24 * 60 * 60 * 1000);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function sameDate(a, b){
+    return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+
+  // Googleのgvizエンドポイントは応答をキャッシュすることがあり、シート更新後も
+  // 古いスナップショットが返ってくる場合がある。URLに毎回変わる値（現在時刻）を
+  // クエリパラメータとして付け、あわせてfetch自体もキャッシュを使わないよう
+  // 指定することで、常に最新のシート内容を取得する
+  async function fetchStockSheet(){
+    var url = 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID +
+      '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(STOCK_SHEET_NAME) + '&headers=0&range=A1:ZZ67' +
+      '&_cb=' + Date.now();
+    var res = await fetch(url, { cache: 'no-store' });
+    var text = await res.text();
+    return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+  }
+
+  // 1行目（日付行）からtargetDateに一致する列を検索する（列位置は決め打ちしない）
+  function findDateColIndex(json, targetDate){
+    var dateRow = json.table.rows && json.table.rows[0];
+    var cells = (dateRow && dateRow.c) || [];
+    for (var i = 0; i < cells.length; i++) {
+      if (sameDate(gvizCellToDate(cells[i]), targetDate)) return i;
+    }
+    return -1;
+  }
+
+  // B列（c[1]）の文字列labelと完全一致する行を検索し、その行番号を返す。
+  // 見つからない場合は-1を返す（gvizが行を間引くため、番号ではなく
+  // 毎回この検索で特定する。findDateColIndex()の行版）
+  function findRowIndexByLabel(json, label){
+    var rows = (json.table && json.table.rows) || [];
+    for (var i = 0; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      var b = c && c[1];
+      if (b && b.v === label) return i;
+    }
+    return -1;
+  }
+
+  function readCellNumber(json, rowIdx, colIdx){
+    if (colIdx < 0 || rowIdx < 0) return null;
+    var row = json.table.rows && json.table.rows[rowIdx];
+    var cell = row && row.c && row.c[colIdx];
+    if (!cell || cell.v === null || cell.v === undefined) return null;
+    var v = typeof cell.v === 'number' ? cell.v : parseFloat(cell.v);
+    return isNaN(v) ? null : v;
+  }
+
+  function fmtStockNumber(v){
+    return v === null ? STOCK_DASH : String(Math.round(v * 10) / 10);
+  }
+
+  // サンプルHTML側で「値が0の列は薄い色で表示する」ためのzeroクラスが
+  // 一部のセル（例：data-stock-raw="袋"）に元々付いている。JSはtextContentしか
+  // 書き換えないため、そのままだと実データが0以外でも薄字のまま＝見えづらく
+  // なる。値に応じてzeroクラスを付け外しして常に見た目を実データに合わせる
+  function applyZeroClass(el, v){
+    if (!el) return;
+    if (v === 0) el.classList.add('zero');
+    else el.classList.remove('zero');
+  }
+
+  function getStockCells(){
+    var out = {};
+    ['M', 'L', '2L', '袋'].forEach(function(size){
+      out[size] = {
+        product: document.querySelector('[data-stock-product="' + size + '"]'),
+        raw: document.querySelector('[data-stock-raw="' + size + '"]'),
+      };
+    });
+    return out;
+  }
+
+  function showStockFallback(){
+    var cells = getStockCells();
+    ['M', 'L', '2L', '袋'].forEach(function(size){
+      if (cells[size].product) { cells[size].product.textContent = STOCK_DASH; cells[size].product.classList.remove('zero'); }
+      if (cells[size].raw) { cells[size].raw.textContent = STOCK_DASH; cells[size].raw.classList.remove('zero'); }
+    });
+  }
+
+  // targetDate（基準日の前日。M・L・2L・袋の製品在庫・生在庫列は、既存のHTML構造上
+  // data-offset="-1"の列に対応する）に一致する日付列を「椎茸在庫」シートから探し、
+  // 見つかればその列の60〜67行目の値を描画する。取得失敗・列が見つからない場合は
+  // 画面全体を壊さないよう空欄（「－」）にフォールバックする
+  window.updateStockLiveData = async function(targetDate){
+    try {
+      var json = await fetchStockSheet();
+      var colIdx = findDateColIndex(json, targetDate);
+      if (colIdx < 0) { showStockFallback(); return; }
+      var cells = getStockCells();
+      ['M', 'L', '2L', '袋'].forEach(function(size){
+        var labels = STOCK_ROW_LABELS[size];
+        var productRowIdx = findRowIndexByLabel(json, labels.product);
+        var rawRowIdx = findRowIndexByLabel(json, labels.raw);
+        var productVal = readCellNumber(json, productRowIdx, colIdx);
+        var rawVal = readCellNumber(json, rawRowIdx, colIdx);
+        if (cells[size].product) { cells[size].product.textContent = fmtStockNumber(productVal); applyZeroClass(cells[size].product, productVal); }
+        if (cells[size].raw) { cells[size].raw.textContent = fmtStockNumber(rawVal); applyZeroClass(cells[size].raw, rawVal); }
+      });
+    } catch (err) {
+      console.error('[椎茸在庫] 取得エラー:', err);
+      showStockFallback();
+    }
+  };
+})();
+</script>
+
 <script>
 (function(){
   var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -639,6 +794,9 @@
     document.getElementById('nextMonth').disabled = isToday;
     document.getElementById('lastUpdated').textContent =
       '表示基準日：' + input.value.replace(/-/g,'/') + (isToday ? '（本日）' : '（過去日を表示中）');
+    // 製品在庫・生在庫列（M・L・2L・袋）は基準日の前日（data-offset="-1"と同じ日）の
+    // 実データを表示する
+    if (typeof updateStockLiveData === 'function') updateStockLiveData(addDays(ref, -1));
   }
 
   function clamp(){
