@@ -638,10 +638,15 @@
     return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
 
+  // Googleのgvizエンドポイントは応答をキャッシュすることがあり、シート更新後も
+  // 古いスナップショットが返ってくる場合がある。URLに毎回変わる値（現在時刻）を
+  // クエリパラメータとして付け、あわせてfetch自体もキャッシュを使わないよう
+  // 指定することで、常に最新のシート内容を取得する
   async function fetchStockSheet(){
     var url = 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID +
-      '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(STOCK_SHEET_NAME) + '&headers=0&range=A1:ZZ67';
-    var res = await fetch(url);
+      '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(STOCK_SHEET_NAME) + '&headers=0&range=A1:ZZ67' +
+      '&_cb=' + Date.now();
+    var res = await fetch(url, { cache: 'no-store' });
     var text = await res.text();
     return JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
   }
