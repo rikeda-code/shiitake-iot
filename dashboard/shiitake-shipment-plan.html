@@ -1168,10 +1168,11 @@
   // 収穫実績から各サイズの比率を求め、将来日（翌日〜8日後）は「転写」タブの
   // 日別収穫合計予測値をその比率で按分する（「②日々の過不足確認_秀優」の
   // B20/B21/B24/B25, C20/C21/C24/C25, D20以降と同じロジック）
-  window.updateHarvestForecast = async function(refDate){
+  window.updateHarvestForecast = async function(harvestDate, baseDate){
+    if (!baseDate) baseDate = harvestDate; // 呼び出し側で省略された場合のフォールバック
     var sizes = ['M', 'L', '2L', '袋'];
     try {
-      var actual = await fetchHarvestActual(refDate);
+      var actual = await fetchHarvestActual(harvestDate);
       var total = actual ? (actual['M'] || 0) + (actual['L'] || 0) + (actual['2L'] || 0) + (actual['袋'] || 0) : 0;
       var ratio = {};
       sizes.forEach(function(size){
@@ -1185,7 +1186,7 @@
 
       var dailyTotalCache = {};
       for (var offset = 0; offset <= 8; offset++) {
-        var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
+        var d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offset);
         var dayTotal = await fetchDailyHarvestTotal(d, dailyTotalCache);
         var totalCell = document.querySelector('[data-harvest-total-offset="' + offset + '"]');
         if (totalCell) totalCell.textContent = dayTotal === null ? STOCK_DASH : String(Math.round(dayTotal * 10) / 10);
@@ -1212,6 +1213,21 @@
     } finally {
       recomputeTotalRow(document.getElementById('table2'), [0, 1]);
     }
+  };
+
+  // 実績日（harvestRefDateInput）・基準日（refDateInput）の両方の現在値を読んで
+  // updateHarvestForecastを呼び出す共通ヘルパー。どちらのピッカーが変更された
+  // 場合でも、常に両方の最新値を渡して呼び出すことで同期を保つ
+  window.triggerHarvestForecastUpdate = function(){
+    if (typeof updateHarvestForecast !== 'function') return;
+    var refInput = document.getElementById('refDateInput');
+    var harvestInput = document.getElementById('harvestRefDateInput');
+    if (!refInput || !refInput.value || !harvestInput || !harvestInput.value) return;
+    function parseIso(s){
+      var parts = s.split('-').map(Number);
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+    updateHarvestForecast(parseIso(harvestInput.value), parseIso(refInput.value));
   };
 })();
 </script>
@@ -1271,6 +1287,7 @@
     // 実データを表示する
     if (typeof updateStockLiveData === 'function') updateStockLiveData(addDays(ref, -1));
     if (typeof updateShipmentForecast === 'function') updateShipmentForecast(ref);
+    if (typeof triggerHarvestForecastUpdate === 'function') triggerHarvestForecastUpdate();
   }
 
   function clamp(){
@@ -1362,7 +1379,7 @@
     const isToday = input.value === todayISO;
     document.getElementById('harvestNextDay').disabled = isToday;
     document.getElementById('harvestNextMonth').disabled = isToday;
-    if (typeof updateHarvestForecast === 'function') updateHarvestForecast(fromISO(input.value));
+    if (typeof triggerHarvestForecastUpdate === 'function') triggerHarvestForecastUpdate();
   }
 
   document.getElementById('harvestPrevDay').addEventListener('click', function(){
@@ -1391,7 +1408,7 @@
     if (iso <= todayISO) {
       input.value = iso;
       clamp();
-      if (typeof updateHarvestForecast === 'function') updateHarvestForecast(fromISO(input.value));
+      if (typeof triggerHarvestForecastUpdate === 'function') triggerHarvestForecastUpdate();
     }
   });
 })();
