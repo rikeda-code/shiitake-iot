@@ -601,6 +601,7 @@
   var SALES_INDEX_GID = '538861653'; // 「シート判別」タブ
   var HARVEST_SHEET_ID = '1FfVj-IyufBcsSydQlwNhmSeh-ctdUMe63JmluzgAQVg';
   var SHIPMENT_GRADE_GID = '1249354043'; // 「転写_秀優_出荷」タブ
+  var REF_DATE_SHEET_GID = '1395691052'; // 「②日々の過不足確認_秀優」タブ
   var STOCK_DASH = '－';
 
   // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
@@ -743,6 +744,19 @@
       return { c: cells.map(function(v){ return { v: v }; }) };
     }) } };
   }
+
+  // 「②日々の過不足確認_秀優」シートのA列（rowIndex行目）に手入力されている
+  // 基準日・実績日を取得する。window経由で他の<script>ブロックからも呼べるようにする
+  window.fetchReferenceDate = async function(rowIndex){
+    try {
+      var json = await fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID);
+      var row = json.table.rows && json.table.rows[rowIndex];
+      var cell = row && row.c && row.c[0];
+      return gvizCellToDate(cell);
+    } catch (e) {
+      return null;
+    }
+  };
 
   // 「販売予実抽出シート」の「シート判別」タブ（A列=年月, B列=そのシートのURL）を
   // 読み、年月文字列（例："2026.9"）→gidの対応表を作る
@@ -1157,6 +1171,17 @@
   input.addEventListener('change', function(){ clamp(); render(); });
 
   render();
+
+  // A2セル（基準日）が取得できたら、それを初期値として反映し直す
+  window.fetchReferenceDate(1).then(function(refFromSheet){
+    if (!refFromSheet) return;
+    var iso = toISO(refFromSheet);
+    if (iso <= todayISO) {
+      input.value = iso;
+      clamp();
+      render();
+    }
+  });
 })();
 
 // ── 拠点切り替えトグル（見た目のみ。データ連携ロジックは今後実装） ──
@@ -1229,6 +1254,16 @@
   input.addEventListener('change', clamp);
 
   clamp();
+
+  // A18セル（実績日）が取得できたら、それを初期値として反映し直す
+  window.fetchReferenceDate(17).then(function(harvestFromSheet){
+    if (!harvestFromSheet) return;
+    const iso = toISO(harvestFromSheet);
+    if (iso <= todayISO) {
+      input.value = iso;
+      clamp();
+    }
+  });
 })();
 </script>
 </body>
