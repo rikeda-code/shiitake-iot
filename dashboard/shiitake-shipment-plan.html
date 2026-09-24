@@ -405,11 +405,11 @@
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">秀</th>
-            <td>－</td><td>－</td><td class="today-col">18.5</td><td>159.4</td><td>107.4</td><td>230.5</td><td>31.3</td><td class="zero">0.0</td><td>205.0</td><td>19.2</td>
+            <td>－</td><td data-stock-raw="秀">－</td><td class="today-col">18.5</td><td>159.4</td><td>107.4</td><td>230.5</td><td>31.3</td><td class="zero">0.0</td><td>205.0</td><td>19.2</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">優</th>
-            <td>－</td><td>－</td><td class="today-col">27.7</td><td>239.1</td><td>161.0</td><td>345.7</td><td>46.9</td><td class="zero">0.0</td><td>307.5</td><td>28.7</td>
+            <td>－</td><td data-stock-raw="優">－</td><td class="today-col">27.7</td><td>239.1</td><td>161.0</td><td>345.7</td><td>46.9</td><td class="zero">0.0</td><td>307.5</td><td>28.7</td>
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
@@ -710,17 +710,27 @@
     return -1;
   }
 
-  // B列（c[1]）の文字列labelと完全一致する行を検索し、その行番号を返す。
+  // B列（c[1]）の文字列labelで前方一致する行を検索し、その行番号を返す。
   // 見つからない場合は-1を返す（gvizが行を間引くため、番号ではなく
-  // 毎回この検索で特定する。findDateColIndex()の行版）
+  // 毎回この検索で特定する。findDateColIndex()の行版）。
+  // labelに含まれる半角"L"は全角"Ｌ"も許容し、完全一致ではなく前方一致にすることで、
+  // "L生在庫　秀Ｌ_40　優Ｌ_60"のような注記追加や表記ゆれにも耐えられるようにする
   function findRowIndexByLabel(json, label){
+    var pattern = '^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/L/g, '[LＬ]');
+    var re = new RegExp(pattern);
     var rows = (json.table && json.table.rows) || [];
     for (var i = 0; i < rows.length; i++) {
       var c = rows[i] && rows[i].c;
       var b = c && c[1];
-      if (b && b.v === label) return i;
+      if (b && typeof b.v === 'string' && re.test(b.v)) return i;
     }
     return -1;
+  }
+
+  function rowLabelText(json, rowIdx){
+    var row = json.table.rows && json.table.rows[rowIdx];
+    var c = row && row.c && row.c[1];
+    return (c && typeof c.v === 'string') ? c.v : '';
   }
 
   function readCellNumber(json, rowIdx, colIdx){
@@ -766,6 +776,10 @@
       if (cells[size].product) { cells[size].product.textContent = STOCK_DASH; cells[size].product.classList.remove('zero'); }
       if (cells[size].raw) { cells[size].raw.textContent = STOCK_DASH; cells[size].raw.classList.remove('zero'); }
     });
+    var gradeRawSyu = document.querySelector('[data-stock-raw="秀"]');
+    var gradeRawYuu = document.querySelector('[data-stock-raw="優"]');
+    if (gradeRawSyu) { gradeRawSyu.textContent = STOCK_DASH; gradeRawSyu.classList.remove('zero'); }
+    if (gradeRawYuu) { gradeRawYuu.textContent = STOCK_DASH; gradeRawYuu.classList.remove('zero'); }
   }
 
   function parseTotalCellNumber(text){
@@ -849,6 +863,25 @@
         if (cells[size].product) { cells[size].product.textContent = fmtStockNumber(productVal); applyZeroClass(cells[size].product, productVal); }
         if (cells[size].raw) { cells[size].raw.textContent = fmtStockNumber(rawVal); applyZeroClass(cells[size].raw, rawVal); }
       });
+
+      // 秀/優（Lの内訳）：「椎茸在庫」シートのL生在庫の行ラベル自体に埋め込まれた
+      // 比率（例："L生在庫　秀Ｌ_40　優Ｌ_60"）から直接按分する。転写_秀優_在庫
+      // シートを経由せず、椎茸在庫シートを直接参照する
+      var lRawRowIdx = findRowIndexByLabel(json, STOCK_ROW_LABELS['L'].raw);
+      var lRawLabel = rowLabelText(json, lRawRowIdx);
+      var lRawVal = readCellNumber(json, lRawRowIdx, colIdx);
+      var syuMatch = lRawLabel.match(/秀[LＬ]_(\d+)/);
+      var yuuMatch = lRawLabel.match(/優[LＬ]_(\d+)/);
+      // ラベルに比率が含まれない、または秀+優の比率が100%にならない（＝ラベルが
+      // 想定外の形式）場合は、誤った按分値を表示しないよう秀・優とも「－」にする
+      var ratioSum = (syuMatch ? parseFloat(syuMatch[1]) : 0) + (yuuMatch ? parseFloat(yuuMatch[1]) : 0);
+      var ratioOk = !!(syuMatch && yuuMatch && ratioSum === 100);
+      var syuRaw = (lRawVal !== null && ratioOk) ? Math.round(lRawVal * parseFloat(syuMatch[1]) / 100 * 10) / 10 : null;
+      var yuuRaw = (lRawVal !== null && ratioOk) ? Math.round(lRawVal * parseFloat(yuuMatch[1]) / 100 * 10) / 10 : null;
+      var gradeRawSyu = document.querySelector('[data-stock-raw="秀"]');
+      var gradeRawYuu = document.querySelector('[data-stock-raw="優"]');
+      if (gradeRawSyu) { gradeRawSyu.textContent = fmtStockNumber(syuRaw); applyZeroClass(gradeRawSyu, syuRaw); }
+      if (gradeRawYuu) { gradeRawYuu.textContent = fmtStockNumber(yuuRaw); applyZeroClass(gradeRawYuu, yuuRaw); }
     } catch (err) {
       console.error('[椎茸在庫] 取得エラー:', err);
       showStockFallback();
