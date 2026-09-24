@@ -639,6 +639,10 @@
       if (ym) {
         return new Date(parseInt(ym[1], 10), parseInt(ym[2], 10) - 1, 1);
       }
+      var ymd = v.trim().match(/^(\d{2})\/(\d{1,2})\/(\d{1,2})(?:\/.*)?$/);
+      if (ymd) {
+        return new Date(2000 + parseInt(ymd[1], 10), parseInt(ymd[2], 10) - 1, parseInt(ymd[3], 10));
+      }
       var md = v.trim().match(/^(\d{1,2})\/(\d{1,2})$/);
       if (md) {
         var month = parseInt(md[1], 10) - 1;
