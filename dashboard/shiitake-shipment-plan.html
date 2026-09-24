@@ -635,6 +635,10 @@
     if (typeof v === 'string') {
       var m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
       if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+      var ym = v.trim().match(/^(\d{4})\/(\d{1,2})$/);
+      if (ym) {
+        return new Date(parseInt(ym[1], 10), parseInt(ym[2], 10) - 1, 1);
+      }
       var md = v.trim().match(/^(\d{1,2})\/(\d{1,2})$/);
       if (md) {
         var month = parseInt(md[1], 10) - 1;
