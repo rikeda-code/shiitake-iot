@@ -472,13 +472,13 @@
         <tbody>
           <tr>
             <th class="sticky-1">M</th>
-            <td class="actual-col">33.16kg</td><td class="ratio-col">6.08%</td>
-            <td>27.64</td><td>35.51</td><td>40.60</td><td>34.12</td><td>34.12</td><td>25.80</td><td>20.78</td><td>18.61</td><td>17.20</td>
+            <td class="actual-col" data-harvest-actual="M">－</td><td class="ratio-col" data-harvest-ratio="M">－</td>
+            <td data-harvest="M" data-harvest-offset="0">－</td><td data-harvest="M" data-harvest-offset="1">－</td><td data-harvest="M" data-harvest-offset="2">－</td><td data-harvest="M" data-harvest-offset="3">－</td><td data-harvest="M" data-harvest-offset="4">－</td><td data-harvest="M" data-harvest-offset="5">－</td><td data-harvest="M" data-harvest-offset="6">－</td><td data-harvest="M" data-harvest-offset="7">－</td><td data-harvest="M" data-harvest-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">L</th>
-            <td class="actual-col">213.60kg</td><td class="ratio-col">39.18%</td>
-            <td>178.08</td><td>228.74</td><td>261.53</td><td>219.76</td><td>219.76</td><td>166.20</td><td>133.88</td><td>119.89</td><td>110.76</td>
+            <td class="actual-col" data-harvest-actual="L">－</td><td class="ratio-col" data-harvest-ratio="L">－</td>
+            <td data-harvest="L" data-harvest-offset="0">－</td><td data-harvest="L" data-harvest-offset="1">－</td><td data-harvest="L" data-harvest-offset="2">－</td><td data-harvest="L" data-harvest-offset="3">－</td><td data-harvest="L" data-harvest-offset="4">－</td><td data-harvest="L" data-harvest-offset="5">－</td><td data-harvest="L" data-harvest-offset="6">－</td><td data-harvest="L" data-harvest-offset="7">－</td><td data-harvest="L" data-harvest-offset="8">－</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">秀_40</th>
@@ -492,18 +492,18 @@
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
-            <td class="actual-col">88.34kg</td><td class="ratio-col">16.20%</td>
-            <td>73.65</td><td>94.60</td><td>108.16</td><td>90.89</td><td>90.89</td><td>68.74</td><td>55.37</td><td>49.58</td><td>45.81</td>
+            <td class="actual-col" data-harvest-actual="2L">－</td><td class="ratio-col" data-harvest-ratio="2L">－</td>
+            <td data-harvest="2L" data-harvest-offset="0">－</td><td data-harvest="2L" data-harvest-offset="1">－</td><td data-harvest="2L" data-harvest-offset="2">－</td><td data-harvest="2L" data-harvest-offset="3">－</td><td data-harvest="2L" data-harvest-offset="4">－</td><td data-harvest="2L" data-harvest-offset="5">－</td><td data-harvest="2L" data-harvest-offset="6">－</td><td data-harvest="2L" data-harvest-offset="7">－</td><td data-harvest="2L" data-harvest-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">袋</th>
-            <td class="actual-col">210.07kg</td><td class="ratio-col">38.53%</td>
-            <td>175.13</td><td>224.96</td><td>257.21</td><td>216.13</td><td>216.13</td><td>163.46</td><td>131.67</td><td>117.91</td><td>108.93</td>
+            <td class="actual-col" data-harvest-actual="袋">－</td><td class="ratio-col" data-harvest-ratio="袋">－</td>
+            <td data-harvest="袋" data-harvest-offset="0">－</td><td data-harvest="袋" data-harvest-offset="1">－</td><td data-harvest="袋" data-harvest-offset="2">－</td><td data-harvest="袋" data-harvest-offset="3">－</td><td data-harvest="袋" data-harvest-offset="4">－</td><td data-harvest="袋" data-harvest-offset="5">－</td><td data-harvest="袋" data-harvest-offset="6">－</td><td data-harvest="袋" data-harvest-offset="7">－</td><td data-harvest="袋" data-harvest-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">合計</th>
             <td class="actual-col">545.17</td><td class="ratio-col">1.00</td>
-            <td>455</td><td>584</td><td>668</td><td>561</td><td>561</td><td>424</td><td>342</td><td>306</td><td>283</td>
+            <td data-harvest-total-offset="0">455</td><td data-harvest-total-offset="1">584</td><td data-harvest-total-offset="2">668</td><td data-harvest-total-offset="3">561</td><td data-harvest-total-offset="4">561</td><td data-harvest-total-offset="5">424</td><td data-harvest-total-offset="6">342</td><td data-harvest-total-offset="7">306</td><td data-harvest-total-offset="8">283</td>
           </tr>
         </tbody>
       </table>
@@ -602,6 +602,10 @@
   var HARVEST_SHEET_ID = '1FfVj-IyufBcsSydQlwNhmSeh-ctdUMe63JmluzgAQVg';
   var SHIPMENT_GRADE_GID = '1249354043'; // 「転写_秀優_出荷」タブ
   var REF_DATE_SHEET_GID = '1395691052'; // 「②日々の過不足確認_秀優」タブ
+  var HARVEST_URL_SHEET_GID = '1878423046'; // 「転写_収穫URL」タブ
+  var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定）
+  var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XElIKSICEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
+  var HARVEST_DAILY_TOTAL_GID = '1164843574'; // 「2026.5いなべ収穫計画」の「転写」タブ
   var STOCK_DASH = '－';
 
   // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
@@ -856,6 +860,73 @@
     return isNaN(v) ? null : v;
   }
 
+  // A列（c[0]）がtargetDateと一致する行を検索する（findDateColIndex()の行版）
+  function findRowIndexByDate(json, targetDate){
+    var rows = (json.table && json.table.rows) || [];
+    for (var i = 0; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      if (c && sameDate(gvizCellToDate(c[0]), targetDate)) return i;
+    }
+    return -1;
+  }
+
+  // 実績日1日分のM/L/2L/袋の収穫実績を取得する。「転写_収穫URL」タブで
+  // 実績日の年月に対応する外部スプレッドシートIDを引き、その「収獲目標値」
+  // シートからA列が実績日と一致する行のI:L列を読む
+  async function fetchHarvestActual(date){
+    try {
+      var urlJson = await fetchCsvSheet(HARVEST_SHEET_ID, HARVEST_URL_SHEET_GID);
+      var rows = (urlJson.table && urlJson.table.rows) || [];
+      var targetSheetId = null;
+      for (var i = 0; i < rows.length; i++) {
+        var c = rows[i].c;
+        var d = gvizCellToDate(c[0]);
+        if (d && d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth()) {
+          var url = c[1] && c[1].v;
+          if (url) {
+            var m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (m) targetSheetId = m[1];
+          }
+          break;
+        }
+      }
+      if (!targetSheetId) return null;
+      var targetJson = await fetchCsvSheet(targetSheetId, HARVEST_TARGET_GID);
+      var rowIdx = findRowIndexByDate(targetJson, date);
+      if (rowIdx < 0) return null;
+      return {
+        'M': readCellNumber(targetJson, rowIdx, 8),
+        'L': readCellNumber(targetJson, rowIdx, 9),
+        '2L': readCellNumber(targetJson, rowIdx, 10),
+        '袋': readCellNumber(targetJson, rowIdx, 11),
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 指定日の収穫合計予測値を「2026.5いなべ収穫計画」の「転写」タブから取得する。
+  // 「転写」タブは当日〜8日後の間で使い回すため、呼び出し側からcacheを渡す
+  async function fetchDailyHarvestTotal(date, cache){
+    try {
+      if (!cache.json) {
+        cache.json = await fetchCsvSheet(HARVEST_DAILY_TOTAL_SHEET_ID, HARVEST_DAILY_TOTAL_GID);
+      }
+      var json = cache.json;
+      var headerRow = json.table.rows[0];
+      var key = yearMonthKey(date);
+      var colIdx = -1;
+      for (var i = 0; i < headerRow.c.length; i++) {
+        if (headerRow.c[i] && String(headerRow.c[i].v).trim() === key) { colIdx = i; break; }
+      }
+      if (colIdx < 0) return null;
+      var rowIdx = date.getDate(); // 1行目=ヘッダー、2行目=1日、なので日番号がそのまま配列indexになる
+      return readCellNumber(json, rowIdx, colIdx);
+    } catch (e) {
+      return null;
+    }
+  }
+
   // 椎茸在庫シートの行を、ラベルに includeText を含み excludeText を含まない
   // ものに絞って colIdx 列の値を合計する
   function sumByLabelSearch(json, colIdx, includeText, excludeText){
@@ -1084,6 +1155,56 @@
       recomputeTotalRow(document.getElementById('table1'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
   };
+
+  // table2（収穫予測パネル）のM/L/2L/袋を実データで算出する。実績日1日分の
+  // 収穫実績から各サイズの比率を求め、将来日（翌日〜8日後）は「転写」タブの
+  // 日別収穫合計予測値をその比率で按分する（「②日々の過不足確認_秀優」の
+  // B20/B21/B24/B25, C20/C21/C24/C25, D20以降と同じロジック）
+  window.updateHarvestForecast = async function(refDate){
+    var sizes = ['M', 'L', '2L', '袋'];
+    try {
+      var actual = await fetchHarvestActual(refDate);
+      var total = actual ? (actual['M'] || 0) + (actual['L'] || 0) + (actual['2L'] || 0) + (actual['袋'] || 0) : 0;
+      var ratio = {};
+      sizes.forEach(function(size){
+        var v = actual ? actual[size] : null;
+        ratio[size] = (v !== null && total > 0) ? v / total : null;
+        var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
+        var ratioCell = document.querySelector('[data-harvest-ratio="' + size + '"]');
+        if (actualCell) { actualCell.textContent = fmtStockNumber(v); applyZeroClass(actualCell, v); }
+        if (ratioCell) { ratioCell.textContent = ratio[size] === null ? STOCK_DASH : (Math.round(ratio[size] * 10000) / 100) + '%'; }
+      });
+
+      var dailyTotalCache = {};
+      for (var offset = 0; offset <= 8; offset++) {
+        var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
+        var dayTotal = await fetchDailyHarvestTotal(d, dailyTotalCache);
+        var totalCell = document.querySelector('[data-harvest-total-offset="' + offset + '"]');
+        if (totalCell) totalCell.textContent = dayTotal === null ? STOCK_DASH : String(Math.round(dayTotal * 10) / 10);
+        sizes.forEach(function(size){
+          var cell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + offset + '"]');
+          if (!cell) return;
+          var v = (dayTotal !== null && ratio[size] !== null) ? Math.round(dayTotal * ratio[size] * 10) / 10 : null;
+          cell.textContent = fmtStockNumber(v);
+          applyZeroClass(cell, v);
+        });
+      }
+    } catch (err) {
+      console.error('[収穫予測] 取得エラー:', err);
+      sizes.forEach(function(size){
+        var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
+        var ratioCell = document.querySelector('[data-harvest-ratio="' + size + '"]');
+        if (actualCell) { actualCell.textContent = STOCK_DASH; actualCell.classList.remove('zero'); }
+        if (ratioCell) ratioCell.textContent = STOCK_DASH;
+        for (var offset = 0; offset <= 8; offset++) {
+          var cell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + offset + '"]');
+          if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
+        }
+      });
+    } finally {
+      recomputeTotalRow(document.getElementById('table2'), [0, 1]);
+    }
+  };
 })();
 </script>
 
@@ -1233,7 +1354,7 @@
     const isToday = input.value === todayISO;
     document.getElementById('harvestNextDay').disabled = isToday;
     document.getElementById('harvestNextMonth').disabled = isToday;
-    // TODO: 実績日変更時の収穫実績データ再取得・再描画ロジックをここに実装予定
+    if (typeof updateHarvestForecast === 'function') updateHarvestForecast(fromISO(input.value));
   }
 
   document.getElementById('harvestPrevDay').addEventListener('click', function(){
@@ -1262,6 +1383,7 @@
     if (iso <= todayISO) {
       input.value = iso;
       clamp();
+      if (typeof updateHarvestForecast === 'function') updateHarvestForecast(fromISO(input.value));
     }
   });
 })();
