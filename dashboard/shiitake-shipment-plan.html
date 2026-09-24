@@ -775,12 +775,13 @@
   // ものに絞って colIdx 列の値を合計する
   function sumByLabelSearch(json, colIdx, includeText, excludeText){
     var rows = (json.table && json.table.rows) || [];
+    var excludeList = (excludeText || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
     var sum = 0;
     for (var i = 0; i < rows.length; i++) {
       var c = rows[i] && rows[i].c;
       var label = c && c[1] && typeof c[1].v === 'string' ? c[1].v : '';
       if (!label || label.indexOf(includeText) === -1) continue;
-      if (excludeText && label.indexOf(excludeText) !== -1) continue;
+      if (excludeList.some(function(ex){ return label.indexOf(ex) !== -1; })) continue;
       var v = readCellNumber(json, i, colIdx);
       if (v !== null) sum += v;
     }
