@@ -397,31 +397,31 @@
         <tbody>
           <tr>
             <th class="sticky-1">M</th>
-            <td data-stock-product="M">6.6</td><td data-stock-raw="M">104</td><td class="today-col">30.9</td><td>195.0</td><td>41.3</td><td>209.9</td><td>18.2</td><td class="zero">0.0</td><td>220.5</td><td>32.6</td>
+            <td data-stock-product="M">－</td><td data-stock-raw="M">－</td><td class="today-col">30.9</td><td>195.0</td><td>41.3</td><td>209.9</td><td>18.2</td><td class="zero">0.0</td><td>220.5</td><td>32.6</td>
           </tr>
           <tr>
             <th class="sticky-1">L</th>
-            <td data-stock-product="L">194.4</td><td data-stock-raw="L">368</td><td class="today-col">46.2</td><td>398.5</td><td>268.4</td><td>576.2</td><td>78.2</td><td class="zero">0.0</td><td>512.5</td><td>47.9</td>
+            <td data-stock-product="L">－</td><td data-stock-raw="L">－</td><td class="today-col">46.2</td><td>398.5</td><td>268.4</td><td>576.2</td><td>78.2</td><td class="zero">0.0</td><td>512.5</td><td>47.9</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">秀</th>
-            <td>77.8</td><td>147</td><td class="today-col">18.5</td><td>159.4</td><td>107.4</td><td>230.5</td><td>31.3</td><td class="zero">0.0</td><td>205.0</td><td>19.2</td>
+            <td>－</td><td>－</td><td class="today-col">18.5</td><td>159.4</td><td>107.4</td><td>230.5</td><td>31.3</td><td class="zero">0.0</td><td>205.0</td><td>19.2</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">優</th>
-            <td>116.6</td><td>221</td><td class="today-col">27.7</td><td>239.1</td><td>161.0</td><td>345.7</td><td>46.9</td><td class="zero">0.0</td><td>307.5</td><td>28.7</td>
+            <td>－</td><td>－</td><td class="today-col">27.7</td><td>239.1</td><td>161.0</td><td>345.7</td><td>46.9</td><td class="zero">0.0</td><td>307.5</td><td>28.7</td>
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
-            <td data-stock-product="2L">0.00kg</td><td data-stock-raw="2L">205</td><td class="today-col">1.0</td><td>71.2</td><td>12.6</td><td>153.5</td><td>95.1</td><td class="zero">0.0</td><td>142.3</td><td>15.0</td>
+            <td data-stock-product="2L">－</td><td data-stock-raw="2L">－</td><td class="today-col">1.0</td><td>71.2</td><td>12.6</td><td>153.5</td><td>95.1</td><td class="zero">0.0</td><td>142.3</td><td>15.0</td>
           </tr>
           <tr>
             <th class="sticky-1">袋</th>
-            <td data-stock-product="袋">256.0</td><td class="zero" data-stock-raw="袋">0</td><td class="today-col">116.0</td><td>157.3</td><td>183.5</td><td>169.0</td><td>279.0</td><td class="zero">0.0</td><td>199.0</td><td>104.0</td>
+            <td data-stock-product="袋">－</td><td data-stock-raw="袋">－</td><td class="today-col">116.0</td><td>157.3</td><td>183.5</td><td>169.0</td><td>279.0</td><td class="zero">0.0</td><td>199.0</td><td>104.0</td>
           </tr>
           <tr>
             <th class="sticky-1">合計</th>
-            <td>457.0</td><td>1,117.0</td><td class="today-col">194.1</td><td>822.0</td><td>505.8</td><td>1,108.6</td><td>470.5</td><td>0.0</td><td>1,074.3</td><td>199.5</td>
+            <td>－</td><td>－</td><td class="today-col">194.1</td><td>822.0</td><td>505.8</td><td>1,108.6</td><td>470.5</td><td>0.0</td><td>1,074.3</td><td>199.5</td>
           </tr>
         </tbody>
       </table>
@@ -768,6 +768,68 @@
     });
   }
 
+  function parseTotalCellNumber(text){
+    if (text == null) return null;
+    var t = String(text).trim();
+    if (t === '' || t === '－' || t === '-') return null;
+    var cleaned = t.replace(/,/g, '').replace(/kg$/i, '').replace(/%$/, '');
+    var v = parseFloat(cleaned);
+    return isNaN(v) ? null : v;
+  }
+
+  // 合計行 = M＋L＋2L＋袋（見出し行を除く実データ行の合計）。秀/優等の.grade-rowは
+  // L等の内訳の再掲であり、含めると二重計上になるため除外する（「②日々の過不足確認_秀優」
+  // シートの12・26・36行目と同じ考え方）
+  function recomputeTotalRow(table, colIndexes){
+    if (!table) return;
+    var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+    if (!rows.length) return;
+    var totalRow = rows[rows.length - 1];
+    var dataRows = rows.slice(0, -1).filter(function(r){ return !r.classList.contains('grade-row'); });
+    var totalCells = totalRow.querySelectorAll('td');
+    colIndexes.forEach(function(colIdx){
+      var sum = 0, any = false;
+      dataRows.forEach(function(r){
+        var cells = r.querySelectorAll('td');
+        var v = parseTotalCellNumber(cells[colIdx] && cells[colIdx].textContent);
+        if (v !== null) { sum += v; any = true; }
+      });
+      if (!any) return;
+      var cell = totalCells[colIdx];
+      if (!cell) return;
+      var firstRowCell = dataRows[0] && dataRows[0].querySelectorAll('td')[colIdx];
+      var isPercentCol = !!(firstRowCell && /%$/.test(firstRowCell.textContent || ''));
+      var rounded = Math.round(sum * 100) / 100;
+      var display;
+      if (isPercentCol) {
+        display = rounded.toFixed(2);
+      } else if (Math.abs(rounded) >= 1000) {
+        display = rounded.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      } else {
+        display = String(Math.round(rounded * 10) / 10);
+      }
+      cell.textContent = display;
+    });
+  }
+
+  // table2の合計（収穫実績・収穫比率の2列のみ）：日別9列はスプレッドシート側で
+  // B・C列までは数式だがD列以降は古い固定値が貼り付いたままだったため対象外。
+  // table3の合計（実績・比率・日別9列すべて）：全列が数式だったため全列を対象にする
+  function recomputeAllTotalRows(){
+    recomputeTotalRow(document.getElementById('table1'), [0, 1]);
+    recomputeTotalRow(document.getElementById('table2'), [0, 1]);
+    var table3 = document.getElementById('table3');
+    if (table3) {
+      var firstRow = table3.querySelector('tbody tr');
+      var colCount = firstRow ? firstRow.querySelectorAll('td').length : 0;
+      var allCols = [];
+      for (var i = 0; i < colCount; i++) allCols.push(i);
+      recomputeTotalRow(table3, allCols);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', recomputeAllTotalRows);
+
   // targetDate（基準日の前日。M・L・2L・袋の製品在庫・生在庫列は、既存のHTML構造上
   // data-offset="-1"の列に対応する）に一致する日付列を「椎茸在庫」シートから探し、
   // 見つかればその列の60〜67行目の値を描画する。取得失敗・列が見つからない場合は
@@ -790,6 +852,10 @@
     } catch (err) {
       console.error('[椎茸在庫] 取得エラー:', err);
       showStockFallback();
+    } finally {
+      // M・L・2L・袋のセルへの反映（成功時・列未検出時・取得失敗時のいずれも）が
+      // 全て終わった後に、table1の合計（製品在庫・生在庫）を追従して再計算する
+      recomputeTotalRow(document.getElementById('table1'), [0, 1]);
     }
   };
 })();
