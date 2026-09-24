@@ -405,11 +405,11 @@
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">秀</th>
-            <td>－</td><td data-stock-raw="秀">－</td><td class="today-col">18.5</td><td>159.4</td><td>107.4</td><td>230.5</td><td>31.3</td><td class="zero">0.0</td><td>205.0</td><td>19.2</td>
+            <td data-stock-product="秀">－</td><td data-stock-raw="秀">－</td><td class="today-col">18.5</td><td>159.4</td><td>107.4</td><td>230.5</td><td>31.3</td><td class="zero">0.0</td><td>205.0</td><td>19.2</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">優</th>
-            <td>－</td><td data-stock-raw="優">－</td><td class="today-col">27.7</td><td>239.1</td><td>161.0</td><td>345.7</td><td>46.9</td><td class="zero">0.0</td><td>307.5</td><td>28.7</td>
+            <td data-stock-product="優">－</td><td data-stock-raw="優">－</td><td class="today-col">27.7</td><td>239.1</td><td>161.0</td><td>345.7</td><td>46.9</td><td class="zero">0.0</td><td>307.5</td><td>28.7</td>
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
@@ -596,6 +596,7 @@
 (function(){
   var STOCK_SHEET_ID = '1ecjNSdIIT3BzQpUIq5T25v1IjEV8eYwZpC1XwU5bacE';
   var STOCK_SHEET_GID = '0'; // 「椎茸在庫」シートのgid
+  var ALLOCATION_SHEET_GID = '276290820'; // 「転写_秀優_判別」タブ
   var STOCK_DASH = '－';
 
   // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
@@ -700,6 +701,31 @@
     }) } };
   }
 
+  // 秀/優の製品在庫の按分ルール（含む文字列・除外文字列・換算係数・加算先）を
+  // 「転写_秀優_判別」タブから取得する。ラベルパターンや係数をJS側にハードコード
+  // せず、スプレッドシート側で一覧管理できるようにするため
+  async function fetchAllocationRules(){
+    var url = 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID +
+      '/export?format=csv&gid=' + ALLOCATION_SHEET_GID;
+    var res = await fetch(url, { cache: 'no-store' });
+    var text = await res.text();
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    var rows = parseCsv(text);
+    var rules = [];
+    for (var i = 1; i < rows.length; i++) { // 1行目はヘッダーなのでスキップ
+      var cells = rows[i];
+      if (!cells || !cells[0]) continue;
+      rules.push({
+        key: cells[0],
+        include: cells[1] || '',
+        exclude: cells[2] || '',
+        factor: parseFloat(cells[3]) || 1,
+        target: cells[4] || ''
+      });
+    }
+    return rules;
+  }
+
   // 1行目（日付行）からtargetDateに一致する列を検索する（列位置は決め打ちしない）
   function findDateColIndex(json, targetDate){
     var dateRow = json.table.rows && json.table.rows[0];
@@ -745,6 +771,36 @@
     return isNaN(v) ? null : v;
   }
 
+  // 椎茸在庫シートの行を、ラベルに includeText を含み excludeText を含まない
+  // ものに絞って colIdx 列の値を合計する
+  function sumByLabelSearch(json, colIdx, includeText, excludeText){
+    var rows = (json.table && json.table.rows) || [];
+    var sum = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      var label = c && c[1] && typeof c[1].v === 'string' ? c[1].v : '';
+      if (!label || label.indexOf(includeText) === -1) continue;
+      if (excludeText && label.indexOf(excludeText) !== -1) continue;
+      var v = readCellNumber(json, i, colIdx);
+      if (v !== null) sum += v;
+    }
+    return sum;
+  }
+
+  // rules（「転写_秀優_判別」タブの内容）のうち、加算先(target)が一致する
+  // ルールをすべて適用して合計する（例：target="秀・製品在庫"なら
+  // 秀L_箱・秀L_バラの2ルールが対象になり、それぞれの集計値×換算係数を合算する）
+  function computeAllocatedValue(stockJson, rules, colIdx, targetLabel){
+    var total = 0, any = false;
+    rules.forEach(function(rule){
+      if (rule.target !== targetLabel) return;
+      var s = sumByLabelSearch(stockJson, colIdx, rule.include, rule.exclude);
+      total += s * rule.factor;
+      any = true;
+    });
+    return any ? Math.round(total * 10) / 10 : null;
+  }
+
   function fmtStockNumber(v){
     return v === null ? STOCK_DASH : String(Math.round(v * 10) / 10);
   }
@@ -780,6 +836,10 @@
     var gradeRawYuu = document.querySelector('[data-stock-raw="優"]');
     if (gradeRawSyu) { gradeRawSyu.textContent = STOCK_DASH; gradeRawSyu.classList.remove('zero'); }
     if (gradeRawYuu) { gradeRawYuu.textContent = STOCK_DASH; gradeRawYuu.classList.remove('zero'); }
+    var gradeProductSyu = document.querySelector('[data-stock-product="秀"]');
+    var gradeProductYuu = document.querySelector('[data-stock-product="優"]');
+    if (gradeProductSyu) { gradeProductSyu.textContent = STOCK_DASH; gradeProductSyu.classList.remove('zero'); }
+    if (gradeProductYuu) { gradeProductYuu.textContent = STOCK_DASH; gradeProductYuu.classList.remove('zero'); }
   }
 
   function parseTotalCellNumber(text){
@@ -882,6 +942,16 @@
       var gradeRawYuu = document.querySelector('[data-stock-raw="優"]');
       if (gradeRawSyu) { gradeRawSyu.textContent = fmtStockNumber(syuRaw); applyZeroClass(gradeRawSyu, syuRaw); }
       if (gradeRawYuu) { gradeRawYuu.textContent = fmtStockNumber(yuuRaw); applyZeroClass(gradeRawYuu, yuuRaw); }
+
+      // 秀/優の製品在庫：按分ルール（含む文字列・除外文字列・換算係数・加算先）を
+      // 「転写_秀優_判別」タブから取得し、椎茸在庫シートの該当ラベルを検索・集計する
+      var allocationRules = await fetchAllocationRules();
+      var syuProduct = computeAllocatedValue(json, allocationRules, colIdx, '秀・製品在庫');
+      var yuuProduct = computeAllocatedValue(json, allocationRules, colIdx, '優・製品在庫');
+      var gradeProductSyu = document.querySelector('[data-stock-product="秀"]');
+      var gradeProductYuu = document.querySelector('[data-stock-product="優"]');
+      if (gradeProductSyu) { gradeProductSyu.textContent = fmtStockNumber(syuProduct); applyZeroClass(gradeProductSyu, syuProduct); }
+      if (gradeProductYuu) { gradeProductYuu.textContent = fmtStockNumber(yuuProduct); applyZeroClass(gradeProductYuu, yuuProduct); }
     } catch (err) {
       console.error('[椎茸在庫] 取得エラー:', err);
       showStockFallback();
