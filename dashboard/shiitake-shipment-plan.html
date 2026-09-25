@@ -974,7 +974,7 @@
   }
 
   function fmtStockNumber(v){
-    return v === null ? STOCK_DASH : String(Math.round(v * 10) / 10);
+    return v === null ? STOCK_DASH : (Math.round(v * 10) / 10).toFixed(1);
   }
 
   // サンプルHTML側で「値が0の列は薄い色で表示する」ためのzeroクラスが
@@ -1052,7 +1052,7 @@
       } else if (Math.abs(rounded) >= 1000) {
         display = rounded.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
       } else {
-        display = String(Math.round(rounded * 10) / 10);
+        display = (Math.round(rounded * 10) / 10).toFixed(1);
       }
       cell.textContent = display;
     });
@@ -1226,7 +1226,7 @@
         var d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offset);
         var dayTotal = await fetchDailyHarvestTotal(d, dailyTotalCache);
         var totalCell = document.querySelector('[data-harvest-total-offset="' + offset + '"]');
-        if (totalCell) totalCell.textContent = dayTotal === null ? STOCK_DASH : String(Math.round(dayTotal * 10) / 10);
+        if (totalCell) totalCell.textContent = dayTotal === null ? STOCK_DASH : (Math.round(dayTotal * 10) / 10).toFixed(1);
         sizes.forEach(function(size){
           var cell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + offset + '"]');
           if (!cell) return;
@@ -1349,7 +1349,7 @@
           var v = (base !== null && !isNaN(harvestV)) ? Math.round((base + harvestV - shipmentV) * 10) / 10 : null;
           var cell = document.querySelector('[data-stock-forecast="' + size + '"][data-stock-forecast-offset="' + offset + '"]');
           if (cell) {
-            cell.textContent = v === null ? STOCK_DASH : String(v);
+            cell.textContent = v === null ? STOCK_DASH : v.toFixed(1);
             cell.classList.remove('pos', 'neg');
             if (v !== null) cell.classList.add(v >= 0 ? 'pos' : 'neg');
           }
