@@ -348,7 +348,7 @@
     <div class="panel-head">
       <h2>在庫 ・ 出荷予定</h2>
       <div class="panel-head-right">
-        <span class="note">単位：kg　/　当日〜7日後の出荷予定</span>
+        <span class="note">単位：kg　/　当日〜8日後の出荷予定</span>
         <div class="day-nav day-nav-compact">
           <button id="prevMonth" aria-label="前月">«</button>
           <button id="prevDay" aria-label="前日">‹</button>
@@ -364,21 +364,22 @@
       <table class="sched" id="table1">
         <colgroup>
           <col class="size-col">
-          <col span="10">
+          <col span="11">
         </colgroup>
         <thead>
           <tr>
             <th class="sticky-1">サイズ</th>
             <th>製品在庫</th>
             <th>生在庫</th>
-            <th class="today-col">当日出荷予定</th>
-            <th>翌日出荷予定</th>
-            <th>2日後出荷予定</th>
-            <th>3日後出荷予定</th>
-            <th>4日後出荷予定</th>
-            <th>5日後出荷予定</th>
-            <th>6日後出荷予定</th>
-            <th>7日後出荷予定</th>
+            <th class="today-col">当日</th>
+            <th>翌日</th>
+            <th>2日後</th>
+            <th>3日後</th>
+            <th>4日後</th>
+            <th>5日後</th>
+            <th>6日後</th>
+            <th>7日後</th>
+            <th>8日後</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1">日付／曜日</th>
@@ -392,36 +393,37 @@
             <th class="dcol" data-offset="5"></th>
             <th class="dcol" data-offset="6"></th>
             <th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="8"></th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <th class="sticky-1">M</th>
-            <td data-stock-product="M">－</td><td data-stock-raw="M">－</td><td class="today-col" data-shipment="M" data-shipment-offset="0">－</td><td data-shipment="M" data-shipment-offset="1">－</td><td data-shipment="M" data-shipment-offset="2">－</td><td data-shipment="M" data-shipment-offset="3">－</td><td data-shipment="M" data-shipment-offset="4">－</td><td class="zero" data-shipment="M" data-shipment-offset="5">－</td><td data-shipment="M" data-shipment-offset="6">－</td><td data-shipment="M" data-shipment-offset="7">－</td>
+            <td data-stock-product="M">－</td><td data-stock-raw="M">－</td><td class="today-col" data-shipment="M" data-shipment-offset="0">－</td><td data-shipment="M" data-shipment-offset="1">－</td><td data-shipment="M" data-shipment-offset="2">－</td><td data-shipment="M" data-shipment-offset="3">－</td><td data-shipment="M" data-shipment-offset="4">－</td><td class="zero" data-shipment="M" data-shipment-offset="5">－</td><td data-shipment="M" data-shipment-offset="6">－</td><td data-shipment="M" data-shipment-offset="7">－</td><td data-shipment="M" data-shipment-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">L</th>
-            <td data-stock-product="L">－</td><td data-stock-raw="L">－</td><td class="today-col" data-shipment="L" data-shipment-offset="0">－</td><td data-shipment="L" data-shipment-offset="1">－</td><td data-shipment="L" data-shipment-offset="2">－</td><td data-shipment="L" data-shipment-offset="3">－</td><td data-shipment="L" data-shipment-offset="4">－</td><td class="zero" data-shipment="L" data-shipment-offset="5">－</td><td data-shipment="L" data-shipment-offset="6">－</td><td data-shipment="L" data-shipment-offset="7">－</td>
+            <td data-stock-product="L">－</td><td data-stock-raw="L">－</td><td class="today-col" data-shipment="L" data-shipment-offset="0">－</td><td data-shipment="L" data-shipment-offset="1">－</td><td data-shipment="L" data-shipment-offset="2">－</td><td data-shipment="L" data-shipment-offset="3">－</td><td data-shipment="L" data-shipment-offset="4">－</td><td class="zero" data-shipment="L" data-shipment-offset="5">－</td><td data-shipment="L" data-shipment-offset="6">－</td><td data-shipment="L" data-shipment-offset="7">－</td><td data-shipment="L" data-shipment-offset="8">－</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">秀</th>
-            <td data-stock-product="秀">－</td><td data-stock-raw="秀">－</td><td class="today-col" data-shipment="秀" data-shipment-offset="0">－</td><td data-shipment="秀" data-shipment-offset="1">－</td><td data-shipment="秀" data-shipment-offset="2">－</td><td data-shipment="秀" data-shipment-offset="3">－</td><td data-shipment="秀" data-shipment-offset="4">－</td><td class="zero" data-shipment="秀" data-shipment-offset="5">－</td><td data-shipment="秀" data-shipment-offset="6">－</td><td data-shipment="秀" data-shipment-offset="7">－</td>
+            <td data-stock-product="秀">－</td><td data-stock-raw="秀">－</td><td class="today-col" data-shipment="秀" data-shipment-offset="0">－</td><td data-shipment="秀" data-shipment-offset="1">－</td><td data-shipment="秀" data-shipment-offset="2">－</td><td data-shipment="秀" data-shipment-offset="3">－</td><td data-shipment="秀" data-shipment-offset="4">－</td><td class="zero" data-shipment="秀" data-shipment-offset="5">－</td><td data-shipment="秀" data-shipment-offset="6">－</td><td data-shipment="秀" data-shipment-offset="7">－</td><td data-shipment="秀" data-shipment-offset="8">－</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1">優</th>
-            <td data-stock-product="優">－</td><td data-stock-raw="優">－</td><td class="today-col" data-shipment="優" data-shipment-offset="0">－</td><td data-shipment="優" data-shipment-offset="1">－</td><td data-shipment="優" data-shipment-offset="2">－</td><td data-shipment="優" data-shipment-offset="3">－</td><td data-shipment="優" data-shipment-offset="4">－</td><td class="zero" data-shipment="優" data-shipment-offset="5">－</td><td data-shipment="優" data-shipment-offset="6">－</td><td data-shipment="優" data-shipment-offset="7">－</td>
+            <td data-stock-product="優">－</td><td data-stock-raw="優">－</td><td class="today-col" data-shipment="優" data-shipment-offset="0">－</td><td data-shipment="優" data-shipment-offset="1">－</td><td data-shipment="優" data-shipment-offset="2">－</td><td data-shipment="優" data-shipment-offset="3">－</td><td data-shipment="優" data-shipment-offset="4">－</td><td class="zero" data-shipment="優" data-shipment-offset="5">－</td><td data-shipment="優" data-shipment-offset="6">－</td><td data-shipment="優" data-shipment-offset="7">－</td><td data-shipment="優" data-shipment-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
-            <td data-stock-product="2L">－</td><td data-stock-raw="2L">－</td><td class="today-col" data-shipment="2L" data-shipment-offset="0">－</td><td data-shipment="2L" data-shipment-offset="1">－</td><td data-shipment="2L" data-shipment-offset="2">－</td><td data-shipment="2L" data-shipment-offset="3">－</td><td data-shipment="2L" data-shipment-offset="4">－</td><td class="zero" data-shipment="2L" data-shipment-offset="5">－</td><td data-shipment="2L" data-shipment-offset="6">－</td><td data-shipment="2L" data-shipment-offset="7">－</td>
+            <td data-stock-product="2L">－</td><td data-stock-raw="2L">－</td><td class="today-col" data-shipment="2L" data-shipment-offset="0">－</td><td data-shipment="2L" data-shipment-offset="1">－</td><td data-shipment="2L" data-shipment-offset="2">－</td><td data-shipment="2L" data-shipment-offset="3">－</td><td data-shipment="2L" data-shipment-offset="4">－</td><td class="zero" data-shipment="2L" data-shipment-offset="5">－</td><td data-shipment="2L" data-shipment-offset="6">－</td><td data-shipment="2L" data-shipment-offset="7">－</td><td data-shipment="2L" data-shipment-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">袋</th>
-            <td data-stock-product="袋">－</td><td data-stock-raw="袋">－</td><td class="today-col" data-shipment="袋" data-shipment-offset="0">－</td><td data-shipment="袋" data-shipment-offset="1">－</td><td data-shipment="袋" data-shipment-offset="2">－</td><td data-shipment="袋" data-shipment-offset="3">－</td><td data-shipment="袋" data-shipment-offset="4">－</td><td class="zero" data-shipment="袋" data-shipment-offset="5">－</td><td data-shipment="袋" data-shipment-offset="6">－</td><td data-shipment="袋" data-shipment-offset="7">－</td>
+            <td data-stock-product="袋">－</td><td data-stock-raw="袋">－</td><td class="today-col" data-shipment="袋" data-shipment-offset="0">－</td><td data-shipment="袋" data-shipment-offset="1">－</td><td data-shipment="袋" data-shipment-offset="2">－</td><td data-shipment="袋" data-shipment-offset="3">－</td><td data-shipment="袋" data-shipment-offset="4">－</td><td class="zero" data-shipment="袋" data-shipment-offset="5">－</td><td data-shipment="袋" data-shipment-offset="6">－</td><td data-shipment="袋" data-shipment-offset="7">－</td><td data-shipment="袋" data-shipment-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">合計</th>
-            <td>－</td><td>－</td><td class="today-col">194.1</td><td>822.0</td><td>505.8</td><td>1,108.6</td><td>470.5</td><td>0.0</td><td>1,074.3</td><td>199.5</td>
+            <td>－</td><td>－</td><td class="today-col">194.1</td><td>822.0</td><td>505.8</td><td>1,108.6</td><td>470.5</td><td>0.0</td><td>1,074.3</td><td>199.5</td><td>－</td>
           </tr>
         </tbody>
       </table>
@@ -1139,7 +1141,7 @@
       var gradeJson = null;
       try { gradeJson = await fetchCsvSheet(HARVEST_SHEET_ID, SHIPMENT_GRADE_GID); } catch (e) { gradeJson = null; }
 
-      for (var offset = 0; offset <= 7; offset++) {
+      for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
         var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache);
         var gradePlan = gradeJson ? await fetchShipmentGradeForDate(gradeJson, d) : { '秀': null, '優': null };
@@ -1154,13 +1156,13 @@
     } catch (err) {
       console.error('[出荷予定] 取得エラー:', err);
       ['M', '2L', '袋', 'L', '秀', '優'].forEach(function(size){
-        for (var offset = 0; offset <= 7; offset++) {
+        for (var offset = 0; offset <= 8; offset++) {
           var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
           if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
         }
       });
     } finally {
-      recomputeTotalRow(document.getElementById('table1'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      recomputeTotalRow(document.getElementById('table1'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
   };
 
