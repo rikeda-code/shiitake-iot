@@ -1341,9 +1341,12 @@
           var harvestCell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + offset + '"]');
           var shipmentCell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
           var harvestV = harvestCell ? parseFloat(String(harvestCell.textContent).replace(/,/g, '')) : NaN;
-          var shipmentV = shipmentCell ? parseFloat(String(shipmentCell.textContent).replace(/,/g, '')) : NaN;
+          var shipmentText = shipmentCell ? String(shipmentCell.textContent).trim() : '';
+          // 出荷予定が未入力（「－」または空欄）の場合は0件として扱い、計算を継続する
+          var shipmentV = (shipmentText === '' || shipmentText === STOCK_DASH) ? 0 : parseFloat(shipmentText.replace(/,/g, ''));
+          if (isNaN(shipmentV)) shipmentV = 0;
           var base = prevValue[size];
-          var v = (base !== null && !isNaN(harvestV) && !isNaN(shipmentV)) ? Math.round((base + harvestV - shipmentV) * 10) / 10 : null;
+          var v = (base !== null && !isNaN(harvestV)) ? Math.round((base + harvestV - shipmentV) * 10) / 10 : null;
           var cell = document.querySelector('[data-stock-forecast="' + size + '"][data-stock-forecast-offset="' + offset + '"]');
           if (cell) {
             cell.textContent = v === null ? STOCK_DASH : String(v);
