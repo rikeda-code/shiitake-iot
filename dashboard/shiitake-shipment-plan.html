@@ -593,11 +593,6 @@
     </div>
   </section>
 
-  <footer>
-    <span><span class="tag">サンプルデータ</span>　実データ連携前のデザイン確認用です（日付ラベルのみ基準日に連動、数値はダミー）</span>
-    <span id="lastUpdated"></span>
-  </footer>
-
 </div>
 
 <!-- ── 在庫・出荷予定パネルの「製品在庫」「生在庫」列（M・L・2L・袋の本行のみ）を、
@@ -1340,8 +1335,6 @@
     var isToday = input.value === todayISO;
     document.getElementById('nextDay').disabled = isToday;
     document.getElementById('nextMonth').disabled = isToday;
-    document.getElementById('lastUpdated').textContent =
-      '表示基準日：' + input.value.replace(/-/g,'/') + (isToday ? '（本日）' : '（過去日を表示中）');
     // 製品在庫・生在庫列（M・L・2L・袋）は基準日の前日（data-offset="-1"と同じ日）の
     // 実データを表示する
     if (typeof updateStockLiveData === 'function') updateStockLiveData(addDays(ref, -1));
