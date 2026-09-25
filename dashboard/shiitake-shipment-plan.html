@@ -209,6 +209,7 @@
     width:100%;
     min-width:920px;
     font-variant-numeric: tabular-nums;
+    table-layout:fixed;
   }
   thead th{
     background:var(--amber-soft);
@@ -222,7 +223,7 @@
     white-space:nowrap;
   }
   thead tr.weekday th{
-    background:#fffaf0;
+    background:var(--amber-soft);
     font-weight:500;
     color:var(--ink-soft);
     font-size:12.5px;
@@ -257,6 +258,8 @@
     padding-top:3px;
     padding-bottom:3px;
   }
+  .harvest tr.grade-row td{ background:#f7ecd9; }
+  .stock tr.grade-row td, .sched tr.grade-row td{ background:#eef4ec; }
   .sticky-1{ position:sticky; left:0; z-index:2; }
   .sticky-2{ position:sticky; left:96px; z-index:2; }
 
@@ -364,7 +367,9 @@
       <table class="sched" id="table1">
         <colgroup>
           <col class="size-col">
-          <col span="11">
+          <col style="width:78px;">
+          <col style="width:64px;">
+          <col span="9" style="width:74px;">
         </colgroup>
         <thead>
           <tr>
@@ -453,7 +458,7 @@
           <col class="size-col">
           <col style="width:78px;">
           <col style="width:64px;">
-          <col span="9">
+          <col span="9" style="width:74px;">
         </colgroup>
         <thead>
           <tr>
@@ -524,7 +529,7 @@
           <col class="size-col">
           <col style="width:78px;">
           <col style="width:64px;">
-          <col span="9">
+          <col span="9" style="width:74px;">
         </colgroup>
         <thead>
           <tr>
