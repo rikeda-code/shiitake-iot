@@ -481,14 +481,14 @@
             <td data-harvest="L" data-harvest-offset="0">－</td><td data-harvest="L" data-harvest-offset="1">－</td><td data-harvest="L" data-harvest-offset="2">－</td><td data-harvest="L" data-harvest-offset="3">－</td><td data-harvest="L" data-harvest-offset="4">－</td><td data-harvest="L" data-harvest-offset="5">－</td><td data-harvest="L" data-harvest-offset="6">－</td><td data-harvest="L" data-harvest-offset="7">－</td><td data-harvest="L" data-harvest-offset="8">－</td>
           </tr>
           <tr class="grade-row">
-            <th class="sticky-1">秀_40</th>
-            <td class="actual-col">85.44kg</td><td class="ratio-col">－</td>
-            <td>71.23</td><td>91.50</td><td>104.61</td><td>87.90</td><td>87.90</td><td>66.48</td><td>53.55</td><td>47.96</td><td>44.30</td>
+            <th class="sticky-1" data-harvest-grade-label="秀">秀_40</th>
+            <td class="actual-col" data-harvest-actual="秀">－</td><td class="ratio-col">－</td>
+            <td data-harvest="秀" data-harvest-offset="0">－</td><td data-harvest="秀" data-harvest-offset="1">－</td><td data-harvest="秀" data-harvest-offset="2">－</td><td data-harvest="秀" data-harvest-offset="3">－</td><td data-harvest="秀" data-harvest-offset="4">－</td><td data-harvest="秀" data-harvest-offset="5">－</td><td data-harvest="秀" data-harvest-offset="6">－</td><td data-harvest="秀" data-harvest-offset="7">－</td><td data-harvest="秀" data-harvest-offset="8">－</td>
           </tr>
           <tr class="grade-row">
-            <th class="sticky-1">優_60</th>
-            <td class="actual-col">128.16kg</td><td class="ratio-col">－</td>
-            <td>106.85</td><td>137.24</td><td>156.92</td><td>131.86</td><td>131.86</td><td>99.72</td><td>80.33</td><td>71.93</td><td>66.46</td>
+            <th class="sticky-1" data-harvest-grade-label="優">優_60</th>
+            <td class="actual-col" data-harvest-actual="優">－</td><td class="ratio-col">－</td>
+            <td data-harvest="優" data-harvest-offset="0">－</td><td data-harvest="優" data-harvest-offset="1">－</td><td data-harvest="優" data-harvest-offset="2">－</td><td data-harvest="優" data-harvest-offset="3">－</td><td data-harvest="優" data-harvest-offset="4">－</td><td data-harvest="優" data-harvest-offset="5">－</td><td data-harvest="優" data-harvest-offset="6">－</td><td data-harvest="優" data-harvest-offset="7">－</td><td data-harvest="優" data-harvest-offset="8">－</td>
           </tr>
           <tr>
             <th class="sticky-1">2L</th>
@@ -1184,6 +1184,36 @@
         if (ratioCell) { ratioCell.textContent = ratio[size] === null ? STOCK_DASH : (Math.round(ratio[size] * 10000) / 100) + '%'; }
       });
 
+      // 秀/優（Lの内訳）：「②日々の過不足確認_秀優」シートのA22/A23セルの
+      // 文字列自体に按分比率が埋め込まれている（例："秀_50"）。B22="=B21*比率/100"・
+      // D22="=D21*比率/100"と同じ考え方で、Lの実績値・日別予測値に対して
+      // クライアント側で按分する（新たな数式はスプレッドシート側に追加しない）
+      var gradeRatios = { '秀': null, '優': null };
+      try {
+        var labelJson = await fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID);
+        var labelRows = labelJson.table.rows;
+        var syuLabel = labelRows[21] && labelRows[21].c[0] && labelRows[21].c[0].v;
+        var yuuLabel = labelRows[22] && labelRows[22].c[0] && labelRows[22].c[0].v;
+        var syuLabelCell = document.querySelector('[data-harvest-grade-label="秀"]');
+        var yuuLabelCell = document.querySelector('[data-harvest-grade-label="優"]');
+        if (syuLabelCell && syuLabel) syuLabelCell.textContent = syuLabel;
+        if (yuuLabelCell && yuuLabel) yuuLabelCell.textContent = yuuLabel;
+        var syuMatch = syuLabel && String(syuLabel).match(/(\d+)$/);
+        var yuuMatch = yuuLabel && String(yuuLabel).match(/(\d+)$/);
+        gradeRatios['秀'] = syuMatch ? parseFloat(syuMatch[1]) / 100 : null;
+        gradeRatios['優'] = yuuMatch ? parseFloat(yuuMatch[1]) / 100 : null;
+      } catch (e) {
+        gradeRatios['秀'] = null;
+        gradeRatios['優'] = null;
+      }
+
+      ['秀', '優'].forEach(function(grade){
+        var lActual = actual ? actual['L'] : null;
+        var v = (lActual !== null && gradeRatios[grade] !== null) ? Math.round(lActual * gradeRatios[grade] * 10) / 10 : null;
+        var actualCell = document.querySelector('[data-harvest-actual="' + grade + '"]');
+        if (actualCell) { actualCell.textContent = fmtStockNumber(v); applyZeroClass(actualCell, v); }
+      });
+
       var dailyTotalCache = {};
       for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offset);
@@ -1197,6 +1227,15 @@
           cell.textContent = fmtStockNumber(v);
           applyZeroClass(cell, v);
         });
+
+        var lDayValue = (dayTotal !== null && ratio['L'] !== null) ? dayTotal * ratio['L'] : null;
+        ['秀', '優'].forEach(function(grade){
+          var gCell = document.querySelector('[data-harvest="' + grade + '"][data-harvest-offset="' + offset + '"]');
+          if (!gCell) return;
+          var v = (lDayValue !== null && gradeRatios[grade] !== null) ? Math.round(lDayValue * gradeRatios[grade] * 10) / 10 : null;
+          gCell.textContent = fmtStockNumber(v);
+          applyZeroClass(gCell, v);
+        });
       }
     } catch (err) {
       console.error('[収穫予測] 取得エラー:', err);
@@ -1207,6 +1246,14 @@
         if (ratioCell) ratioCell.textContent = STOCK_DASH;
         for (var offset = 0; offset <= 8; offset++) {
           var cell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + offset + '"]');
+          if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
+        }
+      });
+      ['秀', '優'].forEach(function(grade){
+        var actualCell = document.querySelector('[data-harvest-actual="' + grade + '"]');
+        if (actualCell) { actualCell.textContent = STOCK_DASH; actualCell.classList.remove('zero'); }
+        for (var offset = 0; offset <= 8; offset++) {
+          var cell = document.querySelector('[data-harvest="' + grade + '"][data-harvest-offset="' + offset + '"]');
           if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
         }
       });
