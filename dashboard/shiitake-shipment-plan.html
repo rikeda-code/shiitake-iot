@@ -1451,7 +1451,9 @@
     var stockPromise = (typeof updateStockLiveData === 'function') ? updateStockLiveData(addDays(ref, -1)) : Promise.resolve();
     var shipmentPromise = (typeof updateShipmentForecast === 'function') ? updateShipmentForecast(ref) : Promise.resolve();
     var harvestPromise = (typeof triggerHarvestForecastUpdate === 'function') ? triggerHarvestForecastUpdate() : Promise.resolve();
-    Promise.all([stockPromise, shipmentPromise, harvestPromise]).then(function(){
+    Promise.all([stockPromise, shipmentPromise, harvestPromise]).catch(function(err){
+      console.error('[在庫・出荷・収穫データ取得] 一部の更新でエラーが発生しました:', err);
+    }).finally(function(){
       if (typeof updateStockForecast === 'function') updateStockForecast();
     });
   }
