@@ -1255,6 +1255,7 @@
       }
     } catch (err) {
       console.error('[収穫予測] 取得エラー:', err);
+      if (isStale()) return;
       sizes.forEach(function(size){
         var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
         var ratioCell = document.querySelector('[data-harvest-ratio="' + size + '"]');
