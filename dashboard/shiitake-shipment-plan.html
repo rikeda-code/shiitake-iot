@@ -562,12 +562,12 @@
           </tr>
           <tr class="grade-row">
             <th class="sticky-1" data-stock-forecast-grade-label="秀">秀</th>
-            <td data-stock-forecast-actual="秀">－</td><td class="ratio-col"></td>
+            <td data-stock-forecast-actual="秀">－</td><td class="ratio-col">－</td>
             <td class="today-col" data-stock-forecast="秀" data-stock-forecast-offset="0">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="1">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="2">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="3">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="4">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="5">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="6">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="7">－</td><td data-stock-forecast="秀" data-stock-forecast-offset="8">－</td>
           </tr>
           <tr class="grade-row">
             <th class="sticky-1" data-stock-forecast-grade-label="優">優</th>
-            <td data-stock-forecast-actual="優">－</td><td class="ratio-col"></td>
+            <td data-stock-forecast-actual="優">－</td><td class="ratio-col">－</td>
             <td class="today-col" data-stock-forecast="優" data-stock-forecast-offset="0">－</td><td data-stock-forecast="優" data-stock-forecast-offset="1">－</td><td data-stock-forecast="優" data-stock-forecast-offset="2">－</td><td data-stock-forecast="優" data-stock-forecast-offset="3">－</td><td data-stock-forecast="優" data-stock-forecast-offset="4">－</td><td data-stock-forecast="優" data-stock-forecast-offset="5">－</td><td data-stock-forecast="優" data-stock-forecast-offset="6">－</td><td data-stock-forecast="優" data-stock-forecast-offset="7">－</td><td data-stock-forecast="優" data-stock-forecast-offset="8">－</td>
           </tr>
           <tr>
@@ -1146,6 +1146,21 @@
       var gradeJson = null;
       try { gradeJson = await fetchCsvSheet(HARVEST_SHEET_ID, SHIPMENT_GRADE_GID); } catch (e) { gradeJson = null; }
 
+      // 当日〜8日後に必要な年月をあらかじめ洗い出し、まとめて並行取得しておく
+      // （fetchOrderPlanForDate自体は変更しない。ここでmonthCacheを
+      // 事前に埋めておくことで、ループ内のawaitが実質待たずに済む）
+      var neededKeys = [];
+      for (var i = 0; i <= 8; i++) {
+        var di = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + i);
+        var key = yearMonthKey(di);
+        if (neededKeys.indexOf(key) === -1) neededKeys.push(key);
+      }
+      await Promise.all(neededKeys.map(function(key){
+        var gid = sheetIndex[key];
+        if (!gid || monthCache[key]) return null;
+        return fetchCsvSheet(SALES_SHEET_ID, gid).then(function(json){ monthCache[key] = json; }).catch(function(){});
+      }));
+
       for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
         var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache);
@@ -1184,7 +1199,12 @@
     if (!baseDate) baseDate = harvestDate; // 呼び出し側で省略された場合のフォールバック
     var sizes = ['M', 'L', '2L', '袋'];
     try {
-      var actual = await fetchHarvestActual(harvestDate);
+      // 実績と秀/優ラベルは互いに依存しないため同時に取得を開始する（ラベルを
+      // 使う按分は、これまで通り実績の描画が終わってから行う）
+      var actualPromise = fetchHarvestActual(harvestDate);
+      var labelJsonPromise = fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID).catch(function(){ return null; });
+
+      var actual = await actualPromise;
       var total = actual ? (actual['M'] || 0) + (actual['L'] || 0) + (actual['2L'] || 0) + (actual['袋'] || 0) : 0;
       var ratio = {};
       if (isStale()) return;
@@ -1202,22 +1222,24 @@
       // D22="=D21*比率/100"と同じ考え方で、Lの実績値・日別予測値に対して
       // クライアント側で按分する（新たな数式はスプレッドシート側に追加しない）
       var gradeRatios = { '秀': null, '優': null };
-      try {
-        var labelJson = await fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID);
-        var labelRows = labelJson.table.rows;
-        var syuLabel = labelRows[21] && labelRows[21].c[0] && labelRows[21].c[0].v;
-        var yuuLabel = labelRows[22] && labelRows[22].c[0] && labelRows[22].c[0].v;
-        var syuLabelCell = document.querySelector('[data-harvest-grade-label="秀"]');
-        var yuuLabelCell = document.querySelector('[data-harvest-grade-label="優"]');
-        if (syuLabelCell && syuLabel) syuLabelCell.textContent = syuLabel;
-        if (yuuLabelCell && yuuLabel) yuuLabelCell.textContent = yuuLabel;
-        var syuMatch = syuLabel && String(syuLabel).match(/(\d+)$/);
-        var yuuMatch = yuuLabel && String(yuuLabel).match(/(\d+)$/);
-        gradeRatios['秀'] = syuMatch ? parseFloat(syuMatch[1]) / 100 : null;
-        gradeRatios['優'] = yuuMatch ? parseFloat(yuuMatch[1]) / 100 : null;
-      } catch (e) {
-        gradeRatios['秀'] = null;
-        gradeRatios['優'] = null;
+      var labelJson = await labelJsonPromise;
+      if (labelJson) {
+        try {
+          var labelRows = labelJson.table.rows;
+          var syuLabel = labelRows[21] && labelRows[21].c[0] && labelRows[21].c[0].v;
+          var yuuLabel = labelRows[22] && labelRows[22].c[0] && labelRows[22].c[0].v;
+          var syuLabelCell = document.querySelector('[data-harvest-grade-label="秀"]');
+          var yuuLabelCell = document.querySelector('[data-harvest-grade-label="優"]');
+          if (syuLabelCell && syuLabel) syuLabelCell.textContent = syuLabel;
+          if (yuuLabelCell && yuuLabel) yuuLabelCell.textContent = yuuLabel;
+          var syuMatch = syuLabel && String(syuLabel).match(/(\d+)$/);
+          var yuuMatch = yuuLabel && String(yuuLabel).match(/(\d+)$/);
+          gradeRatios['秀'] = syuMatch ? parseFloat(syuMatch[1]) / 100 : null;
+          gradeRatios['優'] = yuuMatch ? parseFloat(yuuMatch[1]) / 100 : null;
+        } catch (e) {
+          gradeRatios['秀'] = null;
+          gradeRatios['優'] = null;
+        }
       }
 
       if (isStale()) return;
