@@ -1037,9 +1037,12 @@
         var v = parseTotalCellNumber(cells[colIdx] && cells[colIdx].textContent);
         if (v !== null) { sum += v; any = true; }
       });
-      if (!any) return;
       var cell = totalCells[colIdx];
       if (!cell) return;
+      if (!any) {
+        cell.textContent = STOCK_DASH;
+        return;
+      }
       var firstRowCell = dataRows[0] && dataRows[0].querySelectorAll('td')[colIdx];
       var isPercentCol = !!(firstRowCell && /%$/.test(firstRowCell.textContent || ''));
       var rounded = Math.round(sum * 100) / 100;
