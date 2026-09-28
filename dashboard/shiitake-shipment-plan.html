@@ -1175,13 +1175,19 @@
   // 収穫実績から各サイズの比率を求め、将来日（翌日〜8日後）は「転写」タブの
   // 日別収穫合計予測値をその比率で按分する（「②日々の過不足確認_秀優」の
   // B20/B21/B24/B25, C20/C21/C24/C25, D20以降と同じロジック）
+  var harvestForecastRequestToken = 0;
   window.updateHarvestForecast = async function(harvestDate, baseDate){
+    // 実績日・基準日の変更で短時間に複数回呼ばれた場合に、後から完了した古い
+    // 呼び出しの結果が新しい呼び出しの結果を上書きしないよう、世代番号で判定する
+    var myToken = ++harvestForecastRequestToken;
+    function isStale(){ return myToken !== harvestForecastRequestToken; }
     if (!baseDate) baseDate = harvestDate; // 呼び出し側で省略された場合のフォールバック
     var sizes = ['M', 'L', '2L', '袋'];
     try {
       var actual = await fetchHarvestActual(harvestDate);
       var total = actual ? (actual['M'] || 0) + (actual['L'] || 0) + (actual['2L'] || 0) + (actual['袋'] || 0) : 0;
       var ratio = {};
+      if (isStale()) return;
       sizes.forEach(function(size){
         var v = actual ? actual[size] : null;
         ratio[size] = (v !== null && total > 0) ? v / total : null;
@@ -1214,6 +1220,7 @@
         gradeRatios['優'] = null;
       }
 
+      if (isStale()) return;
       ['秀', '優'].forEach(function(grade){
         var lActual = actual ? actual['L'] : null;
         var v = (lActual !== null && gradeRatios[grade] !== null) ? Math.round(lActual * gradeRatios[grade] * 10) / 10 : null;
@@ -1222,9 +1229,11 @@
       });
 
       var dailyTotalCache = {};
+      if (isStale()) return;
       for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offset);
         var dayTotal = await fetchDailyHarvestTotal(d, dailyTotalCache);
+        if (isStale()) return;
         var totalCell = document.querySelector('[data-harvest-total-offset="' + offset + '"]');
         if (totalCell) totalCell.textContent = dayTotal === null ? STOCK_DASH : (Math.round(dayTotal * 10) / 10).toFixed(1);
         sizes.forEach(function(size){
@@ -1246,6 +1255,7 @@
       }
     } catch (err) {
       console.error('[収穫予測] 取得エラー:', err);
+      if (isStale()) return;
       sizes.forEach(function(size){
         var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
         var ratioCell = document.querySelector('[data-harvest-ratio="' + size + '"]');
@@ -1579,7 +1589,6 @@
     if (iso <= todayISO) {
       input.value = iso;
       clamp();
-      if (typeof triggerHarvestForecastUpdate === 'function') triggerHarvestForecastUpdate();
     }
   });
 })();
