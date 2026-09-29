@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直近工数計画ダッシュボード</title>
+<style>
+  :root{
+    --ink:#2b2420;
+    --ink-soft:#5c5248;
+    --paper:#f7f2e7;
+    --panel:#fffdf8;
+    --line:#ddd0b6;
+    --line-soft:#ece2c9;
+    --brown:#7a4a26;
+    --brown-deep:#5a341a;
+    --amber:#f6d98a;
+    --amber-soft:#fbecc2;
+    --green:#3f6b4c;
+    --green-soft:#e3ede2;
+    --green-deep:#2c4c36;
+    --red:#b3402f;
+    --shadow: 0 1px 0 rgba(43,36,32,.06);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(122,74,38,.06) 1px, transparent 0);
+    background-size: 22px 22px;
+    color:var(--ink);
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding: 14px 18px 10px;
+  }
+
+  .wrap{ max-width:1180px; margin:0 auto; }
+
+  header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    padding-bottom:6px;
+    border-bottom:2px solid var(--brown);
+    margin-bottom:8px;
+    flex-wrap:wrap;
+  }
+  h1{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-weight:700;
+    font-size:clamp(22px,3.2vw,30px);
+    margin:0;
+    color:var(--brown-deep);
+    letter-spacing:.02em;
+  }
+
+  .toggle-cluster{ display:flex; gap:10px; flex-wrap:wrap; }
+  .site-toggle{
+    display:flex;
+    gap:4px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:5px;
+    box-shadow: var(--shadow);
+  }
+  .site-toggle button{
+    padding:7px 14px;
+    border-radius:7px;
+    border:1px solid transparent;
+    background:transparent;
+    color:var(--ink-soft);
+    font-size:13.5px;
+    font-weight:600;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+    white-space:nowrap;
+  }
+  .site-toggle button.active{ background:var(--brown); color:#fff; }
+  .site-toggle button:hover:not(.active){ background:var(--amber-soft); }
+
+  .day-nav{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:8px 10px;
+    box-shadow: var(--shadow);
+    flex-wrap:wrap;
+  }
+  .day-nav button{
+    width:28px; height:28px;
+    border-radius:7px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--brown);
+    font-size:14px;
+    cursor:pointer;
+  }
+  .day-nav button:hover:not(:disabled){ background:var(--amber-soft); }
+  .day-nav .label{ font-size:13px; color:var(--ink-soft); white-space:nowrap; }
+  .day-nav input[type="date"]{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size:14px; font-weight:700; color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:5px 8px; background:#fffef9;
+  }
+  .day-nav .today-btn{ width:auto; padding:0 10px; font-size:13px; font-weight:700; }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    margin-bottom:10px;
+    overflow:hidden;
+    box-shadow: 0 1px 2px rgba(43,36,32,.05);
+  }
+  .panel-head{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:6px 18px 5px; border-bottom:1px solid var(--line-soft); flex-wrap:wrap;
+  }
+  .panel-head h2{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size:16px; font-weight:700; margin:0; color:var(--brown-deep);
+    display:flex; align-items:center; gap:8px;
+  }
+  .panel-head h2::before{ content:""; width:8px; height:8px; border-radius:2px; background:var(--brown); display:inline-block; }
+  .panel-head .note{ font-size:12.5px; color:var(--ink-soft); }
+  .panel-error{ padding:8px 18px; color:var(--red); font-size:13px; display:none; }
+  .panel-error.show{ display:block; }
+
+  .table-scroll{ overflow-x:auto; }
+  table{
+    border-collapse:separate; border-spacing:0; width:100%; min-width:760px;
+    font-variant-numeric: tabular-nums; table-layout:fixed;
+  }
+  thead th{
+    background:var(--amber-soft); color:var(--brown-deep); font-weight:700; font-size:13.5px;
+    text-align:center; padding:4px 10px; border-bottom:1px solid var(--line); border-right:1px solid var(--line-soft);
+    white-space:nowrap;
+  }
+  thead tr.weekday th{
+    background:var(--amber-soft); font-weight:500; color:var(--ink-soft); font-size:12.5px; padding:3px 10px 4px;
+  }
+  tbody td, tbody th{
+    padding:4px 10px; text-align:right; font-size:14.5px;
+    border-bottom:1px solid var(--line-soft); border-right:1px solid var(--line-soft); white-space:nowrap;
+  }
+  tbody th{ text-align:left; font-weight:700; background:#fbf7ee; color:var(--brown-deep); }
+  tbody tr:last-child td, tbody tr:last-child th{ border-bottom:none; background:#f3ead4; font-weight:700; }
+  .sticky-1{ position:sticky; left:0; z-index:2; }
+  col.size-col{ width:130px; }
+
+  .cult td.today-col, .cult th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
+  .work td.today-col, .work th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
+  .labor td.today-col, .labor th.today-col{ background:var(--green-soft) !important; font-weight:700; }
+
+  .neg{ color:var(--red); }
+  .pos{ color:var(--green); }
+  .dept-col{ text-align:center; white-space:normal; }
+
+  details.detail-rows{ padding:6px 18px 10px; }
+  details.detail-rows summary{ cursor:pointer; font-size:13px; color:var(--ink-soft); }
+  details.detail-rows table{ margin-top:6px; }
+
+  .summary-grid{ display:flex; gap:18px; padding:10px 18px; flex-wrap:wrap; }
+  .summary-item{ min-width:140px; }
+  .summary-item .k{ font-size:12.5px; color:var(--ink-soft); }
+  .summary-item .v{ font-size:22px; font-weight:700; color:var(--brown-deep); }
+  .summary-item .v.neg{ color:var(--red); }
+
+  .warnings{ padding:6px 18px 10px; font-size:12.5px; color:var(--red); }
+  .warnings ul{ margin:4px 0 0; padding-left:18px; }
+
+  .unsupported{ padding:40px 18px; text-align:center; color:var(--ink-soft); font-size:15px; }
+
+  @media (max-width:640px){
+    body{ padding:18px 10px 40px; }
+    header{ align-items:flex-start; }
+    .day-nav{ width:100%; justify-content:space-between; }
+    .toggle-cluster{ width:100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="title-block">
+      <h1>直近工数計画ダッシュボード</h1>
+    </div>
+    <div class="toggle-cluster">
+      <div class="site-toggle" id="businessToggle">
+        <button type="button" class="active" data-business="栽培">栽培</button>
+        <button type="button" data-business="出荷">出荷</button>
+        <button type="button" data-business="配送">配送</button>
+      </div>
+      <div class="site-toggle" id="siteToggle">
+        <button type="button" class="active" data-site="いなべ">いなべ</button>
+        <button type="button" data-site="群馬">群馬</button>
+        <button type="button" data-site="南丹">南丹</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="day-nav" style="margin-bottom:10px;">
+    <button id="prevMonth" aria-label="前月">«</button>
+    <button id="prevDay" aria-label="前日">‹</button>
+    <span class="label">基準日</span>
+    <input type="date" id="basisDateInput">
+    <button id="nextDay" aria-label="翌日">›</button>
+    <button id="nextMonth" aria-label="翌月">»</button>
+    <button id="todayBtn" class="today-btn">今日</button>
+  </div>
+
+  <div id="unsupportedPanel" class="panel unsupported" style="display:none;">
+    この業務区分・拠点の組み合わせは未対応です。
+  </div>
+
+  <div id="supportedPanels">
+
+  <!-- ============ ①工程件数・稼働コンテナ数 ============ -->
+  <section class="panel cult">
+    <div class="panel-head">
+      <h2>工程件数・稼働コンテナ数</h2>
+      <span class="note">単位：件　/　当日〜7日後</span>
+    </div>
+    <div class="panel-error" id="cultError"></div>
+    <div class="table-scroll">
+      <table id="table1cult">
+        <colgroup>
+          <col class="size-col">
+          <col span="8" style="width:74px;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1">工程</th>
+            <th class="today-col">当日</th>
+            <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1">日付／曜日</th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody id="table1cultBody">
+        </tbody>
+      </table>
+    </div>
+    <details class="detail-rows">
+      <summary>詳細（芽待ち／成長待ち・芽発生・培養・コンテナ掃除・コンテナ点検）</summary>
+      <div class="table-scroll">
+        <table id="table1cultDetail">
+          <colgroup>
+            <col class="size-col">
+            <col span="8" style="width:74px;">
+          </colgroup>
+          <tbody id="table1cultDetailBody"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <!-- ============ ②標準工数 ============ -->
+  <section class="panel work">
+    <div class="panel-head">
+      <h2>標準工数</h2>
+      <span class="note">単位：h　/　当日〜7日後</span>
+    </div>
+    <div class="panel-error" id="workError"></div>
+    <div class="table-scroll">
+      <table id="table2work">
+        <colgroup>
+          <col class="size-col">
+          <col span="8" style="width:74px;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1">作業区分</th>
+            <th class="today-col">当日</th>
+            <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1">日付／曜日</th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody id="table2workBody">
+        </tbody>
+      </table>
+    </div>
+    <div class="note" id="workHarvestNote" style="display:none; padding:4px 18px 8px;">* 収穫計画のkgが未入力のため、収穫を含まない値</div>
+  </section>
+
+  <!-- ============ ③標準労働時間 ============ -->
+  <section class="panel labor">
+    <div class="panel-head">
+      <h2>標準労働時間</h2>
+      <span class="note">単位：h　/　当日〜7日後</span>
+    </div>
+    <div class="panel-error" id="laborError"></div>
+    <div class="table-scroll">
+      <table id="table3labor">
+        <colgroup>
+          <col class="size-col">
+          <col span="8" style="width:74px;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1">項目</th>
+            <th class="today-col">当日</th>
+            <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1">日付／曜日</th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="sticky-1">標準労働時間合計</th>
+            <td class="today-col" data-labor-total-offset="0">－</td>
+            <td data-labor-total-offset="1">－</td><td data-labor-total-offset="2">－</td><td data-labor-total-offset="3">－</td>
+            <td data-labor-total-offset="4">－</td><td data-labor-total-offset="5">－</td><td data-labor-total-offset="6">－</td><td data-labor-total-offset="7">－</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">出勤人数</th>
+            <td class="today-col" data-attendance-offset="0">－</td>
+            <td data-attendance-offset="1">－</td><td data-attendance-offset="2">－</td><td data-attendance-offset="3">－</td>
+            <td data-attendance-offset="4">－</td><td data-attendance-offset="5">－</td><td data-attendance-offset="6">－</td><td data-attendance-offset="7">－</td>
+          </tr>
+          <tr>
+            <th class="sticky-1">過不足（標準労働時間－標準工数）</th>
+            <td class="today-col" data-shortfall-offset="0">－</td>
+            <td data-shortfall-offset="1">－</td><td data-shortfall-offset="2">－</td><td data-shortfall-offset="3">－</td>
+            <td data-shortfall-offset="4">－</td><td data-shortfall-offset="5">－</td><td data-shortfall-offset="6">－</td><td data-shortfall-offset="7">－</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="warnings" id="laborWarnings" style="display:none;">
+      <strong>未照合の警告</strong>
+      <ul id="laborWarningsList"></ul>
+    </div>
+    <details class="detail-rows">
+      <summary>人別内訳</summary>
+      <div class="table-scroll">
+        <table id="table3laborDetail">
+          <colgroup>
+            <col style="width:130px;">
+            <col style="width:90px;">
+            <col span="8" style="width:74px;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
+              <th class="today-col">当日</th>
+              <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            </tr>
+          </thead>
+          <tbody id="table3laborDetailBody"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  </div>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ===================== 定数 ===================== */
+  var CULTIVATION_SHEET_ID = '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM';
+  var CULTIVATION_SHEET_GID = '1452537379';
+  var STD_HOURS_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
+  var STD_WORK_HOURS_GID = '381752617';
+  var STD_LABOR_HOURS_GID = '1404355975';
+  var SHIFT_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
+  var SHIFT_SHEET_GID = '872290181'; // シフト表は期間ごとに新しいシートが作られるため、差し替え時はここだけ変更する
+  var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
+  var HARVEST_DAILY_TOTAL_GID = '1164843574';
+
+  var DASH = '－';
+  var BASE_BEDS = 2520;
+  var DAY_COUNT = 8; // 当日〜7日後
+
+  /* ===================== 共通ユーティリティ（shiitake-shipment-plan.htmlから複製） ===================== */
+
+  // 簡易なRFC4180準拠CSVパーサー（shiitake-shipment-plan.htmlのparseCsv()と同一実装を複製）
+  function parseCsv(text){
+    var rows = [];
+    var row = [];
+    var field = '';
+    var inQuotes = false;
+    var i = 0;
+    var len = text.length;
+    while (i < len) {
+      var ch = text[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }
+      if (ch === '"') { inQuotes = true; i++; continue; }
+      if (ch === ',') { row.push(field); field = ''; i++; continue; }
+      if (ch === '\r') { i++; continue; }
+      if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+      field += ch; i++;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  // gvizのJSON形式相当（table.rows[].c[].v）に詰め替える。/export?format=csv&gid=を
+  // 使う理由はshiitake-shipment-plan.htmlのfetchCsvSheet()と同じ（gviz/tqのsheet=名前指定は
+  // サーバー側で長時間キャッシュされる既知の問題があるため）
+  async function fetchCsvSheet(sheetId, gid){
+    var url = 'https://docs.google.com/spreadsheets/d/' + sheetId +
+      '/export?format=csv&gid=' + gid;
+    var res = await fetch(url, { cache: 'no-store' });
+    var text = await res.text();
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    var rows = parseCsv(text);
+    return { table: { rows: rows.map(function(cells){
+      return { c: cells.map(function(v){ return { v: v }; }) };
+    }) } };
+  }
+
+  // gvizセル→JS Date（shiitake-shipment-plan.htmlのgvizCellToDate()を複製。
+  // Date(y,m,d)文字列・YYYY/M・YY/M/D/曜日・シリアル値に対応。単純な"M/D"は
+  // 年の手掛かりが無いため、このダッシュボード独自の年推定(buildDatesWithYearInference)を使う）
+  function gvizCellToDate(cell){
+    if (!cell || cell.v === null || cell.v === undefined) return null;
+    var v = cell.v;
+    if (typeof v === 'string') {
+      var m = v.match(/^Date\((\d+),\s*(\d+),\s*(\d+)/);
+      if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10));
+      var ym = v.trim().match(/^(\d{4})\/(\d{1,2})$/);
+      if (ym) return new Date(parseInt(ym[1], 10), parseInt(ym[2], 10) - 1, 1);
+      var ymd = v.trim().match(/^(\d{2})\/(\d{1,2})\/(\d{1,2})(?:\/.*)?$/);
+      if (ymd) return new Date(2000 + parseInt(ymd[1], 10), parseInt(ymd[2], 10) - 1, parseInt(ymd[3], 10));
+    }
+    var serial = typeof v === 'number' ? v
+      : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : null);
+    if (serial === null) return null;
+    var epoch = new Date(1899, 11, 30);
+    var d = new Date(epoch.getTime() + serial * 24 * 60 * 60 * 1000);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function sameDate(a, b){
+    return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+  function addDays(d, n){
+    var r = new Date(d);
+    r.setDate(r.getDate() + n);
+    return r;
+  }
+  function addMonths(d, n){
+    var r = new Date(d);
+    r.setMonth(r.getMonth() + n);
+    return r;
+  }
+  function daysInMonth(d){
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  }
+  var WEEKDAYS = ['日','月','火','水','木','金','土'];
+  function fmtDateLabel(d){
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    return m + '/' + day + ' ' + WEEKDAYS[d.getDay()];
+  }
+  function fmtNum(v){
+    return (v === null || v === undefined || isNaN(v)) ? DASH : Number(v).toFixed(1);
+  }
+
+  /* ===================== 日付の解析（年の補完） ===================== */
+
+  // "8/1"のような年なしM/D文字列を{month,day}に変換する。全角数字にもNFKCで対応
+  function parseMD(text){
+    if (text === null || text === undefined) return null;
+    var s = String(text).normalize('NFKC').trim();
+    var m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+    if (!m) return null;
+    return { month: parseInt(m[1], 10), day: parseInt(m[2], 10) };
+  }
+
+  // 年なしM/Dの列(左から右)に対し、月が前の列より小さくなったら年を+1して
+  // 実際のDateの配列を組み立てる。起点年は「今年-1」「今年」の順で試し、
+  // 本日のM/Dと一致する列ができる方を採用。どちらでも見つからなければ「今年」
+  function buildDatesWithYearInference(mdList, today){
+    function build(startYear){
+      var year = startYear;
+      var prevMonth = null;
+      return mdList.map(function(md){
+        if (!md) return null;
+        if (prevMonth !== null && md.month < prevMonth) year++;
+        prevMonth = md.month;
+        return new Date(year, md.month - 1, md.day);
+      });
+    }
+    var thisYear = today.getFullYear();
+    var candidateYears = [thisYear - 1, thisYear];
+    for (var i = 0; i < candidateYears.length; i++) {
+      var dates = build(candidateYears[i]);
+      if (dates.some(function(d){ return d && sameDate(d, today); })) return dates;
+    }
+    return build(thisYear);
+  }
+
+  /* ===================== ①工程件数・稼働コンテナ数 ===================== */
+
+  // 上から順に照合し、1セルにつき最初に一致した1工程だけをカウントする
+  var PROCESS_KEYWORDS = [
+    { name: '菌床入れ', patterns: ['菌床入れ'], weighted: true },
+    { name: '芽待ち／成長待ち', patterns: ['芽待ち', '成長待ち'], weighted: false },
+    { name: '芽発生', patterns: ['芽発生'], weighted: false },
+    { name: '芽かき', patterns: ['芽かき'], weighted: true },
+    { name: '収穫', patterns: ['収穫'], weighted: true },
+    { name: '培養', patterns: ['培養'], weighted: false },
+    { name: '注水', patterns: ['注水'], weighted: true },
+    { name: '散水', patterns: ['散水'], weighted: false },
+    { name: '廃棄', patterns: ['廃棄'], weighted: true },
+    { name: 'コンテナ掃除', patterns: ['コンテナ掃除'], weighted: false },
+    { name: 'コンテナ点検', patterns: ['コンテナ点検'], weighted: false },
+  ];
+  var DISPLAY_PROCESSES = ['菌床入れ', '芽かき', '収穫', '注水', '散水', '廃棄'];
+  var DETAIL_PROCESSES = ['芽待ち／成長待ち', '芽発生', '培養', 'コンテナ掃除', 'コンテナ点検'];
+
+  function matchProcess(text){
+    if (!text) return null;
+    for (var i = 0; i < PROCESS_KEYWORDS.length; i++) {
+      var p = PROCESS_KEYWORDS[i];
+      for (var j = 0; j < p.patterns.length; j++) {
+        if (text.indexOf(p.patterns[j]) !== -1) return p;
+      }
+    }
+    return null;
+  }
+
+  // 行全体(D列以降)を左から走査し、「菌床入れNNNN」「廃棄NNNN」マーカーの
+  // 位置(列index)・種別・菌床数を抽出する。列indexの昇順で並ぶ
+  function extractMarkers(fullRowCells){
+    var markers = [];
+    for (var i = 0; i < fullRowCells.length; i++) {
+      var text = fullRowCells[i] || '';
+      var mIn = text.match(/菌床入れ(\d{3,4})/);
+      if (mIn) { markers.push({ pos: i, type: 'in', beds: parseInt(mIn[1], 10) }); continue; }
+      var mOut = text.match(/廃棄(\d{3,4})/);
+      if (mOut) { markers.push({ pos: i, type: 'out', beds: parseInt(mOut[1], 10) }); continue; }
+    }
+    return markers;
+  }
+
+  // 列colIdxにおける重み係数(菌床数÷BASE_BEDS)を、行全体のマーカー列から算出する
+  function coefficientAt(markers, colIdx){
+    var lastIdx = -1;
+    for (var i = 0; i < markers.length; i++) {
+      if (markers[i].pos <= colIdx) lastIdx = i; else break;
+    }
+    if (lastIdx >= 0) {
+      var last = markers[lastIdx];
+      if (last.type === 'in') return last.beds / BASE_BEDS;
+      if (last.type === 'out' && last.pos === colIdx) {
+        var prev = lastIdx > 0 ? markers[lastIdx - 1] : null;
+        if (prev && prev.type === 'in') return prev.beds / BASE_BEDS;
+      }
+    }
+    for (var j = 0; j < markers.length; j++) {
+      if (markers[j].pos >= colIdx && markers[j].type === 'out') return markers[j].beds / BASE_BEDS;
+    }
+    return 1.0;
+  }
+
+  // 栽培管理シートの生rows(gviz形式)から、当日〜7日後の工程件数・稼働コンテナ数を集計する。
+  // テストからも直接呼べるよう、CSV取得とは切り離した純粋関数にしてある
+  function aggregateCultivation(rows, basisDate){
+    rows = rows || [];
+    var dateRowCells = rows[0] ? rows[0].c.slice(3) : [];
+    var mdList = dateRowCells.map(function(c){ return parseMD(c && c.v); });
+    var fullDates = buildDatesWithYearInference(mdList, basisDate);
+    var dayColIdx = [];
+    var dayDates = [];
+    for (var off = 0; off < DAY_COUNT; off++) {
+      var target = addDays(basisDate, off);
+      dayDates.push(target);
+      var idx = -1;
+      for (var k = 0; k < fullDates.length; k++) { if (fullDates[k] && sameDate(fullDates[k], target)) { idx = k; break; } }
+      dayColIdx.push(idx);
+    }
+
+    var processCounts = [];
+    var containerCounts = [];
+    for (var o = 0; o < DAY_COUNT; o++) { processCounts.push({}); containerCounts.push(0); }
+
+    for (var r = 2; r < rows.length; r++) {
+      var c = (rows[r] && rows[r].c) || [];
+      var colCraw = c[2] ? c[2].v : '';
+      var colCNum = parseFloat(String(colCraw == null ? '' : colCraw).replace(/,/g, ''));
+      if (colCraw === '' || colCraw === null || colCraw === undefined || isNaN(colCNum)) break; // 数値でない行が来たら終了
+
+      var flagA = c[0] ? String(c[0].v == null ? '' : c[0].v).trim() : '';
+      if (flagA !== '1') continue; // A列フラグが立っている行だけを対象にする
+
+      var fullRowCells = c.slice(3).map(function(cell){
+        return (cell && cell.v !== undefined && cell.v !== null) ? String(cell.v) : '';
+      });
+      var markers = extractMarkers(fullRowCells);
+
+      for (var o2 = 0; o2 < DAY_COUNT; o2++) {
+        var idx2 = dayColIdx[o2];
+        if (idx2 < 0 || idx2 >= fullRowCells.length) continue;
+        var text = fullRowCells[idx2] || '';
+        if (text.trim() !== '') containerCounts[o2]++;
+        var proc = matchProcess(text);
+        if (proc) {
+          var weight = proc.weighted ? coefficientAt(markers, idx2) : 1;
+          processCounts[o2][proc.name] = (processCounts[o2][proc.name] || 0) + weight;
+        }
+      }
+    }
+
+    for (var o3 = 0; o3 < DAY_COUNT; o3++) {
+      Object.keys(processCounts[o3]).forEach(function(key){
+        processCounts[o3][key] = Math.round(processCounts[o3][key] * 10) / 10;
+      });
+      containerCounts[o3] = Math.round(containerCounts[o3] * 10) / 10;
+    }
+
+    return { dates: dayDates, processCounts: processCounts, containerCounts: containerCounts };
+  }
+
+  async function fetchCultivationPanel(basisDate){
+    var json = await fetchCsvSheet(CULTIVATION_SHEET_ID, CULTIVATION_SHEET_GID);
+    return aggregateCultivation(json.table.rows, basisDate);
+  }
+
+  /* ===================== ②標準工数 ===================== */
+
+  var COUNT_BASED_ITEMS = { '菌床入れ': '菌床入れ', '芽かき': '芽かき', '注水': '注水', '廃棄': '廃棄', '散水': '散水', '計量時間': '収穫' };
+  var CONTAINER_BASED_ITEMS = ['コンテナ移動時間', 'コンテナ点検時間'];
+
+  // 標準工数設定シートのA〜I列のみを読む(J列以降の別ブロックは無視)。
+  // 業務区分(A列)は空欄なら直前の値を引き継ぐ
+  function parseStdWorkHoursRows(rows){
+    rows = rows || [];
+    var out = [];
+    var lastDiv = null;
+    for (var i = 4; i < rows.length; i++) { // 5行目以降(0-based index4)
+      var c = (rows[i] && rows[i].c) || [];
+      function cell(idx){ return c[idx] ? c[idx].v : ''; }
+      var divRaw = cell(0);
+      var divText = (divRaw !== undefined && divRaw !== null) ? String(divRaw).trim() : '';
+      var div = divText !== '' ? divText : lastDiv;
+      if (divText !== '') lastDiv = divText;
+      if (div !== '栽培') continue;
+
+      var waku = String(cell(1) == null ? '' : cell(1)).trim();
+      if (!waku) continue;
+
+      var factorCols = [2, 3, 4, 5, 6]; // C,D,E,F,G
+      var factor = null;
+      for (var fc = 0; fc < factorCols.length; fc++) {
+        var raw = cell(factorCols[fc]);
+        var text = raw == null ? '' : String(raw).trim();
+        if (text === '') continue;
+        var num = parseFloat(text.replace(/,/g, ''));
+        if (!isNaN(num)) { factor = num; break; }
+      }
+      var unit = String(cell(7) == null ? '' : cell(7)).trim();
+      out.push({ waku: waku, factor: factor, unit: unit });
+    }
+    return out;
+  }
+
+  async function fetchStdWorkHoursRows(){
+    var json = await fetchCsvSheet(STD_HOURS_SHEET_ID, STD_WORK_HOURS_GID);
+    return parseStdWorkHoursRows(json.table.rows);
+  }
+
+  function yearMonthKey(d){ return d.getFullYear() + '.' + (d.getMonth() + 1); }
+
+  function readCellNumber(rows, rowIdx, colIdx){
+    if (rowIdx < 0 || colIdx < 0) return null;
+    var row = rows[rowIdx];
+    var cell = row && row.c && row.c[colIdx];
+    if (!cell || cell.v === null || cell.v === undefined || cell.v === '') return null;
+    var raw = typeof cell.v === 'string' ? cell.v.replace(/,/g, '') : cell.v;
+    var v = typeof raw === 'number' ? raw : parseFloat(raw);
+    return isNaN(v) ? null : v;
+  }
+
+  // 収穫予測パネル(shiitake-shipment-plan.htmlのtable2)と同じ取得方法を複製。
+  // 「2026.5いなべ収穫計画」の「転写」タブから、年月一致列×日番号一致行の日合計を取得する
+  async function fetchDailyHarvestTotal(date, cache){
+    try {
+      if (!cache.json) cache.json = await fetchCsvSheet(HARVEST_DAILY_TOTAL_SHEET_ID, HARVEST_DAILY_TOTAL_GID);
+      var rows = cache.json.table.rows;
+      var headerRow = rows[0];
+      var key = yearMonthKey(date);
+      var colIdx = -1;
+      for (var i = 0; i < headerRow.c.length; i++) {
+        if (headerRow.c[i] && String(headerRow.c[i].v).trim() === key) { colIdx = i; break; }
+      }
+      if (colIdx < 0) return null;
+      var rowIdx = date.getDate();
+      return readCellNumber(rows, rowIdx, colIdx);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 標準工数設定の行群 x ①の集計結果 x 日別収穫kgから、当日〜7日後の標準工数を算出する。
+  // 純粋関数(テストから直接呼べる)
+  function computeStandardWorkHours(rows, cultResult, harvestKgByDay, basisDate){
+    var perDay = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var items = {};
+      var subtotal = 0;
+      var harvestMissing = false;
+      rows.forEach(function(row){
+        var v = null;
+        if (COUNT_BASED_ITEMS.hasOwnProperty(row.waku)) {
+          var srcProcess = COUNT_BASED_ITEMS[row.waku];
+          var count = (cultResult.processCounts[o] && cultResult.processCounts[o][srcProcess]) || 0;
+          if (row.factor !== null) {
+            v = count * row.factor;
+            if (row.unit === '分') v = v / 60;
+          }
+        } else if (CONTAINER_BASED_ITEMS.indexOf(row.waku) !== -1) {
+          var containerCount = cultResult.containerCounts[o] || 0;
+          if (row.factor !== null) {
+            v = containerCount * row.factor;
+            if (row.unit === '分') v = v / 60;
+          }
+        } else if (row.waku === '収穫') {
+          var kg = harvestKgByDay[o];
+          if (kg === null || kg === undefined || row.factor === null || row.factor === 0) {
+            v = null;
+            harvestMissing = true;
+          } else {
+            v = kg / row.factor;
+          }
+        } else if (row.waku === 'その他間接業') {
+          if (row.factor !== null) {
+            var d = addDays(basisDate, o);
+            v = row.factor / daysInMonth(d);
+          }
+        }
+        items[row.waku] = v;
+        if (v !== null && !isNaN(v)) subtotal += v;
+      });
+      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10, harvestMissing: harvestMissing });
+    }
+    return perDay;
+  }
+
+  /* ===================== ③標準労働時間 ===================== */
+
+  var SHIFT_NAME_ALIASES = {
+    'ハイ': 'NGUYEN VAN HAI',
+    'ヴィン': 'HOANG VAN VINH',
+    'タム': 'DAO VAN TAM',
+    'ギエム': 'NGUYEN THANH NGHIEM',
+    'ハオ': 'NGUYEN VAN HAO',
+    'エガ': 'EGA ADITIYA KURNIAWAN',
+    'アユブ': 'MUHAMAD AYUB FAYYUQI',
+    'イマム': 'IMAM ADI SAPUTRA',
+    '左右田 耀子': '左右田 煬子',
+  };
+
+  // NFKC正規化→括弧(全角・半角)以降を削除→空白(全角・半角・連続)をすべて削除→大文字化
+  function normalizeName(raw){
+    if (!raw) return '';
+    var s = String(raw).normalize('NFKC');
+    var idxFull = s.indexOf('（');
+    var idxHalf = s.indexOf('(');
+    var candidates = [idxFull, idxHalf].filter(function(i){ return i >= 0; }).sort(function(a, b){ return a - b; });
+    if (candidates.length) s = s.slice(0, candidates[0]);
+    s = s.replace(/[\s　]+/g, '');
+    return s.toUpperCase();
+  }
+
+  var BREAK_TABLE = [
+    { max: 6, calc: function(s){ return s; } },
+    { max: 6.75, calc: function(){ return 6; } },
+    { max: 8.75, calc: function(s){ return s - 0.75; } },
+    { max: 9, calc: function(){ return 8; } },
+  ];
+  function applyBreakDeduction(boundHours){
+    for (var i = 0; i < BREAK_TABLE.length; i++) {
+      if (boundHours <= BREAK_TABLE[i].max) return BREAK_TABLE[i].calc(boundHours);
+    }
+    return boundHours - 1;
+  }
+
+  // シフト表の1セルを分類する。NFKC正規化+前後空白除去してから判定
+  function classifyCell(raw){
+    var s = (raw === null || raw === undefined) ? '' : String(raw).normalize('NFKC').trim();
+    var m = s.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+    if (m) {
+      var startH = parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+      var endH = parseInt(m[3], 10) + parseInt(m[4], 10) / 60;
+      var bound = endH - startH;
+      return { type: 'time', hours: applyBreakDeduction(bound) };
+    }
+    if (s !== '' && !isNaN(Number(s))) {
+      return { type: 'numeric', value: Number(s) };
+    }
+    return { type: 'other' };
+  }
+
+  // シフト表からいなべ×栽培(部門='栽培'または'配送・栽培')の人だけを抽出する。純粋関数
+  function extractShiftPersons(rows, basisDate){
+    rows = rows || [];
+    var dateRowCells = rows[0] ? rows[0].c.slice(2) : [];
+    var mdList = dateRowCells.map(function(c){ return parseMD(c && c.v); });
+    var fullDates = buildDatesWithYearInference(mdList, basisDate);
+    var dayColIdx = [];
+    for (var off = 0; off < DAY_COUNT; off++) {
+      var target = addDays(basisDate, off);
+      var idx = -1;
+      for (var k = 0; k < fullDates.length; k++) { if (fullDates[k] && sameDate(fullDates[k], target)) { idx = k; break; } }
+      dayColIdx.push(idx);
+    }
+    var persons = [];
+    for (var r = 13; r < rows.length; r++) { // 14行目以降(0-based index13)
+      var c = (rows[r] && rows[r].c) || [];
+      var name = c[0] ? String(c[0].v == null ? '' : c[0].v).trim() : '';
+      var dept = c[1] ? String(c[1].v == null ? '' : c[1].v).trim() : '';
+      if (dept !== '栽培' && dept !== '配送・栽培') continue;
+      var cellsFull = c.slice(2);
+      var dayCells = dayColIdx.map(function(idx){
+        return (idx >= 0 && cellsFull[idx]) ? cellsFull[idx].v : '';
+      });
+      persons.push({ name: name, dept: dept, dayCells: dayCells });
+    }
+    return persons;
+  }
+
+  async function fetchShiftPersons(basisDate){
+    var json = await fetchCsvSheet(SHIFT_SHEET_ID, SHIFT_SHEET_GID);
+    return extractShiftPersons(json.table.rows, basisDate);
+  }
+
+  // 標準労働時間シートを解析する。純粋関数
+  function parseStdLaborRows(rows){
+    rows = rows || [];
+    var headerRow = rows[2] ? rows[2].c : []; // 3行目(0-based index2)
+    var shiftNameColIdx = -1;
+    for (var h = 0; h < headerRow.length; h++) {
+      if (headerRow[h] && String(headerRow[h].v == null ? '' : headerRow[h].v).trim() === 'シフト表名') { shiftNameColIdx = h; break; }
+    }
+    var out = [];
+    for (var i = 3; i < rows.length; i++) { // 4行目以降(0-based index3)
+      var c = (rows[i] && rows[i].c) || [];
+      function cell(idx){ return c[idx] ? c[idx].v : ''; }
+      var flag = String(cell(1) == null ? '' : cell(1)).trim();
+      var site = String(cell(3) == null ? '' : cell(3)).trim();
+      var dept = String(cell(5) == null ? '' : cell(5)).trim();
+      var name = String(cell(7) == null ? '' : cell(7)).trim();
+      var jRaw = cell(9), nRaw = cell(13);
+      var jVal = parseFloat(String(jRaw == null ? '' : jRaw).replace(/,/g, ''));
+      var nVal = parseFloat(String(nRaw == null ? '' : nRaw).replace(/,/g, ''));
+      var hoursPerDay = (!isNaN(jVal) && jVal > 0) ? jVal : (!isNaN(nVal) ? nVal : null);
+      var shiftNameVal = shiftNameColIdx >= 0 ? String(cell(shiftNameColIdx) == null ? '' : cell(shiftNameColIdx)).trim() : '';
+      if (!name && !site) continue;
+      out.push({ flag: flag, site: site, dept: dept, name: name, hoursPerDay: hoursPerDay, shiftName: shiftNameVal, hasShiftNameCol: shiftNameColIdx >= 0 });
+    }
+    return out;
+  }
+
+  async function fetchStdLaborRows(){
+    var json = await fetchCsvSheet(STD_HOURS_SHEET_ID, STD_LABOR_HOURS_GID);
+    return parseStdLaborRows(json.table.rows);
+  }
+
+  // シフト表の氏名・部門から、標準労働時間シートの該当行を1件特定する。純粋関数
+  function findLaborMatch(personName, personDept, laborRows){
+    var normKey = normalizeName(personName);
+    var candidates = laborRows.filter(function(r){
+      return r.site === 'いなべ' && ['1', '2', '3'].indexOf(r.flag) !== -1;
+    });
+
+    var pool = [];
+    var hasShiftNameCol = candidates.some(function(r){ return r.hasShiftNameCol; });
+    if (hasShiftNameCol) {
+      pool = candidates.filter(function(r){ return r.shiftName && normalizeName(r.shiftName) === normKey; });
+    }
+    if (!pool.length) {
+      var aliasTarget = null;
+      Object.keys(SHIFT_NAME_ALIASES).forEach(function(k){
+        if (normalizeName(k) === normKey) aliasTarget = SHIFT_NAME_ALIASES[k];
+      });
+      var matchKey = aliasTarget ? normalizeName(aliasTarget) : normKey;
+      pool = candidates.filter(function(r){ return normalizeName(r.name) === matchKey; });
+    }
+    if (!pool.length) return null;
+
+    // 名前が一致しても部門(シフトB列＝標準労働時間F列)まで一致しなければ
+    // 誤った人の時間/日を使ってしまう恐れがあるため、部門不一致時はフォールバック
+    // せず未照合(null)として扱う(未照合警告として表面化させる)
+    pool = pool.filter(function(r){ return r.dept === personDept; });
+    if (!pool.length) return null;
+
+    pool = pool.slice().sort(function(a, b){ return parseInt(a.flag, 10) - parseInt(b.flag, 10); });
+    return pool[0];
+  }
+
+  // シフト表の人一覧 x 標準労働時間シートから、当日〜7日後の標準労働時間合計・出勤人数・
+  // 人別内訳・未照合警告を算出する。純粋関数
+  function computeStandardLaborHours(persons, laborRows){
+    var perDayTotal = new Array(DAY_COUNT).fill(0);
+    var perDayAttendance = new Array(DAY_COUNT).fill(0);
+    var warningSet = {};
+    var personBreakdown = [];
+
+    persons.forEach(function(p){
+      var match = findLaborMatch(p.name, p.dept, laborRows);
+      var dayHours = [];
+      p.dayCells.forEach(function(raw, o){
+        var cls = classifyCell(raw);
+        var h = 0;
+        if (cls.type === 'time') {
+          h = cls.hours;
+        } else if (cls.type === 'numeric') {
+          if (match && match.hoursPerDay !== null && match.hoursPerDay !== undefined) {
+            h = cls.value * match.hoursPerDay;
+          } else {
+            warningSet['未照合：' + p.name + '（数値セルあり）'] = true;
+            h = 0;
+          }
+        }
+        dayHours.push(Math.round(h * 10) / 10);
+        perDayTotal[o] += h;
+        if (h > 0) perDayAttendance[o]++;
+      });
+      personBreakdown.push({ name: p.name, dept: p.dept, dayHours: dayHours });
+    });
+
+    perDayTotal = perDayTotal.map(function(v){ return Math.round(v * 10) / 10; });
+    return {
+      perDayTotal: perDayTotal,
+      perDayAttendance: perDayAttendance,
+      warnings: Object.keys(warningSet),
+      personBreakdown: personBreakdown,
+    };
+  }
+
+  /* ===================== 描画 ===================== */
+
+  var basisInput = document.getElementById('basisDateInput');
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var todayISO = toISO(today);
+  function toISO(d){
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function fromISO(s){
+    var parts = s.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  basisInput.max = todayISO;
+  basisInput.value = todayISO;
+
+  var currentBusiness = '栽培';
+  var currentSite = 'いなべ';
+
+  function isSupported(){ return currentBusiness === '栽培' && currentSite === 'いなべ'; }
+
+  function showPanelError(elId, message){
+    var el = document.getElementById(elId);
+    if (!el) return;
+    if (message) { el.textContent = 'データ取得エラー: ' + message; el.classList.add('show'); }
+    else { el.textContent = ''; el.classList.remove('show'); }
+  }
+
+  function renderDcols(basisDate){
+    document.querySelectorAll('.dcol').forEach(function(cell){
+      var offset = parseInt(cell.getAttribute('data-offset'), 10);
+      cell.textContent = fmtDateLabel(addDays(basisDate, offset));
+    });
+  }
+
+  function buildRowHtml(label, key, attr, offsetCount){
+    var tds = '';
+    for (var o = 0; o < offsetCount; o++) {
+      tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attr + '="' + key + '" data-' + attr + '-offset="' + o + '">' + DASH + '</td>';
+    }
+    return '<tr><th class="sticky-1">' + label + '</th>' + tds + '</tr>';
+  }
+
+  function renderCultivationTable(result){
+    var bodyMain = document.getElementById('table1cultBody');
+    var bodyDetail = document.getElementById('table1cultDetailBody');
+    var mainHtml = '';
+    DISPLAY_PROCESSES.forEach(function(name){ mainHtml += buildRowHtml(name, name, 'cult', DAY_COUNT); });
+    mainHtml += buildRowHtml('稼働コンテナ数', '稼働コンテナ数', 'cult', DAY_COUNT);
+    bodyMain.innerHTML = mainHtml;
+
+    var detailHtml = '';
+    DETAIL_PROCESSES.forEach(function(name){ detailHtml += buildRowHtml(name, name, 'cult', DAY_COUNT); });
+    bodyDetail.innerHTML = detailHtml;
+
+    if (!result) return;
+    for (var o = 0; o < DAY_COUNT; o++) {
+      DISPLAY_PROCESSES.concat(DETAIL_PROCESSES).forEach(function(name){
+        var v = result.processCounts[o][name];
+        var cell = document.querySelector('[data-cult="' + name + '"][data-cult-offset="' + o + '"]');
+        if (cell) cell.textContent = (v === undefined) ? DASH : fmtNum(v);
+      });
+      var contCell = document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="' + o + '"]');
+      if (contCell) contCell.textContent = fmtNum(result.containerCounts[o]);
+    }
+  }
+
+  function renderWorkHoursTable(rows, perDay){
+    var body = document.getElementById('table2workBody');
+    var html = '';
+    (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT); });
+    var subtotalTds = '';
+    for (var o = 0; o < DAY_COUNT; o++) {
+      subtotalTds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-work-subtotal-offset="' + o + '">' + DASH + '</td>';
+    }
+    html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th>' + subtotalTds + '</tr>';
+    body.innerHTML = html;
+
+    var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
+    document.getElementById('workHarvestNote').style.display = anyHarvestMissing ? '' : 'none';
+
+    if (!perDay) return;
+    (rows || []).forEach(function(row){
+      for (var o = 0; o < DAY_COUNT; o++) {
+        var v = perDay[o].items[row.waku];
+        var cell = document.querySelector('[data-work="' + row.waku + '"][data-work-offset="' + o + '"]');
+        if (cell) cell.textContent = fmtNum(v);
+      }
+    });
+    for (var o2 = 0; o2 < DAY_COUNT; o2++) {
+      var subCell = document.querySelector('[data-work-subtotal-offset="' + o2 + '"]');
+      if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal) + (perDay[o2].harvestMissing ? '*' : '');
+    }
+  }
+
+  function renderLaborTable(laborResult, workSubtotals){
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var totalCell = document.querySelector('[data-labor-total-offset="' + o + '"]');
+      var attendCell = document.querySelector('[data-attendance-offset="' + o + '"]');
+      var shortfallCell = document.querySelector('[data-shortfall-offset="' + o + '"]');
+      if (!laborResult) {
+        if (totalCell) totalCell.textContent = DASH;
+        if (attendCell) attendCell.textContent = DASH;
+        if (shortfallCell) shortfallCell.textContent = DASH;
+        continue;
+      }
+      if (totalCell) totalCell.textContent = fmtNum(laborResult.perDayTotal[o]);
+      if (attendCell) attendCell.textContent = String(laborResult.perDayAttendance[o]);
+      if (shortfallCell) {
+        var sub = workSubtotals && workSubtotals[o] ? workSubtotals[o].subtotal : null;
+        if (sub === null || sub === undefined) {
+          shortfallCell.textContent = DASH;
+          shortfallCell.classList.remove('neg', 'pos');
+        } else {
+          var shortfall = Math.round((laborResult.perDayTotal[o] - sub) * 10) / 10;
+          var harvestMissing = workSubtotals[o].harvestMissing;
+          shortfallCell.textContent = fmtNum(shortfall) + (harvestMissing ? '*' : '');
+          shortfallCell.classList.toggle('neg', shortfall < 0);
+          shortfallCell.classList.toggle('pos', shortfall >= 0);
+        }
+      }
+    }
+
+    var warningsBox = document.getElementById('laborWarnings');
+    var warningsList = document.getElementById('laborWarningsList');
+    if (laborResult && laborResult.warnings.length) {
+      warningsList.innerHTML = laborResult.warnings.map(function(w){ return '<li>' + w + '</li>'; }).join('');
+      warningsBox.style.display = '';
+    } else {
+      warningsList.innerHTML = '';
+      warningsBox.style.display = 'none';
+    }
+
+    var detailBody = document.getElementById('table3laborDetailBody');
+    if (laborResult && laborResult.personBreakdown.length) {
+      detailBody.innerHTML = laborResult.personBreakdown.map(function(p){
+        var tds = p.dayHours.map(function(h, o){
+          return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
+        }).join('');
+        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '</tr>';
+      }).join('');
+    } else {
+      detailBody.innerHTML = '';
+    }
+  }
+
+  /* ===================== render() ===================== */
+
+  var dailyTotalCache = {};
+
+  async function renderCultivation(basisDate){
+    showPanelError('cultError', null);
+    try {
+      var result = await fetchCultivationPanel(basisDate);
+      renderCultivationTable(result);
+      return result;
+    } catch (err) {
+      console.error('[工程件数・稼働コンテナ数] 取得エラー:', err);
+      showPanelError('cultError', err.message || String(err));
+      renderCultivationTable(null);
+      return null;
+    }
+  }
+
+  async function renderWork(basisDate, cultResult){
+    showPanelError('workError', null);
+    try {
+      var rows = await fetchStdWorkHoursRows();
+      var harvestKgByDay = [];
+      dailyTotalCache = {};
+      for (var o = 0; o < DAY_COUNT; o++) {
+        harvestKgByDay.push(await fetchDailyHarvestTotal(addDays(basisDate, o), dailyTotalCache));
+      }
+      var fallbackCult = cultResult || { processCounts: new Array(DAY_COUNT).fill({}), containerCounts: new Array(DAY_COUNT).fill(0) };
+      var perDay = computeStandardWorkHours(rows, fallbackCult, harvestKgByDay, basisDate);
+      renderWorkHoursTable(rows, perDay);
+      return perDay;
+    } catch (err) {
+      console.error('[標準工数] 取得エラー:', err);
+      showPanelError('workError', err.message || String(err));
+      renderWorkHoursTable([], null);
+      return null;
+    }
+  }
+
+  async function renderLabor(basisDate){
+    showPanelError('laborError', null);
+    try {
+      var persons = await fetchShiftPersons(basisDate);
+      var laborRows = await fetchStdLaborRows();
+      var result = computeStandardLaborHours(persons, laborRows);
+      return result;
+    } catch (err) {
+      console.error('[標準労働時間] 取得エラー:', err);
+      showPanelError('laborError', err.message || String(err));
+      return null;
+    }
+  }
+
+  window.render = async function(){
+    document.getElementById('unsupportedPanel').style.display = isSupported() ? 'none' : '';
+    document.getElementById('supportedPanels').style.display = isSupported() ? '' : 'none';
+    if (!isSupported()) return;
+
+    var basisDate = fromISO(basisInput.value);
+    renderDcols(basisDate);
+
+    var isToday = basisInput.value === todayISO;
+    document.getElementById('nextDay').disabled = isToday;
+    document.getElementById('nextMonth').disabled = isToday;
+
+    // 3パネルは独立して描画する。相互依存する過不足計算は、全パネルの
+    // 結果(成功/失敗いずれも)が揃ってから最後に行う
+    var cultPromise = renderCultivation(basisDate);
+    var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult); });
+    var laborPromise = renderLabor(basisDate);
+
+    var results = await Promise.allSettled([workPromise, laborPromise]);
+    var workSubtotals = results[0].status === 'fulfilled' ? results[0].value : null;
+    var laborResult = results[1].status === 'fulfilled' ? results[1].value : null;
+    renderLaborTable(laborResult, workSubtotals);
+  };
+
+  function clamp(){ if (basisInput.value > todayISO) basisInput.value = todayISO; }
+  document.getElementById('prevDay').addEventListener('click', function(){ basisInput.value = toISO(addDays(fromISO(basisInput.value), -1)); clamp(); render(); });
+  document.getElementById('nextDay').addEventListener('click', function(){ basisInput.value = toISO(addDays(fromISO(basisInput.value), 1)); clamp(); render(); });
+  document.getElementById('prevMonth').addEventListener('click', function(){ basisInput.value = toISO(addMonths(fromISO(basisInput.value), -1)); clamp(); render(); });
+  document.getElementById('nextMonth').addEventListener('click', function(){ basisInput.value = toISO(addMonths(fromISO(basisInput.value), 1)); clamp(); render(); });
+  document.getElementById('todayBtn').addEventListener('click', function(){ basisInput.value = todayISO; render(); });
+  basisInput.addEventListener('change', function(){ clamp(); render(); });
+
+  document.querySelectorAll('#businessToggle button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('#businessToggle button').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentBusiness = btn.getAttribute('data-business');
+      render();
+    });
+  });
+  document.querySelectorAll('#siteToggle button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('#siteToggle button').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentSite = btn.getAttribute('data-site');
+      render();
+    });
+  });
+
+  render();
+
+  /* ===================== テスト用エクスポート ===================== */
+  window.__test = {
+    parseCsv: parseCsv,
+    gvizCellToDate: gvizCellToDate,
+    sameDate: sameDate,
+    addDays: addDays,
+    daysInMonth: daysInMonth,
+    parseMD: parseMD,
+    buildDatesWithYearInference: buildDatesWithYearInference,
+    PROCESS_KEYWORDS: PROCESS_KEYWORDS,
+    matchProcess: matchProcess,
+    extractMarkers: extractMarkers,
+    coefficientAt: coefficientAt,
+    aggregateCultivation: aggregateCultivation,
+    BASE_BEDS: BASE_BEDS,
+    parseStdWorkHoursRows: parseStdWorkHoursRows,
+    computeStandardWorkHours: computeStandardWorkHours,
+    normalizeName: normalizeName,
+    applyBreakDeduction: applyBreakDeduction,
+    classifyCell: classifyCell,
+    extractShiftPersons: extractShiftPersons,
+    parseStdLaborRows: parseStdLaborRows,
+    findLaborMatch: findLaborMatch,
+    computeStandardLaborHours: computeStandardLaborHours,
+    SHIFT_NAME_ALIASES: SHIFT_NAME_ALIASES,
+  };
+})();
+</script>
+</body>
+</html>
