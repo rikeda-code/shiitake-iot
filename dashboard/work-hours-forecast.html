@@ -162,6 +162,7 @@
 
   .neg{ color:var(--red); }
   .pos{ color:var(--green); }
+  .dept-col{ text-align:center; white-space:normal; }
 
   details.detail-rows{ padding:6px 18px 10px; }
   details.detail-rows summary{ cursor:pointer; font-size:13px; color:var(--ink-soft); }
@@ -297,6 +298,7 @@
         </tbody>
       </table>
     </div>
+    <div class="note" id="workHarvestNote" style="display:none; padding:4px 18px 8px;">* 収穫計画のkgが未入力のため、収穫を含まない値</div>
   </section>
 
   <!-- ============ ③標準労働時間 ============ -->
@@ -362,7 +364,7 @@
           </colgroup>
           <thead>
             <tr>
-              <th class="sticky-1">氏名</th><th>部門</th>
+              <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
               <th class="today-col">当日</th>
               <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
             </tr>
@@ -558,9 +560,9 @@
     var markers = [];
     for (var i = 0; i < fullRowCells.length; i++) {
       var text = fullRowCells[i] || '';
-      var mIn = text.match(/菌床入れ(\d{4})/);
+      var mIn = text.match(/菌床入れ(\d{3,4})/);
       if (mIn) { markers.push({ pos: i, type: 'in', beds: parseInt(mIn[1], 10) }); continue; }
-      var mOut = text.match(/廃棄(\d{4})/);
+      var mOut = text.match(/廃棄(\d{3,4})/);
       if (mOut) { markers.push({ pos: i, type: 'out', beds: parseInt(mOut[1], 10) }); continue; }
     }
     return markers;
@@ -1031,14 +1033,15 @@
     var body = document.getElementById('table2workBody');
     var html = '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT); });
-    var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
-    var subtotalLabel = '小計（栽培 標準工数合計）' + (anyHarvestMissing ? '　※収穫除く' : '');
     var subtotalTds = '';
     for (var o = 0; o < DAY_COUNT; o++) {
       subtotalTds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-work-subtotal-offset="' + o + '">' + DASH + '</td>';
     }
-    html += '<tr><th class="sticky-1">' + subtotalLabel + '</th>' + subtotalTds + '</tr>';
+    html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th>' + subtotalTds + '</tr>';
     body.innerHTML = html;
+
+    var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
+    document.getElementById('workHarvestNote').style.display = anyHarvestMissing ? '' : 'none';
 
     if (!perDay) return;
     (rows || []).forEach(function(row){
@@ -1050,7 +1053,7 @@
     });
     for (var o2 = 0; o2 < DAY_COUNT; o2++) {
       var subCell = document.querySelector('[data-work-subtotal-offset="' + o2 + '"]');
-      if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal);
+      if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal) + (perDay[o2].harvestMissing ? '*' : '');
     }
   }
 
@@ -1074,7 +1077,8 @@
           shortfallCell.classList.remove('neg', 'pos');
         } else {
           var shortfall = Math.round((laborResult.perDayTotal[o] - sub) * 10) / 10;
-          shortfallCell.textContent = fmtNum(shortfall);
+          var harvestMissing = workSubtotals[o].harvestMissing;
+          shortfallCell.textContent = fmtNum(shortfall) + (harvestMissing ? '*' : '');
           shortfallCell.classList.toggle('neg', shortfall < 0);
           shortfallCell.classList.toggle('pos', shortfall >= 0);
         }
@@ -1097,7 +1101,7 @@
         var tds = p.dayHours.map(function(h, o){
           return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
         }).join('');
-        return '<tr><th class="sticky-1">' + p.name + '</th><td>' + p.dept + '</td>' + tds + '</tr>';
+        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '</tr>';
       }).join('');
     } else {
       detailBody.innerHTML = '';
