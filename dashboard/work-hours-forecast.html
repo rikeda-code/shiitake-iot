@@ -136,25 +136,24 @@
 
   .table-scroll{ overflow-x:auto; }
   table{
-    border-collapse:separate; border-spacing:0; width:100%; min-width:760px;
+    border-collapse:separate; border-spacing:0; width:100%; min-width:1026px;
     font-variant-numeric: tabular-nums; table-layout:fixed;
   }
   thead th{
     background:var(--amber-soft); color:var(--brown-deep); font-weight:700; font-size:13.5px;
-    text-align:center; padding:4px 10px; border-bottom:1px solid var(--line); border-right:1px solid var(--line-soft);
+    text-align:center; padding:3.5px 10px; line-height:1.2; border-bottom:1px solid var(--line); border-right:1px solid var(--line-soft);
     white-space:nowrap;
   }
   thead tr.weekday th{
-    background:var(--amber-soft); font-weight:500; color:var(--ink-soft); font-size:12.5px; padding:3px 10px 4px;
+    background:var(--amber-soft); font-weight:500; color:var(--ink-soft); font-size:12.5px; padding:2.5px 10px 3.5px; line-height:1.2;
   }
   tbody td, tbody th{
-    padding:4px 10px; text-align:right; font-size:14.5px;
+    padding:3.5px 10px; text-align:right; font-size:14.5px; line-height:1.2;
     border-bottom:1px solid var(--line-soft); border-right:1px solid var(--line-soft); white-space:nowrap;
   }
   tbody th{ text-align:left; font-weight:700; background:#fbf7ee; color:var(--brown-deep); }
   tbody tr:last-child td, tbody tr:last-child th{ border-bottom:none; background:#f3ead4; font-weight:700; }
   .sticky-1{ position:sticky; left:0; z-index:2; }
-  col.size-col{ width:130px; }
 
   .cult td.today-col, .cult th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
   .work td.today-col, .work th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
@@ -164,9 +163,11 @@
   .pos{ color:var(--green); }
   .dept-col{ text-align:center; white-space:normal; }
 
-  details.detail-rows{ padding:6px 18px 10px; }
-  details.detail-rows summary{ cursor:pointer; font-size:13px; color:var(--ink-soft); }
-  details.detail-rows table{ margin-top:6px; }
+  /* テーブル自体は上段の本体テーブルと同じx座標(字下げ無し)で揃え、
+     summaryの見出しテキストだけpanel-headと同じ18px分インセットする */
+  details.detail-rows{ padding:6px 0 10px; }
+  details.detail-rows summary{ cursor:pointer; font-size:13px; color:var(--ink-soft); padding:0 18px; }
+  details.detail-rows .table-scroll{ margin-top:6px; }
 
   .summary-grid{ display:flex; gap:18px; padding:10px 18px; flex-wrap:wrap; }
   .summary-item{ min-width:140px; }
@@ -233,18 +234,15 @@
     <div class="panel-error" id="cultError"></div>
     <div class="table-scroll">
       <table id="table1cult">
-        <colgroup>
-          <col class="size-col">
-          <col span="8" style="width:74px;">
-        </colgroup>
+        <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1">工程</th>
+            <th class="sticky-1" colspan="2">工程</th>
             <th class="today-col">当日</th>
             <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1">日付／曜日</th>
+            <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
@@ -258,10 +256,7 @@
       <summary>詳細（芽待ち／成長待ち・芽発生・培養・コンテナ掃除・コンテナ点検）</summary>
       <div class="table-scroll">
         <table id="table1cultDetail">
-          <colgroup>
-            <col class="size-col">
-            <col span="8" style="width:74px;">
-          </colgroup>
+          <colgroup></colgroup>
           <tbody id="table1cultDetailBody"></tbody>
         </table>
       </div>
@@ -277,18 +272,15 @@
     <div class="panel-error" id="workError"></div>
     <div class="table-scroll">
       <table id="table2work">
-        <colgroup>
-          <col class="size-col">
-          <col span="8" style="width:74px;">
-        </colgroup>
+        <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1">作業区分</th>
+            <th class="sticky-1" colspan="2">作業区分</th>
             <th class="today-col">当日</th>
             <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1">日付／曜日</th>
+            <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
@@ -310,18 +302,15 @@
     <div class="panel-error" id="laborError"></div>
     <div class="table-scroll">
       <table id="table3labor">
-        <colgroup>
-          <col class="size-col">
-          <col span="8" style="width:74px;">
-        </colgroup>
+        <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1">項目</th>
+            <th class="sticky-1" colspan="2">項目</th>
             <th class="today-col">当日</th>
             <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1">日付／曜日</th>
+            <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
@@ -329,19 +318,19 @@
         </thead>
         <tbody>
           <tr>
-            <th class="sticky-1">標準労働時間合計</th>
+            <th class="sticky-1" colspan="2">標準労働時間合計</th>
             <td class="today-col" data-labor-total-offset="0">－</td>
             <td data-labor-total-offset="1">－</td><td data-labor-total-offset="2">－</td><td data-labor-total-offset="3">－</td>
             <td data-labor-total-offset="4">－</td><td data-labor-total-offset="5">－</td><td data-labor-total-offset="6">－</td><td data-labor-total-offset="7">－</td>
           </tr>
           <tr>
-            <th class="sticky-1">出勤人数</th>
+            <th class="sticky-1" colspan="2">出勤人数</th>
             <td class="today-col" data-attendance-offset="0">－</td>
             <td data-attendance-offset="1">－</td><td data-attendance-offset="2">－</td><td data-attendance-offset="3">－</td>
             <td data-attendance-offset="4">－</td><td data-attendance-offset="5">－</td><td data-attendance-offset="6">－</td><td data-attendance-offset="7">－</td>
           </tr>
           <tr>
-            <th class="sticky-1">過不足（標準労働時間－標準工数）</th>
+            <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
             <td class="today-col" data-shortfall-offset="0">－</td>
             <td data-shortfall-offset="1">－</td><td data-shortfall-offset="2">－</td><td data-shortfall-offset="3">－</td>
             <td data-shortfall-offset="4">－</td><td data-shortfall-offset="5">－</td><td data-shortfall-offset="6">－</td><td data-shortfall-offset="7">－</td>
@@ -357,11 +346,7 @@
       <summary>人別内訳</summary>
       <div class="table-scroll">
         <table id="table3laborDetail">
-          <colgroup>
-            <col style="width:130px;">
-            <col style="width:90px;">
-            <col span="8" style="width:74px;">
-          </colgroup>
+          <colgroup></colgroup>
           <thead>
             <tr>
               <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
@@ -397,6 +382,19 @@
   var DASH = '－';
   var BASE_BEDS = 2520;
   var DAY_COUNT = 8; // 当日〜7日後
+
+  // 全テーブル共通のcolgroup（見出し列1=180px＋見出し列2=110px＋日付列92px×8＝1,026px）。
+  // 「氏名＋部門」の人別内訳テーブルは2列そのまま、他のテーブルは見出しセルをcolspan=2にして
+  // 同じ290px幅に揃えることで、全テーブルの当日〜7日後の列が縦にそろう
+  var COLGROUP_HTML = '<col style="width:180px;"><col style="width:110px;"><col span="' + DAY_COUNT + '" style="width:92px;">';
+  function applySharedColgroups(){
+    ['table1cult', 'table1cultDetail', 'table2work', 'table3labor', 'table3laborDetail'].forEach(function(id){
+      var table = document.getElementById(id);
+      var colgroup = table && table.querySelector('colgroup');
+      if (colgroup) colgroup.innerHTML = COLGROUP_HTML;
+    });
+  }
+  applySharedColgroups();
 
   /* ===================== 共通ユーティリティ（shiitake-shipment-plan.htmlから複製） ===================== */
 
@@ -1002,7 +1000,7 @@
     for (var o = 0; o < offsetCount; o++) {
       tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attr + '="' + key + '" data-' + attr + '-offset="' + o + '">' + DASH + '</td>';
     }
-    return '<tr><th class="sticky-1">' + label + '</th>' + tds + '</tr>';
+    return '<tr><th class="sticky-1" colspan="2">' + label + '</th>' + tds + '</tr>';
   }
 
   function renderCultivationTable(result){
@@ -1037,7 +1035,7 @@
     for (var o = 0; o < DAY_COUNT; o++) {
       subtotalTds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-work-subtotal-offset="' + o + '">' + DASH + '</td>';
     }
-    html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th>' + subtotalTds + '</tr>';
+    html += '<tr><th class="sticky-1" colspan="2">小計（栽培 標準工数合計）</th>' + subtotalTds + '</tr>';
     body.innerHTML = html;
 
     var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
