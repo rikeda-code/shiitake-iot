@@ -450,7 +450,7 @@
           <input type="date" id="harvestRefDateInput">
           <button id="harvestNextDay" aria-label="翌日">›</button>
           <button id="harvestNextMonth" aria-label="翌月">»</button>
-          <button id="harvestTodayBtn" class="today-btn">今日</button>
+          <button id="harvestTodayBtn" class="today-btn">前日</button>
         </div>
       </div>
     </div>
@@ -1593,7 +1593,7 @@
     input.value = toISO(addMonths(fromISO(input.value), 1)); clamp();
   });
   document.getElementById('harvestTodayBtn').addEventListener('click', function(){
-    input.value = todayISO; clamp();
+    input.value = toISO(addDays(today, -1)); clamp();
   });
   input.addEventListener('change', clamp);
 
