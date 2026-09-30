@@ -1520,17 +1520,6 @@
   input.addEventListener('change', function(){ clamp(); render(); });
 
   render();
-
-  // A2セル（基準日）が取得できたら、それを初期値として反映し直す
-  window.fetchReferenceDate(1).then(function(refFromSheet){
-    if (!refFromSheet) return;
-    var iso = toISO(refFromSheet);
-    if (iso <= todayISO) {
-      input.value = iso;
-      clamp();
-      render();
-    }
-  });
 })();
 
 // ── 拠点切り替えトグル（見た目のみ。データ連携ロジックは今後実装） ──
@@ -1575,7 +1564,7 @@
   today.setHours(0,0,0,0);
   const todayISO = toISO(today);
   input.max = todayISO;
-  input.value = todayISO;
+  input.value = toISO(addDays(today, -1));
 
   function clamp(){
     if (input.value > todayISO) input.value = todayISO;
@@ -1603,16 +1592,6 @@
   input.addEventListener('change', clamp);
 
   clamp();
-
-  // A18セル（実績日）が取得できたら、それを初期値として反映し直す
-  window.fetchReferenceDate(17).then(function(harvestFromSheet){
-    if (!harvestFromSheet) return;
-    const iso = toISO(harvestFromSheet);
-    if (iso <= todayISO) {
-      input.value = iso;
-      clamp();
-    }
-  });
 })();
 </script>
 </body>
