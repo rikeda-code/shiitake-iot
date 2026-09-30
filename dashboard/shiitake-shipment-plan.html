@@ -1519,7 +1519,13 @@
   });
   input.addEventListener('change', function(){ clamp(); render(); });
 
-  render();
+  // 収穫予測パネル側のIIFEがこの後で実行され、harvestRefDateInputに
+  // 値を設定する。最初のrender()はそれより先に走ると
+  // triggerHarvestForecastUpdate()が実績日未設定のまま早期終了し、
+  // Promise.allが実際の収穫予測データ取得を待たずに完了してしまう
+  // （在庫予測パネルが空のまま計算されるバグの原因）。setTimeoutで
+  // 現在の同期実行がすべて終わった後まで遅延させることで回避する
+  setTimeout(function(){ render(); }, 0);
 })();
 
 // ── 拠点切り替えトグル（見た目のみ。データ連携ロジックは今後実装） ──
