@@ -4096,12 +4096,21 @@ function parseWateringDate(cell) {
   // gvizToDate側の処理に影響しない)。
   const md = parseDateMD(v, cell.f);
   if (md) return md;
-  return gvizToDate(cell);
+  // 号機欄の数字(「47」等)はgvizToDateに渡すと1900年代の日付シリアル値として
+  // 解釈されてしまい、C/D列の入れ替わり判定が誤作動する。運用上ありえない
+  // 古い日付は注水日として採用しない。
+  const d = gvizToDate(cell);
+  if (d && d.getFullYear() < 2020) return null;
+  return d;
 }
 
 function parseWateringRows(table) {
   const rows = table.rows || [];
   const result = [];
+  // 注水シートは「注水日だけが入った行」の下に「その日に注水した号機だけを並べた行」が
+  // 続く作りになっており、号機側の行では注水日欄が空になる。1行で完結している前提だと
+  // 号機の行が全て捨てられてしまうため、直前に現れた注水日を引き継いで解釈する。
+  let stickyDate = null;
   rows.forEach(row => {
     const cells = row?.c || [];
     const cCell = cells[2];
@@ -4113,14 +4122,18 @@ function parseWateringRows(table) {
     // 本来はC列=注水日・D列=号機だが、行によってはC/D列の中身が入れ替わっている
     // (号機のはずの値が日付シリアル値になっている等)ケースがあるため、両列を試して
     // 「日付として解釈できた方を注水日、もう片方を号機」として扱う。
-    let date = parseWateringDate(cCell);
+    let date = cVal !== '' ? parseWateringDate(cCell) : null;
     let containerNo = dVal;
-    if (!date) {
+    if (!date && dVal !== '') {
       const altDate = parseWateringDate(dCell);
       if (altDate) { date = altDate; containerNo = cVal; }
     }
+    if (date) stickyDate = date; // 以降の号機行へ引き継ぐ
+    else date = stickyDate;
+
     if (!date || containerNo === '') {
-      console.warn('[watering] 注水日/号機を解釈できない行をスキップ:', cVal, dVal);
+      // 注水日だけの行(号機が空)は、日付を引き継ぐためだけの行なので警告しない
+      if (containerNo !== '') console.warn('[watering] 注水日/号機を解釈できない行をスキップ:', cVal, dVal);
       return;
     }
     result.push({ containerNo, date });
