@@ -723,9 +723,15 @@ const METRIC_DEFS = {
   harvestPerBed:  { label: '1菌床あたり収穫量', unit: 'g',  kind: 'line', digits: 0 },
   shipmentPerBed: { label: '1菌床あたり出荷量', unit: 'g',  kind: 'line', digits: 0 },
   costRatio:      { label: '菌床原価率',     unit: '%',     kind: 'line', digits: 1 },
-  salesCostRatio: { label: '菌床投資売上倍率', unit: '倍',  kind: 'line', digits: 2 },
+  salesCostRatio: { label: '菌床投資売上倍率', unit: '倍',  kind: 'line', digits: 2, baseline: 2.6 },
 };
 const COMPARE_METRIC_KEYS = Object.keys(METRIC_DEFS);
+
+// 目標値などの基準線。実績と区別できるよう、点を描かない灰色の破線で重ねる
+const BASELINE_COLOR = '#6b7280';
+function baselineSeries(value, label, length = 12) {
+  return { label, data: Array(length).fill(value), color: BASELINE_COLOR, type: 'line', axis: 'y', dash: [4, 4], pointRadius: 0 };
+}
 
 // ────────────────────────────────────────────────────────────────
 // 共通ユーティリティ
@@ -859,7 +865,7 @@ function drawCombo(canvasId, labels, series) {
     borderWidth: s.type === 'line' ? 2.5 : 1,
     borderRadius: s.type === 'line' ? 0 : 4,
     borderDash: s.dash || undefined,
-    pointRadius: s.type === 'line' ? 3 : 0,
+    pointRadius: s.pointRadius != null ? s.pointRadius : (s.type === 'line' ? 3 : 0),
     tension: 0.3,
     spanGaps: false,
     yAxisID: s.axis || 'y',
@@ -1147,6 +1153,7 @@ function renderOverview() {
   `;
   renderCurrentYearCombo('composite-salescost', '菌床投資売上倍率', ds => [
     { label: '菌床投資売上倍率(倍)', data: ds.salesCostRatio, color: COLORS.salesCostRatio, type: 'line', axis: 'y' },
+    baselineSeries(METRIC_DEFS.salesCostRatio.baseline, `基準 ${METRIC_DEFS.salesCostRatio.baseline}倍`),
   ], d);
   renderSalesCostTable();
   renderCurrentYearCombo('composite-costratio', '菌床原価率', ds => [
@@ -1182,6 +1189,7 @@ function renderSiteCompareMetric(containerId, key) {
       axis: 'y',
       dash: loc.key === 'total' ? [6, 4] : undefined,
     }));
+    if (def.baseline != null) series.push(baselineSeries(def.baseline, `基準 ${def.baseline}${def.unit}`));
     chart(`${containerId}-${y}`, `${def.label} 拠点比較（${y}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
   });
 }
@@ -1211,6 +1219,7 @@ function renderYearCompareMetric(containerId, key, d) {
     { label: `${yearCompareA}年`, data: yearSlice(d[key], yearCompareA), color: '#1e3a8a', type: def.kind, axis: 'y' },
     { label: `${yearCompareB}年`, data: yearSlice(d[key], yearCompareB), color: '#dc2626', type: def.kind, axis: 'y', dash: def.kind === 'line' ? [6,3] : undefined },
   ];
+  if (def.baseline != null) series.push(baselineSeries(def.baseline, `基準 ${def.baseline}${def.unit}`));
   chart(canvasId, `${def.label} 年度比較（${yearCompareA}年 / ${yearCompareB}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
 }
 
