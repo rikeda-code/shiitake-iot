@@ -608,6 +608,7 @@
   var SALES_RAW_SHEET_ID = '17DD5aRxc9bv8uZzEfnK_Q9IGOvQVH4ieJU1c-qu7dOc';
   var SALES_RAW_INABE_ORDER_GID = '545062393'; // 「いなべ_受注」タブ
   var REF_DATE_SHEET_GID = '1395691052'; // 「②日々の過不足確認_秀優」タブ
+  var GRADE_RATIO_SHEET_GID = '187806066'; // 「転写_秀優比率」タブ
   var HARVEST_URL_SHEET_GID = '1878423046'; // 「転写_収穫URL」タブ
   var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定）
   var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
@@ -765,6 +766,28 @@
     return { table: { rows: rows.map(function(cells){
       return { c: cells.map(function(v){ return { v: v }; }) };
     }) } };
+  }
+
+  // 「転写_秀優比率」シートを取得し、{パネル名: {秀: 比率, 優: 比率}} の
+  // 形に整理して返す。A列（パネル）が空欄の行は、直前の非空欄の値を
+  // 引き継ぐ（シート上の「同じパネルが続く間は空欄」という表記に対応）
+  async function fetchGradeRatios(){
+    var json = await fetchCsvSheet(HARVEST_SHEET_ID, GRADE_RATIO_SHEET_GID);
+    var rows = (json.table && json.table.rows) || [];
+    var result = {};
+    var currentPanel = null;
+    for (var i = 1; i < rows.length; i++) { // 1行目はヘッダーなのでスキップ
+      var c = rows[i] && rows[i].c;
+      if (!c) continue;
+      var panelCell = c[0] && c[0].v;
+      if (panelCell) currentPanel = String(panelCell).trim();
+      var gradeCell = c[1] && c[1].v;
+      var ratioCell = readCellNumber(json, i, 2);
+      if (!currentPanel || !gradeCell || ratioCell === null) continue;
+      if (!result[currentPanel]) result[currentPanel] = {};
+      result[currentPanel][String(gradeCell).trim()] = ratioCell;
+    }
+    return result;
   }
 
   // 「②日々の過不足確認_秀優」シートのA列（rowIndex行目）に手入力されている
@@ -1240,7 +1263,7 @@
       // 実績と秀/優ラベルは互いに依存しないため同時に取得を開始する（ラベルを
       // 使う按分は、これまで通り実績の描画が終わってから行う）
       var actualPromise = fetchHarvestActual(harvestDate);
-      var labelJsonPromise = fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID).catch(function(){ return null; });
+      var ratioJsonPromise = fetchGradeRatios().catch(function(){ return null; });
 
       var actual = await actualPromise;
       var total = actual ? (actual['M'] || 0) + (actual['L'] || 0) + (actual['2L'] || 0) + (actual['袋'] || 0) : 0;
@@ -1255,29 +1278,23 @@
         if (ratioCell) { ratioCell.textContent = ratio[size] === null ? STOCK_DASH : (Math.round(ratio[size] * 10000) / 100) + '%'; }
       });
 
-      // 秀/優（Lの内訳）：「②日々の過不足確認_秀優」シートのA22/A23セルの
-      // 文字列自体に按分比率が埋め込まれている（例："秀_50"）。B22="=B21*比率/100"・
-      // D22="=D21*比率/100"と同じ考え方で、Lの実績値・日別予測値に対して
-      // クライアント側で按分する（新たな数式はスプレッドシート側に追加しない）
+      // 秀/優（Lの内訳）：「転写_秀優比率」シートの「収穫予測」パネル行の比率を、
+      // Lの実績値・日別予測値に対してクライアント側で按分する
+      // （新たな数式はスプレッドシート側に追加しない）
       var gradeRatios = { '秀': null, '優': null };
-      var labelJson = await labelJsonPromise;
-      if (labelJson) {
-        try {
-          var labelRows = labelJson.table.rows;
-          var syuLabel = labelRows[21] && labelRows[21].c[0] && labelRows[21].c[0].v;
-          var yuuLabel = labelRows[22] && labelRows[22].c[0] && labelRows[22].c[0].v;
-          var syuLabelCell = document.querySelector('[data-harvest-grade-label="秀"]');
-          var yuuLabelCell = document.querySelector('[data-harvest-grade-label="優"]');
-          if (syuLabelCell && syuLabel) syuLabelCell.textContent = syuLabel;
-          if (yuuLabelCell && yuuLabel) yuuLabelCell.textContent = yuuLabel;
-          var syuMatch = syuLabel && String(syuLabel).match(/(\d+)$/);
-          var yuuMatch = yuuLabel && String(yuuLabel).match(/(\d+)$/);
-          gradeRatios['秀'] = syuMatch ? parseFloat(syuMatch[1]) / 100 : null;
-          gradeRatios['優'] = yuuMatch ? parseFloat(yuuMatch[1]) / 100 : null;
-        } catch (e) {
-          gradeRatios['秀'] = null;
-          gradeRatios['優'] = null;
-        }
+      var panelRatios = await ratioJsonPromise;
+      if (panelRatios && panelRatios['収穫予測']) {
+        var syuRatio = panelRatios['収穫予測']['秀'];
+        var yuuRatio = panelRatios['収穫予測']['優'];
+        var syuLabelCell = document.querySelector('[data-harvest-grade-label="秀"]');
+        var yuuLabelCell = document.querySelector('[data-harvest-grade-label="優"]');
+        if (syuLabelCell && syuRatio !== undefined) syuLabelCell.textContent = '秀_' + syuRatio;
+        if (yuuLabelCell && yuuRatio !== undefined) yuuLabelCell.textContent = '優_' + yuuRatio;
+        gradeRatios['秀'] = (syuRatio !== undefined) ? syuRatio / 100 : null;
+        gradeRatios['優'] = (yuuRatio !== undefined) ? yuuRatio / 100 : null;
+      } else {
+        gradeRatios['秀'] = null;
+        gradeRatios['優'] = null;
       }
 
       if (isStale()) return;
@@ -1372,22 +1389,24 @@
         if (ratioCell) ratioCell.textContent = ratio[size] === null ? STOCK_DASH : (Math.round(ratio[size] * 10000) / 100) + '%';
       });
 
-      // 秀/優: 「②日々の過不足確認_秀優」シートのA32/A33ラベルに埋め込まれた
-      // 比率をLの在庫実績に掛ける（収穫予測の秀/優按分と同じ考え方）
+      // 秀/優: 「転写_秀優比率」シートの「在庫予測」パネル行の比率を
+      // Lの在庫実績に掛ける（収穫予測の秀/優按分と同じ考え方）
       var gradeRatios = { '秀': null, '優': null };
       try {
-        var labelJson = await fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID);
-        var labelRows = labelJson.table.rows;
-        var syuLabel = labelRows[31] && labelRows[31].c[0] && labelRows[31].c[0].v;
-        var yuuLabel = labelRows[32] && labelRows[32].c[0] && labelRows[32].c[0].v;
-        var syuLabelCell = document.querySelector('[data-stock-forecast-grade-label="秀"]');
-        var yuuLabelCell = document.querySelector('[data-stock-forecast-grade-label="優"]');
-        if (syuLabelCell && syuLabel) syuLabelCell.textContent = syuLabel;
-        if (yuuLabelCell && yuuLabel) yuuLabelCell.textContent = yuuLabel;
-        var syuMatch = syuLabel && String(syuLabel).match(/(\d+)$/);
-        var yuuMatch = yuuLabel && String(yuuLabel).match(/(\d+)$/);
-        gradeRatios['秀'] = syuMatch ? parseFloat(syuMatch[1]) / 100 : null;
-        gradeRatios['優'] = yuuMatch ? parseFloat(yuuMatch[1]) / 100 : null;
+        var panelRatios = await fetchGradeRatios();
+        if (panelRatios && panelRatios['在庫予測']) {
+          var syuRatio = panelRatios['在庫予測']['秀'];
+          var yuuRatio = panelRatios['在庫予測']['優'];
+          var syuLabelCell = document.querySelector('[data-stock-forecast-grade-label="秀"]');
+          var yuuLabelCell = document.querySelector('[data-stock-forecast-grade-label="優"]');
+          if (syuLabelCell && syuRatio !== undefined) syuLabelCell.textContent = '秀_' + syuRatio;
+          if (yuuLabelCell && yuuRatio !== undefined) yuuLabelCell.textContent = '優_' + yuuRatio;
+          gradeRatios['秀'] = (syuRatio !== undefined) ? syuRatio / 100 : null;
+          gradeRatios['優'] = (yuuRatio !== undefined) ? yuuRatio / 100 : null;
+        } else {
+          gradeRatios['秀'] = null;
+          gradeRatios['優'] = null;
+        }
       } catch (e) {
         gradeRatios['秀'] = null;
         gradeRatios['優'] = null;
