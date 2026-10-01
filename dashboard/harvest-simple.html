@@ -3013,7 +3013,7 @@ async function renderJissekiTab() {
     </div>
     ${bodyHtml}`;
 
-  if (jissekiSubTab === 'chart' && rows.length) jissekiDrawChart(groups);
+  if (jissekiSubTab === 'chart' && rows.length) jissekiDrawChart();
 }
 
 // ── 実績: 表 ──────────────────────────────────────────────────────────────────
@@ -3070,23 +3070,25 @@ function jissekiChartHtml() {
     `<button class="sort-btn${jissekiChartMode === k ? ' active' : ''}" onclick="jissekiSetChartMode('${k}')">${v}</button>`
   ).join('');
   return `
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${modeBtns}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px">
+      ${modeBtns}
+      <button onclick="jissekiSaveChart()" title="このグラフを保存" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.95rem;padding:2px 4px;line-height:1">📌</button>
+    </div>
     <div style="position:relative;height:460px;background:#13151f;border-radius:12px;padding:16px">
       <canvas id="jisseki-chart"></canvas>
     </div>`;
 }
 
-function jissekiDrawChart(groups) {
-  const canvas = document.getElementById('jisseki-chart');
-  if (!canvas || typeof Chart === 'undefined') return;
-
-  const rows = jissekiFilteredRows();
+// 実績グラフのChart.js設定を組み立てる。
+// ライブ表示と保存グラフ(kind:'jisseki')の両方から呼び出す共通ロジック。
+function jissekiChartConfig(rows, chartMode) {
+  const groups = jissekiGroupByMonth(rows);
   // 実際にデータがある拠点だけを対象にする(空の系列で凡例が埋まらないように)
   const activeSites = SITES.filter(s => rows.some(r => r.siteName === s.name));
   const siteColor = name => (SITES.find(s => s.name === name) || {}).color || '#38bdf8';
 
   let labels, datasets;
-  if (jissekiChartMode === 'month') {
+  if (chartMode === 'month') {
     // 月ごとに拠点別の棒を並べ、拠点色で塗り分ける(パック品率は同色の破線)
     const asc = [...groups].reverse();
     labels = asc.map(g => jissekiMonthLabel(g.month));
@@ -3124,7 +3126,7 @@ function jissekiDrawChart(groups) {
     ];
   }
 
-  jissekiCharts.push(new Chart(canvas, {
+  return {
     data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -3135,7 +3137,27 @@ function jissekiDrawChart(groups) {
         y1: { position: 'right', min: 0, max: 100, ticks: { color: '#facc15', font: { size: 10 }, callback: v => `${v}%` }, grid: { display: false } },
       },
     },
-  }));
+  };
+}
+
+function jissekiDrawChart() {
+  const canvas = document.getElementById('jisseki-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  jissekiCharts.push(new Chart(canvas, jissekiChartConfig(jissekiFilteredRows(), jissekiChartMode)));
+}
+
+// 実績グラフの「保存」ボタン。表示中の行と表示モードをそのまま凍結して保存グラフに渡す
+function jissekiSaveChart() {
+  const rows = jissekiFilteredRows();
+  if (!rows.length) { savedToast('保存できるデータがありません'); return; }
+  const siteLabel = jissekiSite === 'all' ? '全拠点' : jissekiSite;
+  const modeLabel = jissekiChartMode === 'month' ? '月別平均' : 'コンテナ別';
+  savedOpenPicker({
+    kind: 'jisseki',
+    title: `実績: ${modeLabel}(${siteLabel})`,
+    chartMode: jissekiChartMode,
+    items: rows.map(r => ({ ...r })),
+  });
 }
 
 // ── 実績: 担当者ランキング ────────────────────────────────────────────────────
@@ -6601,6 +6623,9 @@ function savedBuildChartConfig(chart) {
   if (chart.kind === 'weekly-size') {
     return weeklyZoomSizeChartConfig(chart.items.sizeRows, chart.sizeMode);
   }
+  if (chart.kind === 'jisseki') {
+    return jissekiChartConfig(chart.items, chart.chartMode);
+  }
   return null;
 }
 
@@ -6728,6 +6753,7 @@ const SAVED_KIND_LABELS = {
 function savedChartGroupKey(chart) {
   if (chart.kind === 'analysis') return `analysis:${chart.configKey}`;
   if (chart.kind === 'weekly-size') return `weekly-size:${chart.sizeMode}`;
+  if (chart.kind === 'jisseki') return `jisseki:${chart.chartMode}`;
   return chart.kind;
 }
 function savedChartGroupLabel(chart) {
@@ -6737,6 +6763,9 @@ function savedChartGroupLabel(chart) {
   }
   if (chart.kind === 'weekly-size') {
     return chart.sizeMode === 'daily' ? 'サイズ別日次(週別累計)' : 'サイズ別累計(週別累計)';
+  }
+  if (chart.kind === 'jisseki') {
+    return chart.chartMode === 'month' ? '実績: 月別平均' : '実績: コンテナ別';
   }
   return SAVED_KIND_LABELS[chart.kind] || chart.kind;
 }
