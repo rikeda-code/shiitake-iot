@@ -932,8 +932,11 @@ let weeklyDrillZoomGroups = null;   // 担当者別ドリルの最終カード(�
 // 週別累計タブの各グラフ用「保存」ボタンの共通処理。containersをそのまま凍結して保存グラフに渡す
 function weeklySaveChart(title, containers, fixedMaxDay = null) {
   const frozenContainers = containers.map(c => ({
-    siteName: c.siteName, name: c.name, lot: c.lot, startDate: c.startDate, endDate: c.endDate,
+    siteName: c.siteName, name: c.name, no: c.no, lot: c.lot, startDate: c.startDate, endDate: c.endDate,
     isEnded: c.isEnded, bedCount: c.bedCount,
+    // 注水日は別シート由来のため、保存グラフ側(共有リンク先を含む)では参照できないことがある。
+    // 保存時点で確定した注水日をそのまま凍結して持たせる。
+    wateringDates: wateringDatesForContainer(c).map(d => d.toISOString()),
     rows: (c.rows || []).map(r => ({ rowDate: r.rowDate ? r.rowDate.toISOString() : null, dayNum: r.dayNum, daily: r.daily })),
   }));
   savedOpenPicker({
@@ -2121,9 +2124,11 @@ function buildWeeklyLineChart(canvasId, containers, targetData, isZoom = false, 
     const lotStr = c.lot && c.lot !== '未設定' && !/^Date\(/.test(c.lot) ? c.lot.replace(/\(\d{1,2}\/\d{1,2}\)/g, '').trim() : '';
     const containerLabel = '';
 
-    // 注水日の位置に点を表示する(それ以外の日はpointRadius:0で非表示のまま)
+    // 注水日の位置に点を表示する(それ以外の日はpointRadius:0で非表示のまま)。
+    // 保存グラフは保存時点の注水日を凍結して持っているため、そちらがあれば優先する。
+    const wateringSource = c.wateringDates ? c.wateringDates : wateringDatesForContainer(c);
     const wateringDays = new Set(
-      sd ? wateringDatesForContainer(c).map(d => Math.round((d - sd) / 86400000)).filter(d => d >= 0 && d <= MAX_DAY) : []
+      sd ? wateringSource.map(d => Math.round((d - sd) / 86400000)).filter(d => d >= 0 && d <= MAX_DAY) : []
     );
     const pointRadiusArr = xLabels.map((_, i) => wateringDays.has(i) ? 3.5 : 0);
     const pointBorderArr = xLabels.map((_, i) => wateringDays.has(i) ? 1.5 : 0);
@@ -6603,6 +6608,7 @@ function savedBuildChartConfig(chart) {
 function weeklyReviveContainers(items) {
   return items.map(c => ({
     ...c,
+    wateringDates: (c.wateringDates || []).map(d => new Date(d)),
     rows: (c.rows || []).map(r => ({ ...r, rowDate: r.rowDate ? new Date(r.rowDate) : null })),
   }));
 }
