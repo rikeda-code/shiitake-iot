@@ -605,6 +605,8 @@
   var SALES_INDEX_GID = '538861653'; // 「シート判別」タブ
   var HARVEST_SHEET_ID = '1FfVj-IyufBcsSydQlwNhmSeh-ctdUMe63JmluzgAQVg';
   var SHIPMENT_GRADE_GID = '1249354043'; // 「転写_秀優_出荷」タブ
+  var SALES_RAW_SHEET_ID = '17DD5aRxc9bv8uZzEfnK_Q9IGOvQVH4ieJU1c-qu7dOc';
+  var SALES_RAW_INABE_ORDER_GID = '545062393'; // 「いなべ_受注」タブ
   var REF_DATE_SHEET_GID = '1395691052'; // 「②日々の過不足確認_秀優」タブ
   var HARVEST_URL_SHEET_GID = '1878423046'; // 「転写_収穫URL」タブ
   var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定）
@@ -642,6 +644,10 @@
       var ym = v.trim().match(/^(\d{4})\/(\d{1,2})$/);
       if (ym) {
         return new Date(parseInt(ym[1], 10), parseInt(ym[2], 10) - 1, 1);
+      }
+      var ymdFull = v.trim().match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+      if (ymdFull) {
+        return new Date(parseInt(ymdFull[1], 10), parseInt(ymdFull[2], 10) - 1, parseInt(ymdFull[3], 10));
       }
       var ymd = v.trim().match(/^(\d{2})\/(\d{1,2})\/(\d{1,2})(?:\/.*)?$/);
       if (ymd) {
@@ -815,15 +821,46 @@
     };
   }
 
-  // 秀・優の出荷予定を「転写_秀優_出荷」シートから取得する。日付検索は
-  // findDateColIndex()・gvizCellToDate()をそのまま再利用する（CSV取得後の
-  // 日付形式も"m/d"文字列になるため既存ロジックがそのまま使える）
+  // F列のサイズ表記を"・"/"/"/"*"で区切り、"L"という単語単体が
+  // 含まれるかを判定する（"2L"等を誤って拾わないようにするため）
+  function hasLToken(sizeText){
+    if (!sizeText) return false;
+    var tokens = String(sizeText).split(/[・\/*]/).map(function(t){ return t.trim(); });
+    return tokens.indexOf('L') !== -1;
+  }
+
+  // 「いなべ_受注」シート全体をスキャンし、B列="重量"・E列=grade
+  // （"秀"または"優"）・F列にLトークンを含む行を対象に、colIdx列の値を
+  // 合計する（Lのみの行は100%、混在行は50%で按分）。商品行の増減に
+  // 対応するため、行番号は決め打ちにせず全行を走査する
+  function sumGradeShipmentFromRaw(json, colIdx, grade){
+    var rows = (json.table && json.table.rows) || [];
+    var sum = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      if (!c) continue;
+      var unit = c[1] && c[1].v;
+      if (unit !== '重量') continue;
+      var gradeVal = c[4] && c[4].v;
+      if (gradeVal !== grade) continue;
+      var sizeVal = c[5] && c[5].v;
+      if (!hasLToken(sizeVal)) continue;
+      var ratio = (String(sizeVal).trim() === 'L') ? 1 : 0.5;
+      var v = readCellNumber(json, i, colIdx);
+      if (v !== null) sum += v * ratio;
+    }
+    return sum;
+  }
+
+  // 秀・優の出荷予定を「販売抽出シート（商品別）」の「いなべ_受注」シートの
+  // 商品別RAWデータから直接集計する。日付検索はfindDateColIndex()・
+  // gvizCellToDate()をそのまま再利用する
   async function fetchShipmentGradeForDate(json, date){
     var colIdx = findDateColIndex(json, date);
     if (colIdx < 0) return { '秀': null, '優': null };
     return {
-      '秀': readCellNumber(json, 26, colIdx), // 27行目(0始まりで26) = 秀L
-      '優': readCellNumber(json, 27, colIdx), // 28行目(0始まりで27) = 優L
+      '秀': sumGradeShipmentFromRaw(json, colIdx, '秀'),
+      '優': sumGradeShipmentFromRaw(json, colIdx, '優'),
     };
   }
 
@@ -1141,10 +1178,11 @@
     try {
       var sheetIndex = await fetchSalesSheetIndex();
       var monthCache = {};
-      // 「転写_秀優_出荷」シートは日付ごとに取り直す必要が無いため一度だけ取得する。
-      // 取得自体に失敗しても秀・優が「－」になるだけで、M/L/2L/袋側の処理には影響しない
+      // 「販売抽出シート（商品別）」の「いなべ_受注」シートは日付ごとに取り直す必要が
+      // 無いため一度だけ取得する。取得自体に失敗しても秀・優が「－」になるだけで、
+      // M/L/2L/袋側の処理には影響しない
       var gradeJson = null;
-      try { gradeJson = await fetchCsvSheet(HARVEST_SHEET_ID, SHIPMENT_GRADE_GID); } catch (e) { gradeJson = null; }
+      try { gradeJson = await fetchCsvSheet(SALES_RAW_SHEET_ID, SALES_RAW_INABE_ORDER_GID); } catch (e) { gradeJson = null; }
 
       // 当日〜8日後に必要な年月をあらかじめ洗い出し、まとめて並行取得しておく
       // （fetchOrderPlanForDate自体は変更しない。ここでmonthCacheを
