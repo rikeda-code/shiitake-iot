@@ -315,6 +315,10 @@ function visibleMembers() {
   const n = daysIn();
   return members.filter(m => {
     if (![1, 2, 3, 9].includes(m.flag)) return false;
+    // 退職・異動で退職日の入っていない人は、退職済みとして載せない
+    if ([3, 9].includes(m.flag) && !m.leave) return false;
+    // 事務・営業の人はシフトに載せない
+    if (/事務|営業/.test(m.dept + m.empType)) return false;
     for (let d = 1; d <= n; d++) if (activeOn(m, d)) return true;
     return false;
   }).sort((a, b) => {
