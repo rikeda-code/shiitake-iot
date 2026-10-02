@@ -77,6 +77,10 @@ td.cell.custom { font-size: .68rem; color: var(--accent); }
 td.cell.weekend { background-image: linear-gradient(var(--sel-soft), var(--sel-soft)); background-size: 0 0; }
 td.cell.in-sel { background: var(--sel-soft); }
 td.cell.cursor { box-shadow: inset 0 0 0 2px var(--sel); }
+/* フィルハンドル：選んだ範囲の右下の四角。ドラッグすると同じ内容を広げる */
+.fill-handle { position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; background: var(--sel); border: 1.5px solid var(--surface); z-index: 3; cursor: crosshair; }
+td.cell.fill-prev { box-shadow: inset 0 0 0 1px var(--sel); background-image: repeating-linear-gradient(135deg, var(--sel-soft) 0 4px, transparent 4px 8px); }
+body.filling, body.filling td.cell { cursor: crosshair; }
 td.cell.bad { color: var(--sun); text-decoration: wavy underline; }
 td.cell input { position:absolute; inset:0; width:100%; height:100%; border:0; outline: 2px solid var(--sel); text-align:center; font-family: var(--font-code); background: var(--surface); }
 .grid .tot { position: sticky; right: 0; background: var(--surface); z-index: 2; min-width: 70px; padding: 0 8px; text-align:right; font-weight:700; border-left: 2px solid var(--line); }
@@ -260,7 +264,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
   </div>
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
+    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -552,8 +556,13 @@ function paintSel() {
     const r = +td.dataset.r, c = +td.dataset.c;
     td.classList.toggle('in-sel', !!s && r >= s.r0 && r <= s.r1 && c >= s.c0 && c <= s.c1);
     td.classList.toggle('cursor', !!cursor && cursor.r === r && cursor.c === c);
+    td.classList.toggle('fill-prev', !!filling?.dst && inRect(filling.dst, r, c) && !inRect(filling.src, r, c));
   });
+  // 選んだ範囲の右下にフィルハンドルを付ける
+  document.querySelectorAll('.fill-handle').forEach(x => x.remove());
+  if (s && !editing && !filling) document.querySelector(`td.cell[data-r="${s.r1}"][data-c="${s.c1}"]`)?.insertAdjacentHTML('beforeend', '<span class="fill-handle" title="ドラッグして同じ内容を広げる"></span>');
 }
+const inRect = (q, r, c) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1;
 function setCursor(r, c, extend) {
   if (!rows.length) return;
   r = Math.max(0, Math.min(rows.length - 1, r)); c = Math.max(0, Math.min(cols.length - 1, c));
@@ -604,6 +613,39 @@ function pasteTSV(text) {
 function clearSelection() { const s = norm(sel); if (!s) return; for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) setVal(r, c, ''); render(); }
 
 const gridBox = $('gridBox');
+// フィルハンドルのドラッグ：縦か横の、引っぱった向きに選んだ範囲の内容をくり返して入れる
+let filling = null; // { src: 元の範囲, dst: 広げた後の範囲 }
+gridBox.addEventListener('mousedown', ev => {
+  if (!ev.target.classList.contains('fill-handle')) return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  filling = { src: norm(sel), dst: null };
+  document.body.classList.add('filling');
+  paintSel();
+}, true);
+gridBox.addEventListener('mouseover', ev => {
+  if (!filling) return; const td = ev.target.closest('td.cell'); if (!td) return;
+  const s = filling.src, r = +td.dataset.r, c = +td.dataset.c;
+  const dr = r > s.r1 ? r - s.r1 : r < s.r0 ? s.r0 - r : 0;
+  const dc = c > s.c1 ? c - s.c1 : c < s.c0 ? s.c0 - c : 0;
+  filling.dst = dr === 0 && dc === 0 ? null
+    : dr >= dc ? { r0: Math.min(s.r0, r), r1: Math.max(s.r1, r), c0: s.c0, c1: s.c1 }
+    : { r0: s.r0, r1: s.r1, c0: Math.min(s.c0, c), c1: Math.max(s.c1, c) };
+  paintSel();
+});
+document.addEventListener('mouseup', () => {
+  if (!filling) return;
+  const { src: s, dst } = filling;
+  filling = null; document.body.classList.remove('filling');
+  if (!dst) { paintSel(); return; }
+  const h = s.r1 - s.r0 + 1, w = s.c1 - s.c0 + 1, mod = (a, n) => ((a % n) + n) % n;
+  for (let r = dst.r0; r <= dst.r1; r++) for (let c = dst.c0; c <= dst.c1; c++) {
+    if (inRect(s, r, c)) continue;
+    const sr = s.r0 + mod(r - s.r0, h), sc = s.c0 + mod(c - s.c0, w);
+    setVal(r, c, data[rows[sr].key]?.[cols[sc].iso] || '');
+  }
+  sel = { ...dst }; anchor = { r: dst.r0, c: dst.c0 }; cursor = { r: dst.r1, c: dst.c1 };
+  render();
+});
 gridBox.addEventListener('mousedown', ev => {
   const td = ev.target.closest('td.cell'); if (!td || ev.target.tagName === 'INPUT') return;
   if (editing) commit();
