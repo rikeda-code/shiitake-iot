@@ -781,6 +781,16 @@ const PAST_YEAR_SHEET_NAME = '時間_過去実績'; // 標準労働時間タブ�
 // 事象が実データで確認されたため、PROD_GID・PLAN_GIDと同様にgid指定で取得する
 const PAST_YEAR_COUNT_GID = '1654355403'; // 人数_過去実績
 
+// 栽培内訳（コンテナ数）の7項目（菌床入れ・芽かき・収穫・注水・散水・廃棄・稼働コンテナ数）を、
+// 「整理済み_分析」の貼り付け値ではなく各拠点の「栽培管理」シートから直接計算する拠点の一覧。
+// 群馬・南丹は設定のみ用意し、リストには含めない（後の移行で追加する）
+const CULTIVATION_DIRECT_SITES = ['いなべ'];
+const CULTIVATION_SHEETS = {
+  'いなべ': { id: '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM', gid: '1452537379' },
+  '群馬':   { id: '12Xa_bkHE5tw9-YgGPIONzAj9ex3jr0Au-3B1k6DSZDY', gid: '1776859904' },
+  '南丹':   { id: '1WBnGT3tkVfGhDJ7OZ2mZE4Juvd-t7le68bUlVRHGIeM', gid: '856812819' },
+};
+
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
 // 読み取り用の定数・関数は該当Stageで追加する
@@ -876,6 +886,20 @@ function workTypeClass(wt) {
 }
 
 let allData = null; // { months, monthYms, employees, nameLabel }
+
+// allData確定後にresolveされるPromiseを返す。fetchProductionSheet()が「整理済み_M」の
+// 読み込み完了を待ってから生産データの月一覧を組み立てるために使う（既にallDataが
+// セット済みならそのまま即resolveする）
+let allDataReadyResolvers = [];
+function waitForAllData() {
+  if (allData) return Promise.resolve(allData);
+  return new Promise(resolve => { allDataReadyResolvers.push(resolve); });
+}
+function resolveAllDataReady() {
+  allDataReadyResolvers.forEach(resolve => resolve(allData));
+  allDataReadyResolvers = [];
+}
+
 let activeBase = null;
 let activeMode = null; // 'site' | 'summary'
 let chartInstance = null;
@@ -4662,16 +4686,439 @@ function renderSummaryRoster() {
 }
 
 /* ── Production data ─────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   栽培内訳（コンテナ数）の直接計算（CULTIVATION_DIRECT_SITES対象拠点）
+   ──────────────────────────────────────────────────────────────────────
+   対象拠点の「栽培管理」シートを直接読み、菌床入れ・芽かき・収穫・注水・散水・廃棄・
+   稼働コンテナ数の7項目を月度（10日締め）単位で集計する。工程キーワード照合・
+   菌床数係数のロジックはwork-hours-forecast.htmlの実装（検証済み）を複製している。
+   ═══════════════════════════════════════════════════════════════════ */
+
+// work-hours-forecast.htmlのfetchCsvSheet()を複製。gvizのsheet=名前指定は長時間
+// キャッシュされる既知の問題があるため使わず、/export?format=csv&gid=で取得する。
+// CSVパーサー自体（parseCsv）は、このファイルに既に同一実装（人数_過去実績の取得用）が
+// 存在するためそのまま再利用し、重複定義はしない
+async function fetchCultivationCsvSheet(sheetId, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = parseCsv(text);
+  return { table: { rows: rows.map(cells => ({ c: cells.map(v => ({ v })) })) } };
+}
+
+// 上から順に照合し、1セルにつき最初に一致した1工程だけをカウントする
+// （work-hours-forecast.htmlのPROCESS_KEYWORDSと同一の照合順）
+const CULT_PROCESS_KEYWORDS = [
+  { name: '菌床入れ', patterns: ['菌床入れ'], weighted: true },
+  { name: '芽待ち／成長待ち', patterns: ['芽待ち', '成長待ち'], weighted: false },
+  { name: '芽発生', patterns: ['芽発生'], weighted: false },
+  { name: '芽かき', patterns: ['芽かき'], weighted: true },
+  { name: '収穫', patterns: ['収穫'], weighted: true },
+  { name: '培養', patterns: ['培養'], weighted: false },
+  { name: '注水', patterns: ['注水'], weighted: true },
+  { name: '散水', patterns: ['散水'], weighted: false },
+  { name: '廃棄', patterns: ['廃棄'], weighted: true },
+  { name: 'コンテナ掃除', patterns: ['コンテナ掃除'], weighted: false },
+  { name: 'コンテナ点検', patterns: ['コンテナ点検'], weighted: false },
+];
+const CULT_BASE_BEDS = 2520;
+// 月度ごとの最終的な7項目（稼働コンテナ数を含む）。この順でレコードを挿入する
+const CULTIVATION_METRIC_ORDER = ['菌床入れ', '芽かき', '収穫', '注水', '散水', '廃棄', '稼働コンテナ数'];
+
+function cultMatchProcess(text) {
+  if (!text) return null;
+  for (let i = 0; i < CULT_PROCESS_KEYWORDS.length; i++) {
+    const p = CULT_PROCESS_KEYWORDS[i];
+    for (let j = 0; j < p.patterns.length; j++) {
+      if (text.indexOf(p.patterns[j]) !== -1) return p;
+    }
+  }
+  return null;
+}
+
+// 行全体(D列以降)を左から走査し、「菌床入れNNNN」「廃棄NNNN」マーカーの
+// 位置(列index)・種別・菌床数を抽出する
+function cultExtractMarkers(fullRowCells) {
+  const markers = [];
+  for (let i = 0; i < fullRowCells.length; i++) {
+    const text = fullRowCells[i] || '';
+    const mIn = text.match(/菌床入れ(\d{3,4})/);
+    if (mIn) { markers.push({ pos: i, type: 'in', beds: parseInt(mIn[1], 10) }); continue; }
+    const mOut = text.match(/廃棄(\d{3,4})/);
+    if (mOut) { markers.push({ pos: i, type: 'out', beds: parseInt(mOut[1], 10) }); continue; }
+  }
+  return markers;
+}
+
+// 列colIdxにおける重み係数(菌床数÷CULT_BASE_BEDS)を、行全体のマーカー列から算出する
+function cultCoefficientAt(markers, colIdx) {
+  let lastIdx = -1;
+  for (let i = 0; i < markers.length; i++) {
+    if (markers[i].pos <= colIdx) lastIdx = i; else break;
+  }
+  if (lastIdx >= 0) {
+    const last = markers[lastIdx];
+    if (last.type === 'in') return last.beds / CULT_BASE_BEDS;
+    if (last.type === 'out' && last.pos === colIdx) {
+      const prev = lastIdx > 0 ? markers[lastIdx - 1] : null;
+      if (prev && prev.type === 'in') return prev.beds / CULT_BASE_BEDS;
+    }
+  }
+  for (let j = 0; j < markers.length; j++) {
+    if (markers[j].pos >= colIdx && markers[j].type === 'out') return markers[j].beds / CULT_BASE_BEDS;
+  }
+  return 1.0;
+}
+
+// C列（コンテナ番号）の全角ハイフン「－」・長音「ー」・各種ダッシュ（‐ ‒ – —）を
+// 半角「-」に置換してからNFKC正規化・前後空白除去する
+function normalizeCultivationContainerNo(raw) {
+  if (raw === null || raw === undefined) return '';
+  let s = String(raw).replace(/[－ー‐‒–—]/g, '-');
+  s = s.normalize('NFKC').trim();
+  return s;
+}
+
+// A列=1 かつ C列が「数字」または「数字-数字」（正規化後）に一致する行だけを対象にする
+function isCultivationTargetRow(flagRaw, containerRaw) {
+  const flag = String(flagRaw === null || flagRaw === undefined ? '' : flagRaw).trim();
+  if (flag !== '1') return false;
+  const norm = normalizeCultivationContainerNo(containerRaw);
+  return /^\d+(-\d+)?$/.test(norm);
+}
+
+// 日付セル1個を解析する。"M/D"（年なし）と"YYYY/M/D"（4桁年・曜日なし）の両方に対応する
+function parseCultivationDateCell(raw) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).normalize('NFKC').trim();
+  const full = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (full) return { year: parseInt(full[1], 10), month: parseInt(full[2], 10), day: parseInt(full[3], 10) };
+  const md = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (md) return { year: null, month: parseInt(md[1], 10), day: parseInt(md[2], 10) };
+  return null;
+}
+
+function cultSameDate(a, b) {
+  return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+const CULT_WEEKDAY_CHARS = ['日', '月', '火', '水', '木', '金', '土'];
+
+// 2行目（曜日）のセル1個を解析する。NFKC正規化・前後空白除去の後、先頭1文字が
+// 「日」〜「土」ならその文字を返す。それ以外（空欄等）はnull（曜日による比較をしない列）
+function parseCultivationWeekdayCell(raw) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).normalize('NFKC').trim();
+  if (!s) return null;
+  const ch = s.charAt(0);
+  return CULT_WEEKDAY_CHARS.indexOf(ch) !== -1 ? ch : null;
+}
+
+// 年なしM/Dの列(左から右)に対し、月が前の列より小さくなったら年を+1して実際のDateの
+// 配列を組み立てる。明示年（YYYY/M/D形式）のセルに当たったら、その年をそのまま採用して
+// 以降の判定基準にする（年の補完は明示年のセル以降もそのまま引き継がれる）。
+//
+// シートの表示形式がm/d（年を表示しない）のため、1行目のCSVからは年が分からない。
+// そこで起点年Yを「今年」から6年前までの7通り試し、2行目の曜日（日〜土）と実際に
+// 組み立てた日付の曜日が1列でも食い違う候補、および実在しない日付（うるう年でない
+// 年の2/29等、Dateコンストラクタが自動で繰り上げてしまうもの）を含む候補を除外する。
+// 残った候補が1つならそれを採用し、複数残った場合は最後の列の日付が本日以降で最も
+// 近いものを（無ければ本日に最も近いものを）採用する。1つも残らない場合は、
+// 年を確定できなかったことを示すためnullを返す（呼び出し側で拠点別の警告にする）
+function buildCultivationDatesWithYearInference(mdList, weekdayList, today) {
+  function build(startYear) {
+    let year = startYear;
+    let prevMonth = null;
+    return mdList.map(md => {
+      if (!md) return null;
+      if (md.year !== null) {
+        year = md.year;
+        prevMonth = md.month;
+        return new Date(year, md.month - 1, md.day);
+      }
+      if (prevMonth !== null && md.month < prevMonth) year++;
+      prevMonth = md.month;
+      return new Date(year, md.month - 1, md.day);
+    });
+  }
+
+  function lastValidDate(dates) {
+    for (let i = dates.length - 1; i >= 0; i--) { if (dates[i]) return dates[i]; }
+    return null;
+  }
+
+  // 実在しない日付（Dateコンストラクタが自動で繰り上げた日付）が1つでもあれば無効
+  function isValidBuilt(dates) {
+    for (let i = 0; i < dates.length; i++) {
+      const md = mdList[i];
+      const d = dates[i];
+      if (!md || !d) continue;
+      if (d.getMonth() !== md.month - 1 || d.getDate() !== md.day) return false;
+    }
+    return true;
+  }
+
+  // 曜日が判明している列は、組み立てた日付の曜日と1列でも食い違ったら無効
+  function weekdayMatches(dates) {
+    for (let i = 0; i < dates.length; i++) {
+      const w = weekdayList[i];
+      if (!w) continue;
+      const d = dates[i];
+      if (!d) continue;
+      if (CULT_WEEKDAY_CHARS[d.getDay()] !== w) return false;
+    }
+    return true;
+  }
+
+  const thisYear = today.getFullYear();
+  const candidateYears = [];
+  for (let i = 0; i <= 6; i++) candidateYears.push(thisYear - i);
+
+  const survivors = [];
+  candidateYears.forEach(y => {
+    const dates = build(y);
+    if (!isValidBuilt(dates)) return;
+    if (!weekdayMatches(dates)) return;
+    survivors.push({ year: y, dates });
+  });
+
+  console.log(`[栽培内訳直接計算] 曜日照合で残った起点年候補: ${survivors.length ? survivors.map(s => s.year).join(', ') : '(なし)'}`);
+
+  if (survivors.length === 0) return null;
+  if (survivors.length === 1) {
+    console.log(`[栽培内訳直接計算] 起点年を${survivors[0].year}に確定しました（曜日一致候補1件）`);
+    return survivors[0].dates;
+  }
+
+  // 複数残った場合：最後の列の日付が本日以降で最も近いものを優先。無ければ本日に最も近いもの
+  let best = null;
+  let bestDiff = null;
+  survivors.forEach(s => {
+    const last = lastValidDate(s.dates);
+    if (!last) return;
+    const diff = last.getTime() - today.getTime();
+    if (diff >= 0 && (bestDiff === null || diff < bestDiff)) { bestDiff = diff; best = s; }
+  });
+  if (!best) {
+    let minAbsDiff = null;
+    survivors.forEach(s => {
+      const last = lastValidDate(s.dates);
+      if (!last) return;
+      const diff = Math.abs(last.getTime() - today.getTime());
+      if (minAbsDiff === null || diff < minAbsDiff) { minAbsDiff = diff; best = s; }
+    });
+  }
+  console.log(`[栽培内訳直接計算] 起点年を${best.year}に確定しました（曜日一致候補${survivors.length}件中、最終列の日付が本日に近いものを採用）`);
+  return best.dates;
+}
+
+// 日付dの月度キー（10日締め）を"YYYY/M"形式で返す（normalizeMonth()と比較可能な表記）。
+// dの日が11日以上ならdの年月、10日以下なら前月の年月（整理済み_Mの2行目「実質月」と同じ意味）
+function cultivationMonthKey(d) {
+  let y = d.getFullYear();
+  let m = d.getMonth() + 1;
+  if (d.getDate() <= 10) {
+    m -= 1;
+    if (m < 1) { m = 12; y -= 1; }
+  }
+  return `${y}/${m}`;
+}
+
+function cultDateKey(d) { return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
+
+function cultRound1(v) { return Math.round(v * 10) / 10; }
+
+// 栽培管理シートの生rows(gviz形式)から、targetMonthKeys（"YYYY/M"形式の月度一覧）の
+// 7項目を月度ごとに集計する。純粋関数（テストから直接呼べる）。
+// 月度の期間（M/11〜翌月10日）の全日がシートの日付列でカバーされていない月度はnullにする
+function aggregateCultivationMonthly(rows, today, targetMonthKeys) {
+  rows = rows || [];
+  const dateRowCells = rows[0] ? rows[0].c.slice(3) : [];
+  const mdList = dateRowCells.map(c => parseCultivationDateCell(c && c.v));
+  const weekdayRowCells = rows[1] ? rows[1].c.slice(3) : [];
+  const weekdayList = weekdayRowCells.map(c => parseCultivationWeekdayCell(c && c.v));
+  const fullDates = buildCultivationDatesWithYearInference(mdList, weekdayList, today);
+  if (!fullDates) {
+    const err = new Error('栽培管理シートの日付(年)を確定できませんでした（曜日と一致する起点年の候補がありません）');
+    err.cultivationYearUnresolved = true;
+    throw err;
+  }
+
+  const presentDates = new Set();
+  fullDates.forEach(d => { if (d) presentDates.add(cultDateKey(d)); });
+  const colMonthKey = fullDates.map(d => d ? cultivationMonthKey(d) : null);
+
+  function freshBucket() {
+    return { '菌床入れ': 0, '芽かき': 0, '収穫': 0, '注水': 0, '散水': 0, '廃棄': 0, 'コンテナ掃除': 0, '稼働コンテナ数': 0 };
+  }
+  const sums = {};
+
+  for (let r = 2; r < rows.length; r++) { // 3行目以降(0-based index2)
+    const c = (rows[r] && rows[r].c) || [];
+    const flagRaw = c[0] ? c[0].v : '';
+    const containerRaw = c[2] ? c[2].v : '';
+    if (!isCultivationTargetRow(flagRaw, containerRaw)) continue;
+
+    const fullRowCells = c.slice(3).map(cell => (cell && cell.v !== undefined && cell.v !== null) ? String(cell.v) : '');
+    const markers = cultExtractMarkers(fullRowCells);
+
+    for (let col = 0; col < fullRowCells.length; col++) {
+      const mk = colMonthKey[col];
+      if (!mk) continue; // 日付が解釈できない列(1行目の予備列等)は無視する
+      if (!sums[mk]) sums[mk] = freshBucket();
+      const bucket = sums[mk];
+      const text = fullRowCells[col] || '';
+      if (text.trim() !== '') bucket['稼働コンテナ数'] += 1;
+      const proc = cultMatchProcess(text);
+      if (proc && Object.prototype.hasOwnProperty.call(bucket, proc.name)) {
+        const weight = proc.weighted ? cultCoefficientAt(markers, col) : 1;
+        bucket[proc.name] += weight;
+      }
+    }
+  }
+
+  function isMonthFullyCovered(y, m) {
+    let d = new Date(y, m - 1, 11);
+    const end = new Date(y, m, 10);
+    while (d.getTime() <= end.getTime()) {
+      if (!presentDates.has(cultDateKey(d))) return false;
+      d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    }
+    return true;
+  }
+
+  const result = {};
+  targetMonthKeys.forEach(mk => {
+    const m = String(mk).match(/^(\d+)\/(\d+)$/);
+    if (!m) { result[mk] = null; return; }
+    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10);
+    if (!isMonthFullyCovered(y, mo)) { result[mk] = null; return; }
+    const b = sums[mk] || freshBucket();
+    result[mk] = {
+      '菌床入れ': cultRound1(b['菌床入れ']),
+      '芽かき': cultRound1(b['芽かき']),
+      '収穫': cultRound1(b['収穫']),
+      '注水': cultRound1(b['注水']),
+      '散水': cultRound1(b['散水']),
+      // 廃棄は「廃棄＋コンテナ掃除」が正しい定義（GAS側の「コピー用」の廃棄は未修正のため、
+      // そちらの値とは異なっていて正常）。コンテナ掃除は常に整数（重み付けなし）のため、
+      // 先に廃棄だけ丸めてから加算しても合計を丸めるのと結果は変わらない
+      '廃棄': cultRound1(b['廃棄']) + b['コンテナ掃除'],
+      '稼働コンテナ数': Math.round(b['稼働コンテナ数']),
+    };
+  });
+  return result;
+}
+
+async function fetchCultivationDirectForSite(site, targetMonthKeys, today) {
+  const cfg = CULTIVATION_SHEETS[site];
+  if (!cfg) return null;
+  const json = await fetchCultivationCsvSheet(cfg.id, cfg.gid);
+  return aggregateCultivationMonthly(json.table.rows, today, targetMonthKeys);
+}
+
+// 取得・計算に失敗した拠点名→警告メッセージ。fetchProductionSheet()の戻り値の形
+// （{months, records}）は変えない方針のため、警告はこの別変数経由で表面化させる
+let cultivationDirectWarnings = {};
+
+// 拠点名・指標名→レコードの値配列を、site内の「出荷量(kg)」行の直後に挿入する
+// （既存レコードが無い場合のフォールバック。CULTIVATION_METRIC_ORDERの順で呼び出すこと）
+function insertCultivationRecordsAfterShipment(records, site, newRecs) {
+  let insertAt = -1;
+  for (let i = 0; i < records.length; i++) {
+    if (records[i].site === site && records[i].metric === '出荷量(kg)') { insertAt = i + 1; break; }
+  }
+  if (insertAt === -1) records.push(...newRecs);
+  else records.splice(insertAt, 0, ...newRecs);
+}
+
+// base（整理済み_分析のparseProductionData()結果）の月一覧を「整理済み_M」基準の
+// unionMonthsに揃え、CULTIVATION_DIRECT_SITES対象拠点の栽培内訳7項目を計算値で
+// 置き換える。戻り値の形（{months, records}）・レコードの形は変えない
+async function applyCultivationDirectOverrides(base, allDataForMonths) {
+  // 整理済み_Mの月一覧（"YYYY年M月"）と整理済み_分析の見出しの月（"YYYY/M"）の和集合。
+  // normalizeMonth()で比較可能な表記("YYYY/M")にそろえ、重複を除き時系列順にする
+  const normWorkMonths = (allDataForMonths.months || []).map(normalizeMonth);
+  const monthSet = new Set([...normWorkMonths, ...base.months]);
+  function monthSortKey(m) {
+    const mm = String(m).match(/^(\d+)\/(\d+)$/);
+    return mm ? parseInt(mm[1], 10) * 100 + parseInt(mm[2], 10) : 0;
+  }
+  const unionMonths = Array.from(monthSet).sort((a, b) => monthSortKey(a) - monthSortKey(b));
+
+  const baseMonthIndex = {};
+  base.months.forEach((m, i) => { baseMonthIndex[m] = i; });
+
+  // 全レコードをunionMonths基準に値を再配置する。整理済み_分析に列がない月度は
+  // null（栽培内訳以外の行は、ここで最終的に「－」表示になる）
+  let records = base.records.map(r => ({
+    ...r,
+    values: unionMonths.map(m => {
+      const i = baseMonthIndex[m];
+      return (i !== undefined) ? r.values[i] : null;
+    }),
+  }));
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  for (const site of CULTIVATION_DIRECT_SITES) {
+    let siteResult = null;
+    try {
+      siteResult = await fetchCultivationDirectForSite(site, unionMonths, today);
+      delete cultivationDirectWarnings[site];
+    } catch (e) {
+      console.error(`[栽培内訳直接計算] ${site}の栽培管理シート取得・計算でエラーが発生しました:`, e);
+      cultivationDirectWarnings[site] = e && e.cultivationYearUnresolved
+        ? `${site}の栽培管理シートの日付（年）を確定できませんでした`
+        : `${site}の栽培内訳を栽培管理シートから取得できませんでした`;
+    }
+
+    function valuesFor(metric) {
+      return unionMonths.map(m => (siteResult && siteResult[m]) ? siteResult[m][metric] : null);
+    }
+
+    const existingIdx = {};
+    records.forEach((r, i) => { if (r.site === site && CULTIVATION_METRIC_ORDER.includes(r.metric)) existingIdx[r.metric] = i; });
+
+    CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] !== undefined).forEach(metric => {
+      const idx = existingIdx[metric];
+      records[idx] = { ...records[idx], values: valuesFor(metric) };
+    });
+
+    const missingMetrics = CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] === undefined);
+    if (missingMetrics.length) {
+      const newRecs = missingMetrics.map(metric => ({ site, cat: '栽培内訳', metric, values: valuesFor(metric) }));
+      insertCultivationRecordsAfterShipment(records, site, newRecs);
+    }
+  }
+
+  return { months: unionMonths, records };
+}
+
 let productionData = null;
+// 6箇所から並行して呼ばれても実行（整理済み_分析の取得・栽培管理シートの取得/計算）が
+// 1回だけになるよう、結果そのものではなくPromiseをメモ化する
+let productionDataPromise = null;
 
 async function fetchProductionSheet() {
-  if (productionData) return productionData;
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${PROD_GID}&headers=1`;
-  const res = await fetch(url);
-  const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
-  productionData = parseProductionData(json);
-  return productionData;
+  if (productionDataPromise) return productionDataPromise;
+  productionDataPromise = (async () => {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${PROD_GID}&headers=1`;
+    const res = await fetch(url);
+    const text = await res.text();
+    const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
+    const base = parseProductionData(json);
+
+    // fetchProductionSheet()はallData（整理済み_M）の読み込みが終わる前に呼ばれる
+    // 可能性があるため、月一覧を組み立てる前に読み込み完了を待つ
+    const allDataForMonths = await waitForAllData();
+
+    const merged = await applyCultivationDirectOverrides(base, allDataForMonths);
+    productionData = merged;
+    return merged;
+  })();
+  return productionDataPromise;
 }
 
 let planData = null;
@@ -4867,6 +5314,13 @@ function renderProductionTab() {
 
   fetchProductionSheet().then(data => {
     renderProductionTable(filterProductionByPeriod(data));
+    // 栽培管理シートの取得・計算に失敗した拠点があれば、表の上部に警告を表示する
+    // （他の拠点・他の行の表示は止めない。fetchProductionSheet()の戻り値の形は
+    // 変えない方針のため、警告はcultivationDirectWarnings経由で別途反映する）
+    const warningMessages = Object.values(cultivationDirectWarnings);
+    if (warningMessages.length) {
+      main.insertAdjacentHTML('afterbegin', `<div class="error-msg">${warningMessages.join(' / ')}</div>`);
+    }
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
     console.error(e);
@@ -5292,7 +5746,9 @@ function renderProductionTable({ months: filteredMonths, records }) {
   });
 
   html += `</tbody></table>
-    </div></div>`;
+    </div>
+    <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ いなべの栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
+    </div>`;
 
   main.innerHTML = html;
 }
@@ -6281,11 +6737,15 @@ async function loadAll() {
   document.getElementById('last-updated').textContent = '';
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   if (countChartInstance) { countChartInstance.destroy(); countChartInstance = null; }
-  productionData = null; // 生産実績タブ等に戻った際、更新ボタンで実際に再取得されるようキャッシュも破棄する
+  // 生産実績タブ等に戻った際、更新ボタンで実際に再取得されるようキャッシュも破棄する
+  productionData = null;
+  productionDataPromise = null;
+  cultivationDirectWarnings = {};
 
   try {
     const json = await fetchSheet();
     allData = buildDataset(json);
+    resolveAllDataReady();
     renderPeriodFilterUI(prevPeriodStart, prevPeriodCount);
     renderEmpTypeFilterUI(prevEmpTypeChecked, prevEmpTypeAll);
     renderRoleTypeFilterUI();
@@ -10808,6 +11268,25 @@ let restoredSummarySubtab = null;
 loadAll();
 // 「標準工数設定」シートはページ読み込み時に一度だけ取得する（更新ボタンでは再取得しない）
 loadStdSettingsSheetOnce().catch(e => console.error('[標準工数設定] 初回取得エラー:', e));
+
+/* ===================== テスト用エクスポート（栽培内訳直接計算） ===================== */
+window.__cultTest = {
+  normalizeCultivationContainerNo,
+  isCultivationTargetRow,
+  parseCultivationDateCell,
+  parseCultivationWeekdayCell,
+  buildCultivationDatesWithYearInference,
+  cultivationMonthKey,
+  cultMatchProcess,
+  cultExtractMarkers,
+  cultCoefficientAt,
+  aggregateCultivationMonthly,
+  applyCultivationDirectOverrides,
+  CULTIVATION_DIRECT_SITES,
+  CULTIVATION_SHEETS,
+  CULTIVATION_METRIC_ORDER,
+  getCultivationDirectWarnings: () => cultivationDirectWarnings,
+};
 </script>
 </body>
 </html>
