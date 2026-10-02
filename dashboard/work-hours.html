@@ -4803,20 +4803,30 @@ function cultSameDate(a, b) {
   return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+const CULT_WEEKDAY_CHARS = ['日', '月', '火', '水', '木', '金', '土'];
+
+// 2行目（曜日）のセル1個を解析する。NFKC正規化・前後空白除去の後、先頭1文字が
+// 「日」〜「土」ならその文字を返す。それ以外（空欄等）はnull（曜日による比較をしない列）
+function parseCultivationWeekdayCell(raw) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).normalize('NFKC').trim();
+  if (!s) return null;
+  const ch = s.charAt(0);
+  return CULT_WEEKDAY_CHARS.indexOf(ch) !== -1 ? ch : null;
+}
+
 // 年なしM/Dの列(左から右)に対し、月が前の列より小さくなったら年を+1して実際のDateの
 // 配列を組み立てる。明示年（YYYY/M/D形式）のセルに当たったら、その年をそのまま採用して
 // 以降の判定基準にする（年の補完は明示年のセル以降もそのまま引き継がれる）。
-// 起点年は「今年」から6年前までの範囲で、本日のM/Dと一致する列ができるものを探す。
 //
-// 群馬のように複数年分(365日超)の列が並ぶ場合、どの起点年で組み立てても「最初の1年分
-// （まだ年繰り上げが起きていない区間）」の中に本日と同じM/Dの列が必ず含まれてしまい、
-// 「本日を含む並びになる起点年」が複数（実質的に候補全て）ヒットし得る。これをそのまま
-// 最初に見つかった候補（＝今年）で確定させると、配列全体の年が丸ごと本来より新しい方へ
-// ずれてしまう（本日と一致する列自体は配列の先頭寄りの誤った位置になり、末尾＝実際の
-// 本日時点のデータの年が余分にずれる）。そのため、本日に一致する候補が複数ある場合は、
-// 「本日が見つからない場合」と同じ基準（最後の列の日付が本日以降で最も近い）で
-// 候補を1つに絞り込む（本日に一致する候補が1つだけならそのまま採用する）
-function buildCultivationDatesWithYearInference(mdList, today) {
+// シートの表示形式がm/d（年を表示しない）のため、1行目のCSVからは年が分からない。
+// そこで起点年Yを「今年」から6年前までの7通り試し、2行目の曜日（日〜土）と実際に
+// 組み立てた日付の曜日が1列でも食い違う候補、および実在しない日付（うるう年でない
+// 年の2/29等、Dateコンストラクタが自動で繰り上げてしまうもの）を含む候補を除外する。
+// 残った候補が1つならそれを採用し、複数残った場合は最後の列の日付が本日以降で最も
+// 近いものを（無ければ本日に最も近いものを）採用する。1つも残らない場合は、
+// 年を確定できなかったことを示すためnullを返す（呼び出し側で拠点別の警告にする）
+function buildCultivationDatesWithYearInference(mdList, weekdayList, today) {
   function build(startYear) {
     let year = startYear;
     let prevMonth = null;
@@ -4838,37 +4848,69 @@ function buildCultivationDatesWithYearInference(mdList, today) {
     return null;
   }
 
-  // 最後の列の日付が本日以降で最も近いものを選ぶ（複数候補の絞り込み・フォールバック共通）
-  function pickClosestFutureLast(datesList) {
-    let best = null;
-    let bestDiff = null;
-    datesList.forEach(dates => {
-      const last = lastValidDate(dates);
-      if (!last) return;
-      const diff = last.getTime() - today.getTime();
-      if (diff >= 0 && (bestDiff === null || diff < bestDiff)) { bestDiff = diff; best = dates; }
-    });
-    return best;
+  // 実在しない日付（Dateコンストラクタが自動で繰り上げた日付）が1つでもあれば無効
+  function isValidBuilt(dates) {
+    for (let i = 0; i < dates.length; i++) {
+      const md = mdList[i];
+      const d = dates[i];
+      if (!md || !d) continue;
+      if (d.getMonth() !== md.month - 1 || d.getDate() !== md.day) return false;
+    }
+    return true;
+  }
+
+  // 曜日が判明している列は、組み立てた日付の曜日と1列でも食い違ったら無効
+  function weekdayMatches(dates) {
+    for (let i = 0; i < dates.length; i++) {
+      const w = weekdayList[i];
+      if (!w) continue;
+      const d = dates[i];
+      if (!d) continue;
+      if (CULT_WEEKDAY_CHARS[d.getDay()] !== w) return false;
+    }
+    return true;
   }
 
   const thisYear = today.getFullYear();
   const candidateYears = [];
   for (let i = 0; i <= 6; i++) candidateYears.push(thisYear - i);
 
-  const matching = candidateYears
-    .map(y => build(y))
-    .filter(dates => dates.some(d => d && cultSameDate(d, today)));
+  const survivors = [];
+  candidateYears.forEach(y => {
+    const dates = build(y);
+    if (!isValidBuilt(dates)) return;
+    if (!weekdayMatches(dates)) return;
+    survivors.push({ year: y, dates });
+  });
 
-  if (matching.length === 1) return matching[0];
-  if (matching.length > 1) {
-    const picked = pickClosestFutureLast(matching);
-    if (picked) return picked;
-    return matching[0];
+  console.log(`[栽培内訳直接計算] 曜日照合で残った起点年候補: ${survivors.length ? survivors.map(s => s.year).join(', ') : '(なし)'}`);
+
+  if (survivors.length === 0) return null;
+  if (survivors.length === 1) {
+    console.log(`[栽培内訳直接計算] 起点年を${survivors[0].year}に確定しました（曜日一致候補1件）`);
+    return survivors[0].dates;
   }
 
-  const bestDates = pickClosestFutureLast(candidateYears.map(y => build(y)));
-  if (bestDates) return bestDates;
-  return build(thisYear);
+  // 複数残った場合：最後の列の日付が本日以降で最も近いものを優先。無ければ本日に最も近いもの
+  let best = null;
+  let bestDiff = null;
+  survivors.forEach(s => {
+    const last = lastValidDate(s.dates);
+    if (!last) return;
+    const diff = last.getTime() - today.getTime();
+    if (diff >= 0 && (bestDiff === null || diff < bestDiff)) { bestDiff = diff; best = s; }
+  });
+  if (!best) {
+    let minAbsDiff = null;
+    survivors.forEach(s => {
+      const last = lastValidDate(s.dates);
+      if (!last) return;
+      const diff = Math.abs(last.getTime() - today.getTime());
+      if (minAbsDiff === null || diff < minAbsDiff) { minAbsDiff = diff; best = s; }
+    });
+  }
+  console.log(`[栽培内訳直接計算] 起点年を${best.year}に確定しました（曜日一致候補${survivors.length}件中、最終列の日付が本日に近いものを採用）`);
+  return best.dates;
 }
 
 // 日付dの月度キー（10日締め）を"YYYY/M"形式で返す（normalizeMonth()と比較可能な表記）。
@@ -4894,7 +4936,14 @@ function aggregateCultivationMonthly(rows, today, targetMonthKeys) {
   rows = rows || [];
   const dateRowCells = rows[0] ? rows[0].c.slice(3) : [];
   const mdList = dateRowCells.map(c => parseCultivationDateCell(c && c.v));
-  const fullDates = buildCultivationDatesWithYearInference(mdList, today);
+  const weekdayRowCells = rows[1] ? rows[1].c.slice(3) : [];
+  const weekdayList = weekdayRowCells.map(c => parseCultivationWeekdayCell(c && c.v));
+  const fullDates = buildCultivationDatesWithYearInference(mdList, weekdayList, today);
+  if (!fullDates) {
+    const err = new Error('栽培管理シートの日付(年)を確定できませんでした（曜日と一致する起点年の候補がありません）');
+    err.cultivationYearUnresolved = true;
+    throw err;
+  }
 
   const presentDates = new Set();
   fullDates.forEach(d => { if (d) presentDates.add(cultDateKey(d)); });
@@ -5020,7 +5069,9 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
       delete cultivationDirectWarnings[site];
     } catch (e) {
       console.error(`[栽培内訳直接計算] ${site}の栽培管理シート取得・計算でエラーが発生しました:`, e);
-      cultivationDirectWarnings[site] = `${site}の栽培内訳を栽培管理シートから取得できませんでした`;
+      cultivationDirectWarnings[site] = e && e.cultivationYearUnresolved
+        ? `${site}の栽培管理シートの日付（年）を確定できませんでした`
+        : `${site}の栽培内訳を栽培管理シートから取得できませんでした`;
     }
 
     function valuesFor(metric) {
@@ -11223,6 +11274,7 @@ window.__cultTest = {
   normalizeCultivationContainerNo,
   isCultivationTargetRow,
   parseCultivationDateCell,
+  parseCultivationWeekdayCell,
   buildCultivationDatesWithYearInference,
   cultivationMonthKey,
   cultMatchProcess,
