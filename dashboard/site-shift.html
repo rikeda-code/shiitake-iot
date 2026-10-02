@@ -70,7 +70,7 @@ table.grid { border-collapse: separate; border-spacing: 0; font-variant-numeric:
 .chip.栽培 { background: var(--saibai-soft); color: var(--saibai); }
 .chip.出荷 { background: var(--shukka-soft); color: var(--shukka); }
 .chip.配送 { background: var(--haiso-soft); color: var(--haiso); }
-td.cell { min-width: 50px; font-family: var(--font-code); font-size: .74rem; letter-spacing: -.02em; cursor: cell; position: relative; }
+td.cell { min-width: 52px; height: 38px; line-height: 1.15; font-family: var(--font-code); font-size: .74rem; letter-spacing: -.02em; cursor: cell; position: relative; }
 td.cell.off { color: var(--muted); background: var(--off-soft); font-family: var(--font-body); font-weight: 700; }
 td.cell.absent { color: var(--sun); }
 td.cell.custom { font-size: .68rem; color: var(--accent); }
@@ -143,6 +143,7 @@ td.cell.na { background: repeating-linear-gradient(135deg, var(--off-soft) 0 4px
 button:disabled { opacity: .5; cursor: default; }
 .leave-btns { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .leave-btns button { padding: 4px 9px; font-size: .8rem; }
+td.cell .t2 { display: block; }
 /* 入力／印刷のタブ */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 8px 18px; font-weight: 700; color: var(--muted); margin-bottom: -1px; }
@@ -155,6 +156,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .print-controls fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .print-controls legend { font-size: .72rem; color: var(--muted); margin-bottom: 4px; padding: 0; }
 .print-controls label { display: inline-flex; gap: 4px; align-items: center; font-size: .85rem; }
+.print-controls input[type=date] { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .print-controls input[type=number] { width: 4em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .print-controls .quick button { padding: 3px 10px; font-size: .78rem; }
 .print-controls .go { margin-left: auto; display: flex; gap: 8px; align-items: center; }
@@ -169,6 +171,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table { border-collapse: collapse; table-layout: fixed; width: 100%; font-variant-numeric: tabular-nums; }
 .pp-table th, .pp-table td { border: .2mm solid #9a9a9a; padding: 0 .5mm; line-height: 1; text-align: center; white-space: nowrap; overflow: hidden; color: #111; }
 .pp-table thead th { background: #eef0ee; font-weight: 700; line-height: 1.05; }
+.pp-table thead th .mo { display: block; font-size: .7em; font-weight: 700; }
 .pp-table thead th .wd { display: block; font-weight: 400; font-size: .82em; }
 .pp-table .sun { color: #c2410c; } .pp-table .sat { color: #1d4ed8; }
 .pp-table td.we, .pp-table th.we { background: #f6f6f4; }
@@ -177,7 +180,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table td.off { color: #333; font-weight: 700; }
 .pp-table td.absent { color: #b91c1c; }
 .pp-table .t2 { display: block; line-height: 1.05; letter-spacing: -.02em; }
-.pp-table td.tt, .pp-table th.tt { text-align: right; font-weight: 700; border-left: .5mm solid #111; }
+.pp-table td.tt, .pp-table th.tt { text-align: right; font-weight: 700; border-left: .5mm solid #111; font-size: .85em; }
 .pp-table tr.grp td { border-top: .45mm solid #111; }
 .pp-table tfoot td, .pp-table tfoot th { background: #f1f1ee; font-weight: 700; }
 .pp-table tfoot tr:first-child > * { border-top: .6mm double #111; }
@@ -223,9 +226,10 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <div class="print-controls">
       <fieldset>
         <legend>期間</legend>
-        <label><input type="number" id="ppFrom" min="1" max="31" value="1">日</label>〜
-        <label><input type="number" id="ppTo" min="1" max="31" value="31">日</label>
-        <span class="quick"><button type="button" data-range="all">月全体</button> <button type="button" data-range="h1">1〜15日</button> <button type="button" data-range="h2">16日〜末</button></span>
+        <label><input type="date" id="ppFrom" aria-label="開始日"></label>〜
+        <label><input type="date" id="ppTo" aria-label="終了日"></label>
+        <span class="quick"><button type="button" data-range="all">月全体</button> <button type="button" data-range="h1">1〜15日</button> <button type="button" data-range="h2">16日〜末</button> <button type="button" data-range="cross">16日〜翌月15日</button></span>
+        <span class="hint" id="ppNote"></span>
       </fieldset>
       <fieldset id="ppDepts"><legend>部門</legend></fieldset>
       <fieldset>
@@ -319,6 +323,11 @@ function normVal(v) {
 }
 // 表示用に短くする：'8:00-17:00' → '8-17'
 const shortVal = v => String(v || '').replace(/:00/g, '');
+// セルの表示：時間は「8:00-」「17:00」の2段（印刷と同じ）
+function cellHtml(v) {
+  const tm = normVal(v).match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+  return tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
+}
 // 実働時間：拘束5時間以上は1時間休憩。不正はnull
 function cellHours(v) {
   if (!v || isLeave(v)) return 0;
@@ -450,7 +459,7 @@ function render() {
       if (isLeave(v)) cls.push('off', v === '欠勤' ? 'absent' : 'leave');
       else if (hr === null) cls.push('bad');
       if (hr) { sum += hr; if (tallied(m)) { dayTot[div][d] += hr; dayCnt[d]++; } }
-      h += `<td class="${cls.join(' ')}" data-r="${r}" data-c="${d}"${hr === null ? ' title="時間の形式を確認してください"' : ''}>${esc(shortVal(v))}</td>`;
+      h += `<td class="${cls.join(' ')}" data-r="${r}" data-c="${d}"${hr === null ? ' title="時間の形式を確認してください"' : ''}>${cellHtml(v)}</td>`;
     }
     if (tallied(m)) siteTot[div] += sum;
     h += `<td class="tot">${fmt(sum)}</td></tr>`;
@@ -506,7 +515,7 @@ function startEdit(initial) {
   const td = document.querySelector(`td.cell[data-r="${cursor.r}"][data-c="${cursor.c}"]`);
   const inp = document.createElement('input');
   inp.id = 'cellEditor';
-  inp.value = initial ?? shortVal(data[rows[cursor.r].key]?.[cursor.c] || '');
+  inp.value = initial ?? (data[rows[cursor.r].key]?.[cursor.c] || '');
   td.appendChild(inp); inp.focus();
   if (initial == null) inp.select();
   editing = { inp, r: cursor.r, c: cursor.c };
@@ -524,7 +533,7 @@ function commit() {
 }
 function selectionTSV() {
   const s = norm(sel); const out = [];
-  for (let r = s.r0; r <= s.r1; r++) { const a = []; for (let c = s.c0; c <= s.c1; c++) a.push(shortVal(data[rows[r].key]?.[c] || '')); out.push(a.join('\t')); }
+  for (let r = s.r0; r <= s.r1; r++) { const a = []; for (let c = s.c0; c <= s.c1; c++) a.push(data[rows[r].key]?.[c] || ''); out.push(a.join('\t')); }
   return out.join('\n');
 }
 function pasteTSV(text) {
@@ -634,7 +643,7 @@ $('saveBtn').onclick = async () => {
 };
 $('site').onchange = () => load();
 $('reloadBtn').onclick = () => load(true);
-$('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); load(); };
+$('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); $('ppFrom').value = ''; $('ppTo').value = ''; load(); };
 
 /* ── 固定シフト（30分単位） ── */
 let fxKey = null, fxDraft = null;
@@ -744,20 +753,56 @@ function setView(v) {
 $('tabEdit').onclick = () => setView('edit');
 $('tabPrint').onclick = () => setView('print');
 
+// 期間は日付で選ぶ（月をまたいでもよい。最大31日）
+const isoOf = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const dateOf = iso => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
+function setPpRange(from, to) { $('ppFrom').value = isoOf(from); $('ppTo').value = isoOf(to); }
 function ppRange() {
-  const n = daysIn();
-  let a = Math.max(1, Math.min(n, +$('ppFrom').value || 1));
-  let b = Math.max(1, Math.min(n, +$('ppTo').value || n));
+  let a = $('ppFrom').value ? dateOf($('ppFrom').value) : new Date(year, month - 1, 1);
+  let b = $('ppTo').value ? dateOf($('ppTo').value) : new Date(year, month, 0);
   if (a > b) [a, b] = [b, a];
-  return [a, b];
+  const max = new Date(a); max.setDate(max.getDate() + 30);
+  $('ppNote').textContent = b > max ? '1枚に収めるため、31日分までにしています' : '';
+  if (b > max) { b = max; $('ppTo').value = isoOf(b); }
+  const days = [];
+  for (const dt = new Date(a); dt <= b; dt.setDate(dt.getDate() + 1)) {
+    days.push({ iso: isoOf(dt), ym: `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`, m: dt.getMonth() + 1, d: dt.getDate(), wd: dt.getDay() });
+  }
+  return days;
 }
 document.querySelector('.print-controls .quick').addEventListener('click', ev => {
   const r = ev.target.dataset.range; if (!r) return;
-  const n = daysIn();
-  $('ppFrom').value = r === 'h2' ? 16 : 1;
-  $('ppTo').value = r === 'h1' ? 15 : n;
+  const first = new Date(year, month - 1, 1), last = new Date(year, month, 0);
+  if (r === 'all') setPpRange(first, last);
+  if (r === 'h1') setPpRange(first, new Date(year, month - 1, 15));
+  if (r === 'h2') setPpRange(new Date(year, month - 1, 16), last);
+  if (r === 'cross') setPpRange(new Date(year, month - 1, 16), new Date(year, month, 15));
   renderPrint();
 });
+
+// 表示中の月以外のシフト（印刷で月をまたぐとき用）。{ 'yyyy-MM': { key: { 日: 値 } } }
+let otherMonths = {}, otherSite = null;
+const loadingMonths = new Set();
+function valueOn(m, day) {
+  if (day.ym === monthKey()) return data[m.key]?.[day.d] || '';
+  return otherMonths[day.ym]?.[m.key]?.[day.d] || '';
+}
+function toMonthMap(res) {
+  const map = {};
+  res.shifts.forEach(x => { (map[x.key] ||= {})[+x.date.slice(8)] = normVal(x.value); });
+  return map;
+}
+function ensureMonths(yms) {
+  if (otherSite !== $('site').value) { otherMonths = {}; otherSite = $('site').value; }
+  yms.filter(ym => ym !== monthKey() && !otherMonths[ym] && !loadingMonths.has(ym)).forEach(ym => {
+    try { const c = JSON.parse(localStorage.getItem(`${CACHE_PREFIX}${$('site').value}:${ym}`) || 'null'); if (c) otherMonths[ym] = toMonthMap(c); } catch (e) { /* なくてもよい */ }
+    loadingMonths.add(ym);
+    api('GET', { action: 'load', site: $('site').value, month: ym })
+      .then(res => { otherMonths[ym] = toMonthMap(res); })
+      .catch(err => toast(`${ym.replace('-', '年')}月のシフトを読み込めませんでした：${err.message}`))
+      .finally(() => { loadingMonths.delete(ym); if (document.body.dataset.view === 'print') renderPrint(); });
+  });
+}
 ['ppFrom', 'ppTo', 'ppEmpty', 'ppTotals'].forEach(id => $(id).addEventListener('change', () => renderPrint()));
 $('ppDepts').addEventListener('change', ev => {
   if (ev.target.checked) ppDeptSel.add(ev.target.value); else ppDeptSel.delete(ev.target.value);
@@ -773,11 +818,11 @@ function renderPrint(shrink = 1) {
   const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
   $('ppDepts').innerHTML = '<legend>部門</legend>' + present.map(v =>
     `<label><input type="checkbox" value="${v}" id="ppd-${v}"${ppDeptSel.has(v) ? ' checked' : ''}><span class="chip ${v}">${v === 'その他' ? 'その他（生産部長など）' : v}</span></label>`).join('');
-  const [a, b] = ppRange();
-  $('ppFrom').value = a; $('ppTo').value = b;
-  const days = []; for (let d = a; d <= b; d++) days.push(d);
+  if (!$('ppFrom').value) setPpRange(new Date(year, month - 1, 1), new Date(year, month, 0));
+  const days = ppRange();
+  ensureMonths([...new Set(days.map(x => x.ym))]);
   let list = all.filter(m => ppDeptSel.has(divOf(m.dept)));
-  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => data[m.key]?.[d]));
+  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => valueOn(m, d)));
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
   const divs = DIVS.filter(v => ppDeptSel.has(v) && list.some(m => divOf(m.dept) === v && tallied(m)));
   const showTotals = $('ppTotals').checked;
@@ -787,25 +832,29 @@ function renderPrint(shrink = 1) {
   const PAGE_W = 277, TABLE_H = 190 - 9 - 1.5 - 4.5; // 見出し・下の注記の分を引く
   const nameW = 30, deptW = 13, totW = 13;
   const dayW = (PAGE_W - nameW - deptW - totW) / days.length;
-  const lines = list.length + footRows + 1.7; // 見出し行は日付と曜日の2段
+  const headH = days.some(d => d.ym !== days[0].ym) || days[0].d !== 1 ? 2.4 : 1.7; // 見出し：（月）・日・曜日
+  const lines = list.length + footRows + headH;
   const rowH = Math.min(7, TABLE_H / lines) * shrink;
   // 時間は「8:00-」「17:00」の2段で書く（いちばん長い段は6文字）
   const timeFont = Math.min(rowH * 0.43, (dayW - 1) / (6 * 0.58), 3.4);
   const offFont = Math.min(rowH * 0.7, dayW * 0.6, 5);
-  const cellFont = Math.min(rowH * 0.55, (dayW - 1) / (4 * 0.58), 3.4); // 集計行の数字
+  const cellFont = Math.min(rowH * 0.55, (dayW - 1) / (4.6 * 0.6), 3.4); // 集計行の数字（例：26.5）
   const baseFont = Math.min(rowH * 0.58, 3.4);
 
-  const wdOf = d => new Date(year, month - 1, d).getDay();
-  const weCls = d => { const w = wdOf(d); return w === 0 || w === 6 ? ' we' : ''; };
-  const headCls = d => { const w = wdOf(d); return w === 0 ? 'we sun' : w === 6 ? 'we sat' : ''; };
+  const weCls = d => d.wd === 0 || d.wd === 6 ? ' we' : '';
+  const headCls = d => d.wd === 0 ? 'we sun' : d.wd === 6 ? 'we sat' : '';
+  const label = d => `${d.m}/${d.d}（${WD[d.wd]}）`;
+  const first = days[0], last = days[days.length - 1];
   // 氏名は枠に収まる大きさまで文字を小さくする（全角1、半角0.55文字分で数える）
   const nameFont = name => {
     const len = [...name].reduce((t, ch) => t + (ch.charCodeAt(0) < 0x2000 ? 0.68 : 1), 0);
     return Math.min(baseFont, (nameW - 1.5) / Math.max(len, 1));
   };
-  let h = `<div class="pp-head"><h2>${esc($('site').value)}　${year}年${month}月 シフト表</h2><span class="meta">${month}/${a}（${WD[wdOf(a)]}）〜${month}/${b}（${WD[wdOf(b)]}）・${list.length}名・${[...ppDeptSel].filter(v => present.includes(v)).join('／')}</span></div>`;
+  const title = first.ym === last.ym ? `${first.ym.slice(0, 4)}年${first.m}月` : `${first.ym.slice(0, 4)}年${first.m}月〜${last.m}月`;
+  const waiting = days.some(d => d.ym !== monthKey() && !otherMonths[d.ym]);
+  let h = `<div class="pp-head"><h2>${esc($('site').value)}　${title} シフト表</h2><span class="meta">${waiting ? '（別の月を読み込み中…）' : ''}${label(first)}〜${label(last)}・${list.length}名・${[...ppDeptSel].filter(v => present.includes(v)).join('／')}</span></div>`;
   h += `<table class="pp-table" style="font-size:${baseFont.toFixed(2)}mm"><colgroup><col style="width:${nameW}mm"><col style="width:${deptW}mm">${days.map(() => `<col style="width:${dayW.toFixed(2)}mm">`).join('')}<col style="width:${totW}mm"></colgroup>`;
-  h += `<thead><tr style="height:${(rowH * 1.7).toFixed(2)}mm"><th>氏名</th><th>部門</th>${days.map(d => `<th class="${headCls(d)}">${d}<span class="wd">${WD[wdOf(d)]}</span></th>`).join('')}<th class="tt">計</th></tr></thead><tbody>`;
+  h += `<thead><tr style="height:${(rowH * headH).toFixed(2)}mm"><th>氏名</th><th>部門</th>${days.map(d => `<th class="${headCls(d)}">${d.d === 1 || d === first ? `<span class="mo">${d.m}月</span>` : ''}${d.d}<span class="wd">${WD[d.wd]}</span></th>`).join('')}<th class="tt">計</th></tr></thead><tbody>`;
   const dayTot = {}; divs.forEach(v => dayTot[v] = {});
   const cnt = {};
   let prevDiv = null;
@@ -814,10 +863,10 @@ function renderPrint(shrink = 1) {
     let sum = 0;
     h += `<tr class="${prevDiv && prevDiv !== div ? 'grp' : ''}" style="height:${rowH.toFixed(2)}mm"><td class="nm" style="font-size:${nameFont(m.name).toFixed(2)}mm">${esc(m.name)}</td><td class="dp">${esc(m.dept)}</td>`;
     days.forEach(d => {
-      const v = data[m.key]?.[d] || '';
+      const v = valueOn(m, d);
       const hr = cellHours(v) || 0;
       sum += hr;
-      if (hr && tallied(m) && dayTot[div]) { dayTot[div][d] = (dayTot[div][d] || 0) + hr; cnt[d] = (cnt[d] || 0) + 1; }
+      if (hr && tallied(m) && dayTot[div]) { dayTot[div][d.iso] = (dayTot[div][d.iso] || 0) + hr; cnt[d.iso] = (cnt[d.iso] || 0) + 1; }
       const tm = normVal(v).match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
       const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
       const off = isLeave(v);
@@ -836,9 +885,9 @@ function renderPrint(shrink = 1) {
       return `<tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">${label}</th>${tds}<td class="tt">${num(t)}</td></tr>`;
     };
     h += '<tfoot>';
-    divs.forEach(v => { h += row(`${v} 時間`, d => dayTot[v][d] || 0); });
-    if (divs.length > 1) h += row('合計 時間', d => divs.reduce((s, v) => s + (dayTot[v][d] || 0), 0));
-    h += `<tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d] || ''}</td>`).join('')}<td class="tt"></td></tr></tfoot>`;
+    divs.forEach(v => { h += row(`${v} 時間`, d => dayTot[v][d.iso] || 0); });
+    if (divs.length > 1) h += row('合計 時間', d => divs.reduce((s, v) => s + (dayTot[v][d.iso] || 0), 0));
+    h += `<tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d.iso] || ''}</td>`).join('')}<td class="tt"></td></tr></tfoot>`;
   }
   h += '</table>';
   h += `<div class="pp-foot"><span>休憩：拘束5時間以上は1時間を引いて集計　休＝公休</span><span>印刷 ${new Date().toLocaleDateString('ja-JP')}</span></div>`;
