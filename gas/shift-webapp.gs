@@ -15,7 +15,7 @@
  * ── デプロイ手順（Apps Scriptエディタで実施）──────────
  * 1. 新規スタンドアロンのApps Scriptプロジェクトを作成し、このファイルを貼り付ける
  * 2. 関数「setup」を1回実行（権限を許可）→ シフト_データ／シフト_固定シートが作られる
- * 3. 関数「importLegacyShift」を1回実行 → 旧シフト表の10/11以降を取り込む
+ * 3. 関数「importLegacyShift」を1回実行 → 旧シフト表の10/1以降を取り込む
  *    （実行ログに取り込めなかったセル・照合できなかった氏名が出る）
  * 4. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」
  *    実行ユーザー「自分」／アクセスできるユーザー「全員」
@@ -45,7 +45,7 @@ const FIXED_SHEET_NAME = 'シフト_固定';
 const LEGACY_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
 const LEGACY_SHEET_GID = 872290181;
 const LEGACY_SITE = 'いなべ';
-const LEGACY_FROM = '2026-10-11';
+const LEGACY_FROM = '2026-10-01';
 // 旧シフト表の呼び名 → 整理済み_Mの氏名（work-hours-forecast.html と同じ対応表）
 const LEGACY_NAME_ALIASES = {
   'ハイ': 'NGUYEN VAN HAI', 'ヴィン': 'HOANG VAN VINH', 'タム': 'DAO VAN TAM',
