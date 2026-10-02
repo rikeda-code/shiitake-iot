@@ -171,7 +171,8 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table td.we, .pp-table th.we { background: #f6f6f4; }
 .pp-table td.nm { text-align: left; font-weight: 700; }
 .pp-table td.dp { font-size: .85em; color: #333; }
-.pp-table td.off { color: #888; }
+.pp-table td.off { color: #333; font-weight: 700; }
+.pp-table .t2 { display: block; line-height: 1.05; letter-spacing: -.02em; }
 .pp-table td.tt, .pp-table th.tt { text-align: right; font-weight: 700; border-left: .5mm solid #111; }
 .pp-table tr.grp td { border-top: .45mm solid #111; }
 .pp-table tfoot td, .pp-table tfoot th { background: #f1f1ee; font-weight: 700; }
@@ -765,8 +766,10 @@ function renderPrint(shrink = 1) {
   const dayW = (PAGE_W - nameW - deptW - totW) / days.length;
   const lines = list.length + footRows + 1.7; // 見出し行は日付と曜日の2段
   const rowH = Math.min(7, TABLE_H / lines) * shrink;
-  const longest = Math.max(4, ...list.flatMap(m => days.map(d => shortVal(data[m.key]?.[d] || '').length)));
-  const cellFont = Math.min(rowH * 0.55, (dayW - 1.2) / (longest * 0.56), 3.6);
+  // 時間は「8:00-」「17:00」の2段で書く（いちばん長い段は6文字）
+  const timeFont = Math.min(rowH * 0.43, (dayW - 1) / (6 * 0.58), 3.4);
+  const offFont = Math.min(rowH * 0.7, dayW * 0.6, 5);
+  const cellFont = Math.min(rowH * 0.55, (dayW - 1) / (4 * 0.58), 3.4); // 集計行の数字
   const baseFont = Math.min(rowH * 0.58, 3.4);
 
   const wdOf = d => new Date(year, month - 1, d).getDay();
@@ -792,7 +795,10 @@ function renderPrint(shrink = 1) {
       const hr = cellHours(v) || 0;
       sum += hr;
       if (hr && tallied(m) && dayTot[div]) { dayTot[div][d] = (dayTot[div][d] || 0) + hr; cnt[d] = (cnt[d] || 0) + 1; }
-      h += `<td class="${(v === '休' || v === '有') ? 'off' : ''}${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${esc(shortVal(v))}</td>`;
+      const tm = normVal(v).match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+      const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
+      const off = v === '休' || v === '有';
+      h += `<td class="${off ? 'off' : ''}${weCls(d)}" style="font-size:${(tm ? timeFont : off ? offFont : timeFont).toFixed(2)}mm">${body}</td>`;
     });
     h += `<td class="tt">${sum ? (Math.round(sum * 10) / 10) : ''}</td></tr>`;
     prevDiv = div;
