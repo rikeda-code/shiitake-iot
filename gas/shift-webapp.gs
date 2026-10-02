@@ -1,5 +1,5 @@
 /**
- * 拠点シフト表 GAS Webアプリ（dashboard/shift.html のバックエンド）
+ * 拠点シフト表 GAS Webアプリ（dashboard/site-shift.html のバックエンド）
  *
  * ── 役割 ──────────────────────────────────────────────
  * ・整理済み_M（手書きの従業員マスタ）から拠点ごとのメンバーを読み込む
@@ -19,7 +19,7 @@
  *    （実行ログに取り込めなかったセル・照合できなかった氏名が出る）
  * 4. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」
  *    実行ユーザー「自分」／アクセスできるユーザー「全員」
- * 5. 発行されたURLを dashboard/shift.html の SHIFT_GAS_URL と
+ * 5. 発行されたURLを dashboard/site-shift.html の SHIFT_GAS_URL と
  *    dashboard/work-hours-forecast.html の SHIFT_GAS_URL に設定する
  * コード更新時は「デプロイを管理」から新バージョンとして再デプロイすること。
  *
