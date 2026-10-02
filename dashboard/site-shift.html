@@ -71,7 +71,8 @@ table.grid { border-collapse: separate; border-spacing: 0; font-variant-numeric:
 .chip.出荷 { background: var(--shukka-soft); color: var(--shukka); }
 .chip.配送 { background: var(--haiso-soft); color: var(--haiso); }
 td.cell { min-width: 50px; font-family: var(--font-code); font-size: .74rem; letter-spacing: -.02em; cursor: cell; position: relative; }
-td.cell.off { color: var(--off); background: var(--off-soft); }
+td.cell.off { color: var(--muted); background: var(--off-soft); font-family: var(--font-body); font-weight: 700; }
+td.cell.absent { color: var(--sun); }
 td.cell.custom { font-size: .68rem; color: var(--accent); }
 td.cell.weekend { background-image: linear-gradient(var(--sel-soft), var(--sel-soft)); background-size: 0 0; }
 td.cell.in-sel { background: var(--sel-soft); }
@@ -140,6 +141,8 @@ td.cell.na { background: repeating-linear-gradient(135deg, var(--off-soft) 0 4px
 .notice.error { border-color: var(--sun); color: var(--sun); background: var(--surface); }
 .loading { padding: 40px; text-align: center; color: var(--muted); }
 button:disabled { opacity: .5; cursor: default; }
+.leave-btns { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.leave-btns button { padding: 4px 9px; font-size: .8rem; }
 /* 入力／印刷のタブ */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 8px 18px; font-weight: 700; color: var(--muted); margin-bottom: -1px; }
@@ -172,6 +175,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table td.nm { text-align: left; font-weight: 700; }
 .pp-table td.dp { font-size: .85em; color: #333; }
 .pp-table td.off { color: #333; font-weight: 700; }
+.pp-table td.absent { color: #b91c1c; }
 .pp-table .t2 { display: block; line-height: 1.05; letter-spacing: -.02em; }
 .pp-table td.tt, .pp-table th.tt { text-align: right; font-weight: 700; border-left: .5mm solid #111; }
 .pp-table tr.grp td { border-top: .45mm solid #111; }
@@ -203,6 +207,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <select id="month" aria-label="対象月"></select>
     <button id="applyFixed" class="edit-only">固定シフトを反映</button>
     <button id="clearSel" class="edit-only">選択範囲をクリア</button>
+    <span class="leave-btns edit-only" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
     <button id="reloadBtn" title="スプレッドシートから最新の内容を読み直します">更新</button>
@@ -236,7 +241,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休」、有給は「有」。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
+    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -280,7 +285,7 @@ const $ = id => document.getElementById(id);
 let year, month;
 let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
-let data = {};      // data[key][day] = '8:00-17:00' / '休' / '有'
+let data = {};      // data[key][day] = '8:00-17:00' / 休・代休・有休・季節休・欠勤
 let fixed = {};     // fixed[key] = 月〜日の7要素
 let dirty = false;
 let sel = null, anchor = null, cursor = null, dragging = false, editing = null, editing0 = null;
@@ -299,10 +304,14 @@ const activeOn = (m, d) => ON_SHIFT_FLAGS.includes(m.flag);
 const fmt = h => (Math.round(h * 10) / 10).toLocaleString('ja-JP') + 'h';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 
+// 休みの種類（時間は0として扱う）。よくある書き方はそろえる
+const LEAVE_TYPES = ['休', '代休', '有休', '季節休', '欠勤'];
+const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
+const isLeave = v => LEAVE_TYPES.includes(v);
 // 入力をそろえる：全角・〜・時だけ → '8:00-17:00'
 function normVal(v) {
   let s = String(v || '').normalize('NFKC').trim().replace(/[〜~ー―−]/g, '-').replace(/\s/g, '');
-  if (s === 'やす' || s === '公休') s = '休';
+  if (LEAVE_ALIASES[s]) s = LEAVE_ALIASES[s];
   const m = s.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
   return m ? `${+m[1]}:${m[2] || '00'}-${+m[3]}:${m[4] || '00'}` : s;
 }
@@ -310,7 +319,7 @@ function normVal(v) {
 const shortVal = v => String(v || '').replace(/:00/g, '');
 // 実働時間：拘束5時間以上は1時間休憩。不正はnull
 function cellHours(v) {
-  if (!v || v === '休' || v === '有') return 0;
+  if (!v || isLeave(v)) return 0;
   const m = String(v).match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
   if (!m) return null;
   const span = (+m[3] + m[4] / 60) - (+m[1] + m[2] / 60);
@@ -356,7 +365,7 @@ function apply(res) {
   members = res.members;
   fixed = res.fixed || {};
   data = {};
-  res.shifts.forEach(s => { (data[s.key] ||= {})[+s.date.slice(8)] = s.value; });
+  res.shifts.forEach(s => { (data[s.key] ||= {})[+s.date.slice(8)] = normVal(s.value); }); // 以前の「有」なども新しい表記にそろえる
   loadedSite = $('site').value; loadedMonth = monthKey();
   setDirty(false);
   render(); renderFixed(); renderMembers();
@@ -434,7 +443,7 @@ function render() {
       const v = data[m.key]?.[d] || '';
       const hr = cellHours(v);
       const cls = ['cell'];
-      if (v === '休' || v === '有') cls.push('off');
+      if (isLeave(v)) cls.push('off', v === '欠勤' ? 'absent' : 'leave');
       else if (hr === null) cls.push('bad');
       if (hr) { sum += hr; if (tallied(m)) { dayTot[div][d] += hr; dayCnt[d]++; } }
       h += `<td class="${cls.join(' ')}" data-r="${r}" data-c="${d}"${hr === null ? ' title="時間の形式を確認してください"' : ''}>${esc(shortVal(v))}</td>`;
@@ -548,6 +557,8 @@ document.addEventListener('keydown', ev => {
   if (k === 'Enter' || k === 'F2') { ev.preventDefault(); startEdit(); return; }
   if (k === 'Delete' || k === 'Backspace') { ev.preventDefault(); clearSelection(); return; }
   if (k.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); startEdit(k); }
+  // 日本語入力（IME）で打ち始めたときは、空の入力欄を開いて変換をそのまま受け取る
+  if (k === 'Process' || ev.isComposing) startEdit('');
 });
 const inGrid = ev => !ev.target.closest('input, select, form');
 document.addEventListener('copy', ev => { if (editing || !sel || !inGrid(ev)) return; ev.clipboardData.setData('text/plain', selectionTSV()); ev.preventDefault(); toast('コピーしました'); });
@@ -591,6 +602,14 @@ $('applyFixed').onclick = async () => {
   toast(`${c}セルに反映しました。保存を押すと確定します`);
 };
 $('clearSel').onclick = clearSelection;
+// 選んだセルに休みを入れるボタン
+$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button" data-leave="${t}">${t}</button>`).join('');
+$('leaveBtns').addEventListener('mousedown', ev => ev.preventDefault()); // 選択範囲を保つ
+$('leaveBtns').addEventListener('click', ev => {
+  const t = ev.target.dataset.leave; const s = norm(sel); if (!t || !s) return;
+  for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) setVal(r, c, t);
+  render();
+});
 $('saveBtn').onclick = async () => {
   const btn = $('saveBtn'); btn.disabled = true; btn.textContent = '保存中…';
   try {
@@ -797,8 +816,9 @@ function renderPrint(shrink = 1) {
       if (hr && tallied(m) && dayTot[div]) { dayTot[div][d] = (dayTot[div][d] || 0) + hr; cnt[d] = (cnt[d] || 0) + 1; }
       const tm = normVal(v).match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
       const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
-      const off = v === '休' || v === '有';
-      h += `<td class="${off ? 'off' : ''}${weCls(d)}" style="font-size:${(tm ? timeFont : off ? offFont : timeFont).toFixed(2)}mm">${body}</td>`;
+      const off = isLeave(v);
+      const fs = tm ? timeFont : off ? Math.min(offFont, (dayW - 1) / v.length) : timeFont;
+      h += `<td class="${off ? 'off' : ''}${v === '欠勤' ? ' absent' : ''}${weCls(d)}" style="font-size:${fs.toFixed(2)}mm">${body}</td>`;
     });
     h += `<td class="tt">${sum ? (Math.round(sum * 10) / 10) : ''}</td></tr>`;
     prevDiv = div;
@@ -817,7 +837,7 @@ function renderPrint(shrink = 1) {
     h += `<tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d] || ''}</td>`).join('')}<td class="tt"></td></tr></tfoot>`;
   }
   h += '</table>';
-  h += `<div class="pp-foot"><span>休憩：拘束5時間以上は1時間を引いて集計　休＝公休　有＝有給</span><span>印刷 ${new Date().toLocaleDateString('ja-JP')}</span></div>`;
+  h += `<div class="pp-foot"><span>休憩：拘束5時間以上は1時間を引いて集計　休＝公休</span><span>印刷 ${new Date().toLocaleDateString('ja-JP')}</span></div>`;
   $('printPage').innerHTML = h;
   // 実際に描いた高さが1枚を超えたら、行の高さを縮めて描き直す
   const page = $('printPage'), table = page.querySelector('.pp-table');

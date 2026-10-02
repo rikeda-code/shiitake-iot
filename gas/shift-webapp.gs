@@ -127,10 +127,14 @@ function normalizeName_(raw) {
   return s.replace(/\s+/g, '').toUpperCase();
 }
 
-// '8:00-17:00' 等 → 実働時間。休・空欄は0、形式不正はnull
+// 休みの種類（実働0時間）と、よくある書き方のそろえ先
+const LEAVE_TYPES = ['休', '代休', '有休', '季節休', '欠勤'];
+const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
+
+// '8:00-17:00' 等 → 実働時間。休みの種類・空欄は0、形式不正はnull
 function workHours_(value) {
   const s = String(value || '').normalize('NFKC').trim();
-  if (!s || s === '休' || s === '有') return 0;
+  if (!s || LEAVE_TYPES.indexOf(s) >= 0) return 0;
   const m = s.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
   if (!m) return null;
   const span = (+m[3] + (+m[4] || 0) / 60) - (+m[1] + (+m[2] || 0) / 60);
@@ -141,7 +145,7 @@ function workHours_(value) {
 // 表記をそろえる：8:00〜17:00 → 8:00-17:00
 function normalizeShift_(value) {
   let s = String(value || '').normalize('NFKC').trim().replace(/[〜~ー―−]/g, '-').replace(/\s/g, '');
-  if (s === 'やす' || s === '公休') s = '休';
+  if (LEAVE_ALIASES[s]) s = LEAVE_ALIASES[s];
   const m = s.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
   if (m) s = `${+m[1]}:${m[2] || '00'}-${+m[3]}:${m[4] || '00'}`;
   return s;
