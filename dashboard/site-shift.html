@@ -140,24 +140,53 @@ td.cell.na { background: repeating-linear-gradient(135deg, var(--off-soft) 0 4px
 .notice.error { border-color: var(--sun); color: var(--sun); background: var(--surface); }
 .loading { padding: 40px; text-align: center; color: var(--muted); }
 button:disabled { opacity: .5; cursor: default; }
-.print-head { display: none; }
-@page { size: A4 landscape; margin: 8mm; }
+/* 入力／印刷のタブ */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 8px 18px; font-weight: 700; color: var(--muted); margin-bottom: -1px; }
+.tabs button[aria-selected="true"] { background: var(--surface); border-color: var(--line); color: var(--ink); }
+body[data-view="print"] .edit-only { display: none !important; }
+body:not([data-view="print"]) .print-only { display: none !important; }
+
+/* 印刷設定 */
+.print-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.print-controls fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.print-controls legend { font-size: .72rem; color: var(--muted); margin-bottom: 4px; padding: 0; }
+.print-controls label { display: inline-flex; gap: 4px; align-items: center; font-size: .85rem; }
+.print-controls input[type=number] { width: 4em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.print-controls .quick button { padding: 3px 10px; font-size: .78rem; }
+.print-controls .go { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.preview-box { background: var(--off-soft); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow: hidden; }
+.preview-scale { transform-origin: top left; }
+
+/* 印刷用の1枚（A4横・余白10mm → 277mm × 190mm） */
+.print-page { width: 277mm; height: 190mm; break-inside: avoid; page-break-inside: avoid; background: #fff; color: #111; box-shadow: 0 2px 12px rgba(0,0,0,.18); padding: 0; display: flex; flex-direction: column; font-family: var(--font-body); overflow: hidden; }
+.pp-head { display: flex; justify-content: space-between; align-items: baseline; height: 9mm; padding-bottom: 1.5mm; border-bottom: .5mm solid #111; margin-bottom: 1.5mm; }
+.pp-head h2 { font-size: 4.6mm; margin: 0; letter-spacing: .02em; }
+.pp-head .meta { font-size: 2.8mm; color: #333; }
+.pp-table { border-collapse: collapse; table-layout: fixed; width: 100%; font-variant-numeric: tabular-nums; }
+.pp-table th, .pp-table td { border: .2mm solid #9a9a9a; padding: 0 .5mm; line-height: 1; text-align: center; white-space: nowrap; overflow: hidden; color: #111; }
+.pp-table thead th { background: #eef0ee; font-weight: 700; line-height: 1.05; }
+.pp-table thead th .wd { display: block; font-weight: 400; font-size: .82em; }
+.pp-table .sun { color: #c2410c; } .pp-table .sat { color: #1d4ed8; }
+.pp-table td.we, .pp-table th.we { background: #f6f6f4; }
+.pp-table td.nm { text-align: left; font-weight: 700; }
+.pp-table td.dp { font-size: .85em; color: #333; }
+.pp-table td.off { color: #888; }
+.pp-table td.tt, .pp-table th.tt { text-align: right; font-weight: 700; border-left: .5mm solid #111; }
+.pp-table tr.grp td { border-top: .45mm solid #111; }
+.pp-table tfoot td, .pp-table tfoot th { background: #f1f1ee; font-weight: 700; }
+.pp-table tfoot tr:first-child > * { border-top: .6mm double #111; }
+.pp-foot { margin-top: auto; padding-top: 1mm; font-size: 2.4mm; color: #555; display: flex; justify-content: space-between; }
+
+@page { size: A4 landscape; margin: 10mm; }
 @media print {
-  :root { --bg:#fff; --surface:#fff; --ink:#111; --line:#888; --muted:#333; --off-soft:#eee; --accent-soft:#f3f3f3; }
-  body { padding: 0; background: #fff; font-size: 9px; }
-  .wrap > *:not(.sheet), .hint, .toast { display: none !important; }
-  .print-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; font-size: 12px; }
-  .grid-box { max-height: none; overflow: visible; border: 0; }
-  .grid { width: 100%; font-size: 8px; }
-  .grid th, .grid td { height: 18px; position: static !important; box-shadow: none !important; }
-  .grid thead th .d { font-size: 9px; }
-  td.cell { min-width: 0; font-size: 7.5px; letter-spacing: -.04em; }
-  td.cell.in-sel { background: transparent; }
-  .chip { padding: 0; }
-  .badge { display: none; }
-  .grid .name { min-width: 0; padding: 0 3px; }
-  .grid .role { min-width: 0; padding: 0 3px; }
-  .grid .tot { min-width: 0; padding: 0 3px; }
+  html, body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+  .wrap > *:not(#printView), .print-controls, .toast, .tabs { display: none !important; }
+  #printView, .preview-box { display: block !important; padding: 0 !important; border: 0 !important; background: #fff !important; }
+  .preview-scale { transform: none !important; height: auto !important; }
+  .print-page { box-shadow: none; }
+  .wrap { max-width: none; gap: 0; padding: 0; }
+  #printView > *:not(.preview-box) { display: none !important; }
 }
 </style>
 </head>
@@ -171,23 +200,45 @@ button:disabled { opacity: .5; cursor: default; }
   <div class="toolbar">
     <select id="site" aria-label="拠点"><option>いなべ</option><option>群馬</option><option>南丹</option></select>
     <select id="month" aria-label="対象月"></select>
-    <button id="applyFixed">固定シフトを反映</button>
-    <button id="clearSel">選択範囲をクリア</button>
+    <button id="applyFixed" class="edit-only">固定シフトを反映</button>
+    <button id="clearSel" class="edit-only">選択範囲をクリア</button>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
     <button id="reloadBtn" title="スプレッドシートから最新の内容を読み直します">更新</button>
-    <button id="printBtn">印刷・PDF</button>
-    <button class="primary" id="saveBtn">保存</button>
+    <button class="primary edit-only" id="saveBtn">保存</button>
   </div>
   <div id="dialogSlot"></div>
-
-  <div class="sheet">
-    <div class="print-head"><strong id="phTitle"></strong><span id="phSub"></span></div>
-    <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休」、有給は「有」。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は「印刷・PDF」から、送信先で「PDFに保存」を選ぶとPDFになります（A4横）。</p>
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tabEdit" aria-selected="true" data-view="edit">シフト入力</button>
+    <button role="tab" id="tabPrint" aria-selected="false" data-view="print">印刷・PDF</button>
   </div>
 
-  <div class="panels two">
+  <section id="printView" class="print-only">
+    <div class="print-controls">
+      <fieldset>
+        <legend>期間</legend>
+        <label><input type="number" id="ppFrom" min="1" max="31" value="1">日</label>〜
+        <label><input type="number" id="ppTo" min="1" max="31" value="31">日</label>
+        <span class="quick"><button type="button" data-range="all">月全体</button> <button type="button" data-range="h1">1〜15日</button> <button type="button" data-range="h2">16日〜末</button></span>
+      </fieldset>
+      <fieldset id="ppDepts"><legend>部門</legend></fieldset>
+      <fieldset>
+        <legend>表示</legend>
+        <label><input type="checkbox" id="ppEmpty" checked>シフトのない人も載せる</label>
+        <label><input type="checkbox" id="ppTotals" checked>時間の集計行を載せる</label>
+      </fieldset>
+      <div class="go"><button class="primary" id="ppPrint">印刷・PDFに保存</button></div>
+    </div>
+    <p class="hint">A4横1枚に収まるよう、文字と行の高さを自動で調整します。印刷画面で「送信先」を「PDFに保存」にするとPDFになります。用紙サイズは「A4」、倍率は「デフォルト（100%）」のままにしてください。</p>
+    <div class="preview-box" id="previewBox"><div class="preview-scale" id="previewScale"><div class="print-page" id="printPage"></div></div></div>
+  </section>
+
+  <div class="sheet edit-only">
+    <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
+    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休」、有給は「有」。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
+  </div>
+
+  <div class="panels two edit-only">
     <section class="panel">
       <h2>固定シフト</h2>
       <p>1人ずつ曜日ごとの出勤時間を30分単位で設定します。保存後、「固定シフトを反映」で月の表に入ります。</p>
@@ -406,8 +457,7 @@ function render() {
   h += '<td class="tot"></td></tr></tfoot></table>';
   $('gridBox').innerHTML = h;
   paintSel();
-  $('phTitle').textContent = `${$('site').value}　${year}年${month}月 シフト表`;
-  $('phSub').textContent = divs.map(v => `${v} ${fmt(siteTot[v])}`).join(' ／ ');
+  if (document.body.dataset.view === 'print') renderPrint();
 }
 
 /* ── 選択・入力 ── */
@@ -558,7 +608,6 @@ $('saveBtn').onclick = async () => {
     btn.disabled = false; btn.textContent = '保存';
   }
 };
-$('printBtn').onclick = () => { sel = null; cursor = null; paintSel(); window.print(); };
 $('site').onchange = () => load();
 $('reloadBtn').onclick = () => load(true);
 $('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); load(); };
@@ -658,6 +707,124 @@ $('addForm').addEventListener('submit', async ev => {
     const added = rows.find(x => x.name === name); if (added) { fxKey = added.key; fxDraft = null; renderFixed(); }
   } catch (err) { toast('登録できませんでした：' + err.message); }
 });
+
+
+/* ── 印刷・PDF ── */
+const ppDeptSel = new Set(['栽培', '出荷', '配送', 'その他']);
+function setView(v) {
+  document.body.dataset.view = v;
+  $('tabEdit').setAttribute('aria-selected', v === 'edit');
+  $('tabPrint').setAttribute('aria-selected', v === 'print');
+  if (v === 'print') { if (editing) commit(); renderPrint(); }
+}
+$('tabEdit').onclick = () => setView('edit');
+$('tabPrint').onclick = () => setView('print');
+
+function ppRange() {
+  const n = daysIn();
+  let a = Math.max(1, Math.min(n, +$('ppFrom').value || 1));
+  let b = Math.max(1, Math.min(n, +$('ppTo').value || n));
+  if (a > b) [a, b] = [b, a];
+  return [a, b];
+}
+document.querySelector('.print-controls .quick').addEventListener('click', ev => {
+  const r = ev.target.dataset.range; if (!r) return;
+  const n = daysIn();
+  $('ppFrom').value = r === 'h2' ? 16 : 1;
+  $('ppTo').value = r === 'h1' ? 15 : n;
+  renderPrint();
+});
+['ppFrom', 'ppTo', 'ppEmpty', 'ppTotals'].forEach(id => $(id).addEventListener('change', () => renderPrint()));
+$('ppDepts').addEventListener('change', ev => {
+  if (ev.target.checked) ppDeptSel.add(ev.target.value); else ppDeptSel.delete(ev.target.value);
+  renderPrint();
+});
+$('ppPrint').onclick = () => { renderPrint(); window.print(); };
+window.addEventListener('resize', () => { if (document.body.dataset.view === 'print') fitPreview(); });
+
+function renderPrint(shrink = 1) {
+  if (!members.length && !rows.length) { $('printPage').innerHTML = '<div class="loading">読み込み中…</div>'; return; }
+  const all = visibleMembers();
+  // 部門の選択肢（この拠点にいる部門だけ）
+  const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
+  $('ppDepts').innerHTML = '<legend>部門</legend>' + present.map(v =>
+    `<label><input type="checkbox" value="${v}" id="ppd-${v}"${ppDeptSel.has(v) ? ' checked' : ''}><span class="chip ${v}">${v === 'その他' ? 'その他（生産部長など）' : v}</span></label>`).join('');
+  const [a, b] = ppRange();
+  $('ppFrom').value = a; $('ppTo').value = b;
+  const days = []; for (let d = a; d <= b; d++) days.push(d);
+  let list = all.filter(m => ppDeptSel.has(divOf(m.dept)));
+  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => data[m.key]?.[d]));
+  const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
+  const divs = DIVS.filter(v => ppDeptSel.has(v) && list.some(m => divOf(m.dept) === v && tallied(m)));
+  const showTotals = $('ppTotals').checked;
+  const footRows = showTotals ? divs.length + (divs.length > 1 ? 1 : 0) + 1 : 0;
+
+  // A4横 277×190mm に収まる寸法を計算
+  const PAGE_W = 277, TABLE_H = 190 - 9 - 1.5 - 4.5; // 見出し・下の注記の分を引く
+  const nameW = 30, deptW = 13, totW = 13;
+  const dayW = (PAGE_W - nameW - deptW - totW) / days.length;
+  const lines = list.length + footRows + 1.7; // 見出し行は日付と曜日の2段
+  const rowH = Math.min(7, TABLE_H / lines) * shrink;
+  const longest = Math.max(4, ...list.flatMap(m => days.map(d => shortVal(data[m.key]?.[d] || '').length)));
+  const cellFont = Math.min(rowH * 0.55, (dayW - 1.2) / (longest * 0.56), 3.6);
+  const baseFont = Math.min(rowH * 0.58, 3.4);
+
+  const wdOf = d => new Date(year, month - 1, d).getDay();
+  const weCls = d => { const w = wdOf(d); return w === 0 || w === 6 ? ' we' : ''; };
+  const headCls = d => { const w = wdOf(d); return w === 0 ? 'we sun' : w === 6 ? 'we sat' : ''; };
+  // 氏名は枠に収まる大きさまで文字を小さくする（全角1、半角0.55文字分で数える）
+  const nameFont = name => {
+    const len = [...name].reduce((t, ch) => t + (ch.charCodeAt(0) < 0x2000 ? 0.68 : 1), 0);
+    return Math.min(baseFont, (nameW - 1.5) / Math.max(len, 1));
+  };
+  let h = `<div class="pp-head"><h2>${esc($('site').value)}　${year}年${month}月 シフト表</h2><span class="meta">${month}/${a}（${WD[wdOf(a)]}）〜${month}/${b}（${WD[wdOf(b)]}）・${list.length}名・${[...ppDeptSel].filter(v => present.includes(v)).join('／')}</span></div>`;
+  h += `<table class="pp-table" style="font-size:${baseFont.toFixed(2)}mm"><colgroup><col style="width:${nameW}mm"><col style="width:${deptW}mm">${days.map(() => `<col style="width:${dayW.toFixed(2)}mm">`).join('')}<col style="width:${totW}mm"></colgroup>`;
+  h += `<thead><tr style="height:${(rowH * 1.7).toFixed(2)}mm"><th>氏名</th><th>部門</th>${days.map(d => `<th class="${headCls(d)}">${d}<span class="wd">${WD[wdOf(d)]}</span></th>`).join('')}<th class="tt">計</th></tr></thead><tbody>`;
+  const dayTot = {}; divs.forEach(v => dayTot[v] = {});
+  const cnt = {};
+  let prevDiv = null;
+  list.forEach(m => {
+    const div = divOf(m.dept);
+    let sum = 0;
+    h += `<tr class="${prevDiv && prevDiv !== div ? 'grp' : ''}" style="height:${rowH.toFixed(2)}mm"><td class="nm" style="font-size:${nameFont(m.name).toFixed(2)}mm">${esc(m.name)}</td><td class="dp">${esc(m.dept)}</td>`;
+    days.forEach(d => {
+      const v = data[m.key]?.[d] || '';
+      const hr = cellHours(v) || 0;
+      sum += hr;
+      if (hr && tallied(m) && dayTot[div]) { dayTot[div][d] = (dayTot[div][d] || 0) + hr; cnt[d] = (cnt[d] || 0) + 1; }
+      h += `<td class="${(v === '休' || v === '有') ? 'off' : ''}${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${esc(shortVal(v))}</td>`;
+    });
+    h += `<td class="tt">${sum ? (Math.round(sum * 10) / 10) : ''}</td></tr>`;
+    prevDiv = div;
+  });
+  h += '</tbody>';
+  if (showTotals) {
+    const num = x => x ? (Math.round(x * 10) / 10) : '';
+    const row = (label, f) => {
+      let t = 0;
+      const tds = days.map(d => { const x = f(d); t += x || 0; return `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${num(x)}</td>`; }).join('');
+      return `<tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">${label}</th>${tds}<td class="tt">${num(t)}</td></tr>`;
+    };
+    h += '<tfoot>';
+    divs.forEach(v => { h += row(`${v} 時間`, d => dayTot[v][d] || 0); });
+    if (divs.length > 1) h += row('合計 時間', d => divs.reduce((s, v) => s + (dayTot[v][d] || 0), 0));
+    h += `<tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d] || ''}</td>`).join('')}<td class="tt"></td></tr></tfoot>`;
+  }
+  h += '</table>';
+  h += `<div class="pp-foot"><span>休憩：拘束5時間以上は1時間を引いて集計　休＝公休　有＝有給</span><span>印刷 ${new Date().toLocaleDateString('ja-JP')}</span></div>`;
+  $('printPage').innerHTML = h;
+  // 実際に描いた高さが1枚を超えたら、行の高さを縮めて描き直す
+  const page = $('printPage'), table = page.querySelector('.pp-table');
+  const room = page.clientHeight - page.querySelector('.pp-head').offsetHeight - page.querySelector('.pp-foot').offsetHeight - 8;
+  if (table.offsetHeight > room && shrink > 0.4) return renderPrint(shrink * Math.max(0.5, room / table.offsetHeight) * 0.98);
+  fitPreview();
+}
+function fitPreview() {
+  const box = $('previewBox'), page = $('printPage'), sc = $('previewScale');
+  const scale = Math.min(1, (box.clientWidth - 32) / page.offsetWidth);
+  sc.style.transform = `scale(${scale})`;
+  sc.style.height = (page.offsetHeight * scale) + 'px';
+}
 
 /* ── 起動 ── */
 (function init() {
