@@ -46,7 +46,6 @@ const LEGACY_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
 const LEGACY_SHEET_GID = 872290181;
 const LEGACY_SITE = 'いなべ';
 const LEGACY_FROM = '2026-10-11';
-const LEGACY_FIRST_DATA_ROW = 14;
 // 旧シフト表の呼び名 → 整理済み_Mの氏名（work-hours-forecast.html と同じ対応表）
 const LEGACY_NAME_ALIASES = {
   'ハイ': 'NGUYEN VAN HAI', 'ヴィン': 'HOANG VAN VINH', 'タム': 'DAO VAN TAM',
@@ -337,18 +336,31 @@ function importLegacyShift() {
   const vals = legacy.getDataRange().getValues();
   const disp = legacy.getDataRange().getDisplayValues();
 
-  // 1行目（C列以降）が日付。M/D表記なら年は LEGACY_FROM から推定（月が戻ったら翌年）
-  const startYear = +LEGACY_FROM.slice(0, 4);
-  let year = startYear, prevMonth = 0;
-  const dates = vals[0].map((v, i) => {
-    if (i < 2) return '';
+  // 日付の行：上から10行のうち、日付として読めるセルがいちばん多い行
+  const from = new Date(LEGACY_FROM + 'T00:00:00+09:00');
+  const toDate = (v, d) => {
     if (v instanceof Date) return fmtDate_(v);
-    const m = String(disp[0][i]).normalize('NFKC').match(/(\d{1,2})\/(\d{1,2})/);
+    const m = String(d || '').normalize('NFKC').match(/(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})/);
     if (!m) return '';
-    if (prevMonth && +m[1] < prevMonth) year++;
-    prevMonth = +m[1];
-    return `${year}-${('0' + m[1]).slice(-2)}-${('0' + m[2]).slice(-2)}`;
-  });
+    if (m[1]) return `${m[1]}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`;
+    // 年が書かれていない「M/D」は、取り込み開始日にいちばん近い年とみなす
+    let best = '', bestGap = Infinity;
+    [-1, 0, 1].forEach(dy => {
+      const y = from.getFullYear() + dy;
+      const gap = Math.abs(new Date(y, +m[2] - 1, +m[3]) - from);
+      if (gap < bestGap) { bestGap = gap; best = `${y}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`; }
+    });
+    return best;
+  };
+  let dateRow = 0, bestCount = -1;
+  for (let r = 0; r < Math.min(10, vals.length); r++) {
+    const n = vals[r].filter((v, c) => c >= 2 && toDate(v, disp[r][c])).length;
+    if (n > bestCount) { bestCount = n; dateRow = r; }
+  }
+  const dates = vals[dateRow].map((v, c) => c < 2 ? '' : toDate(v, disp[dateRow][c]));
+  const targetCols = dates.map((d, c) => d && d >= LEGACY_FROM ? c : -1).filter(c => c >= 0);
+  Logger.log(`日付の行：${dateRow + 1}行目／${LEGACY_FROM}以降の列：${targetCols.length}列（${dates[targetCols[0]] || 'なし'}〜${dates[targetCols[targetCols.length - 1]] || 'なし'}）`);
+  if (!targetCols.length) { Logger.log('取り込み対象の日付が見つかりませんでした。日付の行のセルの例：' + disp[dateRow].slice(2, 8).join(' | ')); return; }
 
   const members = readMembers_().filter(m => m.site === LEGACY_SITE);
   const findMember = rawName => {
@@ -361,26 +373,30 @@ function importLegacyShift() {
 
   const cellsByMonth = {};
   const unmatched = [], skipped = [];
-  for (let r = LEGACY_FIRST_DATA_ROW - 1; r < vals.length; r++) {
+  for (let r = dateRow + 1; r < vals.length; r++) {
     const rawName = String(vals[r][0] || '').trim();
     if (!rawName) continue;
-    const m = findMember(rawName);
-    if (!m) { unmatched.push(rawName); continue; }
-    for (let c = 2; c < vals[r].length; c++) {
-      const date = dates[c];
-      if (!date || date < LEGACY_FROM) continue;
+    // この行の対象期間の時間セル
+    const cells = [];
+    targetCols.forEach(c => {
       const raw = String(disp[r][c] || '').trim();
-      if (!raw) continue;
+      if (!raw) return;
       const value = normalizeShift_(raw);
-      if (workHours_(value) === null) { skipped.push(`${rawName} ${date}「${raw}」`); continue; }
-      const month = date.slice(0, 7);
-      (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: m.key, date, value });
-    }
+      if (workHours_(value) === null) { skipped.push(`${rawName} ${dates[c]}「${raw}」`); return; }
+      cells.push({ date: dates[c], value });
+    });
+    if (!cells.length) continue; // 集計行など、時間の入っていない行は無視
+    const m = findMember(rawName);
+    if (!m) { unmatched.push(`${rawName}（${cells.length}日分）`); continue; }
+    cells.forEach(x => {
+      const month = x.date.slice(0, 7);
+      (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: m.key, date: x.date, value: x.value });
+    });
   }
-  Object.keys(cellsByMonth).forEach(month => {
+  Object.keys(cellsByMonth).sort().forEach(month => {
     const res = saveShifts_({ site: LEGACY_SITE, month, cells: cellsByMonth[month] });
     Logger.log(`${month}: ${res.saved}件を取り込みました`);
   });
-  if (unmatched.length) Logger.log('整理済み_Mで見つからなかった氏名：' + [...new Set(unmatched)].join('、'));
-  if (skipped.length) Logger.log('時間として読めず取り込まなかったセル：\n' + skipped.join('\n'));
+  if (unmatched.length) Logger.log('整理済み_Mで見つからず取り込まなかった人：' + unmatched.join('、'));
+  if (skipped.length) Logger.log('時間として読めず取り込まなかったセル（先頭50件）：\n' + skipped.slice(0, 50).join('\n'));
 }
