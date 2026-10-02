@@ -308,6 +308,8 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '
 const LEAVE_TYPES = ['休', '代休', '有休', '季節休', '欠勤'];
 const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
 const isLeave = v => LEAVE_TYPES.includes(v);
+// 「拠点名＋パ／正」で始まる名前は、名前の決まっていない新規要員の枠とみなす
+const isPlaceholder = name => /^(いなべ|群馬|安中|南丹)(パ|正)/.test(String(name).normalize('NFKC').replace(/\s/g, ''));
 // 入力をそろえる：全角・〜・時だけ → '8:00-17:00'
 function normVal(v) {
   let s = String(v || '').normalize('NFKC').trim().replace(/[〜~ー―−]/g, '-').replace(/\s/g, '');
@@ -412,7 +414,9 @@ function visibleMembers() {
   return members.filter(m => {
     if (!ON_SHIFT_FLAGS.includes(m.flag)) return false;
     // 事務・営業の人はシフトに載せない
-    return !/事務|営業/.test(m.dept + m.empType);
+    if (/事務|営業/.test(m.dept + m.empType)) return false;
+    // 名前の決まっていない新規要員の枠（いなべパ出A・群馬正Bなど）は載せない
+    return !isPlaceholder(m.name);
   }).sort((a, b) => {
     const order = ['栽培', '出荷', '配送', 'その他'];
     return order.indexOf(divOf(a.dept)) - order.indexOf(divOf(b.dept)) || a.dept.localeCompare(b.dept, 'ja') || a.row - b.row;
@@ -685,7 +689,7 @@ let retiring = null;
 const md = s => s ? `${s.slice(0, 4)}/${+s.slice(5, 7)}/${+s.slice(8)}` : '—';
 const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職/異動', 9: '退職' };
 function renderMembers() {
-  const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType));
+  const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType) && !isPlaceholder(m.name));
   let h = '<tr><th>氏名</th><th>部門</th><th>雇用区分</th><th>状態</th><th>入社日</th><th>退職日</th><th></th></tr>';
   list.forEach(m => {
     const gone = m.leave && m.leave < ymd(1);
