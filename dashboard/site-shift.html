@@ -237,6 +237,8 @@ const pad = n => String(n).padStart(2, '0');
 const monthKey = () => `${year}-${pad(month)}`;
 const daysIn = () => new Date(year, month, 0).getDate();
 const ymd = d => `${year}-${pad(month)}-${pad(d)}`;
+// 時間の集計に含めない部門（シフトには載せる）
+const NO_TALLY_DEPTS = ['生産部長'];
 const divOf = dept => dept.includes('配送') ? '配送' : dept.includes('出荷') ? '出荷' : dept.includes('栽培') ? '栽培' : 'その他';
 // 在籍の判定は整理済み_MのB列フラグだけで行う（1在職中・2入社＝載せる／3退職・異動・8他所属・9退職＝載せない）
 const ON_SHIFT_FLAGS = [1, 2];
@@ -327,7 +329,8 @@ function visibleMembers() {
 function render() {
   rows = visibleMembers();
   const n = daysIn();
-  const divs = DIVS.concat(rows.some(m => divOf(m.dept) === 'その他') ? ['その他'] : []);
+  const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
+  const divs = DIVS.concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
   let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th><th class="role">部門</th>';
   for (let d = 1; d <= n; d++) {
     const wd = new Date(year, month - 1, d).getDay();
@@ -349,10 +352,10 @@ function render() {
       const cls = ['cell'];
       if (v === '休' || v === '有') cls.push('off');
       else if (hr === null) cls.push('bad');
-      if (hr) { sum += hr; dayTot[div][d] += hr; dayCnt[d]++; }
+      if (hr) { sum += hr; if (tallied(m)) { dayTot[div][d] += hr; dayCnt[d]++; } }
       h += `<td class="${cls.join(' ')}" data-r="${r}" data-c="${d}"${hr === null ? ' title="時間の形式を確認してください"' : ''}>${esc(shortVal(v))}</td>`;
     }
-    siteTot[div] += sum;
+    if (tallied(m)) siteTot[div] += sum;
     h += `<td class="tot">${fmt(sum)}</td></tr>`;
   });
   if (!rows.length) h += `<tr><td class="name" colspan="${n + 3}">この月に在籍しているメンバーがいません</td></tr>`;
