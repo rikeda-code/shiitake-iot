@@ -144,6 +144,12 @@ button:disabled { opacity: .5; cursor: default; }
 .leave-btns { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .leave-btns button { padding: 4px 9px; font-size: .8rem; }
 td.cell .t2 { display: block; }
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: flex-end; }
+.filter-bar fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.filter-bar legend { font-size: .72rem; color: var(--muted); margin-bottom: 4px; padding: 0; }
+.filter-bar label { display: inline-flex; gap: 4px; align-items: center; font-size: .85rem; cursor: pointer; }
+.filter-bar input[type=date] { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.filter-bar .quick button { padding: 3px 10px; font-size: .78rem; }
 /* 入力／印刷のタブ */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 8px 18px; font-weight: 700; color: var(--muted); margin-bottom: -1px; }
@@ -243,6 +249,15 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <div class="preview-box" id="previewBox"><div class="preview-scale" id="previewScale"><div class="print-page" id="printPage"></div></div></div>
   </section>
 
+  <div class="filter-bar edit-only" id="editFilter">
+    <fieldset id="edDepts"><legend>部門</legend></fieldset>
+    <fieldset>
+      <legend>表示する日</legend>
+      <label><input type="date" id="edFrom" aria-label="表示する最初の日"></label>〜
+      <label><input type="date" id="edTo" aria-label="表示する最後の日"></label>
+      <span class="quick"><button type="button" data-ed="all">期間全体</button> <button type="button" data-ed="h1">11日〜25日</button> <button type="button" data-ed="h2">26日〜10日</button></span>
+    </fieldset>
+  </div>
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
     <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
@@ -288,7 +303,9 @@ const $ = id => document.getElementById(id);
 
 // シフトは「11日〜翌月10日」を1期間として入力する（例：10/11〜11/10）。year・monthは期間の始まりの月
 let year, month;
-let cols = [];      // 表に並べる日：{ iso:'2026-10-11', ym:'2026-10', m, d, wd }
+let allCols = [];   // 期間の全日：{ iso:'2026-10-11', ym:'2026-10', m, d, wd }
+let cols = [];      // 表に並べる日（「表示する日」で絞り込んだもの）
+const edDeptSel = new Set(['栽培', '出荷', '配送', 'その他']); // 表に出す部門
 let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
@@ -406,7 +423,9 @@ async function load(fresh) {
     const ok = await ask(`保存していない変更があります。破棄して${$('site').value} ${periodLabel()}を開きますか？`, '破棄して開く');
     if (!ok) { syncSelectors(); return; }
   }
-  cols = periodCols();
+  allCols = periodCols();
+  cols = allCols;
+  $('edFrom').value = ''; $('edTo').value = '';
   if (!SHIFT_GAS_URL) {
     $('gridBox').innerHTML = '<div class="notice">GASのURLがまだ設定されていません。gas/shift-webapp.gs をデプロイし、このページの SHIFT_GAS_URL に設定してください。</div>';
     return;
@@ -452,17 +471,31 @@ function visibleMembers() {
   });
 }
 
+// 表の上の絞り込み（部門・表示する日）
+function renderEditFilter(all) {
+  const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
+  $('edDepts').innerHTML = '<legend>部門</legend>' + present.map(v =>
+    `<label><input type="checkbox" value="${v}" id="edd-${v}"${edDeptSel.has(v) ? ' checked' : ''}><span class="chip ${v}">${v === 'その他' ? 'その他（生産部長など）' : v}</span></label>`).join('');
+  const first = allCols[0].iso, last = allCols[allCols.length - 1].iso;
+  ['edFrom', 'edTo'].forEach(id => { $(id).min = first; $(id).max = last; });
+  if (!$('edFrom').value || $('edFrom').value < first || $('edFrom').value > last) $('edFrom').value = first;
+  if (!$('edTo').value || $('edTo').value < first || $('edTo').value > last) $('edTo').value = last;
+  if ($('edFrom').value > $('edTo').value) [$('edFrom').value, $('edTo').value] = [$('edTo').value, $('edFrom').value];
+}
 function render() {
-  rows = visibleMembers();
+  const everyone = visibleMembers();
+  renderEditFilter(everyone);
+  rows = everyone.filter(m => edDeptSel.has(divOf(m.dept)));
+  cols = allCols.filter(c => c.iso >= $('edFrom').value && c.iso <= $('edTo').value);
   const n = cols.length;
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
-  const divs = DIVS.concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
+  const divs = DIVS.filter(v => edDeptSel.has(v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
   let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th><th class="role">部門</th>';
   cols.forEach((c, i) => {
     const mo = i === 0 || c.d === 1 ? `<span class="mo">${c.m}月</span>` : '';
     h += `<th class="${c.wd === 0 ? 'sun' : c.wd === 6 ? 'sat' : ''}${c.d === 1 ? ' mstart' : ''}">${mo}<span class="d">${c.d}</span>${WD[c.wd]}</th>`;
   });
-  h += '<th class="tot">期間計</th></tr></thead><tbody>';
+  h += `<th class="tot">${cols.length === allCols.length ? '期間計' : '表示日計'}</th></tr></thead><tbody>`;
   const dayTot = {}; divs.forEach(v => dayTot[v] = Array(n).fill(0));
   const dayCnt = Array(n).fill(0);
   const siteTot = {}; divs.forEach(v => siteTot[v] = 0);
@@ -484,7 +517,7 @@ function render() {
     if (tallied(m)) siteTot[div] += sum;
     h += `<td class="tot">${fmt(sum)}</td></tr>`;
   });
-  if (!rows.length) h += `<tr><td class="name" colspan="${n + 3}">この期間に在籍しているメンバーがいません</td></tr>`;
+  if (!rows.length) h += `<tr><td class="name" colspan="${n + 3}">表示する人がいません（部門の選び方を確認してください）</td></tr>`;
   const num = x => x ? (Math.round(x * 10) / 10).toLocaleString('ja-JP') : '–';
   h += '</tbody><tfoot>';
   divs.forEach((v, k) => {
@@ -574,6 +607,8 @@ const gridBox = $('gridBox');
 gridBox.addEventListener('mousedown', ev => {
   const td = ev.target.closest('td.cell'); if (!td || ev.target.tagName === 'INPUT') return;
   if (editing) commit();
+  // ボタンや日付欄に残った選択を外し、キー入力が表に届くようにする
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   setCursor(+td.dataset.r, +td.dataset.c, ev.shiftKey); dragging = true; ev.preventDefault();
 });
 gridBox.addEventListener('mouseover', ev => {
@@ -669,6 +704,22 @@ $('site').onchange = () => load();
 $('reloadBtn').onclick = () => load(true);
 $('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); $('ppFrom').value = ''; $('ppTo').value = ''; load(); };
 
+// 絞り込みを変えたら選択を解いて描き直す
+function refilter() { if (editing) commit(); sel = cursor = anchor = null; render(); }
+$('edDepts').addEventListener('change', ev => {
+  if (ev.target.checked) edDeptSel.add(ev.target.value); else edDeptSel.delete(ev.target.value);
+  refilter();
+});
+['edFrom', 'edTo'].forEach(id => $(id).addEventListener('change', refilter));
+document.querySelector('#editFilter .quick').addEventListener('click', ev => {
+  const r = ev.target.dataset.ed; if (!r) return;
+  const first = allCols[0].iso, last = allCols[allCols.length - 1].iso;
+  const d25 = `${year}-${pad(month)}-25`, d26 = `${year}-${pad(month)}-26`;
+  $('edFrom').value = r === 'h2' ? d26 : first;
+  $('edTo').value = r === 'h1' ? d25 : last;
+  refilter();
+});
+
 /* ── 固定シフト（30分単位） ── */
 let fxKey = null, fxDraft = null;
 const W = (s, e) => `${s}-${e}`;
@@ -678,7 +729,7 @@ function hmSelects(id, t) {
          `<select id="${id}-m" aria-label="分">${MINS.map(x => `<option${m === x ? ' selected' : ''}>${x}</option>`).join('')}</select>`;
 }
 function renderFixed() {
-  const list = rows.slice();
+  const list = visibleMembers(); // 絞り込みに関係なく全員から選べる
   if (!list.some(m => m.key === fxKey)) { fxKey = list[0]?.key || null; fxDraft = null; }
   $('fxPerson').innerHTML = list.map(m => `<option value="${esc(m.key)}"${m.key === fxKey ? ' selected' : ''}>${esc(m.name)}（${esc(m.dept)}）${fixed[m.key] ? '' : '・未登録'}</option>`).join('');
   if (!fxKey) { $('fxTable').innerHTML = ''; return; }
@@ -708,7 +759,7 @@ $('fxTable').addEventListener('change', ev => {
 });
 $('fxCopyMon').onclick = () => { for (let i = 1; i < 5; i++) fxDraft[i] = fxDraft[0]; renderFixed(); toast('月曜の設定を火〜金にコピーしました'); };
 $('fxSave').onclick = async () => {
-  const m = rows.find(x => x.key === fxKey); if (!m) return;
+  const m = visibleMembers().find(x => x.key === fxKey); if (!m) return;
   if (fxDraft.some(v => cellHours(v) === null)) { toast('終了が開始より前の曜日があります'); return; }
   try {
     await api('POST', { action: 'saveFixed', site: $('site').value, key: m.key, name: m.name, pattern: fxDraft });
@@ -727,7 +778,7 @@ function renderMembers() {
   list.forEach(m => {
     const gone = false;
     const acts = retiring === m.key
-      ? `<input type="date" id="leaveDate" aria-label="退職日" value="${cols[cols.length - 1]?.iso || ''}"><select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select><button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button>`
+      ? `<input type="date" id="leaveDate" aria-label="退職日" value="${allCols[allCols.length - 1]?.iso || ''}"><select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select><button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button>`
       : [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="leave">退職・異動</button>`;
     h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${md(m.join)}</td><td>${md(m.leave)}</td><td><div class="acts">${acts}</div></td></tr>`;
   });
@@ -780,8 +831,8 @@ $('tabPrint').onclick = () => setView('print');
 // 印刷の期間は日付で選ぶ（入力中の期間の外や、月をまたいでもよい。最大31日）
 function setPpRange(from, to) { $('ppFrom').value = isoOf(from); $('ppTo').value = isoOf(to); }
 function ppRange() {
-  let a = $('ppFrom').value ? dateOf($('ppFrom').value) : dateOf(cols[0].iso);
-  let b = $('ppTo').value ? dateOf($('ppTo').value) : dateOf(cols[cols.length - 1].iso);
+  let a = $('ppFrom').value ? dateOf($('ppFrom').value) : dateOf(allCols[0].iso);
+  let b = $('ppTo').value ? dateOf($('ppTo').value) : dateOf(allCols[allCols.length - 1].iso);
   if (a > b) [a, b] = [b, a];
   const max = new Date(a); max.setDate(max.getDate() + 30);
   $('ppNote').textContent = b > max ? '1枚に収めるため、31日分までにしています' : '';
@@ -832,13 +883,13 @@ window.addEventListener('resize', () => { if (document.body.dataset.view === 'pr
 
 // 印刷する1枚：見出し（拠点・期間）とシフトの表だけ。時間の合計は載せない
 function renderPrint(shrink = 1) {
-  if (!cols.length || (!members.length && !rows.length)) { $('printPage').innerHTML = '<div class="loading">読み込み中…</div>'; return; }
+  if (!allCols.length || (!members.length && !rows.length)) { $('printPage').innerHTML = '<div class="loading">読み込み中…</div>'; return; }
   const all = visibleMembers();
   // 部門の選択肢（この拠点にいる部門だけ）
   const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
   $('ppDepts').innerHTML = '<legend>部門</legend>' + present.map(v =>
     `<label><input type="checkbox" value="${v}" id="ppd-${v}"${ppDeptSel.has(v) ? ' checked' : ''}><span class="chip ${v}">${v === 'その他' ? 'その他（生産部長など）' : v}</span></label>`).join('');
-  if (!$('ppFrom').value) setPpRange(dateOf(cols[0].iso), dateOf(cols[cols.length - 1].iso));
+  if (!$('ppFrom').value) setPpRange(dateOf(allCols[0].iso), dateOf(allCols[allCols.length - 1].iso));
   const days = ppRange();
   ensureMonths([...new Set(days.map(x => x.ym))]);
   let list = all.filter(m => ppDeptSel.has(divOf(m.dept)));
