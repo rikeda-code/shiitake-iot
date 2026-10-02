@@ -62,7 +62,7 @@ const TZ = 'Asia/Tokyo';
 function doGet(e) {
   const p = e.parameter || {};
   try {
-    if (p.action === 'load') return json_(loadMonth_(p.site, p.month));
+    if (p.action === 'load') return json_(loadMonth_(p.site, p.month, p.fresh === '1'));
     if (p.action === 'hours') return json_(hoursRange_(p.site, p.from, p.to));
     return json_({ status: 'error', message: '不明なactionです' });
   } catch (err) {
@@ -78,14 +78,15 @@ function doPost(e) {
     switch (req.action) {
       case 'saveShifts': return json_(saveShifts_(req));
       case 'saveFixed':  return json_(saveFixed_(req));
-      case 'addMember':  return json_(addMember_(req));
-      case 'retire':     return json_(setRetire_(req.key, req.date, req.flag || 9));
-      case 'undoRetire': return json_(undoRetire_(req.key));
+      case 'addMember':  clearMemberCache_(); return json_(addMember_(req));
+      case 'retire':     clearMemberCache_(); return json_(setRetire_(req.key, req.date, req.flag || 9));
+      case 'undoRetire': clearMemberCache_(); return json_(undoRetire_(req.key));
       default: return json_({ status: 'error', message: '不明なactionです' });
     }
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
   } finally {
+    if (['addMember', 'retire', 'undoRetire'].indexOf(req.action) >= 0) clearMemberCache_();
     lock.releaseLock();
   }
 }
@@ -158,12 +159,28 @@ function masterCols_(sh) {
   return cols;
 }
 
-function readMembers_() {
+// メンバーは5分間キャッシュする（整理済み_Mへの書き込み時と、画面の「更新」ボタンでは読み直す）
+const MEMBER_CACHE_KEY = 'members_v1';
+function readMembers_(fresh) {
+  const cache = CacheService.getScriptCache();
+  if (!fresh) {
+    const hit = cache.get(MEMBER_CACHE_KEY);
+    if (hit) return JSON.parse(hit);
+  }
+  const list = readMembersFromSheet_();
+  try { cache.put(MEMBER_CACHE_KEY, JSON.stringify(list), 300); } catch (e) { /* 100KBを超えたらキャッシュしない */ }
+  return list;
+}
+function clearMemberCache_() { CacheService.getScriptCache().remove(MEMBER_CACHE_KEY); }
+
+function readMembersFromSheet_() {
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
   const last = sh.getLastRow();
   if (last <= MASTER_HEADER_ROW) return [];
-  const vals = sh.getRange(MASTER_HEADER_ROW + 1, 1, last - MASTER_HEADER_ROW, sh.getLastColumn()).getValues();
+  // 月ごとの勤務時間の列は読まず、必要な列（B〜入退社）だけを読む
+  const width = Math.max(cols.flag, cols.empType, cols.site, cols.prj, cols.dept, cols.empNo, cols.name, cols.date);
+  const vals = sh.getRange(MASTER_HEADER_ROW + 1, 1, last - MASTER_HEADER_ROW, width).getValues();
   const g = (row, c) => c > 0 ? row[c - 1] : '';
   const out = [];
   vals.forEach((row, i) => {
@@ -190,7 +207,7 @@ function addMember_(req) {
   if (!req.name || !req.site || !req.dept || !req.joinDate) throw new Error('氏名・拠点・部門・入社日は必須です');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
-  const dup = readMembers_().find(m => m.site === req.site && normalizeName_(m.name) === normalizeName_(req.name) && m.flag !== 9);
+  const dup = readMembers_(true).find(m => m.site === req.site && normalizeName_(m.name) === normalizeName_(req.name) && m.flag !== 9);
   if (dup) throw new Error(`${req.name}さんはすでに${req.site}に登録されています`);
   // 名前が入っている最後の行の次に書く
   const names = sh.getRange(1, cols.name, sh.getLastRow(), 1).getValues();
@@ -209,7 +226,7 @@ function addMember_(req) {
 }
 
 function findMemberRow_(key) {
-  const m = readMembers_().find(x => x.key === key);
+  const m = readMembers_(true).find(x => x.key === key);
   if (!m) throw new Error('整理済み_Mに該当する人が見つかりません');
   return m;
 }
@@ -252,8 +269,8 @@ function readData_() {
   }));
 }
 
-function loadMonth_(site, month) {
-  const members = readMembers_().filter(m => m.site === site && m.flag !== 8);
+function loadMonth_(site, month, fresh) {
+  const members = readMembers_(fresh).filter(m => m.site === site && m.flag !== 8);
   const prefix = month; // 'yyyy-MM'
   const shifts = readData_().filter(r => r.site === site && r.date.indexOf(prefix) === 0)
     .map(r => ({ key: r.key, date: r.date, value: r.value }));
