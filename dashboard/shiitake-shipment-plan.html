@@ -935,7 +935,10 @@
   // A列（c[0]）がtargetDateと一致する行を検索する（findDateColIndex()の行版）
   function findRowIndexByDate(json, targetDate){
     var rows = (json.table && json.table.rows) || [];
-    for (var i = 0; i < rows.length; i++) {
+    // 0行目は「←ここから入力年月を選択」の参照用セルで実データを持たないため、
+    // 1行目以降から検索する（0行目の日付が偶然「月の1日」と一致し、実データ行より
+    // 先に誤って選ばれてしまうバグの修正）
+    for (var i = 1; i < rows.length; i++) {
       var c = rows[i] && rows[i].c;
       if (c && sameDate(gvizCellToDate(c[0]), targetDate)) return i;
     }
