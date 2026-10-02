@@ -866,7 +866,7 @@ function drawCombo(canvasId, labels, series) {
     borderRadius: s.type === 'line' ? 0 : 4,
     borderDash: s.dash || undefined,
     pointRadius: s.pointRadius != null ? s.pointRadius : (s.type === 'line' ? 3 : 0),
-    tension: 0.3,
+    tension: s.tension != null ? s.tension : 0.3,
     spanGaps: false,
     yAxisID: s.axis || 'y',
   }));
@@ -1035,6 +1035,24 @@ function salesCostRatioFor(siteKey, idxs) {
   return +(revenue / cost).toFixed(2);
 }
 
+// グラフ用: 年内を periodヶ月ずつに区切った倍率を、その期間の各月に同じ値で並べた配列にする
+// (表1と同じ区切り・同じ定義なので、グラフの平均線と表の数値が一致する)
+function periodRatioSeries(revenue, substrateCost, period) {
+  const out = Array(revenue.length).fill(null);
+  for (let start = 0; start < revenue.length; start += period) {
+    const end = Math.min(start + period, revenue.length);
+    let rev = 0, cost = 0, months = 0;
+    for (let i = start; i < end; i++) {
+      if (revenue[i] == null || substrateCost[i] == null) continue;
+      rev += revenue[i]; cost += substrateCost[i]; months++;
+    }
+    if (!months || !cost) continue;
+    const v = +(rev / cost).toFixed(2);
+    for (let i = start; i < end; i++) out[i] = v;
+  }
+  return out;
+}
+
 function buildSalesCostTableHtml(period) {
   const cols = [...SITES, TOTAL_SITE];
   const head = `<th>期間</th>` + cols.map(c => `<th class="num">${c.name}</th>`).join('');
@@ -1153,6 +1171,8 @@ function renderOverview() {
   `;
   renderCurrentYearCombo('composite-salescost', '菌床投資売上倍率', ds => [
     { label: '菌床投資売上倍率(倍)', data: ds.salesCostRatio, color: COLORS.salesCostRatio, type: 'line', axis: 'y' },
+    { label: '2ヶ月平均(倍)', data: periodRatioSeries(ds.revenue, ds.substrateCost, 2), color: '#f59e0b',
+      type: 'line', axis: 'y', pointRadius: 0, tension: 0 },
     baselineSeries(METRIC_DEFS.salesCostRatio.baseline, `基準 ${METRIC_DEFS.salesCostRatio.baseline}倍`),
   ], d);
   renderSalesCostTable();
