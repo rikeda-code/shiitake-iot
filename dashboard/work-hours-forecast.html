@@ -376,6 +376,9 @@
   var STD_LABOR_HOURS_GID = '1404355975';
   var SHIFT_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
   var SHIFT_SHEET_GID = '872290181'; // シフト表は期間ごとに新しいシートが作られるため、差し替え時はここだけ変更する
+  // 拠点シフト表（site-shift.html）のGAS WebアプリURL。設定されていればこちらから実働時間を読み、
+  // 空のときだけ上の旧シフト表（期間ごとのシート）を読む
+  var SHIFT_GAS_URL = '';
   var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
   var HARVEST_DAILY_TOTAL_GID = '1164843574';
 
@@ -857,6 +860,23 @@
     return extractShiftPersons(json.table.rows, basisDate);
   }
 
+  // 拠点シフト表のGASから、いなべ×栽培(部門='栽培'または'配送・栽培')の人の当日〜7日後の
+  // 実働時間を取得する。休憩は拠点シフト表側のルール（拘束5時間以上で1時間）で計算済み
+  async function fetchShiftPersonsFromApp(basisDate){
+    var from = toISO(basisDate), to = toISO(addDays(basisDate, DAY_COUNT - 1));
+    var url = SHIFT_GAS_URL + '?action=hours&site=' + encodeURIComponent('いなべ') + '&from=' + from + '&to=' + to;
+    var res = await fetch(url, { cache: 'no-store' });
+    var json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || 'シフトを取得できませんでした');
+    return json.persons
+      .filter(function(p){ return p.dept === '栽培' || p.dept === '配送・栽培'; })
+      .map(function(p){
+        var dayHours = [];
+        for (var o = 0; o < DAY_COUNT; o++) dayHours.push(p.days[toISO(addDays(basisDate, o))] || 0);
+        return { name: p.name, dept: p.dept, dayHours: dayHours };
+      });
+  }
+
   // 標準労働時間シートを解析する。純粋関数
   function parseStdLaborRows(rows){
     rows = rows || [];
@@ -930,6 +950,13 @@
     var personBreakdown = [];
 
     persons.forEach(function(p){
+      // 拠点シフト表から来た人は実働時間が計算済み（照合不要）
+      if (p.dayHours) {
+        var hrs = p.dayHours.map(function(h){ return Math.round(h * 10) / 10; });
+        hrs.forEach(function(h, o){ perDayTotal[o] += h; if (h > 0) perDayAttendance[o]++; });
+        personBreakdown.push({ name: p.name, dept: p.dept, dayHours: hrs });
+        return;
+      }
       var match = findLaborMatch(p.name, p.dept, laborRows);
       var dayHours = [];
       p.dayCells.forEach(function(raw, o){
@@ -1148,8 +1175,14 @@
   async function renderLabor(basisDate){
     showPanelError('laborError', null);
     try {
-      var persons = await fetchShiftPersons(basisDate);
-      var laborRows = await fetchStdLaborRows();
+      var persons, laborRows;
+      if (SHIFT_GAS_URL) {
+        persons = await fetchShiftPersonsFromApp(basisDate);
+        laborRows = [];
+      } else {
+        persons = await fetchShiftPersons(basisDate);
+        laborRows = await fetchStdLaborRows();
+      }
       var result = computeStandardLaborHours(persons, laborRows);
       return result;
     } catch (err) {
