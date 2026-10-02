@@ -175,6 +175,7 @@ button:disabled { opacity: .5; cursor: default; }
     <button id="clearSel">選択範囲をクリア</button>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
+    <button id="reloadBtn" title="スプレッドシートから最新の内容を読み直します">更新</button>
     <button id="printBtn">印刷・PDF</button>
     <button class="primary" id="saveBtn">保存</button>
   </div>
@@ -266,10 +267,13 @@ function cellHours(v) {
 }
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 2200); }
+function setStatus(text, warn) {
+  $('status').textContent = text;
+  $('status').classList.toggle('dirty', !!warn);
+}
 function setDirty(v) {
   dirty = v;
-  $('status').textContent = v ? '保存していない変更があります' : '';
-  $('status').classList.toggle('dirty', v);
+  if (v) setStatus('保存していない変更があります', true);
 }
 window.addEventListener('beforeunload', ev => { if (dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 
@@ -283,28 +287,56 @@ async function api(method, payload) {
   return json;
 }
 
-/* ── 読み込み ── */
-async function load() {
+/* ── 読み込み ──
+   開いたときは、この端末に残っている前回の内容をすぐ表示し、裏で最新を読み込んで差し替える。
+   「更新」ボタンはメンバーも含めてスプレッドシートから読み直す */
+const CACHE_PREFIX = 'siteShift:';
+const cacheKey = () => `${CACHE_PREFIX}${$('site').value}:${monthKey()}`;
+function readCache() { try { return JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) { return null; } }
+function writeCache(res) { try { localStorage.setItem(cacheKey(), JSON.stringify(res)); } catch (e) { /* 保存できなくても動作に影響なし */ } }
+// 画面の今の内容を、この端末の前回の内容として残す（保存直後に使う）
+function cacheCurrent() {
+  const shifts = [];
+  Object.entries(data).forEach(([key, days]) => Object.entries(days).forEach(([d, v]) => { if (v) shifts.push({ key, date: ymd(+d), value: v }); }));
+  writeCache({ members, fixed, shifts });
+}
+function apply(res) {
+  members = res.members;
+  fixed = res.fixed || {};
+  data = {};
+  res.shifts.forEach(s => { (data[s.key] ||= {})[+s.date.slice(8)] = s.value; });
+  loadedSite = $('site').value; loadedMonth = monthKey();
+  setDirty(false);
+  render(); renderFixed(); renderMembers();
+}
+let loadSeq = 0;
+async function load(fresh) {
   if (dirty) {
     const ok = await ask(`保存していない変更があります。破棄して${$('site').value} ${year}年${month}月を開きますか？`, '破棄して開く');
     if (!ok) { syncSelectors(); return; }
   }
-  $('gridBox').innerHTML = '<div class="loading">読み込み中…</div>';
   if (!SHIFT_GAS_URL) {
     $('gridBox').innerHTML = '<div class="notice">GASのURLがまだ設定されていません。gas/shift-webapp.gs をデプロイし、このページの SHIFT_GAS_URL に設定してください。</div>';
     return;
   }
+  const seq = ++loadSeq;
+  const cached = fresh ? null : readCache();
+  if (cached) { apply(cached); setStatus('前回の内容を表示中。最新を読み込んでいます…'); }
+  else { $('gridBox').innerHTML = '<div class="loading">読み込み中…</div>'; setStatus('読み込み中…'); }
+  $('reloadBtn').disabled = true;
   try {
-    const res = await api('GET', { action: 'load', site: $('site').value, month: monthKey() });
-    members = res.members;
-    fixed = res.fixed || {};
-    data = {};
-    res.shifts.forEach(s => { (data[s.key] ||= {})[+s.date.slice(8)] = s.value; });
-    loadedSite = $('site').value; loadedMonth = monthKey();
-    setDirty(false);
-    render(); renderFixed(); renderMembers();
+    const res = await api('GET', { action: 'load', site: $('site').value, month: monthKey(), fresh: fresh ? '1' : '0' });
+    if (seq !== loadSeq) return; // 途中で拠点・月を切り替えた
+    writeCache(res);
+    if (dirty) { setStatus('保存していない変更があります（最新の内容は「更新」で読み込めます）', true); return; }
+    apply(res);
+    setStatus(`最新の内容です（${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 読み込み）`);
   } catch (err) {
-    $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}</div>`;
+    if (seq !== loadSeq) return;
+    if (cached) setStatus('最新を読み込めませんでした。前回の内容を表示しています：' + err.message, true);
+    else { $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}</div>`; setStatus(''); }
+  } finally {
+    if (seq === loadSeq) $('reloadBtn').disabled = false;
   }
 }
 let loadedSite = null, loadedMonth = null;
@@ -517,6 +549,8 @@ $('saveBtn').onclick = async () => {
     }));
     const res = await api('POST', { action: 'saveShifts', site: $('site').value, month: monthKey(), cells });
     setDirty(false);
+    setStatus('保存しました');
+    cacheCurrent();
     toast(res.skipped?.length ? `保存しました（形式が正しくない${res.skipped.length}件は保存していません）` : '保存しました');
   } catch (err) {
     toast('保存できませんでした：' + err.message);
@@ -526,6 +560,7 @@ $('saveBtn').onclick = async () => {
 };
 $('printBtn').onclick = () => { sel = null; cursor = null; paintSel(); window.print(); };
 $('site').onchange = () => load();
+$('reloadBtn').onclick = () => load(true);
 $('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); load(); };
 
 /* ── 固定シフト（30分単位） ── */
@@ -571,7 +606,7 @@ $('fxSave').onclick = async () => {
   if (fxDraft.some(v => cellHours(v) === null)) { toast('終了が開始より前の曜日があります'); return; }
   try {
     await api('POST', { action: 'saveFixed', site: $('site').value, key: m.key, name: m.name, pattern: fxDraft });
-    fixed[m.key] = fxDraft.slice(); renderFixed();
+    fixed[m.key] = fxDraft.slice(); renderFixed(); if (!dirty) cacheCurrent();
     toast(`${m.name}さんの固定シフトを保存しました`);
   } catch (err) { toast('保存できませんでした：' + err.message); }
 };
@@ -608,7 +643,7 @@ $('memTable').addEventListener('click', async ev => {
       await api('POST', { action: 'undoRetire', key });
       toast('在職中に戻しました');
     }
-    retiring = null; await load();
+    retiring = null; await load(true);
   } catch (err) { toast('書き込めませんでした：' + err.message); }
 });
 $('addForm').addEventListener('submit', async ev => {
@@ -619,7 +654,7 @@ $('addForm').addEventListener('submit', async ev => {
     await api('POST', { action: 'addMember', site: $('site').value, name, dept: $('newRole').value, empType: $('newEmp').value, joinDate: $('newJoin').value });
     $('newName').value = '';
     toast(`${name}さんを整理済み_Mに登録しました。固定シフトを設定してください`);
-    await load();
+    await load(true);
     const added = rows.find(x => x.name === name); if (added) { fxKey = added.key; fxDraft = null; renderFixed(); }
   } catch (err) { toast('登録できませんでした：' + err.message); }
 });
