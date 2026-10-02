@@ -238,7 +238,9 @@ const monthKey = () => `${year}-${pad(month)}`;
 const daysIn = () => new Date(year, month, 0).getDate();
 const ymd = d => `${year}-${pad(month)}-${pad(d)}`;
 const divOf = dept => dept.includes('配送') ? '配送' : dept.includes('出荷') ? '出荷' : dept.includes('栽培') ? '栽培' : 'その他';
-const activeOn = (m, d) => (!m.join || m.join <= ymd(d)) && (!m.leave || m.leave >= ymd(d));
+// 在籍の判定は整理済み_MのB列フラグだけで行う（1在職中・2入社＝載せる／3退職・異動・8他所属・9退職＝載せない）
+const ON_SHIFT_FLAGS = [1, 2];
+const activeOn = (m, d) => ON_SHIFT_FLAGS.includes(m.flag);
 const fmt = h => (Math.round(h * 10) / 10).toLocaleString('ja-JP') + 'h';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 
@@ -312,15 +314,10 @@ function syncSelectors() {
 
 /* ── シフト表 ── */
 function visibleMembers() {
-  const n = daysIn();
   return members.filter(m => {
-    if (![1, 2, 3, 9].includes(m.flag)) return false;
-    // 退職・異動で退職日の入っていない人は、退職済みとして載せない
-    if ([3, 9].includes(m.flag) && !m.leave) return false;
+    if (!ON_SHIFT_FLAGS.includes(m.flag)) return false;
     // 事務・営業の人はシフトに載せない
-    if (/事務|営業/.test(m.dept + m.empType)) return false;
-    for (let d = 1; d <= n; d++) if (activeOn(m, d)) return true;
-    return false;
+    return !/事務|営業/.test(m.dept + m.empType);
   }).sort((a, b) => {
     const order = ['栽培', '出荷', '配送', 'その他'];
     return order.indexOf(divOf(a.dept)) - order.indexOf(divOf(b.dept)) || a.dept.localeCompare(b.dept, 'ja') || a.row - b.row;
@@ -343,8 +340,7 @@ function render() {
   rows.forEach((m, r) => {
     let sum = 0;
     const div = divOf(m.dept);
-    const badge = m.leave && m.leave <= ymd(n) ? `<span class="badge">${+m.leave.slice(5, 7)}/${+m.leave.slice(8)}${m.flag === 3 ? '異動' : '退職'}</span>`
-      : m.join && m.join >= ymd(1) ? `<span class="badge new">${+m.join.slice(5, 7)}/${+m.join.slice(8)}入社</span>` : '';
+    const badge = m.flag === 2 ? '<span class="badge new">入社</span>' : '';
     h += `<tr><td class="name">${esc(m.name)}${badge}</td><td class="role"><span class="chip ${div}">${esc(m.dept)}</span></td>`;
     for (let d = 1; d <= n; d++) {
       if (!activeOn(m, d)) { h += `<td class="cell na" data-r="${r}" data-c="${d}"></td>`; continue; }
@@ -582,7 +578,7 @@ let retiring = null;
 const md = s => s ? `${s.slice(0, 4)}/${+s.slice(5, 7)}/${+s.slice(8)}` : '—';
 const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職/異動', 9: '退職' };
 function renderMembers() {
-  const list = members.filter(m => [1, 2].includes(m.flag) || (m.leave && m.leave >= `${year - 1}-${pad(month)}-01`));
+  const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType));
   let h = '<tr><th>氏名</th><th>部門</th><th>雇用区分</th><th>状態</th><th>入社日</th><th>退職日</th><th></th></tr>';
   list.forEach(m => {
     const gone = m.leave && m.leave < ymd(1);
