@@ -377,16 +377,17 @@ function importLegacyShift() {
     const rawName = String(vals[r][0] || '').trim();
     if (!rawName) continue;
     // この行の対象期間の時間セル
-    const cells = [];
+    const cells = [], bad = [];
     targetCols.forEach(c => {
       const raw = String(disp[r][c] || '').trim();
       if (!raw) return;
       const value = normalizeShift_(raw);
-      if (workHours_(value) === null) { skipped.push(`${rawName} ${dates[c]}「${raw}」`); return; }
+      if (workHours_(value) === null) { bad.push(`${rawName} ${dates[c]}「${raw}」`); return; }
       cells.push({ date: dates[c], value });
     });
-    if (!cells.length) continue; // 集計行など、時間の入っていない行は無視
     const m = findMember(rawName);
+    if (m) skipped.push(...bad); // 集計行の数字などは報告しない
+    if (!cells.length) continue; // 時間の入っていない行は無視
     if (!m) { unmatched.push(`${rawName}（${cells.length}日分）`); continue; }
     cells.forEach(x => {
       const month = x.date.slice(0, 7);
