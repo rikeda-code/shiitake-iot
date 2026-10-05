@@ -493,20 +493,30 @@
 
   /* ===================== 日付の解析（年の補完） ===================== */
 
-  // "8/1"のような年なしM/D文字列を{month,day}に変換する。全角数字にもNFKCで対応
+  // "8/1"のような年なしM/D文字列、および"2026/10/01"・"2026-10-01"のような
+  // 年ありの日付文字列を{year, month, day}に変換する(yearは年なしの場合null)。
+  // 全角数字にもNFKCで対応。シフト表・栽培管理シートのどちらの日付行解析にも使われる
   function parseMD(text){
     if (text === null || text === undefined) return null;
     var s = String(text).normalize('NFKC').trim();
+    var ymd = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    if (ymd) return { year: parseInt(ymd[1], 10), month: parseInt(ymd[2], 10), day: parseInt(ymd[3], 10) };
     var m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
     if (!m) return null;
-    return { month: parseInt(m[1], 10), day: parseInt(m[2], 10) };
+    return { year: null, month: parseInt(m[1], 10), day: parseInt(m[2], 10) };
   }
 
   // 年なしM/Dの列(左から右)に対し、月が前の列より小さくなったら年を+1して
   // 実際のDateの配列を組み立てる。起点年は「今年-1」「今年」の順で試し、
-  // 本日のM/Dと一致する列ができる方を採用。どちらでも見つからなければ「今年」
+  // 本日のM/Dと一致する列ができる方を採用。どちらでも見つからなければ「今年」。
+  //
+  // 列の中に年ありの日付(YYYY/M/D等)が1つでも混ざっている場合は、今日基準の
+  // 起点年探しは行わず、年ありの列の年・月をそのまま年の補完の基準にする。
+  // その列より右側のM/Dのみの列は、月が直前の列より小さくなったところで年を+1
+  // （従来と同じ向きのロールオーバー）。左側のM/Dのみの列は、年ありの列から
+  // 遡る方向に月が増えて見えたところ（＝年をまたいで戻ったところ）で年を-1する
   function buildDatesWithYearInference(mdList, today){
-    function build(startYear){
+    function buildAllMD(startYear){
       var year = startYear;
       var prevMonth = null;
       return mdList.map(function(md){
@@ -516,13 +526,50 @@
         return new Date(year, md.month - 1, md.day);
       });
     }
-    var thisYear = today.getFullYear();
-    var candidateYears = [thisYear - 1, thisYear];
-    for (var i = 0; i < candidateYears.length; i++) {
-      var dates = build(candidateYears[i]);
-      if (dates.some(function(d){ return d && sameDate(d, today); })) return dates;
+
+    var hasExplicitYear = mdList.some(function(md){ return md && md.year !== null; });
+    if (!hasExplicitYear) {
+      var thisYear = today.getFullYear();
+      var candidateYears = [thisYear - 1, thisYear];
+      for (var i = 0; i < candidateYears.length; i++) {
+        var dates0 = buildAllMD(candidateYears[i]);
+        if (dates0.some(function(d){ return d && sameDate(d, today); })) return dates0;
+      }
+      return buildAllMD(thisYear);
     }
-    return build(thisYear);
+
+    var dates = mdList.map(function(md){
+      return (md && md.year !== null) ? new Date(md.year, md.month - 1, md.day) : null;
+    });
+
+    // 右方向への伝播：年ありの列(または右方向で既に解決済みの列)を基準に、
+    // それより右のM/Dのみの列を埋める
+    var year = null, prevMonth = null;
+    for (var r = 0; r < mdList.length; r++) {
+      var mdR = mdList[r];
+      if (!mdR) continue;
+      if (dates[r]) { year = dates[r].getFullYear(); prevMonth = mdR.month; continue; }
+      if (year === null) continue; // まだ基準が無い(左側は左方向の伝播で埋める)
+      if (prevMonth !== null && mdR.month < prevMonth) year++;
+      prevMonth = mdR.month;
+      dates[r] = new Date(year, mdR.month - 1, mdR.day);
+    }
+
+    // 左方向への伝播：右から左へ走査し、まだ埋まっていない列を直近の確定済み列
+    // (年あり、または右方向の伝播で埋まった列)を基準に埋める
+    year = null;
+    var nextMonth = null;
+    for (var l = mdList.length - 1; l >= 0; l--) {
+      var mdL = mdList[l];
+      if (!mdL) continue;
+      if (dates[l]) { year = dates[l].getFullYear(); nextMonth = mdL.month; continue; }
+      if (year === null) continue;
+      if (nextMonth !== null && mdL.month > nextMonth) year--;
+      nextMonth = mdL.month;
+      dates[l] = new Date(year, mdL.month - 1, mdL.day);
+    }
+
+    return dates;
   }
 
   /* ===================== ①工程件数・稼働コンテナ数 ===================== */
