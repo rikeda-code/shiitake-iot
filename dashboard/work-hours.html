@@ -4820,12 +4820,16 @@ function parseCultivationWeekdayCell(raw) {
 // 以降の判定基準にする（年の補完は明示年のセル以降もそのまま引き継がれる）。
 //
 // シートの表示形式がm/d（年を表示しない）のため、1行目のCSVからは年が分からない。
-// そこで起点年Yを「今年」から6年前までの7通り試し、2行目の曜日（日〜土）と実際に
-// 組み立てた日付の曜日が1列でも食い違う候補、および実在しない日付（うるう年でない
-// 年の2/29等、Dateコンストラクタが自動で繰り上げてしまうもの）を含む候補を除外する。
-// 残った候補が1つならそれを採用し、複数残った場合は最後の列の日付が本日以降で最も
-// 近いものを（無ければ本日に最も近いものを）採用する。1つも残らない場合は、
-// 年を確定できなかったことを示すためnullを返す（呼び出し側で拠点別の警告にする）
+// そこで起点年Yを「今年」から6年前までの7通り試し、実在しない日付（うるう年でない
+// 年の2/29等、Dateコンストラクタが自動で繰り上げてしまうもの）を含む候補は除外する。
+// 2行目の曜日（日〜土）との食い違いは、1列でも除外する従来の方式だと、シート側の
+// 曜日セルの手入力ミス1件だけで正しい起点年まで除外されてしまうため、食い違いの
+// 数が最も少ない候補を採用する方式にする。ただし、その食い違いが「比較した列数の
+// 1%以下」かつ「10列以下」の場合に限り許容し、それを超える場合は年を確定できな
+// かったものとしてnullを返す（呼び出し側で拠点別の警告にする）。食い違いの数が
+// 最少の候補が複数残った場合は、最後の列の日付が本日以降で最も近いものを（無ければ
+// 本日に最も近いものを）採用する。採用した候補に食い違いがあった場合は、呼び出し側が
+// シートの入力ミスをコンソール・画面に出せるよう、食い違った列の情報も合わせて返す
 function buildCultivationDatesWithYearInference(mdList, weekdayList, today) {
   function build(startYear) {
     let year = startYear;
@@ -4859,58 +4863,83 @@ function buildCultivationDatesWithYearInference(mdList, weekdayList, today) {
     return true;
   }
 
-  // 曜日が判明している列は、組み立てた日付の曜日と1列でも食い違ったら無効
-  function weekdayMatches(dates) {
+  // 曜日が判明している列のうち、組み立てた日付の曜日と食い違う列のindexを返す
+  function weekdayMismatchIndexes(dates) {
+    const idxs = [];
     for (let i = 0; i < dates.length; i++) {
       const w = weekdayList[i];
       if (!w) continue;
       const d = dates[i];
       if (!d) continue;
-      if (CULT_WEEKDAY_CHARS[d.getDay()] !== w) return false;
+      if (CULT_WEEKDAY_CHARS[d.getDay()] !== w) idxs.push(i);
     }
-    return true;
+    return idxs;
+  }
+  function comparedCount(dates) {
+    let n = 0;
+    for (let i = 0; i < dates.length; i++) { if (weekdayList[i] && dates[i]) n++; }
+    return n;
   }
 
   const thisYear = today.getFullYear();
   const candidateYears = [];
   for (let i = 0; i <= 6; i++) candidateYears.push(thisYear - i);
 
-  const survivors = [];
+  const candidates = [];
   candidateYears.forEach(y => {
     const dates = build(y);
     if (!isValidBuilt(dates)) return;
-    if (!weekdayMatches(dates)) return;
-    survivors.push({ year: y, dates });
+    const mismatchIdx = weekdayMismatchIndexes(dates);
+    candidates.push({ year: y, dates, mismatchIdx, mismatchCount: mismatchIdx.length, compared: comparedCount(dates) });
   });
 
-  console.log(`[栽培内訳直接計算] 曜日照合で残った起点年候補: ${survivors.length ? survivors.map(s => s.year).join(', ') : '(なし)'}`);
-
-  if (survivors.length === 0) return null;
-  if (survivors.length === 1) {
-    console.log(`[栽培内訳直接計算] 起点年を${survivors[0].year}に確定しました（曜日一致候補1件）`);
-    return survivors[0].dates;
+  if (candidates.length === 0) {
+    console.log('[栽培内訳直接計算] 曜日照合で残った起点年候補: (なし、実在しない日付を含む候補のみ)');
+    return null;
   }
 
-  // 複数残った場合：最後の列の日付が本日以降で最も近いものを優先。無ければ本日に最も近いもの
-  let best = null;
-  let bestDiff = null;
-  survivors.forEach(s => {
-    const last = lastValidDate(s.dates);
-    if (!last) return;
-    const diff = last.getTime() - today.getTime();
-    if (diff >= 0 && (bestDiff === null || diff < bestDiff)) { bestDiff = diff; best = s; }
-  });
-  if (!best) {
-    let minAbsDiff = null;
+  const minMismatch = Math.min(...candidates.map(c => c.mismatchCount));
+  const compared = candidates[0].compared;
+  const withinTolerance = minMismatch <= 10 && minMismatch <= compared * 0.01;
+
+  console.log(`[栽培内訳直接計算] 曜日照合で残った起点年候補: ${candidates.map(c => `${c.year}(不一致${c.mismatchCount}/${c.compared}件)`).join(', ')}`);
+
+  if (!withinTolerance) {
+    console.log(`[栽培内訳直接計算] 最小の不一致数(${minMismatch}件 / 比較${compared}件)が許容範囲（10件かつ1%）を超えるため、起点年を確定できません`);
+    return null;
+  }
+
+  let survivors = candidates.filter(c => c.mismatchCount === minMismatch);
+
+  let best;
+  if (survivors.length === 1) {
+    best = survivors[0];
+    console.log(`[栽培内訳直接計算] 起点年を${best.year}に確定しました（曜日不一致${best.mismatchCount}件、候補1件）`);
+  } else {
+    let bestDiff = null;
     survivors.forEach(s => {
       const last = lastValidDate(s.dates);
       if (!last) return;
-      const diff = Math.abs(last.getTime() - today.getTime());
-      if (minAbsDiff === null || diff < minAbsDiff) { minAbsDiff = diff; best = s; }
+      const diff = last.getTime() - today.getTime();
+      if (diff >= 0 && (bestDiff === null || diff < bestDiff)) { bestDiff = diff; best = s; }
     });
+    if (!best) {
+      let minAbsDiff = null;
+      survivors.forEach(s => {
+        const last = lastValidDate(s.dates);
+        if (!last) return;
+        const diff = Math.abs(last.getTime() - today.getTime());
+        if (minAbsDiff === null || diff < minAbsDiff) { minAbsDiff = diff; best = s; }
+      });
+    }
+    console.log(`[栽培内訳直接計算] 起点年を${best.year}に確定しました（曜日不一致${best.mismatchCount}件で並んだ候補${survivors.length}件中、最終列の日付が本日に近いものを採用）`);
   }
-  console.log(`[栽培内訳直接計算] 起点年を${best.year}に確定しました（曜日一致候補${survivors.length}件中、最終列の日付が本日に近いものを採用）`);
-  return best.dates;
+
+  const mismatches = best.mismatchIdx.map(i => {
+    const d = best.dates[i];
+    return { label: `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`, sheetWeekday: weekdayList[i] };
+  });
+  return { dates: best.dates, mismatches };
 }
 
 // 日付dの月度キー（10日締め）を"YYYY/M"形式で返す（normalizeMonth()と比較可能な表記）。
@@ -4931,19 +4960,21 @@ function cultRound1(v) { return Math.round(v * 10) / 10; }
 
 // 栽培管理シートの生rows(gviz形式)から、targetMonthKeys（"YYYY/M"形式の月度一覧）の
 // 7項目を月度ごとに集計する。純粋関数（テストから直接呼べる）。
-// 月度の期間（M/11〜翌月10日）の全日がシートの日付列でカバーされていない月度はnullにする
+// 月度の期間（M/11〜翌月10日）の全日がシートの日付列でカバーされていない月度はnullにする。
+// 戻り値は{ result, mismatches }（mismatchesは採用した起点年での曜日不一致列。通常は空配列）
 function aggregateCultivationMonthly(rows, today, targetMonthKeys) {
   rows = rows || [];
   const dateRowCells = rows[0] ? rows[0].c.slice(3) : [];
   const mdList = dateRowCells.map(c => parseCultivationDateCell(c && c.v));
   const weekdayRowCells = rows[1] ? rows[1].c.slice(3) : [];
   const weekdayList = weekdayRowCells.map(c => parseCultivationWeekdayCell(c && c.v));
-  const fullDates = buildCultivationDatesWithYearInference(mdList, weekdayList, today);
-  if (!fullDates) {
+  const yearInference = buildCultivationDatesWithYearInference(mdList, weekdayList, today);
+  if (!yearInference) {
     const err = new Error('栽培管理シートの日付(年)を確定できませんでした（曜日と一致する起点年の候補がありません）');
     err.cultivationYearUnresolved = true;
     throw err;
   }
+  const { dates: fullDates, mismatches } = yearInference;
 
   const presentDates = new Set();
   fullDates.forEach(d => { if (d) presentDates.add(cultDateKey(d)); });
@@ -5008,7 +5039,7 @@ function aggregateCultivationMonthly(rows, today, targetMonthKeys) {
       '稼働コンテナ数': Math.round(b['稼働コンテナ数']),
     };
   });
-  return result;
+  return { result, mismatches };
 }
 
 async function fetchCultivationDirectForSite(site, targetMonthKeys, today) {
@@ -5021,6 +5052,9 @@ async function fetchCultivationDirectForSite(site, targetMonthKeys, today) {
 // 取得・計算に失敗した拠点名→警告メッセージ。fetchProductionSheet()の戻り値の形
 // （{months, records}）は変えない方針のため、警告はこの別変数経由で表面化させる
 let cultivationDirectWarnings = {};
+// 曜日の不一致を許容範囲内で採用した拠点名→補足メッセージ（警告ではなく入力ミスの
+// 可能性を知らせる注意書き。エラーではないため計算自体は通常どおり行われている）
+let cultivationDirectNotices = {};
 
 // 拠点名・指標名→レコードの値配列を、site内の「出荷量(kg)」行の直後に挿入する
 // （既存レコードが無い場合のフォールバック。CULTIVATION_METRIC_ORDERの順で呼び出すこと）
@@ -5071,32 +5105,54 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
     const outcome = siteOutcomes[i];
     let siteResult = null;
     if (outcome.status === 'fulfilled') {
-      siteResult = outcome.value;
+      siteResult = outcome.value && outcome.value.result;
       delete cultivationDirectWarnings[site];
+      const mismatches = (outcome.value && outcome.value.mismatches) || [];
+      if (mismatches.length) {
+        mismatches.forEach(mm => {
+          console.log(`[栽培内訳直接計算] ${site}：曜日の不一致 ${mm.label}（シート上は「${mm.sheetWeekday}」）`);
+        });
+        cultivationDirectNotices[site] = `${site}の栽培管理シートの2行目（曜日）に入力ミスの可能性：${mismatches.map(mm => mm.label).join('、')}`;
+      } else {
+        delete cultivationDirectNotices[site];
+      }
     } else {
       const e = outcome.reason;
       console.error(`[栽培内訳直接計算] ${site}の栽培管理シート取得・計算でエラーが発生しました:`, e);
       cultivationDirectWarnings[site] = e && e.cultivationYearUnresolved
         ? `${site}の栽培管理シートの日付（年）を確定できませんでした`
         : `${site}の栽培内訳を栽培管理シートから取得できませんでした`;
+      delete cultivationDirectNotices[site];
     }
 
-    function valuesFor(metric) {
-      return unionMonths.map(m => (siteResult && siteResult[m]) ? siteResult[m][metric] : null);
-    }
+    // 以降はrecordsへの反映のみ（既にsiteResultは確定済み）。万一ここで予期しない
+    // エラーが起きても、他の拠点・表全体の描画を止めないよう、該当拠点の7項目を
+    // nullにした上で警告に倒す（取得・計算自体の失敗と同じ扱いにする）
+    try {
+      function valuesFor(metric) {
+        return unionMonths.map(m => (siteResult && siteResult[m]) ? siteResult[m][metric] : null);
+      }
 
-    const existingIdx = {};
-    records.forEach((r, idx) => { if (r.site === site && CULTIVATION_METRIC_ORDER.includes(r.metric)) existingIdx[r.metric] = idx; });
+      const existingIdx = {};
+      records.forEach((r, idx) => { if (r.site === site && CULTIVATION_METRIC_ORDER.includes(r.metric)) existingIdx[r.metric] = idx; });
 
-    CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] !== undefined).forEach(metric => {
-      const idx = existingIdx[metric];
-      records[idx] = { ...records[idx], values: valuesFor(metric) };
-    });
+      CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] !== undefined).forEach(metric => {
+        const idx = existingIdx[metric];
+        records[idx] = { ...records[idx], values: valuesFor(metric) };
+      });
 
-    const missingMetrics = CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] === undefined);
-    if (missingMetrics.length) {
-      const newRecs = missingMetrics.map(metric => ({ site, cat: '栽培内訳', metric, values: valuesFor(metric) }));
-      insertCultivationRecordsAfterShipment(records, site, newRecs);
+      const missingMetrics = CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] === undefined);
+      if (missingMetrics.length) {
+        const newRecs = missingMetrics.map(metric => ({ site, cat: '栽培内訳', metric, values: valuesFor(metric) }));
+        insertCultivationRecordsAfterShipment(records, site, newRecs);
+      }
+    } catch (e) {
+      console.error(`[栽培内訳直接計算] ${site}の表への反映中に予期しないエラーが発生しました:`, e);
+      cultivationDirectWarnings[site] = `${site}の栽培内訳を栽培管理シートから取得できませんでした`;
+      const nullValues = unionMonths.map(() => null);
+      records.forEach((r, idx) => {
+        if (r.site === site && CULTIVATION_METRIC_ORDER.includes(r.metric)) records[idx] = { ...r, values: nullValues };
+      });
     }
   });
 
@@ -5327,6 +5383,12 @@ function renderProductionTab() {
     const warningMessages = Object.values(cultivationDirectWarnings);
     if (warningMessages.length) {
       main.insertAdjacentHTML('afterbegin', `<div class="error-msg">${warningMessages.join(' / ')}</div>`);
+    }
+    // 曜日の不一致を許容範囲内で採用した拠点があれば、エラーではなく補足として
+    // 目立ちすぎない色で表示する（計算自体は通常どおり行われている）
+    const noticeMessages = Object.values(cultivationDirectNotices);
+    if (noticeMessages.length) {
+      main.insertAdjacentHTML('afterbegin', `<div style="padding:8px 18px;color:var(--muted);font-size:0.8rem">${noticeMessages.join(' / ')}</div>`);
     }
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">生産データ取得エラー: ${e.message}</div>`;
@@ -6748,6 +6810,7 @@ async function loadAll() {
   productionData = null;
   productionDataPromise = null;
   cultivationDirectWarnings = {};
+  cultivationDirectNotices = {};
 
   try {
     const json = await fetchSheet();
@@ -11293,6 +11356,7 @@ window.__cultTest = {
   CULTIVATION_SHEETS,
   CULTIVATION_METRIC_ORDER,
   getCultivationDirectWarnings: () => cultivationDirectWarnings,
+  getCultivationDirectNotices: () => cultivationDirectNotices,
 };
 </script>
 </body>
