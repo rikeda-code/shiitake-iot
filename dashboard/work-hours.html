@@ -791,6 +791,11 @@ const CULTIVATION_SHEETS = {
   '南丹':   { id: '1WBnGT3tkVfGhDJ7OZ2mZE4Juvd-t7le68bUlVRHGIeM', gid: '2146042804' },
 };
 
+// 「整理済み_分析」の貼り付け値ではなく「菌床納品実績」ファイルの「菌床数集計」シートから
+// 直接参照する拠点の一覧（菌床購入数(本)のみが対象。栽培内訳とは独立した別機能）
+const KINSHO_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
+const KINSHO_SHEET = { id: '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY', gid: '1209158168' };
+
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
 // 読み取り用の定数・関数は該当Stageで追加する
@@ -5172,6 +5177,148 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
   return { months: unionMonths, records };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   菌床購入数(本)の直接参照（KINSHO_DIRECT_SITES対象拠点）
+   ──────────────────────────────────────────────────────────────────────
+   「整理済み_分析」の貼り付け値ではなく、「菌床納品実績」ファイルの
+   「菌床数集計」シートから菌床購入数(本)の値だけを直接参照する。
+   栽培内訳の直接計算（CULTIVATION_DIRECT_SITES）とは独立した別機能で、
+   そちらのコード・ロジックには一切手を加えない。
+   ═══════════════════════════════════════════════════════════════════ */
+
+async function fetchKinshoCsvRows() {
+  const url = `https://docs.google.com/spreadsheets/d/${KINSHO_SHEET.id}/export?format=csv&gid=${KINSHO_SHEET.gid}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return parseCsv(text);
+}
+
+// 「菌床数集計」シートの生rows(CSV行=文字列の配列の配列)から、KINSHO_DIRECT_SITES各拠点の
+// 「合計」行の年月別の値を取得する。純粋関数（テストから直接呼べる）。
+// 年月の見出しが重複している場合は例外を投げる（kinshoDuplicateMonth=true）。
+// 戻り値は { bySite, missingSites }。bySiteは拠点名→{"YYYY/M":値(または値が無ければキー自体無し)}
+function parseKinshoSheet(rows) {
+  rows = rows || [];
+  const header = rows[0] || [];
+
+  // D列(index3)以降の各セルを、文字列のままNFKC正規化・trimして年月として解釈する
+  // （列位置は固定せず見出しから探す。数値変換はしない＝"2025.1"と"2025.10"を区別するため）
+  const colYearMonth = {};
+  const seenMonths = new Set();
+  for (let col = 3; col < header.length; col++) {
+    const raw = header[col];
+    if (raw === undefined || raw === null) continue;
+    const s = String(raw).normalize('NFKC').trim();
+    const m = s.match(/^(\d{4})\.(\d{1,2})$/);
+    if (!m) continue;
+    const key = `${parseInt(m[1], 10)}/${parseInt(m[2], 10)}`;
+    if (seenMonths.has(key)) {
+      const err = new Error(`菌床数集計シートの年月見出しが重複しています: ${key}`);
+      err.kinshoDuplicateMonth = true;
+      throw err;
+    }
+    seenMonths.add(key);
+    colYearMonth[col] = key;
+  }
+
+  // A列（「菌床数」／「金額(円)」）・B列（拠点）はセル結合のため、直前の非空値を
+  // 下の行に引き継ぐ。「菌床数」の欄にある行だけを対象にする
+  let carryA = '';
+  let carryB = '';
+  const kinshoRows = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const aRaw = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
+    const bRaw = (row[1] !== undefined && row[1] !== null) ? String(row[1]).trim() : '';
+    if (aRaw) carryA = aRaw;
+    if (bRaw) carryB = bRaw;
+    if (carryA !== '菌床数') continue;
+    const cVal = (row[2] !== undefined && row[2] !== null) ? String(row[2]).trim() : '';
+    kinshoRows.push({ site: carryB, c: cVal, row });
+  }
+
+  function parseValue(raw) {
+    if (raw === undefined || raw === null) return null;
+    const s = String(raw).trim();
+    if (s === '') return null;
+    const n = parseFloat(s.replace(/,/g, ''));
+    return isNaN(n) ? null : n;
+  }
+
+  const bySite = {};
+  const missingSites = [];
+  KINSHO_DIRECT_SITES.forEach(site => {
+    const found = kinshoRows.find(kr => kr.site === site && kr.c === '合計');
+    if (!found) { missingSites.push(site); return; }
+    const byMonth = {};
+    Object.keys(colYearMonth).forEach(colIdx => {
+      byMonth[colYearMonth[colIdx]] = parseValue(found.row[colIdx]);
+    });
+    bySite[site] = byMonth;
+  });
+
+  return { bySite, missingSites };
+}
+
+// 取得失敗・年月重複等、菌床数集計シート全体に関わる失敗、または個別拠点の
+// 合計行が見つからない場合の警告メッセージ（表示順はfetchProductionSheet()の呼び出しごとに洗い替え）
+let kinshoDirectWarningMessages = [];
+
+// 6箇所から並行して呼ばれても取得が1回だけになるよう、結果ではなくPromiseをメモ化する。
+// 栽培管理シートの取得（applyCultivationDirectOverrides内）とは独立しているため、
+// fetchProductionSheet()側で早めに呼び出すことで並行して取得が進む
+let kinshoDirectDataPromise = null;
+function fetchKinshoDirectDataOnce() {
+  if (!kinshoDirectDataPromise) {
+    kinshoDirectDataPromise = (async () => {
+      const rows = await fetchKinshoCsvRows();
+      return parseKinshoSheet(rows);
+    })();
+  }
+  return kinshoDirectDataPromise;
+}
+
+// KINSHO_DIRECT_SITES対象拠点の「菌床購入数(本)」レコードの値を、菌床数集計シートの
+// 値で全期間置き換える。レコードは拠点名＋指標名「菌床購入数(本)」で探す（カテゴリ名は
+// 拠点により異なるため使わない）。mergedは栽培内訳の直接計算適用済みの{months,records}で、
+// 戻り値の形・レコードの形は変えない（対象レコードの値のみ置換する）
+async function applyKinshoDirectOverrides(merged, kinshoPromise) {
+  const months = merged.months;
+  const records = merged.records;
+  kinshoDirectWarningMessages = [];
+
+  let kinshoResult = null;
+  try {
+    kinshoResult = await kinshoPromise;
+  } catch (e) {
+    console.error('[菌床購入数直接参照] 菌床数集計シートの取得・パースでエラーが発生しました:', e);
+    kinshoDirectWarningMessages.push('菌床購入数を菌床納品実績シートから取得できませんでした');
+  }
+
+  KINSHO_DIRECT_SITES.forEach(site => {
+    const idx = records.findIndex(r => r.site === site && r.metric === '菌床購入数(本)');
+    if (idx === -1) return; // 対象レコードが無ければ何もしない（挿入はしない方針）
+
+    if (!kinshoResult) {
+      records[idx] = { ...records[idx], values: months.map(() => null) };
+      return;
+    }
+    if (kinshoResult.missingSites.includes(site)) {
+      kinshoDirectWarningMessages.push(`${site}の菌床購入数の合計行が菌床数集計シートに見つかりませんでした`);
+      records[idx] = { ...records[idx], values: months.map(() => null) };
+      return;
+    }
+    const byMonth = kinshoResult.bySite[site] || {};
+    records[idx] = {
+      ...records[idx],
+      values: months.map(m => Object.prototype.hasOwnProperty.call(byMonth, m) ? byMonth[m] : null),
+    };
+  });
+
+  return { months, records };
+}
+
 let productionData = null;
 // 6箇所から並行して呼ばれても実行（整理済み_分析の取得・栽培管理シートの取得/計算）が
 // 1回だけになるよう、結果そのものではなくPromiseをメモ化する
@@ -5190,7 +5337,13 @@ async function fetchProductionSheet() {
     // 可能性があるため、月一覧を組み立てる前に読み込み完了を待つ
     const allDataForMonths = await waitForAllData();
 
-    const merged = await applyCultivationDirectOverrides(base, allDataForMonths);
+    // 菌床数集計シートの取得は栽培管理シートの取得と独立しているため、ここで先に
+    // 開始しておき（Promiseだけ保持）、applyCultivationDirectOverrides()の完了を待たずに
+    // 並行して進める
+    const kinshoPromise = fetchKinshoDirectDataOnce();
+
+    const cultMerged = await applyCultivationDirectOverrides(base, allDataForMonths);
+    const merged = await applyKinshoDirectOverrides(cultMerged, kinshoPromise);
     productionData = merged;
     return merged;
   })();
@@ -5393,7 +5546,7 @@ function renderProductionTab() {
     // 栽培管理シートの取得・計算に失敗した拠点があれば、表の上部に警告を表示する
     // （他の拠点・他の行の表示は止めない。fetchProductionSheet()の戻り値の形は
     // 変えない方針のため、警告はcultivationDirectWarnings経由で別途反映する）
-    const warningMessages = Object.values(cultivationDirectWarnings);
+    const warningMessages = Object.values(cultivationDirectWarnings).concat(kinshoDirectWarningMessages);
     if (warningMessages.length) {
       main.insertAdjacentHTML('afterbegin', `<div class="error-msg">${warningMessages.join(' / ')}</div>`);
     }
@@ -5830,6 +5983,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
   html += `</tbody></table>
     </div>
     <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ ${CULTIVATION_DIRECT_SITES.join('・')}の栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
+    <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${KINSHO_DIRECT_SITES.join('・')}の菌床購入数は菌床納品実績（菌床数集計）から取得（末締め）</div>
     </div>`;
 
   main.innerHTML = html;
@@ -6824,6 +6978,8 @@ async function loadAll() {
   productionDataPromise = null;
   cultivationDirectWarnings = {};
   cultivationDirectNotices = {};
+  kinshoDirectDataPromise = null;
+  kinshoDirectWarningMessages = [];
 
   try {
     const json = await fetchSheet();
@@ -11370,6 +11526,11 @@ window.__cultTest = {
   CULTIVATION_METRIC_ORDER,
   getCultivationDirectWarnings: () => cultivationDirectWarnings,
   getCultivationDirectNotices: () => cultivationDirectNotices,
+  parseKinshoSheet,
+  applyKinshoDirectOverrides,
+  KINSHO_DIRECT_SITES,
+  KINSHO_SHEET,
+  getKinshoDirectWarningMessages: () => kinshoDirectWarningMessages,
 };
 </script>
 </body>
