@@ -796,6 +796,13 @@ const CULTIVATION_SHEETS = {
 const KINSHO_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
 const KINSHO_SHEET = { id: '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY', gid: '1209158168' };
 
+// 「整理済み_分析」の貼り付け値ではなく、拠点・月ごとの「収穫管理表」ファイルから
+// 直接参照する拠点の一覧（収穫量(kg)のみが対象。栽培内訳・菌床購入数とは独立した別機能）。
+// どのファイルを見るかは、ファーム勤務時間ファイル内「シートURL」シートで年月ごとに管理されている
+const HARVEST_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
+const HARVEST_URL_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1996914203' };
+const HARVEST_TARGET_SHEET_GID = '676064999'; // 収穫管理表の「収獲目標値」シート（固定gid）
+
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
 // 読み取り用の定数・関数は該当Stageで追加する
@@ -5319,6 +5326,224 @@ async function applyKinshoDirectOverrides(merged, kinshoPromise) {
   return { months, records };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   収穫量(kg)の直接参照（HARVEST_DIRECT_SITES対象拠点）
+   ──────────────────────────────────────────────────────────────────────
+   「整理済み_分析」の貼り付け値ではなく、拠点・月ごとの「収穫管理表」
+   ファイル（「シートURL」シートで年月ごとに管理）の「収獲目標値」シート
+   から収穫量(kg)の値だけを直接参照する。栽培内訳・菌床購入数の直接参照
+   とは独立した別機能で、そちらのコード・ロジックには一切手を加えない。
+   ═══════════════════════════════════════════════════════════════════ */
+
+async function fetchHarvestCsvRows(sheetId, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return parseCsv(text);
+}
+
+// 「シートURL」シートの生rows(CSV行=文字列の配列の配列)から、HARVEST_DIRECT_SITES各拠点の
+// 年月別URL（スプレッドシートID＋gid）を取得する。純粋関数（テストから直接呼べる）。
+// 1行目の見出しから拠点の列を探す（列固定なし）。2行目以降のA列が年月（"YYYY/M"または
+// "YYYY/M/D"、日は無視）。URLが空欄・IDが取り出せないセルはnull（URLなし）として扱う。
+// 戻り値は { bySiteMonth }。bySiteMonth[拠点][月key] = {id, gid} または null
+function parseHarvestUrlSheet(rows) {
+  rows = rows || [];
+  const header = rows[0] || [];
+
+  const siteCol = {};
+  HARVEST_DIRECT_SITES.forEach(site => {
+    for (let col = 1; col < header.length; col++) {
+      const raw = header[col];
+      if (raw !== undefined && raw !== null && String(raw).trim() === site) { siteCol[site] = col; break; }
+    }
+  });
+
+  const bySiteMonth = {};
+  HARVEST_DIRECT_SITES.forEach(site => { bySiteMonth[site] = {}; });
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const aRaw = row[0];
+    if (aRaw === undefined || aRaw === null) continue;
+    const s = String(aRaw).trim();
+    const m = s.match(/^(\d{4})\/(\d{1,2})(?:\/\d{1,2})?$/);
+    if (!m) continue;
+    const monthKey = `${parseInt(m[1], 10)}/${parseInt(m[2], 10)}`;
+
+    HARVEST_DIRECT_SITES.forEach(site => {
+      const col = siteCol[site];
+      if (col === undefined) { bySiteMonth[site][monthKey] = null; return; }
+      const urlRaw = row[col];
+      const url = (urlRaw !== undefined && urlRaw !== null) ? String(urlRaw).trim() : '';
+      if (!url) { bySiteMonth[site][monthKey] = null; return; }
+      const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (!idMatch) { bySiteMonth[site][monthKey] = null; return; }
+      const gidMatch = url.match(/gid=(\d+)/);
+      bySiteMonth[site][monthKey] = { id: idMatch[1], gid: gidMatch ? gidMatch[1] : HARVEST_TARGET_SHEET_GID };
+    });
+  }
+
+  return { bySiteMonth };
+}
+
+// 収穫管理表（収獲目標値シート）の生rows(CSV)から、expectedMonthKey("YYYY/M")の
+// 収穫実績値の合計を取得する。純粋関数。
+// ・A1セル("YY/M/D/曜日")の年月がexpectedMonthKeyと一致しなければmonth_mismatch
+// ・3行目の見出しから「収穫実績値」列を、列固定せず探す（見つからなければheader_not_found）
+// ・A列が「合計」の行を探す（見つからなければtotal_row_not_found）
+// 戻り値は { value, error }。errorがあればvalueはnull
+function parseHarvestTargetSheet(rows, expectedMonthKey) {
+  rows = rows || [];
+
+  const a1Raw = (rows[0] && rows[0][0] !== undefined && rows[0][0] !== null) ? String(rows[0][0]).trim() : '';
+  const a1m = a1Raw.match(/^(\d{1,2})\/(\d{1,2})\/\d{1,2}\/.+$/);
+  if (!a1m) return { value: null, error: 'header_not_found' };
+  const sheetMonthKey = `${2000 + parseInt(a1m[1], 10)}/${parseInt(a1m[2], 10)}`;
+  if (sheetMonthKey !== expectedMonthKey) return { value: null, error: 'month_mismatch' };
+
+  const headerRow = rows[2] || [];
+  let col = -1;
+  for (let i = 0; i < headerRow.length; i++) {
+    if (headerRow[i] !== undefined && headerRow[i] !== null && String(headerRow[i]).trim() === '収穫実績値') { col = i; break; }
+  }
+  if (col === -1) return { value: null, error: 'header_not_found' };
+
+  let totalRowIdx = -1;
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const aVal = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
+    if (aVal === '合計') { totalRowIdx = r; break; }
+  }
+  if (totalRowIdx === -1) return { value: null, error: 'total_row_not_found' };
+
+  const raw = rows[totalRowIdx][col];
+  if (raw === undefined || raw === null) return { value: null, error: 'total_row_not_found' };
+  const s = String(raw).trim().replace(/kg$/i, '').replace(/,/g, '');
+  const n = parseFloat(s);
+  if (isNaN(n)) return { value: null, error: 'total_row_not_found' };
+  return { value: n, error: null };
+}
+
+const HARVEST_ERROR_REASON_TEXT = {
+  month_mismatch: '月の不一致',
+  header_not_found: '収穫実績値列が見つかりません',
+  total_row_not_found: '合計行が見つかりません',
+  fetch_failed: '取得失敗',
+};
+
+// 取得失敗・URL一覧全体に関わる失敗、または個別拠点・月の取得失敗の警告メッセージ
+let harvestDirectWarningMessages = [];
+// URL未設定の月が1つでもあれば、警告ではなく補足の注記として表示する文言
+let harvestDirectNotices = [];
+
+// 6箇所から並行して呼ばれても取得が1回だけになるよう、結果ではなくPromiseをメモ化する。
+// 栽培管理シート・菌床納品実績の取得とは独立しているため、fetchProductionSheet()側で
+// 早めに呼び出すことで並行して取得が進む
+let harvestUrlDataPromise = null;
+function fetchHarvestUrlDataOnce() {
+  if (!harvestUrlDataPromise) {
+    harvestUrlDataPromise = (async () => {
+      const rows = await fetchHarvestCsvRows(HARVEST_URL_SHEET.id, HARVEST_URL_SHEET.gid);
+      return parseHarvestUrlSheet(rows);
+    })();
+  }
+  return harvestUrlDataPromise;
+}
+
+// HARVEST_DIRECT_SITES対象拠点の「収穫量(kg)」レコードの値を、拠点・月ごとの収穫管理表の
+// 値で全期間置き換える。レコードは拠点名＋指標名「収穫量(kg)」で探す（カテゴリ名は使わない）。
+// mergedは栽培内訳・菌床購入数の直接参照適用済みの{months,records}で、戻り値の形・
+// レコードの形は変えない（対象レコードの値のみ置換する）。収穫管理表の取得は月一覧に
+// 含まれる月だけ行い、拠点数×月数の同時取得数をHARVEST_CONCURRENCYまでに制限する
+const HARVEST_CONCURRENCY = 6;
+async function applyHarvestDirectOverrides(merged, urlPromise) {
+  const months = merged.months;
+  const records = merged.records;
+  harvestDirectWarningMessages = [];
+  harvestDirectNotices = [];
+
+  function nullifyAll() {
+    HARVEST_DIRECT_SITES.forEach(site => {
+      const idx = records.findIndex(r => r.site === site && r.metric === '収穫量(kg)');
+      if (idx === -1) return;
+      records[idx] = { ...records[idx], values: months.map(() => null) };
+    });
+  }
+
+  let urlResult = null;
+  try {
+    urlResult = await urlPromise;
+  } catch (e) {
+    console.error('[収穫量直接参照] シートURLシートの取得・パースでエラーが発生しました:', e);
+    harvestDirectWarningMessages.push('収穫量のURL一覧（シートURL）を取得できませんでした');
+    nullifyAll();
+    return { months, records };
+  }
+
+  // 拠点×月のうちURLがあるものだけを取得対象にする（月一覧に無い月・URLなしの月は取得しない）
+  const tasks = [];
+  let hasUrlMissingMonth = false;
+  HARVEST_DIRECT_SITES.forEach(site => {
+    months.forEach(m => {
+      const urlInfo = (urlResult.bySiteMonth[site] || {})[m];
+      if (urlInfo) tasks.push({ site, month: m, urlInfo });
+      else hasUrlMissingMonth = true;
+    });
+  });
+
+  const resultsBySiteMonth = {};
+  let taskIdx = 0;
+  async function worker() {
+    while (taskIdx < tasks.length) {
+      const t = tasks[taskIdx++];
+      if (!resultsBySiteMonth[t.site]) resultsBySiteMonth[t.site] = {};
+      try {
+        const rows = await fetchHarvestCsvRows(t.urlInfo.id, t.urlInfo.gid);
+        resultsBySiteMonth[t.site][t.month] = parseHarvestTargetSheet(rows, t.month);
+      } catch (e) {
+        console.error(`[収穫量直接参照] ${t.site} ${t.month}の収穫管理表の取得でエラーが発生しました:`, e);
+        resultsBySiteMonth[t.site][t.month] = { value: null, error: 'fetch_failed' };
+      }
+    }
+  }
+  const workerCount = Math.min(HARVEST_CONCURRENCY, tasks.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  const failureMessages = [];
+  HARVEST_DIRECT_SITES.forEach(site => {
+    months.forEach(m => {
+      const r = (resultsBySiteMonth[site] || {})[m];
+      if (r && r.error) {
+        failureMessages.push(`${site} ${m}（${HARVEST_ERROR_REASON_TEXT[r.error] || r.error}）`);
+      }
+    });
+  });
+  if (failureMessages.length) {
+    harvestDirectWarningMessages.push(`収穫量を取得できなかった月：${failureMessages.join('、')}`);
+  }
+  if (hasUrlMissingMonth) {
+    harvestDirectNotices.push('URL未設定の月は「－」');
+  }
+
+  HARVEST_DIRECT_SITES.forEach(site => {
+    const idx = records.findIndex(r => r.site === site && r.metric === '収穫量(kg)');
+    if (idx === -1) return;
+    records[idx] = {
+      ...records[idx],
+      values: months.map(m => {
+        const urlInfo = (urlResult.bySiteMonth[site] || {})[m];
+        if (!urlInfo) return null; // URLなしの月
+        const r = (resultsBySiteMonth[site] || {})[m];
+        return (r && !r.error) ? r.value : null;
+      }),
+    };
+  });
+
+  return { months, records };
+}
+
 let productionData = null;
 // 6箇所から並行して呼ばれても実行（整理済み_分析の取得・栽培管理シートの取得/計算）が
 // 1回だけになるよう、結果そのものではなくPromiseをメモ化する
@@ -5337,13 +5562,15 @@ async function fetchProductionSheet() {
     // 可能性があるため、月一覧を組み立てる前に読み込み完了を待つ
     const allDataForMonths = await waitForAllData();
 
-    // 菌床数集計シートの取得は栽培管理シートの取得と独立しているため、ここで先に
-    // 開始しておき（Promiseだけ保持）、applyCultivationDirectOverrides()の完了を待たずに
-    // 並行して進める
+    // 菌床数集計シート・収穫量シートURL一覧の取得は栽培管理シートの取得と独立しているため、
+    // ここで先に開始しておき（Promiseだけ保持）、applyCultivationDirectOverrides()の完了を
+    // 待たずに並行して進める（収穫管理表本体の取得は月一覧確定後でないと開始できない）
     const kinshoPromise = fetchKinshoDirectDataOnce();
+    const harvestUrlPromise = fetchHarvestUrlDataOnce();
 
     const cultMerged = await applyCultivationDirectOverrides(base, allDataForMonths);
-    const merged = await applyKinshoDirectOverrides(cultMerged, kinshoPromise);
+    const kinshoMerged = await applyKinshoDirectOverrides(cultMerged, kinshoPromise);
+    const merged = await applyHarvestDirectOverrides(kinshoMerged, harvestUrlPromise);
     productionData = merged;
     return merged;
   })();
@@ -5546,7 +5773,7 @@ function renderProductionTab() {
     // 栽培管理シートの取得・計算に失敗した拠点があれば、表の上部に警告を表示する
     // （他の拠点・他の行の表示は止めない。fetchProductionSheet()の戻り値の形は
     // 変えない方針のため、警告はcultivationDirectWarnings経由で別途反映する）
-    const warningMessages = Object.values(cultivationDirectWarnings).concat(kinshoDirectWarningMessages);
+    const warningMessages = Object.values(cultivationDirectWarnings).concat(kinshoDirectWarningMessages, harvestDirectWarningMessages);
     if (warningMessages.length) {
       main.insertAdjacentHTML('afterbegin', `<div class="error-msg">${warningMessages.join(' / ')}</div>`);
     }
@@ -5984,6 +6211,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
     </div>
     <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ ${CULTIVATION_DIRECT_SITES.join('・')}の栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
     <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${KINSHO_DIRECT_SITES.join('・')}の菌床購入数は菌床納品実績（菌床数集計）から取得（末締め）</div>
+    <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${HARVEST_DIRECT_SITES.join('・')}の収穫量は各拠点の収穫管理表（収獲目標値シートの収穫実績値・合計）から取得（末締め）${harvestDirectNotices.length ? '　' + harvestDirectNotices.join('　') : ''}</div>
     </div>`;
 
   main.innerHTML = html;
@@ -6980,6 +7208,9 @@ async function loadAll() {
   cultivationDirectNotices = {};
   kinshoDirectDataPromise = null;
   kinshoDirectWarningMessages = [];
+  harvestUrlDataPromise = null;
+  harvestDirectWarningMessages = [];
+  harvestDirectNotices = [];
 
   try {
     const json = await fetchSheet();
@@ -11531,6 +11762,15 @@ window.__cultTest = {
   KINSHO_DIRECT_SITES,
   KINSHO_SHEET,
   getKinshoDirectWarningMessages: () => kinshoDirectWarningMessages,
+  parseHarvestUrlSheet,
+  parseHarvestTargetSheet,
+  applyHarvestDirectOverrides,
+  HARVEST_DIRECT_SITES,
+  HARVEST_URL_SHEET,
+  HARVEST_TARGET_SHEET_GID,
+  HARVEST_CONCURRENCY,
+  getHarvestDirectWarningMessages: () => harvestDirectWarningMessages,
+  getHarvestDirectNotices: () => harvestDirectNotices,
 };
 </script>
 </body>
