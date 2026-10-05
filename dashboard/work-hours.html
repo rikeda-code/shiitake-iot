@@ -783,8 +783,8 @@ const PAST_YEAR_COUNT_GID = '1654355403'; // 人数_過去実績
 
 // 栽培内訳（コンテナ数）の7項目（菌床入れ・芽かき・収穫・注水・散水・廃棄・稼働コンテナ数）を、
 // 「整理済み_分析」の貼り付け値ではなく各拠点の「栽培管理」シートから直接計算する拠点の一覧。
-// 群馬・南丹は設定のみ用意し、リストには含めない（後の移行で追加する）
-const CULTIVATION_DIRECT_SITES = ['いなべ'];
+// 南丹は設定のみ用意し、リストには含めない（後の移行で追加する）
+const CULTIVATION_DIRECT_SITES = ['いなべ', '群馬'];
 const CULTIVATION_SHEETS = {
   'いなべ': { id: '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM', gid: '1452537379' },
   '群馬':   { id: '12Xa_bkHE5tw9-YgGPIONzAj9ex3jr0Au-3B1k6DSZDY', gid: '1776859904' },
@@ -5062,12 +5062,19 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
 
-  for (const site of CULTIVATION_DIRECT_SITES) {
+  // 対象拠点の栽培管理シート取得・計算は、サイトごとに独立しているため並行して行う
+  const siteOutcomes = await Promise.allSettled(
+    CULTIVATION_DIRECT_SITES.map(site => fetchCultivationDirectForSite(site, unionMonths, today))
+  );
+
+  CULTIVATION_DIRECT_SITES.forEach((site, i) => {
+    const outcome = siteOutcomes[i];
     let siteResult = null;
-    try {
-      siteResult = await fetchCultivationDirectForSite(site, unionMonths, today);
+    if (outcome.status === 'fulfilled') {
+      siteResult = outcome.value;
       delete cultivationDirectWarnings[site];
-    } catch (e) {
+    } else {
+      const e = outcome.reason;
       console.error(`[栽培内訳直接計算] ${site}の栽培管理シート取得・計算でエラーが発生しました:`, e);
       cultivationDirectWarnings[site] = e && e.cultivationYearUnresolved
         ? `${site}の栽培管理シートの日付（年）を確定できませんでした`
@@ -5079,7 +5086,7 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
     }
 
     const existingIdx = {};
-    records.forEach((r, i) => { if (r.site === site && CULTIVATION_METRIC_ORDER.includes(r.metric)) existingIdx[r.metric] = i; });
+    records.forEach((r, idx) => { if (r.site === site && CULTIVATION_METRIC_ORDER.includes(r.metric)) existingIdx[r.metric] = idx; });
 
     CULTIVATION_METRIC_ORDER.filter(metric => existingIdx[metric] !== undefined).forEach(metric => {
       const idx = existingIdx[metric];
@@ -5091,7 +5098,7 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
       const newRecs = missingMetrics.map(metric => ({ site, cat: '栽培内訳', metric, values: valuesFor(metric) }));
       insertCultivationRecordsAfterShipment(records, site, newRecs);
     }
-  }
+  });
 
   return { months: unionMonths, records };
 }
@@ -5747,7 +5754,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
 
   html += `</tbody></table>
     </div>
-    <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ いなべの栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
+    <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ ${CULTIVATION_DIRECT_SITES.join('・')}の栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
     </div>`;
 
   main.innerHTML = html;
