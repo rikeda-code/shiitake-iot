@@ -564,6 +564,17 @@
     /* 生産計画タブ専用：上部の余白を詰めてスクロール領域を広げる（他タブの
        .prod-panelには影響させないよう、既存クラスとは別に新設） */
     .prod-panel-compact { padding-top: 8px; }
+    /* 生産実績タブ専用：パネルの枠（背景・枠線・角の丸み）が表の最後の行・下部の注記
+       まで含めた内容全体を囲むよう、画面の高さに収めず内容に応じて自然に伸ばす
+       （flex:1;min-height:0のままだと3拠点分の表がパネルの下端をはみ出し、はみ出した
+       行だけbody側の地の色が透けて見えてしまう）。縦スクロールは引き続き上位のmain
+       要素に任せる（他タブの.prod-panelには影響させないよう別クラスにする） */
+    .prod-panel--seisan-jisseki { flex: 0 0 auto; min-height: auto; }
+    /* 生産実績タブの表限定：行の半透明の背景色(cat-saibai等)が、パネルの内側・はみ出した
+       外側のどちらに表示されていても常に同じ色に見えるよう、表自体に地の色(--bg)を
+       敷く（透明なtdは本来「その背後に何が描画されているか」で色が変わってしまうため）。
+       他タブのprod-tableの背景には影響させない */
+    .prod-table--seisan-jisseki { background: var(--bg); }
 
     /* ── 比較タブ（サブタブ付き。ヘッダー行を固定し、下部のみスクロール） ── */
     .compare-shell {
@@ -5833,7 +5844,7 @@ const CULTIVATION_METRICS = new Set(['菌床入れ', '芽かき', '収穫', '注
 // 生カテゴリ文言に分割されているケースに対応）。栽培内訳系は1拠点内に1グループのみの
 // 前提で、該当指標が連続する間はそのまま1ブロックにまとめ「栽培内訳（コンテナ数）」を
 // 割り当てる。それ以外の行は元の生カテゴリ文言をそのまま使う
-function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
+function groupIntoLabeledBlocks(siteRecs, labelForOccurrence, extraShippingMetrics) {
   // 栽培内訳（コンテナ数）関連の指標（CULTIVATION_METRICS）は、シート上で連続して
   // 並んでいることを前提にせず、拠点内のどこにあっても必ず1つのまとまりとして扱う。
   // （シート側の行順によっては、ほかの指標の行が間に挟まり、栽培内訳の行が不連続に
@@ -5841,6 +5852,17 @@ function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
   // 結合セルが分断されないようにする。先頭から見て最初に現れた栽培内訳の行の位置に
   // まとめて挿入する）
   const cultivationRecords = siteRecs.filter(r => CULTIVATION_METRICS.has(r.metric));
+
+  // extraShippingMetrics：SHIPPING_METRICS（4種）に加えて同じ「出荷」のまとまりに
+  // 合流させたい指標（生産実績タブの「付帯作業」など）。SHIPPING_METRICS自体は
+  // 生産計画タブ(renderPlanTable)とも共有しているため変更しない。extraの指標は
+  // まとまりを「閉じる」条件（SHIPPING_METRICS全種が揃ったら閉じる）には数えず、
+  // 進行中のまとまりに素通しで合流させるだけなので、呼び出し元が指定しない限り
+  // （plan側）挙動は従来どおり変わらない
+  const extraShippingSet = extraShippingMetrics && extraShippingMetrics.length ? new Set(extraShippingMetrics) : null;
+  function isShippingLike(metric) {
+    return SHIPPING_METRICS.has(metric) || (extraShippingSet && extraShippingSet.has(metric));
+  }
 
   const raw = [];
   let shippingRun = null;
@@ -5863,10 +5885,10 @@ function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
       }
       return; // 栽培内訳の行はまとめて挿入済みのため、個別には追加しない
     }
-    if (SHIPPING_METRICS.has(r.metric)) {
+    if (isShippingLike(r.metric)) {
       if (!shippingRun) shippingRun = { records: [], seen: new Set() };
       shippingRun.records.push(r);
-      shippingRun.seen.add(r.metric);
+      if (SHIPPING_METRICS.has(r.metric)) shippingRun.seen.add(r.metric);
       if (shippingRun.seen.size >= SHIPPING_METRICS.size) closeShippingRun();
       return;
     }
@@ -6167,10 +6189,10 @@ function renderProductionTable({ months: filteredMonths, records }) {
     return classes.join(' ');
   }
 
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel prod-panel--seisan-jisseki">
     <div class="chart-section-label">🌱 生産実績 ／ 整理済み_分析</div>
     <div class="prod-table-wrap">
-    <table class="prod-table">
+    <table class="prod-table prod-table--seisan-jisseki">
       <thead><tr>
         <th class="th-left" style="min-width:70px">拠点</th>
         <th class="th-left" style="min-width:120px">カテゴリ</th>
@@ -6185,12 +6207,11 @@ function renderProductionTable({ months: filteredMonths, records }) {
 
     // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
     // 出荷関連カテゴリは、シート上の生カテゴリ文言に依存せず指標の内容で判定し
-    // 「出荷内訳（実績）」に統一する
-    const blocks = groupIntoLabeledBlocks(siteRecs, () => '出荷内訳（実績）');
-    // 診断用ログ：拠点ごとのブロック構成（ラベル・行数・指標名の並び）を出力する。
-    // 栽培内訳（コンテナ数）の結合セルが分断される不具合の原因調査用（本番で発生時は
-    // ブラウザのコンソールでこの出力を確認する）
-    console.log(`[生産実績表] ${site}: ` + JSON.stringify(blocks.map(b => ({ label: b.label, rows: b.records.length, metrics: b.records.map(r => r.metric) }))));
+    // 「出荷内訳（実績）」に統一する。「付帯作業」はシート上のカテゴリが「出荷内訳」
+    // （実績の「出荷内訳（実績）」とは異なる生カテゴリ文言）のため、指定しないと
+    // 出荷の並びの途中で別ブロックに割れてしまう。extraShippingMetricsに加えることで
+    // 同じ1つの「出荷内訳（実績）」のまとまりに合流させる
+    const blocks = groupIntoLabeledBlocks(siteRecs, () => '出荷内訳（実績）', ['付帯作業']);
 
     let rowIdx = 0;
     blocks.forEach(block => {
