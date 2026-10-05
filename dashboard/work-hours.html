@@ -5435,8 +5435,11 @@ const HARVEST_ERROR_REASON_TEXT = {
 
 // 取得失敗・URL一覧全体に関わる失敗、または個別拠点・月の取得失敗の警告メッセージ
 let harvestDirectWarningMessages = [];
-// URL未設定の月が1つでもあれば、警告ではなく補足の注記として表示する文言
+// 補完が1件でもあれば、その旨を表の下に1回だけ表示する文言
 let harvestDirectNotices = [];
+// 【整理済み_分析廃止時に削除する暫定処理】URL未設定の月を整理済み_分析の値で補完した
+// 拠点・月の記録。{ 拠点: { "YYYY/M": true } }。表示セルに†を付けるため、描画側から参照する
+let harvestDirectBackfilled = {};
 
 // 6箇所から並行して呼ばれても取得が1回だけになるよう、結果ではなくPromiseをメモ化する。
 // 栽培管理シート・菌床納品実績の取得とは独立しているため、fetchProductionSheet()側で
@@ -5463,6 +5466,7 @@ async function applyHarvestDirectOverrides(merged, urlPromise) {
   const records = merged.records;
   harvestDirectWarningMessages = [];
   harvestDirectNotices = [];
+  harvestDirectBackfilled = {};
 
   function nullifyAll() {
     HARVEST_DIRECT_SITES.forEach(site => {
@@ -5484,12 +5488,10 @@ async function applyHarvestDirectOverrides(merged, urlPromise) {
 
   // 拠点×月のうちURLがあるものだけを取得対象にする（月一覧に無い月・URLなしの月は取得しない）
   const tasks = [];
-  let hasUrlMissingMonth = false;
   HARVEST_DIRECT_SITES.forEach(site => {
     months.forEach(m => {
       const urlInfo = (urlResult.bySiteMonth[site] || {})[m];
       if (urlInfo) tasks.push({ site, month: m, urlInfo });
-      else hasUrlMissingMonth = true;
     });
   });
 
@@ -5523,23 +5525,36 @@ async function applyHarvestDirectOverrides(merged, urlPromise) {
   if (failureMessages.length) {
     harvestDirectWarningMessages.push(`収穫量を取得できなかった月：${failureMessages.join('、')}`);
   }
-  if (hasUrlMissingMonth) {
-    harvestDirectNotices.push('URL未設定の月は「－」');
-  }
 
   HARVEST_DIRECT_SITES.forEach(site => {
     const idx = records.findIndex(r => r.site === site && r.metric === '収穫量(kg)');
     if (idx === -1) return;
+    // 上書き前の値（整理済み_分析由来、unionMonths基準に既に並び替え済み）を
+    // URL未設定の月の補完元として使うため、置き換え前に控えておく
+    const fallbackValues = records[idx].values;
     records[idx] = {
       ...records[idx],
-      values: months.map(m => {
+      values: months.map((m, mi) => {
         const urlInfo = (urlResult.bySiteMonth[site] || {})[m];
-        if (!urlInfo) return null; // URLなしの月
+        if (!urlInfo) {
+          // 【整理済み_分析廃止時に削除する暫定処理】URLが未設定の月は、整理済み_分析の
+          // 値（無ければnull）をそのまま使う。取得失敗・見出しなし・月の不一致はここを
+          // 通らない（補完しない）
+          const fallback = fallbackValues[mi];
+          if (fallback === null || fallback === undefined) return null;
+          if (!harvestDirectBackfilled[site]) harvestDirectBackfilled[site] = {};
+          harvestDirectBackfilled[site][m] = true;
+          return fallback;
+        }
         const r = (resultsBySiteMonth[site] || {})[m];
         return (r && !r.error) ? r.value : null;
       }),
     };
   });
+
+  if (Object.keys(harvestDirectBackfilled).length) {
+    harvestDirectNotices.push('† URL未設定のため整理済み_分析の値を表示');
+  }
 
   return { months, records };
 }
@@ -6192,13 +6207,21 @@ function renderProductionTable({ months: filteredMonths, records }) {
         // Metric
         html += `<td class="col-metric">${r.metric}</td>`;
 
-        // Values（延長列・超過列は空欄、選択範囲内はデータなしを「ー」で表示）
+        // Values（延長列・超過列は空欄、選択範囲内はデータなしを「ー」で表示）。
+        // 収穫量(kg)は表示のみ整数（四捨五入）にする。生産データ自体の値は変えない
         prodIdx.forEach((pi, mi) => {
           if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
           const v = pi >= 0 ? r.values[pi] : null;
-          html += v !== null
-            ? `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`
-            : `<td class="col-num empty">—</td>`;
+          if (v === null) { html += '<td class="col-num empty">—</td>'; return; }
+          if (r.metric === '収穫量(kg)') {
+            // 【整理済み_分析廃止時に削除する暫定処理】URL未設定の月を整理済み_分析の
+            // 値で補完したセルには†を付ける
+            const monthKey = pi >= 0 ? filteredMonths[pi] : null;
+            const backfilled = !!(monthKey && harvestDirectBackfilled[site] && harvestDirectBackfilled[site][monthKey]);
+            html += `<td class="col-num">${Math.round(v).toLocaleString('ja-JP')}${backfilled ? '†' : ''}</td>`;
+            return;
+          }
+          html += `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`;
         });
 
         html += '</tr>';
@@ -7211,6 +7234,7 @@ async function loadAll() {
   harvestUrlDataPromise = null;
   harvestDirectWarningMessages = [];
   harvestDirectNotices = [];
+  harvestDirectBackfilled = {};
 
   try {
     const json = await fetchSheet();
@@ -11771,6 +11795,7 @@ window.__cultTest = {
   HARVEST_CONCURRENCY,
   getHarvestDirectWarningMessages: () => harvestDirectWarningMessages,
   getHarvestDirectNotices: () => harvestDirectNotices,
+  getHarvestDirectBackfilled: () => harvestDirectBackfilled,
 };
 </script>
 </body>
