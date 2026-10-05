@@ -564,6 +564,17 @@
     /* 生産計画タブ専用：上部の余白を詰めてスクロール領域を広げる（他タブの
        .prod-panelには影響させないよう、既存クラスとは別に新設） */
     .prod-panel-compact { padding-top: 8px; }
+    /* 生産実績タブ専用：パネルの枠（背景・枠線・角の丸み）が表の最後の行・下部の注記
+       まで含めた内容全体を囲むよう、画面の高さに収めず内容に応じて自然に伸ばす
+       （flex:1;min-height:0のままだと3拠点分の表がパネルの下端をはみ出し、はみ出した
+       行だけbody側の地の色が透けて見えてしまう）。縦スクロールは引き続き上位のmain
+       要素に任せる（他タブの.prod-panelには影響させないよう別クラスにする） */
+    .prod-panel--seisan-jisseki { flex: 0 0 auto; min-height: auto; }
+    /* 生産実績タブの表限定：行の半透明の背景色(cat-saibai等)が、パネルの内側・はみ出した
+       外側のどちらに表示されていても常に同じ色に見えるよう、表自体に地の色(--bg)を
+       敷く（透明なtdは本来「その背後に何が描画されているか」で色が変わってしまうため）。
+       他タブのprod-tableの背景には影響させない */
+    .prod-table--seisan-jisseki { background: var(--bg); }
 
     /* ── 比較タブ（サブタブ付き。ヘッダー行を固定し、下部のみスクロール） ── */
     .compare-shell {
@@ -5833,11 +5844,30 @@ const CULTIVATION_METRICS = new Set(['菌床入れ', '芽かき', '収穫', '注
 // 生カテゴリ文言に分割されているケースに対応）。栽培内訳系は1拠点内に1グループのみの
 // 前提で、該当指標が連続する間はそのまま1ブロックにまとめ「栽培内訳（コンテナ数）」を
 // 割り当てる。それ以外の行は元の生カテゴリ文言をそのまま使う
-function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
+function groupIntoLabeledBlocks(siteRecs, labelForOccurrence, extraShippingMetrics) {
+  // 栽培内訳（コンテナ数）関連の指標（CULTIVATION_METRICS）は、シート上で連続して
+  // 並んでいることを前提にせず、拠点内のどこにあっても必ず1つのまとまりとして扱う。
+  // （シート側の行順によっては、ほかの指標の行が間に挟まり、栽培内訳の行が不連続に
+  // なることがある。この場合も、指標の行だけを抜き出して1箇所にまとめることで、
+  // 結合セルが分断されないようにする。先頭から見て最初に現れた栽培内訳の行の位置に
+  // まとめて挿入する）
+  const cultivationRecords = siteRecs.filter(r => CULTIVATION_METRICS.has(r.metric));
+
+  // extraShippingMetrics：SHIPPING_METRICS（4種）に加えて同じ「出荷」のまとまりに
+  // 合流させたい指標（生産実績タブの「付帯作業」など）。SHIPPING_METRICS自体は
+  // 生産計画タブ(renderPlanTable)とも共有しているため変更しない。extraの指標は
+  // まとまりを「閉じる」条件（SHIPPING_METRICS全種が揃ったら閉じる）には数えず、
+  // 進行中のまとまりに素通しで合流させるだけなので、呼び出し元が指定しない限り
+  // （plan側）挙動は従来どおり変わらない
+  const extraShippingSet = extraShippingMetrics && extraShippingMetrics.length ? new Set(extraShippingMetrics) : null;
+  function isShippingLike(metric) {
+    return SHIPPING_METRICS.has(metric) || (extraShippingSet && extraShippingSet.has(metric));
+  }
+
   const raw = [];
   let shippingRun = null;
   let shippingCount = 0;
-  let cultivationRun = null;
+  let cultivationBlockInserted = false;
 
   function closeShippingRun() {
     if (!shippingRun) return;
@@ -5845,33 +5875,27 @@ function groupIntoLabeledBlocks(siteRecs, labelForOccurrence) {
     raw.push({ label: labelForOccurrence(shippingCount), records: shippingRun.records });
     shippingRun = null;
   }
-  function closeCultivationRun() {
-    if (!cultivationRun) return;
-    raw.push({ label: '栽培内訳（コンテナ数）', records: cultivationRun });
-    cultivationRun = null;
-  }
 
   siteRecs.forEach(r => {
-    if (SHIPPING_METRICS.has(r.metric)) {
-      closeCultivationRun();
+    if (CULTIVATION_METRICS.has(r.metric)) {
+      if (!cultivationBlockInserted) {
+        closeShippingRun();
+        raw.push({ label: '栽培内訳（コンテナ数）', records: cultivationRecords });
+        cultivationBlockInserted = true;
+      }
+      return; // 栽培内訳の行はまとめて挿入済みのため、個別には追加しない
+    }
+    if (isShippingLike(r.metric)) {
       if (!shippingRun) shippingRun = { records: [], seen: new Set() };
       shippingRun.records.push(r);
-      shippingRun.seen.add(r.metric);
+      if (SHIPPING_METRICS.has(r.metric)) shippingRun.seen.add(r.metric);
       if (shippingRun.seen.size >= SHIPPING_METRICS.size) closeShippingRun();
       return;
     }
-    if (CULTIVATION_METRICS.has(r.metric)) {
-      closeShippingRun();
-      if (!cultivationRun) cultivationRun = [];
-      cultivationRun.push(r);
-      return;
-    }
     closeShippingRun();
-    closeCultivationRun();
     raw.push({ label: r.cat, records: [r] });
   });
   closeShippingRun();
-  closeCultivationRun();
 
   // 隣接ブロックが同一ラベルになった場合（勤務実績側で全出荷ブロックを1つの
   // 「出荷内訳（実績）」にまとめる場合など）は1つの結合セルにまとめる
@@ -6157,16 +6181,18 @@ function renderProductionTable({ months: filteredMonths, records }) {
     const classes = [];
     if (r.metric === '出荷量(kg)') return 'metric-syukka-kg';
     if (r.metric === '合計(点数)') classes.push('metric-goukei');
-    if (cat.includes('生産実績')) classes.push('cat-seisan');
-    else if (cat.includes('栽培')) classes.push('cat-saibai');
+    // 「生産実績」のまとまり（菌床購入数(本)・収穫量(kg)）は、ほかのカテゴリ色分けとは
+    // 違い背景色を付けない（地の色のまま。南丹のカテゴリ名が「生販実績」だった頃は
+    // この色分けに当てはまらず色なしだったため、3拠点ともその見た目に統一する）
+    if (cat.includes('栽培')) classes.push('cat-saibai');
     else if (cat.includes('出荷')) classes.push('cat-syukka');
     return classes.join(' ');
   }
 
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel prod-panel--seisan-jisseki">
     <div class="chart-section-label">🌱 生産実績 ／ 整理済み_分析</div>
     <div class="prod-table-wrap">
-    <table class="prod-table">
+    <table class="prod-table prod-table--seisan-jisseki">
       <thead><tr>
         <th class="th-left" style="min-width:70px">拠点</th>
         <th class="th-left" style="min-width:120px">カテゴリ</th>
@@ -6181,8 +6207,11 @@ function renderProductionTable({ months: filteredMonths, records }) {
 
     // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
     // 出荷関連カテゴリは、シート上の生カテゴリ文言に依存せず指標の内容で判定し
-    // 「出荷内訳（実績）」に統一する
-    const blocks = groupIntoLabeledBlocks(siteRecs, () => '出荷内訳（実績）');
+    // 「出荷内訳（実績）」に統一する。「付帯作業」はシート上のカテゴリが「出荷内訳」
+    // （実績の「出荷内訳（実績）」とは異なる生カテゴリ文言）のため、指定しないと
+    // 出荷の並びの途中で別ブロックに割れてしまう。extraShippingMetricsに加えることで
+    // 同じ1つの「出荷内訳（実績）」のまとまりに合流させる
+    const blocks = groupIntoLabeledBlocks(siteRecs, () => '出荷内訳（実績）', ['付帯作業']);
 
     let rowIdx = 0;
     blocks.forEach(block => {
