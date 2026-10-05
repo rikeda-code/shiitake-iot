@@ -788,7 +788,7 @@ const CULTIVATION_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
 const CULTIVATION_SHEETS = {
   'いなべ': { id: '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM', gid: '1452537379' },
   '群馬':   { id: '12Xa_bkHE5tw9-YgGPIONzAj9ex3jr0Au-3B1k6DSZDY', gid: '1776859904' },
-  '南丹':   { id: '1WBnGT3tkVfGhDJ7OZ2mZE4Juvd-t7le68bUlVRHGIeM', gid: '856812819' },
+  '南丹':   { id: '1WBnGT3tkVfGhDJ7OZ2mZE4Juvd-t7le68bUlVRHGIeM', gid: '2146042804' },
 };
 
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
@@ -4984,6 +4984,10 @@ function aggregateCultivationMonthly(rows, today, targetMonthKeys) {
     return { '菌床入れ': 0, '芽かき': 0, '収穫': 0, '注水': 0, '散水': 0, '廃棄': 0, 'コンテナ掃除': 0, '稼働コンテナ数': 0 };
   }
   const sums = {};
+  // 対象行の全セルのうち、工程キーワード（菌床入れ〜コンテナ点検）に1つでも一致したかどうか。
+  // 1つも一致しなければ、栽培管理シートではない別のシート（gidの取り違え等）を読んでいる
+  // 可能性が高いため、計算結果を使わずエラーにする（シート取り違えの検知）
+  let anyProcessMatched = false;
 
   for (let r = 2; r < rows.length; r++) { // 3行目以降(0-based index2)
     const c = (rows[r] && rows[r].c) || [];
@@ -4995,18 +4999,25 @@ function aggregateCultivationMonthly(rows, today, targetMonthKeys) {
     const markers = cultExtractMarkers(fullRowCells);
 
     for (let col = 0; col < fullRowCells.length; col++) {
+      const text = fullRowCells[col] || '';
+      const proc = cultMatchProcess(text);
+      if (proc) anyProcessMatched = true;
       const mk = colMonthKey[col];
       if (!mk) continue; // 日付が解釈できない列(1行目の予備列等)は無視する
       if (!sums[mk]) sums[mk] = freshBucket();
       const bucket = sums[mk];
-      const text = fullRowCells[col] || '';
       if (text.trim() !== '') bucket['稼働コンテナ数'] += 1;
-      const proc = cultMatchProcess(text);
       if (proc && Object.prototype.hasOwnProperty.call(bucket, proc.name)) {
         const weight = proc.weighted ? cultCoefficientAt(markers, col) : 1;
         bucket[proc.name] += weight;
       }
     }
+  }
+
+  if (!anyProcessMatched) {
+    const err = new Error('栽培管理シートに工程の記録が見つかりません（別のシートを指している可能性があります）');
+    err.cultivationNoProcessFound = true;
+    throw err;
   }
 
   function isMonthFullyCovered(y, m) {
@@ -5121,7 +5132,9 @@ async function applyCultivationDirectOverrides(base, allDataForMonths) {
       console.error(`[栽培内訳直接計算] ${site}の栽培管理シート取得・計算でエラーが発生しました:`, e);
       cultivationDirectWarnings[site] = e && e.cultivationYearUnresolved
         ? `${site}の栽培管理シートの日付（年）を確定できませんでした`
-        : `${site}の栽培内訳を栽培管理シートから取得できませんでした`;
+        : (e && e.cultivationNoProcessFound
+          ? `${site}の栽培管理シートに工程の記録が見つかりません（別のシートを指している可能性があります）`
+          : `${site}の栽培内訳を栽培管理シートから取得できませんでした`);
       delete cultivationDirectNotices[site];
     }
 
