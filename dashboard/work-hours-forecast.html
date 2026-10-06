@@ -291,6 +291,9 @@
       </table>
     </div>
     <div class="note" id="workHarvestNote" style="display:none; padding:4px 18px 8px;">* 収穫計画のkgが未入力のため、収穫を含まない値</div>
+    <div class="warnings" id="workHarvestWarnings" style="display:none;">
+      <ul id="workHarvestWarningsList"></ul>
+    </div>
   </section>
 
   <!-- ============ ③標準労働時間 ============ -->
@@ -300,6 +303,8 @@
       <span class="note">単位：h　/　当日〜7日後</span>
     </div>
     <div class="panel-error" id="laborError"></div>
+    <div id="laborPreparing" class="unsupported" style="display:none;"></div>
+    <div id="laborContent">
     <div class="table-scroll">
       <table id="table3labor">
         <colgroup></colgroup>
@@ -358,6 +363,7 @@
         </table>
       </div>
     </details>
+    </div>
   </section>
 
   </div>
@@ -369,8 +375,11 @@
   'use strict';
 
   /* ===================== 定数 ===================== */
-  var CULTIVATION_SHEET_ID = '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM';
-  var CULTIVATION_SHEET_GID = '1452537379';
+  // 栽培管理シートの取得先（拠点ごと）。未対応の拠点（南丹）はエントリを持たない
+  var FORECAST_CULTIVATION_SHEETS = {
+    'いなべ': { id: '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM', gid: '1452537379' },
+    '群馬':   { id: '12Xa_bkHE5tw9-YgGPIONzAj9ex3jr0Au-3B1k6DSZDY', gid: '1776859904' },
+  };
   var STD_HOURS_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
   var STD_WORK_HOURS_GID = '381752617';
   var STD_LABOR_HOURS_GID = '1404355975';
@@ -379,8 +388,15 @@
   // 拠点シフト表（site-shift.html）のGAS WebアプリURL。設定されていればこちらから実働時間を読み、
   // 空のときだけ上の旧シフト表（期間ごとのシート）を読む
   var SHIFT_GAS_URL = ''; // 反映は保留中。拠点シフト表のGAS URL: https://script.google.com/macros/s/AKfycbx4rClGwfPBk705aOu0GH97Xbvm3TlNKpKxXPg6BUxDEUAOhUI_vztgHLapbc8j8ODA/exec
-  var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
-  var HARVEST_DAILY_TOTAL_GID = '1164843574';
+  // 日別収穫kgの取得先（拠点ごと）。typeで取得方式を切り替える：
+  // 'yearMonthColumns'=いなべ(従来どおり。1シートの年月列×日番号行)、
+  // 'monthlySheets'=群馬(「2026年ファーム売上高・収穫量」の月ごとのシートを
+  // 年月→gidで手動管理。シート一覧の仕組みができるまでは月を追加するたびにここに足す)
+  var FORECAST_HARVEST_SOURCES = {
+    'いなべ': { type: 'yearMonthColumns', id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' },
+    '群馬': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
+             gids: { '2026.10': '1913253722' } },
+  };
 
   var DASH = '－';
   var BASE_BEDS = 2520;
@@ -636,13 +652,185 @@
     return 1.0;
   }
 
+  // C列（コンテナ番号）の全角ハイフン「－」・長音「ー」・各種ダッシュ（‐ ‒ – —）を
+  // 半角「-」に置換してからNFKC正規化・前後空白除去する
+  // （work-hours.htmlのnormalizeCultivationContainerNo()を複製）
+  function normalizeCultivationContainerNo(raw){
+    if (raw === null || raw === undefined) return '';
+    var s = String(raw).replace(/[－ー‐‒–—]/g, '-');
+    s = s.normalize('NFKC').trim();
+    return s;
+  }
+
+  // A列=1 かつ C列が「数字」または「数字-数字」（正規化後）に一致する行だけを対象にする。
+  // シート全体を見て判定し、途中でC列が数値でない行が来ても集計を打ち切らない
+  // （work-hours.htmlのisCultivationTargetRow()を複製）
+  function isCultivationTargetRow(flagRaw, containerRaw){
+    var flag = String(flagRaw === null || flagRaw === undefined ? '' : flagRaw).trim();
+    if (flag !== '1') return false;
+    var norm = normalizeCultivationContainerNo(containerRaw);
+    return /^\d+(-\d+)?$/.test(norm);
+  }
+
+  // 日付セル1個を解析する。"M/D"（年なし）と"YYYY/M/D"（4桁年・曜日なし。PR #453）の
+  // 両方に対応する（work-hours.htmlのparseCultivationDateCell()を複製）
+  function parseCultivationDateCell(raw){
+    if (raw === null || raw === undefined) return null;
+    var s = String(raw).normalize('NFKC').trim();
+    var full = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (full) return { year: parseInt(full[1], 10), month: parseInt(full[2], 10), day: parseInt(full[3], 10) };
+    var md = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+    if (md) return { year: null, month: parseInt(md[1], 10), day: parseInt(md[2], 10) };
+    return null;
+  }
+
+  var CULT_WEEKDAY_CHARS = ['日', '月', '火', '水', '木', '金', '土'];
+
+  // 2行目（曜日）のセル1個を解析する。NFKC正規化・前後空白除去の後、先頭1文字が
+  // 「日」〜「土」ならその文字を返す（work-hours.htmlのparseCultivationWeekdayCell()を複製）
+  function parseCultivationWeekdayCell(raw){
+    if (raw === null || raw === undefined) return null;
+    var s = String(raw).normalize('NFKC').trim();
+    if (!s) return null;
+    var ch = s.charAt(0);
+    return CULT_WEEKDAY_CHARS.indexOf(ch) !== -1 ? ch : null;
+  }
+
+  // 年なしM/Dの列に対し、月が前の列より小さくなったら年を+1して実際のDateの配列を
+  // 組み立てる。明示年（YYYY/M/D形式）のセルに当たったら、その年をそのまま採用して
+  // 以降の判定基準にする。起点年は「今年」から6年前までの7通り試し、2行目の曜日との
+  // 食い違いが最も少ない候補を採用する（食い違いが「比較列数の1%以下」かつ「10列以下」
+  // の場合のみ許容。それを超える場合は年を確定できなかったものとしてnullを返す）。
+  // 群馬の栽培管理シートは約4年分あり、「今年−1／今年」から選ぶ方式では年を誤るため、
+  // work-hours.htmlのbuildCultivationDatesWithYearInference()をそのまま複製して使う
+  function buildCultivationDatesWithYearInference(mdList, weekdayList, today){
+    function build(startYear){
+      var year = startYear;
+      var prevMonth = null;
+      return mdList.map(function(md){
+        if (!md) return null;
+        if (md.year !== null) {
+          year = md.year;
+          prevMonth = md.month;
+          return new Date(year, md.month - 1, md.day);
+        }
+        if (prevMonth !== null && md.month < prevMonth) year++;
+        prevMonth = md.month;
+        return new Date(year, md.month - 1, md.day);
+      });
+    }
+
+    function lastValidDate(dates){
+      for (var i = dates.length - 1; i >= 0; i--) { if (dates[i]) return dates[i]; }
+      return null;
+    }
+
+    function isValidBuilt(dates){
+      for (var i = 0; i < dates.length; i++) {
+        var md = mdList[i];
+        var d = dates[i];
+        if (!md || !d) continue;
+        if (d.getMonth() !== md.month - 1 || d.getDate() !== md.day) return false;
+      }
+      return true;
+    }
+
+    function weekdayMismatchIndexes(dates){
+      var idxs = [];
+      for (var i = 0; i < dates.length; i++) {
+        var w = weekdayList[i];
+        if (!w) continue;
+        var d = dates[i];
+        if (!d) continue;
+        if (CULT_WEEKDAY_CHARS[d.getDay()] !== w) idxs.push(i);
+      }
+      return idxs;
+    }
+    function comparedCount(dates){
+      var n = 0;
+      for (var i = 0; i < dates.length; i++) { if (weekdayList[i] && dates[i]) n++; }
+      return n;
+    }
+
+    var thisYear = today.getFullYear();
+    var candidateYears = [];
+    for (var y = 0; y <= 6; y++) candidateYears.push(thisYear - y);
+
+    var candidates = [];
+    candidateYears.forEach(function(cy){
+      var dates = build(cy);
+      if (!isValidBuilt(dates)) return;
+      var mismatchIdx = weekdayMismatchIndexes(dates);
+      candidates.push({ year: cy, dates: dates, mismatchIdx: mismatchIdx, mismatchCount: mismatchIdx.length, compared: comparedCount(dates) });
+    });
+
+    if (candidates.length === 0) {
+      console.log('[栽培管理シート] 曜日照合で残った起点年候補: (なし、実在しない日付を含む候補のみ)');
+      return null;
+    }
+
+    var minMismatch = Math.min.apply(null, candidates.map(function(c){ return c.mismatchCount; }));
+    var compared = candidates[0].compared;
+    var withinTolerance = minMismatch <= 10 && minMismatch <= compared * 0.01;
+
+    console.log('[栽培管理シート] 曜日照合で残った起点年候補: ' + candidates.map(function(c){ return c.year + '(不一致' + c.mismatchCount + '/' + c.compared + '件)'; }).join(', '));
+
+    if (!withinTolerance) {
+      console.log('[栽培管理シート] 最小の不一致数(' + minMismatch + '件 / 比較' + compared + '件)が許容範囲（10件かつ1%）を超えるため、起点年を確定できません');
+      return null;
+    }
+
+    var survivors = candidates.filter(function(c){ return c.mismatchCount === minMismatch; });
+
+    var best;
+    if (survivors.length === 1) {
+      best = survivors[0];
+      console.log('[栽培管理シート] 起点年を' + best.year + 'に確定しました（曜日不一致' + best.mismatchCount + '件、候補1件）');
+    } else {
+      var bestDiff = null;
+      survivors.forEach(function(s){
+        var last = lastValidDate(s.dates);
+        if (!last) return;
+        var diff = last.getTime() - today.getTime();
+        if (diff >= 0 && (bestDiff === null || diff < bestDiff)) { bestDiff = diff; best = s; }
+      });
+      if (!best) {
+        var minAbsDiff = null;
+        survivors.forEach(function(s){
+          var last = lastValidDate(s.dates);
+          if (!last) return;
+          var diff = Math.abs(last.getTime() - today.getTime());
+          if (minAbsDiff === null || diff < minAbsDiff) { minAbsDiff = diff; best = s; }
+        });
+      }
+      console.log('[栽培管理シート] 起点年を' + best.year + 'に確定しました（曜日不一致' + best.mismatchCount + '件で並んだ候補' + survivors.length + '件中、最終列の日付が本日に近いものを採用）');
+    }
+
+    var mismatches = best.mismatchIdx.map(function(i){
+      var d = best.dates[i];
+      return { label: (d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate()), sheetWeekday: weekdayList[i] };
+    });
+    return { dates: best.dates, mismatches: mismatches };
+  }
+
   // 栽培管理シートの生rows(gviz形式)から、当日〜7日後の工程件数・稼働コンテナ数を集計する。
-  // テストからも直接呼べるよう、CSV取得とは切り離した純粋関数にしてある
-  function aggregateCultivation(rows, basisDate){
+  // テストからも直接呼べるよう、CSV取得とは切り離した純粋関数にしてある。siteはエラー
+  // メッセージの拠点名表示にのみ使う（集計ロジック自体は拠点名に依存しない）
+  function aggregateCultivation(rows, basisDate, site){
+    site = site || 'いなべ';
     rows = rows || [];
     var dateRowCells = rows[0] ? rows[0].c.slice(3) : [];
-    var mdList = dateRowCells.map(function(c){ return parseMD(c && c.v); });
-    var fullDates = buildDatesWithYearInference(mdList, basisDate);
+    var mdList = dateRowCells.map(function(c){ return parseCultivationDateCell(c && c.v); });
+    var weekdayRowCells = rows[1] ? rows[1].c.slice(3) : [];
+    var weekdayList = weekdayRowCells.map(function(c){ return parseCultivationWeekdayCell(c && c.v); });
+    var yearInference = buildCultivationDatesWithYearInference(mdList, weekdayList, basisDate);
+    if (!yearInference) {
+      var yearErr = new Error(site + 'の栽培管理シートの日付（年）を確定できませんでした');
+      yearErr.cultivationYearUnresolved = true;
+      throw yearErr;
+    }
+    var fullDates = yearInference.dates;
+
     var dayColIdx = [];
     var dayDates = [];
     for (var off = 0; off < DAY_COUNT; off++) {
@@ -657,19 +845,25 @@
     var containerCounts = [];
     for (var o = 0; o < DAY_COUNT; o++) { processCounts.push({}); containerCounts.push(0); }
 
+    // 対象行の全セルのうち、工程キーワードに1つでも一致したかどうか。1つも一致しなければ
+    // 栽培管理シートではない別のシート（gidの取り違え等）を読んでいる可能性が高いため、
+    // 計算結果を使わずエラーにする（work-hours.htmlと同じシート取り違えの検知）
+    var anyProcessMatched = false;
+
     for (var r = 2; r < rows.length; r++) {
       var c = (rows[r] && rows[r].c) || [];
+      var flagA = c[0] ? c[0].v : '';
       var colCraw = c[2] ? c[2].v : '';
-      var colCNum = parseFloat(String(colCraw == null ? '' : colCraw).replace(/,/g, ''));
-      if (colCraw === '' || colCraw === null || colCraw === undefined || isNaN(colCNum)) break; // 数値でない行が来たら終了
-
-      var flagA = c[0] ? String(c[0].v == null ? '' : c[0].v).trim() : '';
-      if (flagA !== '1') continue; // A列フラグが立っている行だけを対象にする
+      if (!isCultivationTargetRow(flagA, colCraw)) continue;
 
       var fullRowCells = c.slice(3).map(function(cell){
         return (cell && cell.v !== undefined && cell.v !== null) ? String(cell.v) : '';
       });
       var markers = extractMarkers(fullRowCells);
+
+      for (var colAll = 0; colAll < fullRowCells.length; colAll++) {
+        if (matchProcess(fullRowCells[colAll])) anyProcessMatched = true;
+      }
 
       for (var o2 = 0; o2 < DAY_COUNT; o2++) {
         var idx2 = dayColIdx[o2];
@@ -684,6 +878,12 @@
       }
     }
 
+    if (!anyProcessMatched) {
+      var mismatchErr = new Error(site + 'の栽培管理シートに工程の記録が見つかりません（別のシートを指している可能性があります）');
+      mismatchErr.cultivationSheetMismatch = true;
+      throw mismatchErr;
+    }
+
     for (var o3 = 0; o3 < DAY_COUNT; o3++) {
       Object.keys(processCounts[o3]).forEach(function(key){
         processCounts[o3][key] = Math.round(processCounts[o3][key] * 10) / 10;
@@ -694,9 +894,23 @@
     return { dates: dayDates, processCounts: processCounts, containerCounts: containerCounts };
   }
 
-  async function fetchCultivationPanel(basisDate){
-    var json = await fetchCsvSheet(CULTIVATION_SHEET_ID, CULTIVATION_SHEET_GID);
-    return aggregateCultivation(json.table.rows, basisDate);
+  // 拠点ごとの栽培管理シートの生rows(gviz形式)を取得する。取得結果は拠点ごとにメモ化し、
+  // 同じ拠点の再描画（日付ナビゲーション等）で毎回取得し直さないようにする。取得に
+  // 失敗した場合はキャッシュに残さず、次回呼び出し時に再取得できるようにする
+  var cultivationRowsCache = {};
+  function fetchCultivationRowsForSite(site){
+    if (!cultivationRowsCache[site]) {
+      var conf = FORECAST_CULTIVATION_SHEETS[site];
+      var p = fetchCsvSheet(conf.id, conf.gid).then(function(json){ return json.table.rows; });
+      p.catch(function(){ if (cultivationRowsCache[site] === p) delete cultivationRowsCache[site]; });
+      cultivationRowsCache[site] = p;
+    }
+    return cultivationRowsCache[site];
+  }
+
+  async function fetchCultivationPanel(basisDate, site){
+    var rows = await fetchCultivationRowsForSite(site);
+    return aggregateCultivation(rows, basisDate, site);
   }
 
   /* ===================== ②標準工数 ===================== */
@@ -754,11 +968,118 @@
     return isNaN(v) ? null : v;
   }
 
+  // 見出しセルの比較用：改行・半角/全角空白を取り除く（「収穫量\n（合計）」のような
+  // 改行入りの見出しが他にあっても、正しく「収穫見込」等とだけ一致させるため）
+  function normalizeHarvestHeaderCell(raw){
+    if (raw === null || raw === undefined) return '';
+    return String(raw).replace(/[\s　]+/g, '');
+  }
+
+  // シートの上から10行以内で、「日付」と「収穫見込」の両方の見出しを含む最初の行を探す。
+  // 列位置は固定せず見出し文字列で探す（下の方(44行目付近)にある別表の「日付」見出しを
+  // 誤って拾わないよう、10行を超えて探索しない）
+  function findHarvestPlanHeader(rows){
+    var limit = Math.min(rows.length, 10);
+    for (var r = 0; r < limit; r++) {
+      var cells = (rows[r] && rows[r].c) || [];
+      var dateIdx = -1, kgIdx = -1;
+      for (var c = 0; c < cells.length; c++) {
+        var text = normalizeHarvestHeaderCell(cells[c] && cells[c].v);
+        if (text === '日付') dateIdx = c;
+        if (text === '収穫見込') kgIdx = c;
+      }
+      if (dateIdx >= 0 && kgIdx >= 0) return { rowIdx: r, dateIdx: dateIdx, kgIdx: kgIdx };
+    }
+    return null;
+  }
+
+  // 「日付」列のセル("10/01(木)"等)から月日を読み取る。曜日の括弧書きは無視する
+  function parseHarvestPlanDateCell(raw){
+    if (raw === null || raw === undefined) return null;
+    var s = String(raw).trim();
+    var m = s.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (!m) return null;
+    return { month: parseInt(m[1], 10), day: parseInt(m[2], 10) };
+  }
+
+  // 「収穫見込」列のセルからkg数値を読み取る。カンマ・"kg"を除去し、空欄・数値でない
+  // （#REF!・#DIV/0!等）場合はnullにする
+  function parseHarvestPlanKgCell(raw){
+    if (raw === null || raw === undefined) return null;
+    var s = String(raw).trim();
+    if (s === '') return null;
+    s = s.replace(/,/g, '').replace(/kg$/i, '').trim();
+    var v = parseFloat(s);
+    return isNaN(v) ? null : v;
+  }
+
+  // 見出し位置(header)が分かっている状態で、月日が一致する行の収穫見込kgを探す。
+  // 日付列が空になった行、または31日分読み終えたところで終了する（見つからなければnull）
+  function lookupHarvestPlanKg(rows, header, month, day){
+    for (var i = 0; i < 31; i++) {
+      var r = header.rowIdx + 1 + i;
+      var cells = (rows[r] && rows[r].c) || [];
+      var dateCell = cells[header.dateIdx];
+      var rawDate = dateCell ? dateCell.v : null;
+      if (rawDate === null || rawDate === undefined || String(rawDate).trim() === '') break;
+      var md = parseHarvestPlanDateCell(rawDate);
+      if (md && md.month === month && md.day === day) {
+        var kgCell = cells[header.kgIdx];
+        return parseHarvestPlanKgCell(kgCell ? kgCell.v : null);
+      }
+    }
+    return null;
+  }
+
+  // パネル2下部に表示する「取得できなかった」警告（年月・拠点ごとに1回だけ出す）
+  var harvestMonthlyWarnings = [];
+  function addHarvestMonthlyWarning(site, monthKey, reason){
+    var msg = site + 'の収穫見込（' + monthKey + '）を取得できませんでした（' + reason + '）';
+    if (harvestMonthlyWarnings.indexOf(msg) === -1) harvestMonthlyWarnings.push(msg);
+  }
+
+  // 群馬型：「2026年ファーム売上高・収穫量」の年月ごとのシート(gids)から、該当日の
+  // 収穫見込kgを取得する。シートの取得・見出し探索は年月ごとに1回だけ行い、cacheに
+  // 保持する（8日間が月をまたぐ場合は必要な月のシートをすべて取得することになる）
+  async function fetchMonthlySheetHarvestKg(date, cache, src, site){
+    var monthKey = yearMonthKey(date);
+    if (!cache.monthlyStatus) cache.monthlyStatus = {};
+    if (!cache.monthlyData) cache.monthlyData = {};
+    if (cache.monthlyStatus[monthKey] === undefined) {
+      var gid = src.gids[monthKey];
+      if (!gid) {
+        cache.monthlyStatus[monthKey] = 'no_gid';
+      } else {
+        try {
+          var json = await fetchCsvSheet(src.id, gid);
+          var header = findHarvestPlanHeader(json.table.rows);
+          if (!header) {
+            cache.monthlyStatus[monthKey] = 'error';
+            addHarvestMonthlyWarning(site, monthKey, '見出しが見つかりません');
+          } else {
+            cache.monthlyData[monthKey] = { rows: json.table.rows, header: header };
+            cache.monthlyStatus[monthKey] = 'ok';
+          }
+        } catch (e) {
+          cache.monthlyStatus[monthKey] = 'error';
+          addHarvestMonthlyWarning(site, monthKey, '取得エラー');
+        }
+      }
+    }
+    if (cache.monthlyStatus[monthKey] !== 'ok') return null;
+    var entry = cache.monthlyData[monthKey];
+    return lookupHarvestPlanKg(entry.rows, entry.header, date.getMonth() + 1, date.getDate());
+  }
+
   // 収穫予測パネル(shiitake-shipment-plan.htmlのtable2)と同じ取得方法を複製。
-  // 「2026.5いなべ収穫計画」の「転写」タブから、年月一致列×日番号一致行の日合計を取得する
-  async function fetchDailyHarvestTotal(date, cache){
+  // 「2026.5いなべ収穫計画」の「転写」タブから、年月一致列×日番号一致行の日合計を取得する。
+  // 拠点の取得先が未設定の場合は取得せずnullを返す。typeによって取得方式を振り分ける
+  async function fetchDailyHarvestTotal(date, cache, site){
+    var src = FORECAST_HARVEST_SOURCES[site];
+    if (!src) return null;
+    if (src.type === 'monthlySheets') return fetchMonthlySheetHarvestKg(date, cache, src, site);
     try {
-      if (!cache.json) cache.json = await fetchCsvSheet(HARVEST_DAILY_TOTAL_SHEET_ID, HARVEST_DAILY_TOTAL_GID);
+      if (!cache.json) cache.json = await fetchCsvSheet(src.id, src.gid);
       var rows = cache.json.table.rows;
       var headerRow = rows[0];
       var key = yearMonthKey(date);
@@ -1053,7 +1374,8 @@
   var currentBusiness = '栽培';
   var currentSite = 'いなべ';
 
-  function isSupported(){ return currentBusiness === '栽培' && currentSite === 'いなべ'; }
+  // 栽培×いなべ・群馬のみ対応（南丹は未対応のまま）
+  function isSupported(){ return currentBusiness === '栽培' && (currentSite === 'いなべ' || currentSite === '群馬'); }
 
   function showPanelError(elId, message){
     var el = document.getElementById(elId);
@@ -1184,10 +1506,10 @@
 
   var dailyTotalCache = {};
 
-  async function renderCultivation(basisDate){
+  async function renderCultivation(basisDate, site){
     showPanelError('cultError', null);
     try {
-      var result = await fetchCultivationPanel(basisDate);
+      var result = await fetchCultivationPanel(basisDate, site);
       renderCultivationTable(result);
       return result;
     } catch (err) {
@@ -1198,15 +1520,29 @@
     }
   }
 
-  async function renderWork(basisDate, cultResult){
+  function renderHarvestMonthlyWarnings(warnings){
+    var box = document.getElementById('workHarvestWarnings');
+    var list = document.getElementById('workHarvestWarningsList');
+    if (warnings && warnings.length) {
+      list.innerHTML = warnings.map(function(w){ return '<li>' + w + '</li>'; }).join('');
+      box.style.display = '';
+    } else {
+      list.innerHTML = '';
+      box.style.display = 'none';
+    }
+  }
+
+  async function renderWork(basisDate, cultResult, site){
     showPanelError('workError', null);
     try {
       var rows = await fetchStdWorkHoursRows();
       var harvestKgByDay = [];
       dailyTotalCache = {};
+      harvestMonthlyWarnings = [];
       for (var o = 0; o < DAY_COUNT; o++) {
-        harvestKgByDay.push(await fetchDailyHarvestTotal(addDays(basisDate, o), dailyTotalCache));
+        harvestKgByDay.push(await fetchDailyHarvestTotal(addDays(basisDate, o), dailyTotalCache, site));
       }
+      renderHarvestMonthlyWarnings(harvestMonthlyWarnings);
       var fallbackCult = cultResult || { processCounts: new Array(DAY_COUNT).fill({}), containerCounts: new Array(DAY_COUNT).fill(0) };
       var perDay = computeStandardWorkHours(rows, fallbackCult, harvestKgByDay, basisDate);
       renderWorkHoursTable(rows, perDay);
@@ -1239,12 +1575,29 @@
     }
   }
 
+  // パネル3（標準労働時間）の「準備中」表示を切り替える。群馬選択時は勤務表（シフト表・
+  // 標準労働時間シート）自体を取得しないため、テーブル・警告・人別内訳をまとめて隠す
+  function setLaborPreparing(isPreparing, message){
+    var prepEl = document.getElementById('laborPreparing');
+    var contentEl = document.getElementById('laborContent');
+    if (isPreparing) {
+      showPanelError('laborError', null);
+      prepEl.textContent = message;
+      prepEl.style.display = '';
+      contentEl.style.display = 'none';
+    } else {
+      prepEl.style.display = 'none';
+      contentEl.style.display = '';
+    }
+  }
+
   window.render = async function(){
     document.getElementById('unsupportedPanel').style.display = isSupported() ? 'none' : '';
     document.getElementById('supportedPanels').style.display = isSupported() ? '' : 'none';
     if (!isSupported()) return;
 
     var basisDate = fromISO(basisInput.value);
+    var site = currentSite;
     renderDcols(basisDate);
 
     var isToday = basisInput.value === todayISO;
@@ -1253,8 +1606,18 @@
 
     // 3パネルは独立して描画する。相互依存する過不足計算は、全パネルの
     // 結果(成功/失敗いずれも)が揃ってから最後に行う
-    var cultPromise = renderCultivation(basisDate);
-    var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult); });
+    var cultPromise = renderCultivation(basisDate, site);
+    var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site); });
+
+    // 群馬はパネル3（標準労働時間）が未対応のため「準備中」表示にし、勤務表
+    // （シフト表・標準労働時間シート）は取得しない
+    if (site === '群馬') {
+      setLaborPreparing(true, '群馬の標準労働時間は準備中です');
+      await workPromise;
+      return;
+    }
+    setLaborPreparing(false);
+
     var laborPromise = renderLabor(basisDate);
 
     var results = await Promise.allSettled([workPromise, laborPromise]);
@@ -1305,6 +1668,13 @@
     coefficientAt: coefficientAt,
     aggregateCultivation: aggregateCultivation,
     BASE_BEDS: BASE_BEDS,
+    FORECAST_CULTIVATION_SHEETS: FORECAST_CULTIVATION_SHEETS,
+    FORECAST_HARVEST_SOURCES: FORECAST_HARVEST_SOURCES,
+    normalizeCultivationContainerNo: normalizeCultivationContainerNo,
+    isCultivationTargetRow: isCultivationTargetRow,
+    parseCultivationDateCell: parseCultivationDateCell,
+    parseCultivationWeekdayCell: parseCultivationWeekdayCell,
+    buildCultivationDatesWithYearInference: buildCultivationDatesWithYearInference,
     parseStdWorkHoursRows: parseStdWorkHoursRows,
     computeStandardWorkHours: computeStandardWorkHours,
     normalizeName: normalizeName,
@@ -1315,6 +1685,13 @@
     findLaborMatch: findLaborMatch,
     computeStandardLaborHours: computeStandardLaborHours,
     SHIFT_NAME_ALIASES: SHIFT_NAME_ALIASES,
+    yearMonthKey: yearMonthKey,
+    normalizeHarvestHeaderCell: normalizeHarvestHeaderCell,
+    findHarvestPlanHeader: findHarvestPlanHeader,
+    parseHarvestPlanDateCell: parseHarvestPlanDateCell,
+    parseHarvestPlanKgCell: parseHarvestPlanKgCell,
+    lookupHarvestPlanKg: lookupHarvestPlanKg,
+    fetchDailyHarvestTotal: fetchDailyHarvestTotal,
   };
 })();
 </script>
