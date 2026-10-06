@@ -291,6 +291,9 @@
       </table>
     </div>
     <div class="note" id="workHarvestNote" style="display:none; padding:4px 18px 8px;">* 収穫計画のkgが未入力のため、収穫を含まない値</div>
+    <div class="warnings" id="workHarvestWarnings" style="display:none;">
+      <ul id="workHarvestWarningsList"></ul>
+    </div>
   </section>
 
   <!-- ============ ③標準労働時間 ============ -->
@@ -385,10 +388,14 @@
   // 拠点シフト表（site-shift.html）のGAS WebアプリURL。設定されていればこちらから実働時間を読み、
   // 空のときだけ上の旧シフト表（期間ごとのシート）を読む
   var SHIFT_GAS_URL = ''; // 反映は保留中。拠点シフト表のGAS URL: https://script.google.com/macros/s/AKfycbx4rClGwfPBk705aOu0GH97Xbvm3TlNKpKxXPg6BUxDEUAOhUI_vztgHLapbc8j8ODA/exec
-  // 日別収穫kgの取得先（拠点ごと）。群馬の日別収穫kgの元データは未確定のため、
-  // エントリを設けずnull扱いにする（後で決まり次第ここに追加する）
+  // 日別収穫kgの取得先（拠点ごと）。typeで取得方式を切り替える：
+  // 'yearMonthColumns'=いなべ(従来どおり。1シートの年月列×日番号行)、
+  // 'monthlySheets'=群馬(「2026年ファーム売上高・収穫量」の月ごとのシートを
+  // 年月→gidで手動管理。シート一覧の仕組みができるまでは月を追加するたびにここに足す)
   var FORECAST_HARVEST_SOURCES = {
-    'いなべ': { id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' },
+    'いなべ': { type: 'yearMonthColumns', id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' },
+    '群馬': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
+             gids: { '2026.10': '1913253722' } },
   };
 
   var DASH = '－';
@@ -961,12 +968,116 @@
     return isNaN(v) ? null : v;
   }
 
+  // 見出しセルの比較用：改行・半角/全角空白を取り除く（「収穫量\n（合計）」のような
+  // 改行入りの見出しが他にあっても、正しく「収穫見込」等とだけ一致させるため）
+  function normalizeHarvestHeaderCell(raw){
+    if (raw === null || raw === undefined) return '';
+    return String(raw).replace(/[\s　]+/g, '');
+  }
+
+  // シートの上から10行以内で、「日付」と「収穫見込」の両方の見出しを含む最初の行を探す。
+  // 列位置は固定せず見出し文字列で探す（下の方(44行目付近)にある別表の「日付」見出しを
+  // 誤って拾わないよう、10行を超えて探索しない）
+  function findHarvestPlanHeader(rows){
+    var limit = Math.min(rows.length, 10);
+    for (var r = 0; r < limit; r++) {
+      var cells = (rows[r] && rows[r].c) || [];
+      var dateIdx = -1, kgIdx = -1;
+      for (var c = 0; c < cells.length; c++) {
+        var text = normalizeHarvestHeaderCell(cells[c] && cells[c].v);
+        if (text === '日付') dateIdx = c;
+        if (text === '収穫見込') kgIdx = c;
+      }
+      if (dateIdx >= 0 && kgIdx >= 0) return { rowIdx: r, dateIdx: dateIdx, kgIdx: kgIdx };
+    }
+    return null;
+  }
+
+  // 「日付」列のセル("10/01(木)"等)から月日を読み取る。曜日の括弧書きは無視する
+  function parseHarvestPlanDateCell(raw){
+    if (raw === null || raw === undefined) return null;
+    var s = String(raw).trim();
+    var m = s.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (!m) return null;
+    return { month: parseInt(m[1], 10), day: parseInt(m[2], 10) };
+  }
+
+  // 「収穫見込」列のセルからkg数値を読み取る。カンマ・"kg"を除去し、空欄・数値でない
+  // （#REF!・#DIV/0!等）場合はnullにする
+  function parseHarvestPlanKgCell(raw){
+    if (raw === null || raw === undefined) return null;
+    var s = String(raw).trim();
+    if (s === '') return null;
+    s = s.replace(/,/g, '').replace(/kg$/i, '').trim();
+    var v = parseFloat(s);
+    return isNaN(v) ? null : v;
+  }
+
+  // 見出し位置(header)が分かっている状態で、月日が一致する行の収穫見込kgを探す。
+  // 日付列が空になった行、または31日分読み終えたところで終了する（見つからなければnull）
+  function lookupHarvestPlanKg(rows, header, month, day){
+    for (var i = 0; i < 31; i++) {
+      var r = header.rowIdx + 1 + i;
+      var cells = (rows[r] && rows[r].c) || [];
+      var dateCell = cells[header.dateIdx];
+      var rawDate = dateCell ? dateCell.v : null;
+      if (rawDate === null || rawDate === undefined || String(rawDate).trim() === '') break;
+      var md = parseHarvestPlanDateCell(rawDate);
+      if (md && md.month === month && md.day === day) {
+        var kgCell = cells[header.kgIdx];
+        return parseHarvestPlanKgCell(kgCell ? kgCell.v : null);
+      }
+    }
+    return null;
+  }
+
+  // パネル2下部に表示する「取得できなかった」警告（年月・拠点ごとに1回だけ出す）
+  var harvestMonthlyWarnings = [];
+  function addHarvestMonthlyWarning(site, monthKey, reason){
+    var msg = site + 'の収穫見込（' + monthKey + '）を取得できませんでした（' + reason + '）';
+    if (harvestMonthlyWarnings.indexOf(msg) === -1) harvestMonthlyWarnings.push(msg);
+  }
+
+  // 群馬型：「2026年ファーム売上高・収穫量」の年月ごとのシート(gids)から、該当日の
+  // 収穫見込kgを取得する。シートの取得・見出し探索は年月ごとに1回だけ行い、cacheに
+  // 保持する（8日間が月をまたぐ場合は必要な月のシートをすべて取得することになる）
+  async function fetchMonthlySheetHarvestKg(date, cache, src, site){
+    var monthKey = yearMonthKey(date);
+    if (!cache.monthlyStatus) cache.monthlyStatus = {};
+    if (!cache.monthlyData) cache.monthlyData = {};
+    if (cache.monthlyStatus[monthKey] === undefined) {
+      var gid = src.gids[monthKey];
+      if (!gid) {
+        cache.monthlyStatus[monthKey] = 'no_gid';
+      } else {
+        try {
+          var json = await fetchCsvSheet(src.id, gid);
+          var header = findHarvestPlanHeader(json.table.rows);
+          if (!header) {
+            cache.monthlyStatus[monthKey] = 'error';
+            addHarvestMonthlyWarning(site, monthKey, '見出しが見つかりません');
+          } else {
+            cache.monthlyData[monthKey] = { rows: json.table.rows, header: header };
+            cache.monthlyStatus[monthKey] = 'ok';
+          }
+        } catch (e) {
+          cache.monthlyStatus[monthKey] = 'error';
+          addHarvestMonthlyWarning(site, monthKey, '取得エラー');
+        }
+      }
+    }
+    if (cache.monthlyStatus[monthKey] !== 'ok') return null;
+    var entry = cache.monthlyData[monthKey];
+    return lookupHarvestPlanKg(entry.rows, entry.header, date.getMonth() + 1, date.getDate());
+  }
+
   // 収穫予測パネル(shiitake-shipment-plan.htmlのtable2)と同じ取得方法を複製。
   // 「2026.5いなべ収穫計画」の「転写」タブから、年月一致列×日番号一致行の日合計を取得する。
-  // 拠点の取得先が未設定（群馬など、日別収穫kgの元データが未確定）の場合は取得せずnullを返す
+  // 拠点の取得先が未設定の場合は取得せずnullを返す。typeによって取得方式を振り分ける
   async function fetchDailyHarvestTotal(date, cache, site){
     var src = FORECAST_HARVEST_SOURCES[site];
     if (!src) return null;
+    if (src.type === 'monthlySheets') return fetchMonthlySheetHarvestKg(date, cache, src, site);
     try {
       if (!cache.json) cache.json = await fetchCsvSheet(src.id, src.gid);
       var rows = cache.json.table.rows;
@@ -1409,15 +1520,29 @@
     }
   }
 
+  function renderHarvestMonthlyWarnings(warnings){
+    var box = document.getElementById('workHarvestWarnings');
+    var list = document.getElementById('workHarvestWarningsList');
+    if (warnings && warnings.length) {
+      list.innerHTML = warnings.map(function(w){ return '<li>' + w + '</li>'; }).join('');
+      box.style.display = '';
+    } else {
+      list.innerHTML = '';
+      box.style.display = 'none';
+    }
+  }
+
   async function renderWork(basisDate, cultResult, site){
     showPanelError('workError', null);
     try {
       var rows = await fetchStdWorkHoursRows();
       var harvestKgByDay = [];
       dailyTotalCache = {};
+      harvestMonthlyWarnings = [];
       for (var o = 0; o < DAY_COUNT; o++) {
         harvestKgByDay.push(await fetchDailyHarvestTotal(addDays(basisDate, o), dailyTotalCache, site));
       }
+      renderHarvestMonthlyWarnings(harvestMonthlyWarnings);
       var fallbackCult = cultResult || { processCounts: new Array(DAY_COUNT).fill({}), containerCounts: new Array(DAY_COUNT).fill(0) };
       var perDay = computeStandardWorkHours(rows, fallbackCult, harvestKgByDay, basisDate);
       renderWorkHoursTable(rows, perDay);
@@ -1560,6 +1685,13 @@
     findLaborMatch: findLaborMatch,
     computeStandardLaborHours: computeStandardLaborHours,
     SHIFT_NAME_ALIASES: SHIFT_NAME_ALIASES,
+    yearMonthKey: yearMonthKey,
+    normalizeHarvestHeaderCell: normalizeHarvestHeaderCell,
+    findHarvestPlanHeader: findHarvestPlanHeader,
+    parseHarvestPlanDateCell: parseHarvestPlanDateCell,
+    parseHarvestPlanKgCell: parseHarvestPlanKgCell,
+    lookupHarvestPlanKg: lookupHarvestPlanKg,
+    fetchDailyHarvestTotal: fetchDailyHarvestTotal,
   };
 })();
 </script>
