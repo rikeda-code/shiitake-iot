@@ -303,8 +303,6 @@
       <span class="note">単位：h　/　当日〜7日後</span>
     </div>
     <div class="panel-error" id="laborError"></div>
-    <div id="laborPreparing" class="unsupported" style="display:none;"></div>
-    <div id="laborContent">
     <div class="table-scroll">
       <table id="table3labor">
         <colgroup></colgroup>
@@ -347,6 +345,8 @@
       <strong>未照合の警告</strong>
       <ul id="laborWarningsList"></ul>
     </div>
+    <div class="note" id="laborNotices" style="display:none; padding:2px 18px 8px;"></div>
+    <div class="note" id="laborPeriodNotices" style="display:none; padding:2px 18px 8px;"></div>
     <details class="detail-rows">
       <summary>人別内訳</summary>
       <div class="table-scroll">
@@ -363,7 +363,6 @@
         </table>
       </div>
     </details>
-    </div>
   </section>
 
   </div>
@@ -396,6 +395,14 @@
     'いなべ': { type: 'yearMonthColumns', id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' },
     '群馬': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
              gids: { '2026.10': '1913253722' } },
+  };
+  // 勤務表の取得先（拠点ごと）。いなべは従来どおりSHIFT_SHEET_ID/SHIFT_SHEET_GID/
+  // SHIFT_GAS_URLを使うため、ここにはエントリを持たない。群馬は月度（11日〜翌月10日）・
+  // 班ごとに別シートのため、月度の開始年月→gidで手動管理する（シート一覧の仕組みが
+  // できるまでは月度を追加するたびにここに足す）
+  var FORECAST_SHIFT_SOURCES = {
+    '群馬': { type: 'gunmaPeriodSheets', id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM',
+             gids: { '2026.9': '1594631834' } },
   };
 
   var DASH = '－';
@@ -1356,6 +1363,246 @@
     };
   }
 
+  /* ===================== ③標準労働時間（群馬：勤務表（収穫班）） =====================
+     いなべ(上の関数群)とは取得元・シート構成・氏名の付け方が異なるため、別の関数群として
+     実装する（いなべ側のSHIFT_SHEET_ID/SHIFT_GAS_URL関連コード・関数は一切変更しない） */
+
+  // 月度（11日〜翌月10日）の開始年月キー("YYYY.M"形式)を返す。日が10以下なら前月が
+  // 月度の開始月（例：2026/10/6→"2026.9"、2026/10/11→"2026.10"）
+  function gunmaPeriodKey(date){
+    var y = date.getFullYear(), m = date.getMonth() + 1;
+    if (date.getDate() <= 10) { m -= 1; if (m < 1) { m = 12; y -= 1; } }
+    return y + '.' + m;
+  }
+  function fmtYMD(d){ return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate(); }
+
+  // 勤務表(収穫班)の1セルを分類する。NFKC正規化し、空白・改行をすべて取り除いてから判定する
+  // （時刻が"8:00-\n17:00"のように改行入りで入っているため）
+  function classifyGunmaShiftCell(raw){
+    if (raw === null || raw === undefined) return { type: 'blank' };
+    var s = String(raw).normalize('NFKC').replace(/[\s　]+/g, '');
+    if (s === '') return { type: 'blank' };
+    var m = s.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+    if (m) {
+      var startH = parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+      var endH = parseInt(m[3], 10) + parseInt(m[4], 10) / 60;
+      return { type: 'time', hours: applyBreakDeduction(endH - startH) };
+    }
+    if (s === '入社') return { type: 'nyusha' };
+    return { type: 'other' }; // 休・夏・有休など
+  }
+
+  // 勤務表(収穫班)のA列の名前を正規化する：NFKC正規化→全角/半角の括弧以降を削除→
+  // 数字を削除→空白(全角・半角・改行)を削除。例："野呂8"→"野呂"、"中島5(3)"→"中島"、
+  // "渡部(収)"→"渡部"
+  function normalizeGunmaShiftName(raw){
+    if (!raw) return '';
+    var s = String(raw).normalize('NFKC');
+    var idxFull = s.indexOf('（');
+    var idxHalf = s.indexOf('(');
+    var cands = [idxFull, idxHalf].filter(function(i){ return i >= 0; }).sort(function(a, b){ return a - b; });
+    if (cands.length) s = s.slice(0, cands[0]);
+    s = s.replace(/[0-9０-９]/g, '');
+    s = s.replace(/[\s　]+/g, '');
+    return s;
+  }
+
+  // 実習生などの対応表（群馬用。いなべのSHIFT_NAME_ALIASESとは別に持つ）
+  var GUNMA_SHIFT_NAME_ALIASES = {
+    'ティエン': 'PHAM VAN TIEN',
+    'デスタ': 'DESTA RINO',
+    'レフィン': 'REVIN NAUFAL ALMAS',
+  };
+
+  // 勤務表(収穫班)の生rows(gviz形式)を解析する。純粋関数（テストから直接呼べる）。
+  // 戻り値：{ fullDates, weekdayMismatches, persons }
+  // persons各要素：{ rawName, name(正規化後), category('employee'|'other'), cellsFull, nyushaIdx }
+  function parseGunmaShiftSheet(rows, periodKey){
+    rows = rows || [];
+    var dayRowCells = rows[2] ? rows[2].c.slice(1) : []; // 3行目(0-index2)、B列以降(index1〜)
+    var weekdayRowCells = rows[3] ? rows[3].c.slice(1) : []; // 4行目(0-index3)
+
+    // 日付列の特定：1〜31の数値が連続する間だけを対象にする（「勤務時間 当初予定」等の
+    // 見出し列より右には進まない）
+    var dayNumbers = [];
+    for (var i = 0; i < dayRowCells.length; i++) {
+      var v = dayRowCells[i] ? dayRowCells[i].v : null;
+      var s = (v === null || v === undefined) ? '' : String(v).trim();
+      var n = s === '' ? NaN : parseFloat(s);
+      if (s !== '' && !isNaN(n) && Number.isInteger(n) && n >= 1 && n <= 31) dayNumbers.push(n);
+      else break;
+    }
+
+    var parts = periodKey.split('.').map(Number);
+    var year = parts[0], month = parts[1], prevDay = null;
+    var fullDates = dayNumbers.map(function(n){
+      if (prevDay !== null && n < prevDay) { month++; if (month > 12) { month = 1; year++; } }
+      prevDay = n;
+      return new Date(year, month - 1, n);
+    });
+
+    var weekdayMismatches = [];
+    fullDates.forEach(function(d, idx){
+      var raw = weekdayRowCells[idx] ? weekdayRowCells[idx].v : null;
+      var w = (raw === null || raw === undefined) ? '' : String(raw).normalize('NFKC').trim();
+      if (!w) return;
+      var ch = w.charAt(0);
+      if (WEEKDAYS[d.getDay()] !== ch) weekdayMismatches.push({ date: d, sheetWeekday: ch, actualWeekday: WEEKDAYS[d.getDay()] });
+    });
+    if (weekdayMismatches.length) {
+      console.warn('[群馬勤務表] 曜日の食い違い(' + periodKey + '): ' + weekdayMismatches.map(function(m){
+        return (m.date.getMonth() + 1) + '/' + m.date.getDate() + '(シート表記:' + m.sheetWeekday + '・実際:' + m.actualWeekday + ')';
+      }).join(', '));
+    }
+
+    var persons = [];
+    var seenBlank = false;
+    for (var r = 4; r < rows.length; r++) { // 5行目以降(0-index4)
+      var c = (rows[r] && rows[r].c) || [];
+      var rawName = c[0] ? c[0].v : '';
+      var trimmed = (rawName === null || rawName === undefined) ? '' : String(rawName).trim();
+      if (trimmed === '') { seenBlank = true; continue; } // 空行は読み飛ばす(社員区分の終端の目印にもする)
+      if (trimmed.indexOf('パート合計') === 0) break; // 集計欄以降は読まない
+      if (trimmed.indexOf('(仮)') !== -1 || trimmed.indexOf('（仮）') !== -1) continue; // 仮の枠は対象外
+
+      var cellsFull = c.slice(1);
+      var nyushaIdx = -1;
+      for (var ci = 0; ci < dayNumbers.length; ci++) {
+        var cell = cellsFull[ci];
+        if (classifyGunmaShiftCell(cell ? cell.v : null).type === 'nyusha') { nyushaIdx = ci; break; }
+      }
+      persons.push({
+        rawName: trimmed,
+        name: normalizeGunmaShiftName(trimmed),
+        category: seenBlank ? 'other' : 'employee',
+        cellsFull: cellsFull,
+        nyushaIdx: nyushaIdx,
+      });
+    }
+
+    return { fullDates: fullDates, weekdayMismatches: weekdayMismatches, persons: persons };
+  }
+
+  // 勤務表の名前(正規化後、名字のみ)から、標準労働時間シートの該当行を1件特定する。
+  // 標準労働時間シートの名前(H列)を正規化して、勤務表の名前で始まる行を探す
+  // （勤務表は名字だけ、標準労働時間シートはフルネームのため）。候補が2件以上の場合、
+  // および対応表(GUNMA_SHIFT_NAME_ALIASES)適用後も見つからない場合は未照合(null)とする
+  function findLaborMatchGunma(personName, laborRows){
+    if (!personName) return null;
+    var aliasTarget = GUNMA_SHIFT_NAME_ALIASES[personName];
+    var normKey = normalizeName(aliasTarget || personName);
+    if (!normKey) return null;
+    var candidates = laborRows.filter(function(r){
+      return r.site === '群馬' && ['1', '2', '3'].indexOf(r.flag) !== -1;
+    });
+    var pool = candidates.filter(function(r){ return normalizeName(r.name).indexOf(normKey) === 0; });
+    if (pool.length !== 1) return null;
+    return pool[0];
+  }
+
+  // 群馬の勤務表（収穫班）の生rows(gviz形式)群(月度ごと) x 標準労働時間シートから、
+  // 当日〜7日後の標準労働時間合計・出勤人数・人別内訳・補足・未設定期間の注記を算出する。
+  // periodsData: { periodKeys, perPeriod: { "YYYY.M": { status: 'ok'|'no_gid'|'error', parsed? } } }
+  // 純粋関数（テストから直接呼べる）
+  function computeGunmaStandardLaborHours(periodsData, basisDate, laborRows){
+    var perDayTotal = new Array(DAY_COUNT).fill(null);
+    var perDayAttendance = new Array(DAY_COUNT).fill(null);
+    var personMap = {};
+    var personOrder = [];
+    var notices = [];
+    var noticedNames = {};
+    var periodNotices = [];
+    var noticedPeriods = {};
+
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var date = addDays(basisDate, o);
+      var pk = gunmaPeriodKey(date);
+      var info = periodsData.perPeriod[pk];
+      if (!info || info.status !== 'ok') {
+        if (!noticedPeriods[pk]) {
+          noticedPeriods[pk] = true;
+          if (info && info.status === 'error') {
+            periodNotices.push('勤務表のシート（' + pk + '）を取得できませんでした（' + fmtYMD(date) + '〜）');
+          } else {
+            periodNotices.push('勤務表のシートが未設定の期間：' + fmtYMD(date) + '〜');
+          }
+        }
+        continue; // この日はperDayTotal/perDayAttendanceをnullのままにする(0として計算しない)
+      }
+
+      var parsed = info.parsed;
+      var colIdx = -1;
+      for (var k = 0; k < parsed.fullDates.length; k++) {
+        if (parsed.fullDates[k] && sameDate(parsed.fullDates[k], date)) { colIdx = k; break; }
+      }
+      if (colIdx < 0) continue; // 月度は設定されているがこの日の列が見つからない(通常は起きない)
+
+      perDayTotal[o] = 0;
+      perDayAttendance[o] = 0;
+
+      parsed.persons.forEach(function(p){
+        var key = p.name;
+        if (!personMap[key]) {
+          personMap[key] = { name: p.name, dept: '－', dayHours: new Array(DAY_COUNT).fill(null), excluded: false, matched: null, category: p.category, stdHoursPerDay: null };
+          personOrder.push(key);
+        }
+        var entry = personMap[key];
+        if (entry.excluded) return;
+
+        if (entry.matched === null) {
+          var match = findLaborMatchGunma(p.name, laborRows);
+          if (match && match.dept === '生産部長') { entry.excluded = true; return; }
+          entry.matched = match || false;
+          if (match) {
+            entry.dept = match.dept;
+            entry.stdHoursPerDay = (match.hoursPerDay !== null && match.hoursPerDay !== undefined) ? match.hoursPerDay : null;
+          } else if (p.category === 'employee') {
+            entry.dept = '－';
+            entry.stdHoursPerDay = 8;
+            if (!noticedNames[key]) { noticedNames[key] = true; notices.push('標準労働時間シート未登録のため8h/日で計算：' + p.name); }
+          } else {
+            entry.dept = '－';
+            entry.stdHoursPerDay = null;
+          }
+        }
+        if (entry.excluded) return;
+
+        var cellObj = p.cellsFull[colIdx];
+        var cls = classifyGunmaShiftCell(cellObj ? cellObj.v : null);
+        var h = 0;
+        if (cls.type === 'time') {
+          h = cls.hours;
+        } else if (cls.type === 'blank') {
+          if (p.nyushaIdx !== -1 && colIdx <= p.nyushaIdx) h = 0; // 入社日以前の空欄は0h
+          else if (p.category === 'employee') h = entry.stdHoursPerDay || 0; // 社員の区分だけ出勤(時間/日)
+          else h = 0;
+        } // 'nyusha'・'other'(休等)は0h
+
+        // 人別内訳の表示だけ丸め、合計(perDayTotal)には丸める前の値を積算する
+        // （いなべ側のcomputeStandardLaborHoursと同じ方式。先に丸めてから積算すると、
+        // 人数が多いほど丸め誤差が積み重なってしまうため）
+        entry.dayHours[o] = Math.round(h * 10) / 10;
+        perDayTotal[o] += h;
+        if (h > 0) perDayAttendance[o]++;
+      });
+    }
+
+    perDayTotal = perDayTotal.map(function(v){ return v === null ? null : Math.round(v * 10) / 10; });
+    var personBreakdown = personOrder
+      .map(function(key){ return personMap[key]; })
+      .filter(function(e){ return !e.excluded; })
+      .map(function(e){ return { name: e.name, dept: e.dept, dayHours: e.dayHours }; });
+
+    return {
+      perDayTotal: perDayTotal,
+      perDayAttendance: perDayAttendance,
+      warnings: [],
+      personBreakdown: personBreakdown,
+      notices: notices,
+      periodNotices: periodNotices,
+    };
+  }
+
   /* ===================== 描画 ===================== */
 
   var basisInput = document.getElementById('basisDateInput');
@@ -1456,13 +1703,16 @@
       var totalCell = document.querySelector('[data-labor-total-offset="' + o + '"]');
       var attendCell = document.querySelector('[data-attendance-offset="' + o + '"]');
       var shortfallCell = document.querySelector('[data-shortfall-offset="' + o + '"]');
-      if (!laborResult) {
+      // perDayTotal[o]がnull（群馬で勤務表のシートが未設定の期間など）の場合は、
+      // 0として計算せず「－」のままにする
+      var total = laborResult ? laborResult.perDayTotal[o] : null;
+      if (!laborResult || total === null || total === undefined) {
         if (totalCell) totalCell.textContent = DASH;
         if (attendCell) attendCell.textContent = DASH;
-        if (shortfallCell) shortfallCell.textContent = DASH;
+        if (shortfallCell) { shortfallCell.textContent = DASH; shortfallCell.classList.remove('neg', 'pos'); }
         continue;
       }
-      if (totalCell) totalCell.textContent = fmtNum(laborResult.perDayTotal[o]);
+      if (totalCell) totalCell.textContent = fmtNum(total);
       if (attendCell) attendCell.textContent = String(laborResult.perDayAttendance[o]);
       if (shortfallCell) {
         var sub = workSubtotals && workSubtotals[o] ? workSubtotals[o].subtotal : null;
@@ -1470,7 +1720,7 @@
           shortfallCell.textContent = DASH;
           shortfallCell.classList.remove('neg', 'pos');
         } else {
-          var shortfall = Math.round((laborResult.perDayTotal[o] - sub) * 10) / 10;
+          var shortfall = Math.round((total - sub) * 10) / 10;
           var harvestMissing = workSubtotals[o].harvestMissing;
           shortfallCell.textContent = fmtNum(shortfall) + (harvestMissing ? '*' : '');
           shortfallCell.classList.toggle('neg', shortfall < 0);
@@ -1487,6 +1737,26 @@
     } else {
       warningsList.innerHTML = '';
       warningsBox.style.display = 'none';
+    }
+
+    // 補足（警告色ではない）：標準労働時間シート未登録のため8h/日で計算した人の一覧
+    var noticesBox = document.getElementById('laborNotices');
+    if (laborResult && laborResult.notices && laborResult.notices.length) {
+      noticesBox.textContent = laborResult.notices.join('　');
+      noticesBox.style.display = '';
+    } else {
+      noticesBox.textContent = '';
+      noticesBox.style.display = 'none';
+    }
+
+    // 勤務表のシートが未設定・取得失敗の期間の注記
+    var periodNoticesBox = document.getElementById('laborPeriodNotices');
+    if (laborResult && laborResult.periodNotices && laborResult.periodNotices.length) {
+      periodNoticesBox.textContent = laborResult.periodNotices.join('　');
+      periodNoticesBox.style.display = '';
+    } else {
+      periodNoticesBox.textContent = '';
+      periodNoticesBox.style.display = 'none';
     }
 
     var detailBody = document.getElementById('table3laborDetailBody');
@@ -1575,19 +1845,49 @@
     }
   }
 
-  // パネル3（標準労働時間）の「準備中」表示を切り替える。群馬選択時は勤務表（シフト表・
-  // 標準労働時間シート）自体を取得しないため、テーブル・警告・人別内訳をまとめて隠す
-  function setLaborPreparing(isPreparing, message){
-    var prepEl = document.getElementById('laborPreparing');
-    var contentEl = document.getElementById('laborContent');
-    if (isPreparing) {
-      showPanelError('laborError', null);
-      prepEl.textContent = message;
-      prepEl.style.display = '';
-      contentEl.style.display = 'none';
-    } else {
-      prepEl.style.display = 'none';
-      contentEl.style.display = '';
+  // 群馬の勤務表（収穫班）の月度ごとのシートを取得する。表示する8日間に必要な月度を
+  // すべて洗い出し、月度ごとに取得・解析して(fetchCsvSheet→parseGunmaShiftSheet)
+  // cacheにメモ化する（8日間が月度をまたぐ場合は必要な月度のシートをすべて取得する）
+  var gunmaShiftCache = {};
+  async function fetchGunmaShiftPeriodData(basisDate){
+    var src = FORECAST_SHIFT_SOURCES['群馬'];
+    var periodKeys = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var pk = gunmaPeriodKey(addDays(basisDate, o));
+      if (periodKeys.indexOf(pk) === -1) periodKeys.push(pk);
+    }
+    var perPeriod = {};
+    for (var i = 0; i < periodKeys.length; i++) {
+      var key = periodKeys[i];
+      if (gunmaShiftCache[key] === undefined) {
+        var gid = src.gids[key];
+        if (!gid) {
+          gunmaShiftCache[key] = { status: 'no_gid' };
+        } else {
+          try {
+            var json = await fetchCsvSheet(src.id, gid);
+            gunmaShiftCache[key] = { status: 'ok', parsed: parseGunmaShiftSheet(json.table.rows, key) };
+          } catch (e) {
+            gunmaShiftCache[key] = { status: 'error' };
+          }
+        }
+      }
+      perPeriod[key] = gunmaShiftCache[key];
+    }
+    return { periodKeys: periodKeys, perPeriod: perPeriod };
+  }
+
+  async function renderLaborGunma(basisDate){
+    showPanelError('laborError', null);
+    try {
+      var periodsData = await fetchGunmaShiftPeriodData(basisDate);
+      var laborRows = await fetchStdLaborRows();
+      var result = computeGunmaStandardLaborHours(periodsData, basisDate, laborRows);
+      return result;
+    } catch (err) {
+      console.error('[標準労働時間(群馬)] 取得エラー:', err);
+      showPanelError('laborError', err.message || String(err));
+      return null;
     }
   }
 
@@ -1608,17 +1908,7 @@
     // 結果(成功/失敗いずれも)が揃ってから最後に行う
     var cultPromise = renderCultivation(basisDate, site);
     var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site); });
-
-    // 群馬はパネル3（標準労働時間）が未対応のため「準備中」表示にし、勤務表
-    // （シフト表・標準労働時間シート）は取得しない
-    if (site === '群馬') {
-      setLaborPreparing(true, '群馬の標準労働時間は準備中です');
-      await workPromise;
-      return;
-    }
-    setLaborPreparing(false);
-
-    var laborPromise = renderLabor(basisDate);
+    var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate) : renderLabor(basisDate);
 
     var results = await Promise.allSettled([workPromise, laborPromise]);
     var workSubtotals = results[0].status === 'fulfilled' ? results[0].value : null;
@@ -1692,6 +1982,16 @@
     parseHarvestPlanKgCell: parseHarvestPlanKgCell,
     lookupHarvestPlanKg: lookupHarvestPlanKg,
     fetchDailyHarvestTotal: fetchDailyHarvestTotal,
+    FORECAST_SHIFT_SOURCES: FORECAST_SHIFT_SOURCES,
+    gunmaPeriodKey: gunmaPeriodKey,
+    fmtYMD: fmtYMD,
+    classifyGunmaShiftCell: classifyGunmaShiftCell,
+    normalizeGunmaShiftName: normalizeGunmaShiftName,
+    GUNMA_SHIFT_NAME_ALIASES: GUNMA_SHIFT_NAME_ALIASES,
+    parseGunmaShiftSheet: parseGunmaShiftSheet,
+    findLaborMatchGunma: findLaborMatchGunma,
+    computeGunmaStandardLaborHours: computeGunmaStandardLaborHours,
+    fetchGunmaShiftPeriodData: fetchGunmaShiftPeriodData,
   };
 })();
 </script>
