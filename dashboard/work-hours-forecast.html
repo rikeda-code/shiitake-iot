@@ -1621,8 +1621,99 @@
   basisInput.max = todayISO;
   basisInput.value = todayISO;
 
+  /* ===================== 選択（区分・拠点）の保持 ===================== */
+
+  var SELECTION_STORAGE_KEY = 'workHoursForecast.selection';
+
+  function getToggleValues(selector, attr){
+    return Array.prototype.map.call(document.querySelectorAll(selector), function(btn){
+      return btn.getAttribute(attr);
+    });
+  }
+  var VALID_BUSINESS_VALUES = getToggleValues('#businessToggle button', 'data-business');
+  var VALID_SITE_VALUES = getToggleValues('#siteToggle button', 'data-site');
+
+  function parseQueryString(search){
+    var result = {};
+    var qs = (search && search.indexOf('?') === 0) ? search.slice(1) : (search || '');
+    if (!qs) return result;
+    qs.split('&').forEach(function(pair){
+      if (!pair) return;
+      var idx = pair.indexOf('=');
+      var key = idx === -1 ? pair : pair.slice(0, idx);
+      var val = idx === -1 ? '' : pair.slice(idx + 1);
+      try {
+        result[decodeURIComponent(key)] = decodeURIComponent(val);
+      } catch (e) { /* 不正なエンコードは無視 */ }
+    });
+    return result;
+  }
+
+  function buildQueryString(business, site){
+    return '?div=' + encodeURIComponent(business) + '&site=' + encodeURIComponent(site);
+  }
+
+  function updateUrlQuery(business, site){
+    try {
+      var newUrl = location.pathname + buildQueryString(business, site) + location.hash;
+      history.replaceState(null, '', newUrl);
+    } catch (e) { /* history APIが使えない環境では何もしない */ }
+  }
+
+  function readStoredSelection(){
+    try {
+      var raw = localStorage.getItem(SELECTION_STORAGE_KEY);
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return null;
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeStoredSelection(business, site){
+    try {
+      localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify({ business: business, site: site }));
+    } catch (e) { /* localStorageが使えない環境では何もしない */ }
+  }
+
+  function resolveInitialSelection(){
+    var query = parseQueryString(location.search);
+    var stored = readStoredSelection();
+
+    var business = '栽培';
+    if (query.div && VALID_BUSINESS_VALUES.indexOf(query.div) !== -1) {
+      business = query.div;
+    } else if (stored && stored.business && VALID_BUSINESS_VALUES.indexOf(stored.business) !== -1) {
+      business = stored.business;
+    }
+
+    var site = 'いなべ';
+    if (query.site && VALID_SITE_VALUES.indexOf(query.site) !== -1) {
+      site = query.site;
+    } else if (stored && stored.site && VALID_SITE_VALUES.indexOf(stored.site) !== -1) {
+      site = stored.site;
+    }
+
+    return { business: business, site: site };
+  }
+
   var currentBusiness = '栽培';
   var currentSite = 'いなべ';
+
+  (function applyInitialSelection(){
+    var initial = resolveInitialSelection();
+    currentBusiness = initial.business;
+    currentSite = initial.site;
+    document.querySelectorAll('#businessToggle button').forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-business') === currentBusiness);
+    });
+    document.querySelectorAll('#siteToggle button').forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-site') === currentSite);
+    });
+    updateUrlQuery(currentBusiness, currentSite);
+  })();
 
   // 栽培×いなべ・群馬のみ対応（南丹は未対応のまま）
   function isSupported(){ return currentBusiness === '栽培' && (currentSite === 'いなべ' || currentSite === '群馬'); }
@@ -1932,6 +2023,8 @@
       document.querySelectorAll('#businessToggle button').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
       currentBusiness = btn.getAttribute('data-business');
+      updateUrlQuery(currentBusiness, currentSite);
+      writeStoredSelection(currentBusiness, currentSite);
       render();
     });
   });
@@ -1940,6 +2033,8 @@
       document.querySelectorAll('#siteToggle button').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
       currentSite = btn.getAttribute('data-site');
+      updateUrlQuery(currentBusiness, currentSite);
+      writeStoredSelection(currentBusiness, currentSite);
       render();
     });
   });
@@ -1995,6 +2090,15 @@
     findLaborMatchGunma: findLaborMatchGunma,
     computeGunmaStandardLaborHours: computeGunmaStandardLaborHours,
     fetchGunmaShiftPeriodData: fetchGunmaShiftPeriodData,
+    SELECTION_STORAGE_KEY: SELECTION_STORAGE_KEY,
+    VALID_BUSINESS_VALUES: VALID_BUSINESS_VALUES,
+    VALID_SITE_VALUES: VALID_SITE_VALUES,
+    parseQueryString: parseQueryString,
+    buildQueryString: buildQueryString,
+    resolveInitialSelection: resolveInitialSelection,
+    readStoredSelection: readStoredSelection,
+    writeStoredSelection: writeStoredSelection,
+    getCurrentSelection: function(){ return { business: currentBusiness, site: currentSite }; },
   };
 })();
 </script>
