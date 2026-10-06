@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ハローワーク説明会 担当者向け実務マニュアル</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  :root {
+    --ink: #1f2a24;
+    --sub: #5a665f;
+    --line: #cfd8d2;
+    --brand: #2f6b4f;
+    --brand-soft: #e8f1ec;
+    --say: #fff7e3;
+    --say-line: #e0a526;
+    --warn: #b3261e;
+    --warn-soft: #fdecea;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font-family: "IPAPGothic", "IPAGothic", "Noto Sans JP", sans-serif;
+    font-size: 10.5pt; line-height: 1.7;
+  }
+  h1, h2, h3, h4 { margin: 0; line-height: 1.4; }
+  p { margin: 0 0 6px; }
+  ul, ol { margin: 4px 0 8px; padding-left: 1.4em; }
+  li { margin: 2px 0; }
+  strong { color: #000; }
+  .u { background: linear-gradient(transparent 60%, #ffe28a 60%); font-weight: bold; }
+
+  /* cover */
+  .cover { height: 260mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .tag { color: var(--brand); font-size: 13pt; letter-spacing: .2em; margin-bottom: 10px; }
+  .cover h1 { font-size: 30pt; color: var(--brand); border-left: 10px solid var(--brand); padding-left: 16px; }
+  .cover .lead { margin-top: 18px; font-size: 12pt; color: var(--sub); }
+  .cover .company { margin-top: 60px; font-size: 13pt; }
+  .cover .date { color: var(--sub); }
+
+  /* toc */
+  .toc { page-break-after: always; }
+  .toc ol { list-style: none; padding: 0; font-size: 12pt; }
+  .toc li { border-bottom: 1px dotted var(--line); padding: 8px 4px; display: flex; gap: 14px; }
+  .toc .no { color: var(--brand); font-weight: bold; width: 3.2em; }
+  .toc .desc { color: var(--sub); font-size: 9.5pt; margin-left: auto; }
+
+  /* chapter */
+  .chapter { page-break-before: always; }
+  .chapter:first-of-type { page-break-before: auto; }
+  .ch-title {
+    background: var(--brand); color: #fff; padding: 10px 14px; border-radius: 4px;
+    font-size: 17pt; margin-bottom: 14px;
+  }
+  .ch-title small { font-size: 10pt; opacity: .85; margin-left: 10px; }
+  h3 {
+    font-size: 12.5pt; color: var(--brand); border-bottom: 2px solid var(--brand);
+    padding-bottom: 3px; margin: 16px 0 8px;
+  }
+  h4 { font-size: 11pt; margin: 12px 0 6px; }
+  h3, h4 { break-after: avoid; page-break-after: avoid; }
+  h4::before { content: "■ "; color: var(--brand); }
+  .keep { break-inside: avoid; page-break-inside: avoid; }
+
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 10pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 5px 8px; vertical-align: top; text-align: left; }
+  th { background: var(--brand-soft); white-space: nowrap; }
+  td.k { background: #f6f8f7; font-weight: bold; width: 26%; }
+
+  /* speech */
+  .say {
+    background: var(--say); border-left: 5px solid var(--say-line); border-radius: 3px;
+    padding: 6px 10px 6px 12px; margin: 6px 0 10px; break-inside: avoid;
+  }
+  .say::before {
+    content: "話し方の例"; display: inline-block; font-size: 8.5pt; font-weight: bold;
+    background: var(--say-line); color: #fff; padding: 0 8px; border-radius: 10px; margin-bottom: 3px;
+  }
+  .say p { margin: 2px 0; }
+  .say .who { color: var(--sub); font-size: 9pt; }
+
+  .rule {
+    background: var(--warn-soft); border: 1.5px solid var(--warn); border-radius: 4px;
+    padding: 8px 12px; margin: 8px 0 12px; break-inside: avoid;
+  }
+  .rule .head { color: var(--warn); font-weight: bold; margin-bottom: 4px; }
+  .note { color: var(--sub); font-size: 9.5pt; }
+  .box { border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; margin: 8px 0 12px; break-inside: avoid; }
+
+  /* flow */
+  .flow { display: flex; flex-wrap: wrap; gap: 4px 0; align-items: center; margin: 6px 0; }
+  .flow span.s { background: var(--brand-soft); border: 1px solid var(--brand); border-radius: 3px; padding: 2px 8px; font-size: 9.5pt; }
+  .flow span.a { color: var(--brand); padding: 0 5px; font-weight: bold; }
+  .phase { font-weight: bold; color: var(--brand); margin-top: 8px; }
+
+  /* steps */
+  .step { border: 1px solid var(--line); border-radius: 5px; margin: 10px 0; break-inside: avoid; }
+  .step-h { display: flex; align-items: center; gap: 10px; background: var(--brand-soft); padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  .step-h .n { background: var(--brand); color: #fff; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; flex: none; }
+  .step-h .t { font-weight: bold; font-size: 11.5pt; }
+  .step-h .time { margin-left: auto; font-size: 9pt; background: #fff; border: 1px solid var(--brand); color: var(--brand); border-radius: 10px; padding: 0 8px; }
+  .step-b { padding: 6px 12px 4px; }
+  .ref { display: inline-block; font-size: 9pt; color: var(--brand); border: 1px solid var(--brand); border-radius: 3px; padding: 0 6px; }
+
+  .qa { border-bottom: 1px dashed var(--line); padding: 6px 0 4px; break-inside: avoid; }
+  .qa .q { font-weight: bold; font-size: 11pt; }
+  .qa .q::before { content: "Q"; display: inline-block; background: var(--brand); color: #fff; border-radius: 3px; padding: 0 6px; margin-right: 6px; }
+  .qa .pt { font-size: 9.5pt; color: var(--sub); margin: 2px 0; }
+  .qa .pt::before { content: "ポイント："; font-weight: bold; color: var(--ink); }
+
+  pre.tree { font-family: inherit; background: #f6f8f7; border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; font-size: 10pt; line-height: 1.6; white-space: pre-wrap; }
+
+  @media screen {
+    body { max-width: 820px; margin: 0 auto; padding: 16px; }
+    .cover { height: auto; padding: 60px 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 表紙 ===== -->
+<section class="cover">
+  <div class="tag">担当者向け実務マニュアル</div>
+  <h1>ハローワーク説明会<br>対応マニュアル</h1>
+  <p class="lead">説明会を初めて担当する人でも、一人で対応できるためのマニュアルです。<br>当日は「Ⅳ．説明会当日の流れ」を上から順に見ながら進めてください。</p>
+  <div class="company">テンフィールズファーム株式会社</div>
+  <div class="date">2026年10月版</div>
+</section>
+
+<!-- ===== 目次 ===== -->
+<section class="toc">
+  <div class="ch-title">目次</div>
+  <ol>
+    <li><span class="no">－</span>はじめに<span class="desc">使い方・絶対に守る5つのルール</span></li>
+    <li><span class="no">Ⅰ</span>説明会の概要<span class="desc">目的・場所・形式・採用までの流れ</span></li>
+    <li><span class="no">Ⅱ</span>事前準備<span class="desc">予約方法・対応可能日時の把握</span></li>
+    <li><span class="no">Ⅲ</span>当日の準備<span class="desc">持参物・服装</span></li>
+    <li><span class="no">Ⅳ</span>説明会当日の流れ<span class="desc">★当日はここを見る</span></li>
+    <li><span class="no">Ⅴ</span>説明内容<span class="desc">会社概要・仕事内容・勤務条件の台本</span></li>
+    <li><span class="no">Ⅵ</span>困ったときの対応<span class="desc">想定質問と回答例</span></li>
+  </ol>
+  <div class="box" style="margin-top:20px">
+    <strong>このマニュアルの見方</strong>
+    <div class="say" style="margin-top:8px"><p>オレンジの枠は「話し方の例」です。そのまま読み上げても大丈夫です。</p></div>
+    <div class="rule"><div class="head">赤い枠</div>必ず守ること・注意することです。</div>
+  </div>
+</section>
+
+<!-- ===== はじめに ===== -->
+<section class="chapter">
+  <div class="ch-title">はじめに</div>
+
+  <h3>このマニュアルの使い方</h3>
+  <ul>
+    <li>説明会を一度も担当したことがない人でも、一人で対応できるように作っています。</li>
+    <li>当日は、<strong>Ⅳ．説明会当日の流れ</strong>を上から順に見ながら進めてください。</li>
+    <li>「話し方の例」は、そのまま読み上げても大丈夫です。</li>
+  </ul>
+
+  <h3>絶対に守る5つのルール</h3>
+  <table>
+    <tr><th style="width:2em"></th><th>ルール</th><th>理由</th></tr>
+    <tr><td>1</td><td><strong>その場で採用を決めない</strong></td><td>採用は面接や選考の後に、会社が判断するため</td></tr>
+    <tr><td>2</td><td><strong>採用を約束しない</strong></td><td>「たぶん大丈夫です」も約束と受け取られるため</td></tr>
+    <tr><td>3</td><td><strong>求人票にない条件を言わない</strong></td><td>実際の条件と違うとトラブルになるため</td></tr>
+    <tr><td>4</td><td><strong>分からないことを推測で答えない</strong></td><td>間違った情報を伝えないため</td></tr>
+    <tr><td>5</td><td><strong>迷ったら持ち帰る</strong></td><td>後日の回答で問題ないため</td></tr>
+  </table>
+
+  <div class="rule">
+    <div class="head">困ったときの合言葉</div>
+    <p style="font-size:13pt"><strong>「確認して、後日あらためてご連絡いたします。」</strong></p>
+  </div>
+</section>
+
+<!-- ===== Ⅰ ===== -->
+<section class="chapter">
+  <div class="ch-title">Ⅰ．説明会の概要</div>
+
+  <h3>1．説明会の目的</h3>
+  <p>説明会は、<span class="u">テンフィールズファーム株式会社と仕事内容を知ってもらい、興味を持った人を面接・現場見学につなげる場</span>です。その場で採用を決める場ではありません。</p>
+  <p>担当者のゴールは、次の2つです。</p>
+  <ul>
+    <li>求職者に、会社と仕事のイメージを持って帰ってもらう</li>
+    <li>興味を持った人の情報を記録し、面接・見学の日程を決める</li>
+  </ul>
+
+  <h3>2．開催場所</h3>
+  <table>
+    <tr><th>拠点</th><th>開催場所</th></tr>
+    <tr><td>いなべ</td><td>ハローワーク桑名</td></tr>
+    <tr><td>群馬</td><td>ハローワーク安中</td></tr>
+    <tr><td>南丹</td><td>ハローワーク園部</td></tr>
+  </table>
+  <p class="note">※会場（何階・どの部屋か）は、予約するときに確認してください。</p>
+
+  <h3>3．開催日時</h3>
+  <ul>
+    <li>開催日時は、予約するときにハローワークと調整して決めます（Ⅱを参照）。</li>
+    <li>予約のときに、<strong>開始・終了時刻</strong>と<strong>何分前に到着すればよいか</strong>もあわせて確認してください。</li>
+  </ul>
+
+  <h3>4．対象者</h3>
+  <ul>
+    <li>ハローワークを利用している求職者のうち、当社の求人に興味を持った人</li>
+    <li><strong>ほぼ全員が、椎茸の仕事は未経験です。</strong>専門用語は使わず、分かりやすい言葉で説明してください。</li>
+  </ul>
+
+  <h3>5．説明会の形式</h3>
+  <table>
+    <tr><td class="k">形式</td><td>ブース形式</td></tr>
+    <tr><td class="k">1回の人数</td><td>求職者2〜3名</td></tr>
+    <tr><td class="k">1回の時間</td><td>約30分（これを何回か繰り返す）</td></tr>
+    <tr><td class="k">募集職種</td><td>パート・社員（その都度変わるため、求人票や資料で確認する）</td></tr>
+  </table>
+
+  <div class="keep"><h3>6．説明会の基本的な流れ</h3>
+  <div class="box">
+    <div class="phase">【知ってもらう】</div>
+    <div class="flow">
+      <span class="s">① 挨拶＋名刺</span><span class="a">→</span>
+      <span class="s">② 興味のある求人を確認</span><span class="a">→</span>
+      <span class="s">③ 説明会・面接について説明</span><span class="a">→</span>
+      <span class="s">④ 会社概要</span><span class="a">→</span>
+      <span class="s">⑤ 仕事内容（写真）</span><span class="a">→</span>
+      <span class="s">⑥ 勤務条件</span><span class="a">→</span>
+      <span class="s">⑦ 質疑応答</span>
+    </div>
+    <div class="phase">【つなげる】</div>
+    <div class="flow">
+      <span class="s">⑧ 面接・見学への意向確認</span><span class="a">→</span>
+      <span class="s">⑨ 日程調整</span><span class="a">→</span>
+      <span class="s">⑩ 必要情報の記録</span>
+    </div>
+  </div></div>
+
+  <h3>7．採用までの流れ</h3>
+  <h4>パート</h4>
+  <div class="flow">
+    <span class="s">① 説明会</span><span class="a">→</span><span class="s">② 日程調整</span><span class="a">→</span><span class="s">③ 現地面接・現場見学</span><span class="a">→</span><span class="s">④ 採用判断</span>
+  </div>
+  <h4>社員</h4>
+  <div class="flow">
+    <span class="s">① 説明会</span><span class="a">→</span><span class="s">② 日程調整</span><span class="a">→</span><span class="s">③ 現場見学 または 選考（求職者が選ぶ）</span><span class="a">→</span><span class="s">④ 採用判断</span>
+  </div>
+  <p class="note" style="margin-top:4px">選考の流れ：書類選考 → 一次面接＋適性検査 → 二次面接 → 最終面接</p>
+
+  <h3>8．担当者の役割</h3>
+  <table>
+    <tr><th>やること</th><th>ポイント</th></tr>
+    <tr><td>名刺を渡す</td><td>最初の挨拶のときに、全員に渡す</td></tr>
+    <tr><td>会社・仕事内容・勤務条件を伝える</td><td>求人票と説明用資料に書いてある範囲で伝える</td></tr>
+    <tr><td>質問に答える</td><td>分からないことは持ち帰る</td></tr>
+    <tr><td>興味を持った人を面接・見学につなげる</td><td>日程を決め、必要な情報を記録する</td></tr>
+    <tr><td>終了後に社内へ報告する</td><td>報告先：</td></tr>
+  </table>
+
+  <h3>9．担当者は採用判断をしない</h3>
+  <div class="rule">
+    <div class="head">採用を決める権限はありません</div>
+    <ul style="margin:0">
+      <li>採用は、面接や選考の後に会社が判断します。</li>
+      <li>「採用されますか」と聞かれても、「大丈夫です」「たぶん採用されます」とは言わないでください。</li>
+    </ul>
+  </div>
+  <div class="say"><p>「本日は、会社と仕事内容をご紹介する場になっております。採用については、面接（現場見学）の後に会社で判断いたしますので、まずは一度、現場を見ていただければと思います。」</p></div>
+</section>
+
+<!-- ===== Ⅱ ===== -->
+<section class="chapter">
+  <div class="ch-title">Ⅱ．事前準備</div>
+
+  <h3>1．説明会の予約方法</h3>
+  <table>
+    <tr><th>拠点</th><th>予約先</th><th>予約方法</th></tr>
+    <tr><td>いなべ</td><td>ハローワーク桑名</td><td>① ハローワークに電話する<br>② ハローワークのHPにある申込書に記入して提出する</td></tr>
+    <tr><td>群馬</td><td>ハローワーク安中</td><td>ハローワークに電話して、日程を調整する</td></tr>
+    <tr><td>南丹</td><td>ハローワーク園部</td><td>ハローワークに電話して、日程を調整する</td></tr>
+  </table>
+
+  <h3>2．面接・見学の対応可能日時の把握</h3>
+  <p>説明会の場で日程を決めるため、事前に次の日時を把握しておきます。</p>
+  <table>
+    <tr><td class="k">パート</td><td>面接担当者が面接できる日時</td></tr>
+    <tr><td class="k">社員</td><td>現場見学に対応できる日時</td></tr>
+  </table>
+</section>
+
+<!-- ===== Ⅲ ===== -->
+<section class="chapter">
+  <div class="ch-title">Ⅲ．当日の準備</div>
+
+  <h3>1．持参物</h3>
+  <table>
+    <tr><th>持ち物</th><th>何のために持っていくのか</th><th>ポイント</th></tr>
+    <tr><td><strong>求人票</strong><br><span class="note">いなべのみ</span></td><td>勤務条件を正しく説明するため</td><td>群馬・南丹は不要</td></tr>
+    <tr><td><strong>説明用資料</strong></td><td>会社概要と仕事内容を、見せながら説明するため</td><td></td></tr>
+    <tr><td><strong>作業風景の写真</strong></td><td>仕事内容をイメージしてもらうため</td><td>説明用資料とは別に用意する</td></tr>
+    <tr><td><strong>パック済み椎茸</strong></td><td>実際の商品を見てもらい、どんな物を作る仕事かをイメージしてもらうため</td><td>見せるだけで、渡さない</td></tr>
+    <tr><td><strong>名刺</strong></td><td>最初の挨拶で全員に渡すため。面接時の連絡先として使ってもらう</td><td>説明する人と面接担当者が違う場合は、面接担当者の連絡先も伝える</td></tr>
+    <tr><td><strong>筆記用具</strong></td><td>求職者に情報を書いてもらう、持ち帰る質問をメモするため</td><td></td></tr>
+    <tr><td><strong>メモ用紙</strong></td><td>興味を持った人の情報と、答えられなかった質問を記録するため</td><td>終了後、社内への報告に使う</td></tr>
+  </table>
+
+  <h3>2．服装</h3>
+  <p style="font-size:12pt"><strong>基本：Yシャツ＋ネクタイ＋作業服</strong></p>
+  <table>
+    <tr><th>服装</th><th>伝えたいこと</th></tr>
+    <tr><td>Yシャツ＋ネクタイ</td><td>きちんとした会社であるという印象</td></tr>
+    <tr><td>作業服</td><td>現場で体を動かす仕事であることが、見ただけで伝わる</td></tr>
+  </table>
+</section>
+
+<!-- ===== Ⅳ ===== -->
+<section class="chapter">
+  <div class="ch-title">Ⅳ．説明会当日の流れ<small>★当日はこの章を上から順に</small></div>
+  <p>1回あたり<strong>約30分・求職者2〜3名</strong>です。時間は目安なので、多少ずれても問題ありません。</p>
+
+  <div class="step">
+    <div class="step-h"><span class="n">前</span><span class="t">開始前</span></div>
+    <div class="step-b">
+      <ol>
+        <li>予約時に確認した時刻までに到着する</li>
+        <li>ハローワークの担当者に挨拶する</li>
+        <li>ブースに説明用資料・写真・椎茸・名刺を並べる</li>
+      </ol>
+      <div class="say"><p class="who">ハローワーク担当者へ</p><p>「本日説明会でお世話になります、テンフィールズファーム株式会社の〔名前〕です。よろしくお願いいたします。」</p></div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">1</span><span class="t">挨拶＋名刺を渡す</span><span class="time">約2分</span></div>
+    <div class="step-b">
+      <p>自己紹介をして、全員に名刺を渡す。</p>
+      <div class="say"><p>「本日はお越しいただき、ありがとうございます。テンフィールズファーム株式会社の〔名前〕と申します。よろしくお願いいたします。」</p></div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">2</span><span class="t">どの求人に興味を持ったか確認</span><span class="time">約1分</span></div>
+    <div class="step-b">
+      <p>パートと社員のどちらに興味があるかを聞く。決まっていない人には両方を説明する。</p>
+      <div class="say"><p>「今回はパートと社員の募集がありますが、どちらにご興味をお持ちですか？」</p></div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">3</span><span class="t">説明会・面接について説明</span><span class="time">約1分</span></div>
+    <div class="step-b">
+      <p>今日は説明の場であり、採用はこの場で決めないことを伝える。</p>
+      <div class="say"><p>「本日は、会社と仕事内容のご紹介をさせていただきます。ご興味を持っていただけた方には、後日、現場で面接や見学をしていただく流れになります。この場で採用を決めることはありませんので、気になることは何でも聞いてください。」</p></div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">4</span><span class="t">会社概要の説明</span><span class="time">約4分</span></div>
+    <div class="step-b"><p>説明用資料を見せながら説明する。　<span class="ref">台本 → Ⅴ①</span></p></div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">5</span><span class="t">仕事内容の説明</span><span class="time">約6分</span></div>
+    <div class="step-b"><p>作業風景の写真とパック済み椎茸を見せながら説明する。　<span class="ref">台本 → Ⅴ②</span></p></div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">6</span><span class="t">勤務条件の説明</span><span class="time">約4分</span></div>
+    <div class="step-b"><p>いなべは求人票、群馬・南丹は別途資料または求人票を見ながら説明する。　<span class="ref">台本 → Ⅴ③</span></p></div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">7</span><span class="t">質疑応答</span><span class="time">約5分</span></div>
+    <div class="step-b">
+      <p>分からないことは推測で答えず、メモして持ち帰る。　<span class="ref">回答例 → Ⅵ</span></p>
+      <div class="say">
+        <p>「ここまでで、何か気になることはございますか？」</p>
+        <p class="who">分からないとき</p>
+        <p>「申し訳ありません、確認して後日あらためてご連絡いたします。」</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">8</span><span class="t">面接・現場見学への意向確認</span><span class="time">約2分</span></div>
+    <div class="step-b">
+      <div class="say">
+        <p class="who">パート</p>
+        <p>「ご興味があれば、一度現場を見ていただきながら、面接をさせていただければと思います。いかがでしょうか？」</p>
+        <p class="who">社員</p>
+        <p>「社員の場合は、まず現場見学をしていただくか、選考に進んでいただくか、お選びいただけます。どちらがよろしいですか？」</p>
+      </div>
+      <p><strong>迷っている人・興味が薄い人には、無理に誘わない。</strong></p>
+      <div class="say"><p>「今日決めていただかなくても大丈夫です。お渡しした名刺の連絡先に、いつでもご連絡ください。」</p></div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">9</span><span class="t">日程調整</span><span class="time">約3分</span></div>
+    <div class="step-b">
+      <table>
+        <tr><th>対象</th><th>対応</th></tr>
+        <tr><td>パート（面接・見学）</td><td>事前に把握した日時から、<strong>その場で決める</strong></td></tr>
+        <tr><td>社員（現場見学）</td><td>事前に把握した日時から、<strong>その場で決める</strong></td></tr>
+        <tr><td>社員（選考）</td><td>その場では決めない。<strong>ハローワークの紹介状と履歴書を本社へ郵送してもらう</strong></td></tr>
+      </table>
+      <div class="rule">
+        <div class="head">あわせて必ず伝えること</div>
+        <ul style="margin:0">
+          <li>面接時の連絡先（説明する人と面接担当者が違う場合は、面接担当者の連絡先も伝える）</li>
+          <li>オンライン面接になる場合があること</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p>「ご希望の日にちはございますか？」</p>
+        <p>「面接のご連絡は、お渡しした名刺の番号からさせていただきます。」</p>
+        <p class="who">面接担当者が違う場合</p>
+        <p>「当日の面接は〔担当者名〕が担当いたします。連絡先は〔電話番号〕です。」</p>
+        <p>「状況によっては、オンラインでの面接になる場合もございますので、ご了承ください。」</p>
+        <p class="who">社員・選考を選んだ人</p>
+        <p>「選考に進まれる場合は、ハローワークの紹介状と履歴書を、名刺に書いてある本社の住所まで郵送してください。届きましたら、こちらから今後の流れをご連絡いたします。」</p>
+      </div>
+      <p class="note">本社住所：〒511-0283 三重県いなべ市大安町南金井2805-6 ラフィネ大安B棟 205</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">10</span><span class="t">必要情報の記録</span><span class="time">約2分</span></div>
+    <div class="step-b">
+      <p>ほかの求職者に聞こえないよう、<strong>本人にメモ用紙へ書いてもらう。</strong></p>
+      <table>
+        <tr><td class="k">書いてもらう項目</td><td>氏名／電話番号／希望職種／面接・見学の希望日／その他（持ち帰った質問など）</td></tr>
+      </table>
+      <div class="say"><p>「お手数ですが、こちらにお名前とお電話番号、ご希望の職種と日にちをご記入いただけますか？」</p></div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="n">後</span><span class="t">終了後</span></div>
+    <div class="step-b">
+      <ol>
+        <li>ハローワークの担当者に挨拶する</li>
+        <li>社内へ報告する（報告先：　　　　　　　）
+          <ul>
+            <li>説明した人数</li>
+            <li>興味を持った人の情報（⑩で記録した内容）</li>
+            <li>その場で答えられなかった質問</li>
+          </ul>
+        </li>
+      </ol>
+      <div class="say"><p class="who">ハローワーク担当者へ</p><p>「本日はありがとうございました。またよろしくお願いいたします。」</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Ⅴ ===== -->
+<section class="chapter">
+  <div class="ch-title">Ⅴ．説明内容<small>④〜⑥の台本</small></div>
+
+  <h3>① 会社概要</h3>
+  <table>
+    <tr><td class="k">会社名</td><td>テンフィールズファーム株式会社</td></tr>
+    <tr><td class="k">本社</td><td>三重県いなべ市</td></tr>
+    <tr><td class="k">事業内容</td><td>椎茸の栽培・出荷、菌床（椎茸を育てる土台）の製造</td></tr>
+    <tr><td class="k">拠点</td><td>椎茸の栽培：いなべ・群馬・南丹・鹿沼（栃木）<br>菌床の製造：志摩工場（三重県志摩市）</td></tr>
+    <tr><td class="k">従業員数</td><td>約130名（2026年10月時点）</td></tr>
+    <tr><td class="k">職場の特徴</td><td>・コンテナの中で椎茸を育てている<br>・エアコン完備の室内作業がメイン<br>・一年中、天候に左右されずに働ける</td></tr>
+  </table>
+  <div class="say">
+    <p>「テンフィールズファーム株式会社は、三重県いなべ市に本社がある会社です。椎茸の栽培・出荷と、椎茸を育てる土台になる『菌床』の製造をしています。」</p>
+    <p>「椎茸は、いなべ・群馬・南丹・鹿沼の4か所で育てていて、三重県志摩市の工場で菌床を作っています。従業員は約130名です。」</p>
+    <p>「当社の特徴は、コンテナの中で椎茸を育てていることです。畑の農業と違って、エアコンの効いた室内での作業が中心なので、一年中、天候に左右されずに働いていただけます。」</p>
+  </div>
+
+  <h3>② 仕事内容 ― パート</h3>
+  <table>
+    <tr><td class="k">主な仕事内容</td><td>椎茸の収穫と、パック・袋詰め</td></tr>
+    <tr><td class="k">具体的な作業</td><td>菌床入れ・芽かき・散水・収穫・パック詰め・袋詰め</td></tr>
+    <tr><td class="k">配送</td><td>資格・経験によっては、配送をお願いする可能性がある</td></tr>
+    <tr><td class="k">作業環境</td><td>・立ち仕事がメイン<br>・3〜10kgほどの段ボールや収穫かごを持つことがある</td></tr>
+    <tr><td class="k">確認すること</td><td>仕事の内容を伝えたうえで、体に不安がないかを聞く（病歴そのものは聞かない）</td></tr>
+  </table>
+  <div class="say">
+    <p>「パートさんには、主に椎茸の収穫と、パック詰め・袋詰めをお願いしています。」</p>
+    <p class="who">写真を見せながら</p>
+    <p>「こちらが実際の作業場です。コンテナの中で、椎茸がこのように育っています。」</p>
+    <p>「ほかにも、菌床を並べる作業や、余分な芽を取る『芽かき』、水をかける『散水』などの作業があります。」</p>
+    <p class="who">椎茸を見せながら</p>
+    <p>「収穫した椎茸は、最終的にこのようにパックに詰めて出荷します。」</p>
+    <p>「資格や経験によっては、配送をお願いすることもあります。」</p>
+    <p>「3〜10kgほどの物を持つ作業や立ち仕事がありますが、腰などに不安はございませんか？」</p>
+  </div>
+
+  <h3>② 仕事内容 ― 社員</h3>
+  <p>社員の仕事は、<strong>栽培</strong>と<strong>出荷管理</strong>がメインで、<strong>配送</strong>がサブです。</p>
+  <table>
+    <tr><th>部門</th><th>具体的な作業</th></tr>
+    <tr><td>栽培</td><td>コンテナごとに担当者を決め、椎茸栽培で大切な温度・湿度と作業工程を管理する</td></tr>
+    <tr><td>出荷管理</td><td>取引先からの注文に合わせて、パック・袋詰めの指示を出す。進み具合、在庫、品質を確認する</td></tr>
+    <tr><td>配送（サブ）</td><td>菌床と椎茸を配送する</td></tr>
+    <tr><td><strong>全部門共通</strong></td><td><strong>パートさんへの指導、数字の管理（目標の管理）</strong></td></tr>
+  </table>
+  <div class="say">
+    <p>「社員の方には、主に椎茸の『栽培』か『出荷管理』をお願いしています。」</p>
+    <p>「栽培では、コンテナごとに担当を決めて、椎茸を育てるのに大切な温度や湿度、作業の工程を管理していただきます。」</p>
+    <p>「出荷管理では、取引先からの注文に合わせてパック詰めの指示を出し、進み具合や在庫、品質を確認していただきます。」</p>
+    <p>「そのほか、菌床や椎茸の配送をお願いすることもあります。」</p>
+    <p>「どの部門でも、パートさんへの指導や、目標に対する数字の管理をお願いしています。」</p>
+  </div>
+
+  <h3>③ 勤務条件</h3>
+  <div class="rule">
+    <div class="head">勤務条件のルール</div>
+    <ul style="margin:0">
+      <li>時給・給与は、<strong>いなべは求人票、群馬・南丹は別途資料または求人票</strong>を見て説明する</li>
+      <li>拠点による条件の違いはありません</li>
+      <li>分からないことは、詳しい人に確認してから後日回答する</li>
+    </ul>
+  </div>
+
+  <div class="keep"><h4>パート</h4>
+  <table>
+    <tr><td class="k">時給</td><td>求人票を参照</td></tr>
+    <tr><td class="k">勤務時間</td><td>8:00〜17:00の間で決める（1日3時間以上）<br>配送の場合は、早めに出勤することがある（例：6:30出勤）</td></tr>
+    <tr><td class="k">勤務日数</td><td>週3〜5日</td></tr>
+    <tr><td class="k">休日</td><td>シフトによる</td></tr>
+    <tr><td class="k">社会保険</td><td>週20時間以上働く人は加入が必要（2026年10月時点）</td></tr>
+  </table></div>
+  <div class="say">
+    <p>「時給は、こちらの求人票に書いてあるとおりです。」</p>
+    <p>「勤務時間は、朝8時から夕方5時までの間で、1日3時間以上の範囲で決めていただけます。週3日から5日の勤務で、お休みはシフトで決まります。」</p>
+    <p>「配送をお願いする場合は、朝6時半ごろなど、早めの出勤になることがあります。」</p>
+    <p>「週20時間以上働かれる方は、社会保険に加入していただくことになります。」</p>
+  </div>
+
+  <div class="keep"><h4>社員</h4>
+  <table>
+    <tr><td class="k">給与</td><td>求人票を参照</td></tr>
+    <tr><td class="k">勤務時間</td><td>8:00〜17:00（配送の場合は、出勤が早まることがある）</td></tr>
+    <tr><td class="k">休日</td><td>シフト制。毎月11日〜翌月10日の期間にある土日祝日と同じ日数を、シフトで休む。土日に出勤してもらう可能性がある</td></tr>
+  </table></div>
+  <div class="say">
+    <p>「給与は、こちらの求人票に書いてあるとおりです。」</p>
+    <p>「勤務時間は朝8時から夕方5時までです。配送のときは、出勤が早くなることがあります。」</p>
+    <p>「お休みはシフト制です。毎月11日から翌月10日までの期間にある土日祝日と同じ日数を、シフトでお休みしていただきます。土日に出勤していただくこともあります。」</p>
+  </div>
+
+  <div class="keep"><h4>パート・社員共通</h4>
+  <table>
+    <tr><td class="k">休憩</td><td>12:00〜13:00（1時間）、10:00と15:00に各10分</td></tr>
+    <tr><td class="k">試用期間</td><td>入社後3か月</td></tr>
+  </table></div>
+</section>
+
+<!-- ===== Ⅵ ===== -->
+<section class="chapter">
+  <div class="ch-title">Ⅵ．困ったときの対応</div>
+
+  <h3>基本ルール</h3>
+<pre class="tree">質問を受けたら
+   ↓
+求人票・説明用資料・このマニュアルに書いてある？
+   ├ 書いてある　　　　　　　→ その内容のとおりに答える
+   └ 書いていない／自信がない → 推測で答えず、持ち帰る
+                                    ↓
+                     メモに「質問内容」と「誰からの質問か」を書く
+                                    ↓
+                     終了後、社内に報告する → 後日回答する</pre>
+
+  <h3>想定質問と回答例</h3>
+
+  <div class="qa">
+    <div class="q">1．採用について聞かれた（何人採用しますか、いつ決まりますか）</div>
+    <div class="pt">採用人数や時期は担当者が判断できないため、持ち帰る。</div>
+    <div class="say"><p>「採用については、面接（選考）の後に会社で判断しております。人数や時期など詳しいことは、確認して後日ご連絡いたします。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">2．給与について詳しく聞かれた（昇給、賞与、手取り額）</div>
+    <div class="pt">求人票に書いてあることだけを答える。金額の見込みは言わない。</div>
+    <div class="say"><p>「求人票に書いてある内容は〔求人票の内容〕です。それ以外の詳しいことは、確認して後日ご連絡いたします。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">3．勤務時間について聞かれた（短い時間でもいいか、曜日を固定できるか）</div>
+    <div class="pt">決まっている範囲で答え、細かい希望は面接で相談してもらう。</div>
+    <div class="say"><p>「パートの方は、朝8時から夕方5時までの間で、1日3時間以上、週3日から5日で働いていただけます。細かいご希望は、面接のときにご相談ください。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">4．仕事内容について、分からない質問をされた</div>
+    <div class="pt">推測で答えない。現場見学につなげる。</div>
+    <div class="say"><p>「申し訳ありません、確認して後日ご連絡いたします。現場見学で実際の作業を見ていただくこともできますので、ぜひ一度お越しください。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">5．「今日面接できますか」と聞かれた</div>
+    <div class="pt">説明会の場では面接をしない。その場で日程を決める。</div>
+    <div class="say"><p>「本日は会社のご紹介の場になっておりますので、面接は後日、現場で行っております。よろしければ、今この場で日程を決めさせていただけますか？」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">6．「採用されますか」と聞かれた</div>
+    <div class="pt">「大丈夫です」「たぶん採用されます」など、約束と受け取られる言い方は絶対にしない。</div>
+    <div class="say"><p>「採用については、面接（選考）の後に会社で判断いたしますので、この場ではお答えできないんです。まずは一度、現場を見ていただければと思います。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">7．本来の担当者について聞かれた</div>
+    <div class="pt">担当者の事情を詳しく話す必要はない。面接担当者の連絡先を伝える。</div>
+    <div class="say"><p>「本日は私が担当させていただいております。面接は〔担当者名〕が担当いたしますので、ご不明な点はこちらの連絡先にお問い合わせください。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">8．残業について聞かれた</div>
+    <div class="say">
+      <p class="who">パート</p><p>「残業をお願いする場合もございます。」</p>
+      <p class="who">社員</p><p>「確認して後日ご連絡いたします。」</p>
+    </div>
+  </div>
+
+  <div class="qa">
+    <div class="q">9．車通勤について聞かれた</div>
+    <div class="say"><p>「車での通勤は可能です。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">10．Wワーク・扶養内で働けるか聞かれた</div>
+    <div class="pt">「扶養内で大丈夫です」とは言わない。</div>
+    <div class="say"><p>「勤務時間は1日3時間以上・週3日からご相談いただけます。週20時間以上の場合は社会保険の加入が必要になります。扶養やWワークについて詳しいことは、面接のときにご相談ください。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">11．年齢・体力について聞かれた</div>
+    <div class="pt">年齢で判断しないことを伝え、仕事の内容を正直に伝える。</div>
+    <div class="say"><p>「年齢で判断することはありません。立ち仕事が中心で、3〜10kgほどの物を持つこともありますので、一度現場を見ていただいて、ご自身で判断していただければと思います。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">12．社員の担当部門（栽培・出荷管理）を選べるか聞かれた</div>
+    <div class="pt">「選べます」とは約束しない。</div>
+    <div class="say"><p>「担当する部門は、入社後に会社と相談して決めていきます。ご希望があれば、面接のときにお伝えください。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">13．配送に必要な資格を聞かれた</div>
+    <table>
+      <tr><th>配送する物</th><th>必要な資格</th></tr>
+      <tr><td>菌床</td><td>大型免許</td></tr>
+      <tr><td>椎茸</td><td>準中型以上の免許</td></tr>
+      <tr><td>軽自動車での配達</td><td>普通免許でも可能な仕事あり</td></tr>
+    </table>
+    <div class="say"><p>「菌床の配送は大型免許、椎茸の配送は準中型以上の免許が必要です。普通免許でも、軽自動車で配達するお仕事もあります。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">14．服装・持ち物について聞かれた</div>
+    <div class="say"><p>「動きやすく、汚れてもよい服装でお願いしています。長靴はご自身でご用意いただいています。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">15．休憩時間について聞かれた</div>
+    <div class="say"><p>「お昼は12時から13時まで1時間の休憩があります。ほかに、10時と15時に10分ずつ休憩があります。」</p></div>
+  </div>
+
+  <div class="qa">
+    <div class="q">16．試用期間について聞かれた</div>
+    <div class="say"><p>「入社後3か月間が試用期間になります。」</p></div>
+  </div>
+
+  <div class="rule" style="margin-top:16px">
+    <div class="head">どの質問でも、迷ったら</div>
+    <p style="font-size:12pt;margin:0"><strong>「確認して、後日あらためてご連絡いたします。」</strong></p>
+  </div>
+</section>
+
+</body>
+</html>
