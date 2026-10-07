@@ -303,6 +303,8 @@
       <span class="note">単位：h　/　当日〜7日後</span>
     </div>
     <div class="panel-error" id="laborError"></div>
+    <div id="laborPreparing" class="unsupported" style="display:none;"></div>
+    <div id="laborContent">
     <div class="table-scroll">
       <table id="table3labor">
         <colgroup></colgroup>
@@ -363,6 +365,7 @@
         </table>
       </div>
     </details>
+    </div>
   </section>
 
   </div>
@@ -374,10 +377,11 @@
   'use strict';
 
   /* ===================== 定数 ===================== */
-  // 栽培管理シートの取得先（拠点ごと）。未対応の拠点（南丹）はエントリを持たない
+  // 栽培管理シートの取得先（拠点ごと）
   var FORECAST_CULTIVATION_SHEETS = {
     'いなべ': { id: '1X8RMzKwg_DoVMogqCRh78bcqecVgHzvRWc5FeKc1TPM', gid: '1452537379' },
     '群馬':   { id: '12Xa_bkHE5tw9-YgGPIONzAj9ex3jr0Au-3B1k6DSZDY', gid: '1776859904' },
+    '南丹':   { id: '1WBnGT3tkVfGhDJ7OZ2mZE4Juvd-t7le68bUlVRHGIeM', gid: '2146042804' },
   };
   var STD_HOURS_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
   var STD_WORK_HOURS_GID = '381752617';
@@ -395,6 +399,8 @@
     'いなべ': { type: 'yearMonthColumns', id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' },
     '群馬': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
              gids: { '2026.10': '1913253722' } },
+    '南丹': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
+             gids: { '2026.10': '1061657376' } }, // 南丹10月売上高＆収穫量
   };
   // 勤務表の取得先（拠点ごと）。いなべは従来どおりSHIFT_SHEET_ID/SHIFT_SHEET_GID/
   // SHIFT_GAS_URLを使うため、ここにはエントリを持たない。群馬は月度（11日〜翌月10日）・
@@ -1715,8 +1721,8 @@
     updateUrlQuery(currentBusiness, currentSite);
   })();
 
-  // 栽培×いなべ・群馬のみ対応（南丹は未対応のまま）
-  function isSupported(){ return currentBusiness === '栽培' && (currentSite === 'いなべ' || currentSite === '群馬'); }
+  // 栽培×いなべ・群馬・南丹に対応
+  function isSupported(){ return currentBusiness === '栽培' && (currentSite === 'いなべ' || currentSite === '群馬' || currentSite === '南丹'); }
 
   function showPanelError(elId, message){
     var el = document.getElementById(elId);
@@ -1985,6 +1991,23 @@
     }
   }
 
+  // パネル3（標準労働時間）の「準備中」表示を切り替える。南丹選択時は勤務表
+  // （シフト表・標準労働時間シート）自体を取得しないため、テーブル・警告・
+  // 人別内訳をまとめて隠す（群馬のPR #459時点と同じ扱い）
+  function setLaborPreparing(isPreparing, message){
+    var prepEl = document.getElementById('laborPreparing');
+    var contentEl = document.getElementById('laborContent');
+    if (isPreparing) {
+      showPanelError('laborError', null);
+      prepEl.textContent = message;
+      prepEl.style.display = '';
+      contentEl.style.display = 'none';
+    } else {
+      prepEl.style.display = 'none';
+      contentEl.style.display = '';
+    }
+  }
+
   window.render = async function(){
     document.getElementById('unsupportedPanel').style.display = isSupported() ? 'none' : '';
     document.getElementById('supportedPanels').style.display = isSupported() ? '' : 'none';
@@ -2002,6 +2025,16 @@
     // 結果(成功/失敗いずれも)が揃ってから最後に行う
     var cultPromise = renderCultivation(basisDate, site);
     var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site); });
+
+    // 南丹はパネル3（標準労働時間）が未対応のため「準備中」表示にし、勤務表
+    // （シフト表・標準労働時間シート）は取得しない
+    if (site === '南丹') {
+      setLaborPreparing(true, '南丹の標準労働時間は準備中です');
+      await workPromise;
+      return;
+    }
+    setLaborPreparing(false);
+
     var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate) : renderLabor(basisDate);
 
     var results = await Promise.allSettled([workPromise, laborPromise]);
