@@ -630,6 +630,17 @@
     .staffplan-refresh-btn:hover:not(:disabled) { background: #3a3f5c; }
     .staffplan-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     #staffplan-content { flex: 1; min-height: 0; overflow-y: auto; }
+    /* 内容に合わせて高さを自然に伸ばす共通クラス：画面の高さに収めず、最後の
+       グラフ・表・注記まで背景・枠線・角の丸みが届くようにする（flex:1;min-height:0
+       のままだと、パネルの高さが画面に収まるよう制限され、内容がそれより長い場合に
+       パネルの下端をはみ出してしまう。縦スクロールは既存の上位スクロール領域
+       （main、または各タブが内部に持つ#compare-content等の自己スクロールdiv）に
+       任せる。.summary-panel/.roster-panel/.prod-panel/.compare-shellのうち、まだ
+       自前のoverflow-y:autoを持たない（＝上位のスクロール領域に直接頼っている）
+       パネルにだけ、個別クラスを増やさずこの共通クラスを追加して適用する。
+       生産実績タブ専用の.prod-panel--seisan-jisseki（既存・変更しない）と同じ考え方で、
+       既存クラスより後に定義することで、同じ詳細度でも確実に上書きされるようにする） */
+    .panel-fit-content { flex: 0 0 auto; min-height: auto; }
     .prod-table {
       border-collapse: collapse;
       font-size: 0.82rem;
@@ -1058,6 +1069,40 @@ function buildExtendedMonthList(selectedMonths, allRealMonths) {
     }
   }
   return extended;
+}
+
+// 要員計画「実績工数（業務区分別）」グラフ（planstaffplan2-combined）専用：
+// グラフの高さを、要員不足セグメント内のラベル（時間・人数の2行）が収まる範囲で
+// 自動的に縮める。要員不足（_staffGapBar）が1つも無い月だけを表示している場合は
+// 420px固定。描画部分(chartArea)に必要な高さは「ラベル目安高さ(28px)×縦軸MAX÷
+// 要員不足の最小値」で求め、描画部分以外の高さ(凡例・軸ラベル等)は実際に一度
+// 描画したchart.height-chart.chartArea.heightで測る。320〜650pxにクランプする
+const STAFF_GAP_LABEL_PX = 28;
+const STAFF_PLAN_CHART_MIN_PX = 320;
+const STAFF_PLAN_CHART_MAX_PX = 650;
+const STAFF_PLAN_CHART_FALLBACK_PX = 420;
+
+function computeStaffPlanCombinedTargetHeight(gapValues, axisMax, chromeHeightPx) {
+  const validGaps = (gapValues || []).filter(v => v !== null && v !== undefined && v > 0);
+  if (!validGaps.length) return STAFF_PLAN_CHART_FALLBACK_PX;
+  const gapMin = Math.min(...validGaps);
+  const requiredAreaHeight = STAFF_GAP_LABEL_PX * axisMax / gapMin;
+  const target = requiredAreaHeight + chromeHeightPx;
+  return Math.max(STAFF_PLAN_CHART_MIN_PX, Math.min(STAFF_PLAN_CHART_MAX_PX, target));
+}
+
+// chartは320〜650pxのどこかの高さで既に一度描画済みのインスタンスを渡す
+// （chart.height - chart.chartArea.heightで凡例・軸ラベル等の高さを実測するため）。
+// 目標の高さが現在の高さと異なる場合のみ、ラッパー要素の高さを変更しchart.resize()で
+// 再描画する（2回の描画で確定させ、それ以上は繰り返さない）
+function fitStaffPlanCombinedChartHeight(chart, gapValues, axisMax) {
+  const wrapEl = chart.canvas && chart.canvas.parentElement;
+  if (!wrapEl) return;
+  const chromeHeightPx = chart.height - chart.chartArea.height;
+  const target = Math.round(computeStaffPlanCombinedTargetHeight(gapValues, axisMax, chromeHeightPx));
+  if (target === chart.height) return;
+  wrapEl.style.height = target + 'px';
+  chart.resize();
 }
 
 // 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための
@@ -2654,7 +2699,7 @@ function renderSummaryTable() {
   const orderedWorkTypes = getOrderedWorkTypes(employees);
   const EMP_CLASSES = ['社員・技能実習生', 'パート'];
 
-  let html = `<div class="summary-panel"><table class="summary-table">
+  let html = `<div class="summary-panel panel-fit-content"><table class="summary-table">
     <thead><tr>
       <th class="col-site">拠点</th>
       <th class="col-work">業務区分</th>
@@ -4461,7 +4506,7 @@ function renderSummaryByEmpType() {
   const EMP_COLORS_MAP = { '社員': '#60a5fa', '技能実習生': '#c084fc', 'パート': '#fb923c' };
   const SITE_ROW_SPAN = EMP_TYPES.length * 2 + 2;
 
-  let html = `<div class="summary-panel"><table class="summary-table">
+  let html = `<div class="summary-panel panel-fit-content"><table class="summary-table">
     <thead><tr>
       <th class="col-site">拠点</th>
       <th class="col-work">雇用形態</th>
@@ -4667,7 +4712,7 @@ function renderSummaryRoster() {
       { key: 'name', label: nameLabel || '氏名' },
     ];
 
-    let tableHtml = `<div class="roster-panel"><table class="roster-table"><thead><tr>`;
+    let tableHtml = `<div class="roster-panel panel-fit-content"><table class="roster-table"><thead><tr>`;
     tableCols.forEach(c => {
       const cls = c.key === 'site' ? ' col-site' : '';
       const sortCls = rosterSortCol === c.key ? (rosterSortAsc ? ' sort-asc' : ' sort-desc') : '';
@@ -5934,7 +5979,7 @@ function renderPlanTable({ months: planMonths, records }) {
     return classes.join(' ');
   }
 
-  let html = `<div class="prod-panel prod-panel-compact">
+  let html = `<div class="prod-panel prod-panel-compact panel-fit-content">
     <div class="chart-section-label">🌱 生産計画 ／ ファーム勤務時間 &gt; 整理済み_計画_更新</div>
     <div class="prod-table-wrap">
     <table class="prod-table">
@@ -6016,7 +6061,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
     return;
   }
 
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel panel-fit-content">
     <div class="chart-section-label">📋 予定標準工数(h) ／ 生産計画 × 標準工数設定
       <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 整理済み_計画_更新シートの計画値 × 標準工数設定で算出　係数は⚙️標準工数設定タブで変更可</span>
     </div>`;
@@ -6565,7 +6610,7 @@ function renderStdSetTab() {
   const conv = currentStdConv;
   window._stdConv = conv;
 
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel panel-fit-content">
     <div class="chart-section-label">⚙️ 標準工数設定
       <span style="float:right;display:flex;gap:8px;align-items:center">
         <button class="select-btn" style="padding:3px 14px" onclick="resetStdSettings()">リセット</button>
@@ -6682,7 +6727,7 @@ function renderYojitsuStdSetTab() {
   const conv = yojitsuStdConv;
   window._yojitsuStdConv = conv;
 
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel panel-fit-content">
     <div class="chart-section-label">⚙️ 標準工数設定（予実）
       <span style="float:right;display:flex;gap:8px;align-items:center">
         <button class="select-btn" style="padding:3px 14px" onclick="resetYojitsuStdSettings()">リセット</button>
@@ -6798,7 +6843,7 @@ function renderStdHoursTable(prodData) {
   const divCount = {};
   rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
 
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel panel-fit-content">
     <div class="chart-section-label">📋 標準工数(h) ／ 生産実績 × 標準工数設定
       <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 稼働コンテナ数・合計点数は生産実績シートから取得　cs換算設定は⚙️タブで変更可</span>
     </div>`;
@@ -7108,7 +7153,7 @@ function renderProductivityCharts(workData, prodData) {
   }
 
   // Render HTML
-  let html = `<div class="prod-panel">
+  let html = `<div class="prod-panel panel-fit-content">
     <div class="chart-section-label">📈 生産性 ／ 最新月: ${lastMonth}
       <span style="float:right;display:flex;align-items:center;gap:6px;font-size:0.78rem">
         <span style="color:var(--muted)">棒グラフ:</span>
@@ -9598,7 +9643,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       tension: 0.3, yAxisID: 'y2', order: 0,
       _volumeLine: true, _unit: DIV_UNIT['出荷'],
     });
-    planCmpChartInstances['staffplan-combined'] = new Chart(ctx, {
+    const staffPlanCombinedChart = new Chart(ctx, {
       data: { labels: vm, datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -9697,6 +9742,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         },
       }],
     });
+    planCmpChartInstances['staffplan-combined'] = staffPlanCombinedChart;
+    fitStaffPlanCombinedChartHeight(staffPlanCombinedChart, staffGapData, sharedMax);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
@@ -9775,7 +9822,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   ).join('');
 
   main.innerHTML = `
-    <div class="compare-shell">
+    <div class="compare-shell panel-fit-content">
       <div class="compare-header-row" style="flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
         <div class="chart-section-label" style="flex-shrink:0">📊比較（繁忙期見込み）／ ファーム勤務時間 &gt; 標準労働時間
           <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
@@ -10693,7 +10740,7 @@ function renderCompareSiteCharts(prodData) {
   const upperCountBySiteAdjusted = applyStdHoursTierTransferCountDeltaMulti(upperCountBySiteExclTransferVirtual, ['fulltime', 'parttime']);
 
   main.innerHTML = `
-    <div class="compare-shell">
+    <div class="compare-shell panel-fit-content">
       <div class="compare-header-row">
         <div class="chart-section-label">📊 比較（3拠点）</div>
         <div class="transfer-toggle" id="comparesite-view-toggle">
@@ -11674,7 +11721,7 @@ function renderDecPlanContent(planData, mergeData) {
     ※ ⑤=②+③+④。　※ ⑥12月標準工数時間は生産計画×標準工数設定から算出。
   </div>`;
 
-  main.innerHTML = `<div class="prod-panel" style="padding:20px">
+  main.innerHTML = `<div class="prod-panel panel-fit-content" style="padding:20px">
     <div class="chart-section-label" style="font-size:1rem;margin-bottom:4px">📅 26/12向け計画</div>
     <div id="decplan-changeC-alerts"></div>
     ${note}
