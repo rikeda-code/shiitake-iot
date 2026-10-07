@@ -303,8 +303,6 @@
       <span class="note">単位：h　/　当日〜7日後</span>
     </div>
     <div class="panel-error" id="laborError"></div>
-    <div id="laborPreparing" class="unsupported" style="display:none;"></div>
-    <div id="laborContent">
     <div class="table-scroll">
       <table id="table3labor">
         <colgroup></colgroup>
@@ -365,7 +363,6 @@
         </table>
       </div>
     </details>
-    </div>
   </section>
 
   </div>
@@ -406,12 +403,18 @@
   // SHIFT_GAS_URLを使うため、ここにはエントリを持たない。群馬は月度（11日〜翌月10日）・
   // 班ごとに別シートのため、月度の開始年月→gidで手動管理する（シート一覧の仕組みが
   // できるまでは月度を追加するたびにここに足す）
+  // 南丹は、現場の印刷の勤務表を読み取って作ったスポット対応のシート
+  // （正式な勤務表の仕組みができるまでのつなぎ）。1枚のシートが日付の範囲を
+  // 持つため、期間ごとの複数シートを後から足せるよう、gidは配列で持つ
+  // （今回は1枚のみ）
   var FORECAST_SHIFT_SOURCES = {
     '群馬': { type: 'gunmaPeriodSheets', id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM',
              gids: {
                '2026.9':  '1594631834', // 26.9/11~10/10 収穫班
                '2026.10': '2074687161', // 26.10/11~11/10 収穫班
              } },
+    '南丹': { type: 'datedHoursSheet', id: '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8',
+             gids: ['716401757'] }, // 南丹勤務表（2026/10/11〜10/31）の「勤務表」シート
   };
 
   var DASH = '－';
@@ -1612,6 +1615,163 @@
     };
   }
 
+  /* ===================== ③標準労働時間（南丹：現場の印刷物を読み取ったスポット対応の
+     勤務表） =====================
+     いなべ・群馬とは異なり、標準労働時間シートとの照合・部門による絞り込みは行わず、
+     シートに載っている全員を対象にする（部門は「－」固定）。正式な勤務表の仕組みが
+     できるまでのつなぎのため、いなべ・群馬側のコード・関数は一切変更しない */
+
+  // 南丹の勤務表の1セルを分類する。NFKC正規化（全角「８Ｈ」等を半角化）し、
+  // 空白・改行を取り除いてから判定する。"8H"等の数値はそのまま実働時間とし、
+  // 休憩の控除はしない（いなべ・群馬のapplyBreakDeductionは使わない）
+  function classifyNantanShiftCell(raw){
+    if (raw === null || raw === undefined) return { type: 'other', hours: 0 };
+    var s = String(raw).normalize('NFKC').replace(/[\s　]+/g, '');
+    if (s === '') return { type: 'other', hours: 0 };
+    var m = s.match(/^(\d+(\.\d+)?)H$/i);
+    if (m) return { type: 'hours', hours: parseFloat(m[1]) };
+    return { type: 'other', hours: 0 }; // 「休」「-/法」「-/公」「有」等
+  }
+
+  // 南丹の勤務表の生rows(gviz形式)を解析する。純粋関数（テストから直接呼べる）。
+  // 1行目=A1「名前」・B列以降は年付きの日付("2026/10/11"等)、2行目=A2「曜日」・
+  // B列以降はその曜日、3行目以降がA列=名前の人の行（A列が空になった行で終端）。
+  // 戻り値：{ dates, weekdayMismatches, persons }
+  function parseNantanDatedHoursSheet(rows){
+    rows = rows || [];
+    var dateRowCells = rows[0] ? rows[0].c.slice(1) : []; // 1行目、B列以降
+    var weekdayRowCells = rows[1] ? rows[1].c.slice(1) : []; // 2行目、B列以降
+
+    var dates = dateRowCells.map(function(c){
+      var md = parseMD(c && c.v);
+      return (md && md.year !== null) ? new Date(md.year, md.month - 1, md.day) : null;
+    });
+
+    var weekdayMismatches = [];
+    dates.forEach(function(d, idx){
+      if (!d) return;
+      var raw = weekdayRowCells[idx] ? weekdayRowCells[idx].v : null;
+      var w = (raw === null || raw === undefined) ? '' : String(raw).normalize('NFKC').trim();
+      if (!w) return;
+      var ch = w.charAt(0);
+      if (WEEKDAYS[d.getDay()] !== ch) weekdayMismatches.push({ date: d, sheetWeekday: ch, actualWeekday: WEEKDAYS[d.getDay()] });
+    });
+    if (weekdayMismatches.length) {
+      console.warn('[南丹勤務表] 曜日の食い違い: ' + weekdayMismatches.map(function(m){
+        return (m.date.getMonth() + 1) + '/' + m.date.getDate() + '(シート表記:' + m.sheetWeekday + '・実際:' + m.actualWeekday + ')';
+      }).join(', '));
+    }
+
+    var persons = [];
+    for (var r = 2; r < rows.length; r++) { // 3行目以降(0-index2)
+      var c = (rows[r] && rows[r].c) || [];
+      var rawName = c[0] ? c[0].v : '';
+      var trimmed = (rawName === null || rawName === undefined) ? '' : String(rawName).trim();
+      if (trimmed === '') break; // A列が空になった直前の行までが人の行
+      persons.push({ name: trimmed, cellsFull: c.slice(1) });
+    }
+
+    return { dates: dates, weekdayMismatches: weekdayMismatches, persons: persons };
+  }
+
+  // 南丹の勤務表（複数シートに分かれる場合に備え配列で持つ）をすべて取得・解析する。
+  // 取得結果は保持（メモ化）し、失敗時はキャッシュに残さず再取得できるようにする
+  var nantanShiftSheetsPromise = null;
+  async function fetchNantanShiftSheets(){
+    if (!nantanShiftSheetsPromise) {
+      var src = FORECAST_SHIFT_SOURCES['南丹'];
+      var p = Promise.all(src.gids.map(function(gid){
+        return fetchCsvSheet(src.id, gid).then(function(json){ return parseNantanDatedHoursSheet(json.table.rows); });
+      }));
+      p.catch(function(){ if (nantanShiftSheetsPromise === p) nantanShiftSheetsPromise = null; });
+      nantanShiftSheetsPromise = p;
+    }
+    return nantanShiftSheetsPromise;
+  }
+
+  // 南丹の勤務表(複数シート) x 基準日から、当日〜7日後の標準労働時間合計・出勤人数・
+  // 人別内訳・シートの日付範囲外の期間の注記を算出する。標準労働時間シートとの照合は
+  // 行わず、部門は「－」固定。純粋関数（テストから直接呼べる）
+  function computeNantanStandardLaborHours(sheets, basisDate){
+    var perDayTotal = new Array(DAY_COUNT).fill(null);
+    var perDayAttendance = new Array(DAY_COUNT).fill(null);
+    var personMap = {};
+    var personOrder = [];
+    var periodNotices = [];
+    var rangeStart = null, rangeEnd = null;
+
+    function flushRange(){
+      if (rangeStart === null) return;
+      var endText = (rangeEnd.getTime() === rangeStart.getTime()) ? ''
+        : '〜' + (rangeEnd.getFullYear() === rangeStart.getFullYear()
+          ? (rangeEnd.getMonth() + 1) + '/' + rangeEnd.getDate()
+          : fmtYMD(rangeEnd));
+      periodNotices.push('勤務表の範囲外の期間：' + fmtYMD(rangeStart) + endText);
+      rangeStart = null; rangeEnd = null;
+    }
+
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var date = addDays(basisDate, o);
+      var sheet = null, colIdx = -1;
+      for (var si = 0; si < sheets.length; si++) {
+        for (var k = 0; k < sheets[si].dates.length; k++) {
+          if (sheets[si].dates[k] && sameDate(sheets[si].dates[k], date)) { sheet = sheets[si]; colIdx = k; break; }
+        }
+        if (sheet) break;
+      }
+
+      if (!sheet) {
+        if (rangeStart === null) rangeStart = date;
+        rangeEnd = date;
+        continue; // この日はperDayTotal/perDayAttendanceをnullのままにする(0として計算しない)
+      }
+      flushRange();
+
+      perDayTotal[o] = 0;
+      perDayAttendance[o] = 0;
+      sheet.persons.forEach(function(p){
+        var key = p.name;
+        if (!personMap[key]) {
+          personMap[key] = { name: p.name, dept: DASH, dayHours: new Array(DAY_COUNT).fill(null) };
+          personOrder.push(key);
+        }
+        var entry = personMap[key];
+        var cellObj = p.cellsFull[colIdx];
+        var cls = classifyNantanShiftCell(cellObj ? cellObj.v : null);
+        var h = cls.hours;
+        entry.dayHours[o] = Math.round(h * 10) / 10;
+        perDayTotal[o] += h;
+        if (h > 0) perDayAttendance[o]++;
+      });
+    }
+    flushRange();
+
+    perDayTotal = perDayTotal.map(function(v){ return v === null ? null : Math.round(v * 10) / 10; });
+    var personBreakdown = personOrder.map(function(key){ return personMap[key]; });
+
+    return {
+      perDayTotal: perDayTotal,
+      perDayAttendance: perDayAttendance,
+      warnings: [],
+      personBreakdown: personBreakdown,
+      notices: [],
+      periodNotices: periodNotices,
+    };
+  }
+
+  async function renderLaborNantan(basisDate){
+    showPanelError('laborError', null);
+    try {
+      var sheets = await fetchNantanShiftSheets();
+      var result = computeNantanStandardLaborHours(sheets, basisDate);
+      return result;
+    } catch (err) {
+      console.error('[標準労働時間(南丹)] 取得エラー:', err);
+      showPanelError('laborError', err.message || String(err));
+      return null;
+    }
+  }
+
   /* ===================== 描画 ===================== */
 
   var basisInput = document.getElementById('basisDateInput');
@@ -1991,23 +2151,6 @@
     }
   }
 
-  // パネル3（標準労働時間）の「準備中」表示を切り替える。南丹選択時は勤務表
-  // （シフト表・標準労働時間シート）自体を取得しないため、テーブル・警告・
-  // 人別内訳をまとめて隠す（群馬のPR #459時点と同じ扱い）
-  function setLaborPreparing(isPreparing, message){
-    var prepEl = document.getElementById('laborPreparing');
-    var contentEl = document.getElementById('laborContent');
-    if (isPreparing) {
-      showPanelError('laborError', null);
-      prepEl.textContent = message;
-      prepEl.style.display = '';
-      contentEl.style.display = 'none';
-    } else {
-      prepEl.style.display = 'none';
-      contentEl.style.display = '';
-    }
-  }
-
   window.render = async function(){
     document.getElementById('unsupportedPanel').style.display = isSupported() ? 'none' : '';
     document.getElementById('supportedPanels').style.display = isSupported() ? '' : 'none';
@@ -2026,16 +2169,9 @@
     var cultPromise = renderCultivation(basisDate, site);
     var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site); });
 
-    // 南丹はパネル3（標準労働時間）が未対応のため「準備中」表示にし、勤務表
-    // （シフト表・標準労働時間シート）は取得しない
-    if (site === '南丹') {
-      setLaborPreparing(true, '南丹の標準労働時間は準備中です');
-      await workPromise;
-      return;
-    }
-    setLaborPreparing(false);
-
-    var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate) : renderLabor(basisDate);
+    var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate)
+      : (site === '南丹') ? renderLaborNantan(basisDate)
+      : renderLabor(basisDate);
 
     var results = await Promise.allSettled([workPromise, laborPromise]);
     var workSubtotals = results[0].status === 'fulfilled' ? results[0].value : null;
@@ -2123,6 +2259,10 @@
     findLaborMatchGunma: findLaborMatchGunma,
     computeGunmaStandardLaborHours: computeGunmaStandardLaborHours,
     fetchGunmaShiftPeriodData: fetchGunmaShiftPeriodData,
+    classifyNantanShiftCell: classifyNantanShiftCell,
+    parseNantanDatedHoursSheet: parseNantanDatedHoursSheet,
+    fetchNantanShiftSheets: fetchNantanShiftSheets,
+    computeNantanStandardLaborHours: computeNantanStandardLaborHours,
     SELECTION_STORAGE_KEY: SELECTION_STORAGE_KEY,
     VALID_BUSINESS_VALUES: VALID_BUSINESS_VALUES,
     VALID_SITE_VALUES: VALID_SITE_VALUES,
