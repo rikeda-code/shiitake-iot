@@ -1071,35 +1071,38 @@ function buildExtendedMonthList(selectedMonths, allRealMonths) {
   return extended;
 }
 
-// 要員計画「実績工数（業務区分別）」グラフ（planstaffplan2-combined）専用：
-// グラフの高さを、要員不足セグメント内のラベル（時間・人数の2行）が収まる範囲で
-// 自動的に縮める。要員不足（_staffGapBar）が1つも無い月だけを表示している場合は
-// 420px固定。描画部分(chartArea)に必要な高さは「ラベル目安高さ(28px)×縦軸MAX÷
-// 要員不足の最小値」で求め、描画部分以外の高さ(凡例・軸ラベル等)は実際に一度
-// 描画したchart.height-chart.chartArea.heightで測る。320〜650pxにクランプする
-const STAFF_GAP_LABEL_PX = 28;
-const STAFF_PLAN_CHART_MIN_PX = 320;
-const STAFF_PLAN_CHART_MAX_PX = 650;
-const STAFF_PLAN_CHART_FALLBACK_PX = 420;
+// 「実績工数（業務区分別）」系の積み上げグラフ（要員計画のplanstaffplan2-combined・
+// 拠点サマリのplansitesum2-combined・3拠点サマリのplansum2-combined）共通：
+// グラフの高さを、セグメント内に2行ラベル（時間・人数等）を描くデータセットが
+// ある場合はそのラベルが収まる範囲で、無い場合は420px固定で自動的に決める。
+// ラベルを描くデータセットがある場合、描画部分(chartArea)に必要な高さは
+// 「ラベル目安高さ(28px)×縦軸MAX÷該当データセットの最小値」で求め、描画部分
+// 以外の高さ(凡例・軸ラベル等)は実際に一度描画したchart.height-chart.chartArea.
+// heightで測る。320〜650pxにクランプする（3グラフで同じ処理を複製しないよう、
+// この2関数を共有する）
+const SEGMENT_LABEL_PX = 28;
+const SEGMENT_CHART_MIN_PX = 320;
+const SEGMENT_CHART_MAX_PX = 650;
+const SEGMENT_CHART_FALLBACK_PX = 420;
 
-function computeStaffPlanCombinedTargetHeight(gapValues, axisMax, chromeHeightPx) {
-  const validGaps = (gapValues || []).filter(v => v !== null && v !== undefined && v > 0);
-  if (!validGaps.length) return STAFF_PLAN_CHART_FALLBACK_PX;
-  const gapMin = Math.min(...validGaps);
-  const requiredAreaHeight = STAFF_GAP_LABEL_PX * axisMax / gapMin;
+function computeSegmentLabelChartHeight(labelValues, axisMax, chromeHeightPx) {
+  const validValues = (labelValues || []).filter(v => v !== null && v !== undefined && v > 0);
+  if (!validValues.length) return SEGMENT_CHART_FALLBACK_PX;
+  const valueMin = Math.min(...validValues);
+  const requiredAreaHeight = SEGMENT_LABEL_PX * axisMax / valueMin;
   const target = requiredAreaHeight + chromeHeightPx;
-  return Math.max(STAFF_PLAN_CHART_MIN_PX, Math.min(STAFF_PLAN_CHART_MAX_PX, target));
+  return Math.max(SEGMENT_CHART_MIN_PX, Math.min(SEGMENT_CHART_MAX_PX, target));
 }
 
 // chartは320〜650pxのどこかの高さで既に一度描画済みのインスタンスを渡す
 // （chart.height - chart.chartArea.heightで凡例・軸ラベル等の高さを実測するため）。
 // 目標の高さが現在の高さと異なる場合のみ、ラッパー要素の高さを変更しchart.resize()で
 // 再描画する（2回の描画で確定させ、それ以上は繰り返さない）
-function fitStaffPlanCombinedChartHeight(chart, gapValues, axisMax) {
+function fitSegmentLabelChartHeight(chart, labelValues, axisMax) {
   const wrapEl = chart.canvas && chart.canvas.parentElement;
   if (!wrapEl) return;
   const chromeHeightPx = chart.height - chart.chartArea.height;
-  const target = Math.round(computeStaffPlanCombinedTargetHeight(gapValues, axisMax, chromeHeightPx));
+  const target = Math.round(computeSegmentLabelChartHeight(labelValues, axisMax, chromeHeightPx));
   if (target === chart.height) return;
   wrapEl.style.height = target + 'px';
   chart.resize();
@@ -8908,7 +8911,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         tension: 0.3, yAxisID: 'y2', order: 0,
         _volumeLine: true, _unit: DIV_UNIT['出荷'],
       });
-      planCmpChartInstances['sum-combined'] = new Chart(ctx, {
+      const sumCombinedChart = new Chart(ctx, {
         data: { labels: vm, datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
@@ -8935,6 +8938,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           },
         },
       });
+      planCmpChartInstances['sum-combined'] = sumCombinedChart;
+      // このグラフにはセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
+      // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
+      fitSegmentLabelChartHeight(sumCombinedChart, [], sharedMax);
     }
 
     // 2段目：3拠点分のcomputeSiteTotalData()をmergeSiteTotalDataAcrossSitesで合算し、
@@ -9249,7 +9256,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       tension: 0.3, yAxisID: 'y2', order: 0,
       _volumeLine: true, _unit: DIV_UNIT['出荷'],
     });
-    planCmpChartInstances['sitesum-combined'] = new Chart(ctx, {
+    const siteSumCombinedChart = new Chart(ctx, {
       data: { labels: vm, datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -9276,6 +9283,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         },
       },
     });
+    planCmpChartInstances['sitesum-combined'] = siteSumCombinedChart;
+    // このグラフにもセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
+    // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
+    fitSegmentLabelChartHeight(siteSumCombinedChart, [], sharedMax);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
@@ -9743,7 +9754,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       }],
     });
     planCmpChartInstances['staffplan-combined'] = staffPlanCombinedChart;
-    fitStaffPlanCombinedChartHeight(staffPlanCombinedChart, staffGapData, sharedMax);
+    fitSegmentLabelChartHeight(staffPlanCombinedChart, staffGapData, sharedMax);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
