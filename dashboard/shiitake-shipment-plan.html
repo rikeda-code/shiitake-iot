@@ -603,14 +603,12 @@
   var ALLOCATION_SHEET_GID = '276290820'; // 「転写_秀優_判別」タブ
   var SALES_SHEET_ID = '18zyC0JwVyaW3i18LQdvHQeDpEcfzM8iolhclgNocrnM';
   var SALES_INDEX_GID = '538861653'; // 「シート判別」タブ
-  var HARVEST_SHEET_ID = '1FfVj-IyufBcsSydQlwNhmSeh-ctdUMe63JmluzgAQVg';
-  var SHIPMENT_GRADE_GID = '1249354043'; // 「転写_秀優_出荷」タブ
   var SALES_RAW_SHEET_ID = '17DD5aRxc9bv8uZzEfnK_Q9IGOvQVH4ieJU1c-qu7dOc';
   var SALES_RAW_INABE_ORDER_GID = '545062393'; // 「いなべ_受注」タブ
-  var REF_DATE_SHEET_GID = '1395691052'; // 「②日々の過不足確認_秀優」タブ
-  var GRADE_RATIO_SHEET_GID = '187806066'; // 「転写_秀優比率」タブ
-  var HARVEST_URL_SHEET_GID = '1878423046'; // 「転写_収穫URL」タブ
-  var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定）
+  var DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg'; // DB共有
+  var GRADE_RATIO_SHEET_GID = '1773303848'; // 「収穫_秀優比率」タブ
+  var HARVEST_URL_SHEET_GID = '1996914203'; // 「URL_収穫管理表」タブ（いなべの列を使う）
+  var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定。URLにgidがあればそちらを使う）
   var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
   var HARVEST_DAILY_TOTAL_GID = '1164843574'; // 「2026.5いなべ収穫計画」の「転写」タブ
   var STOCK_DASH = '－';
@@ -768,11 +766,11 @@
     }) } };
   }
 
-  // 「転写_秀優比率」シートを取得し、{パネル名: {秀: 比率, 優: 比率}} の
+  // 「DB共有」ファイルの「収穫_秀優比率」シートを取得し、{パネル名: {秀: 比率, 優: 比率}} の
   // 形に整理して返す。A列（パネル）が空欄の行は、直前の非空欄の値を
   // 引き継ぐ（シート上の「同じパネルが続く間は空欄」という表記に対応）
   async function fetchGradeRatios(){
-    var json = await fetchCsvSheet(HARVEST_SHEET_ID, GRADE_RATIO_SHEET_GID);
+    var json = await fetchCsvSheet(DB_SHARE_SHEET_ID, GRADE_RATIO_SHEET_GID);
     var rows = (json.table && json.table.rows) || [];
     var result = {};
     var currentPanel = null;
@@ -789,19 +787,6 @@
     }
     return result;
   }
-
-  // 「②日々の過不足確認_秀優」シートのA列（rowIndex行目）に手入力されている
-  // 基準日・実績日を取得する。window経由で他の<script>ブロックからも呼べるようにする
-  window.fetchReferenceDate = async function(rowIndex){
-    try {
-      var json = await fetchCsvSheet(HARVEST_SHEET_ID, REF_DATE_SHEET_GID);
-      var row = json.table.rows && json.table.rows[rowIndex];
-      var cell = row && row.c && row.c[0];
-      return gvizCellToDate(cell);
-    } catch (e) {
-      return null;
-    }
-  };
 
   // 「販売予実抽出シート」の「シート判別」タブ（A列=年月, B列=そのシートのURL）を
   // 読み、年月文字列（例："2026.9"）→gidの対応表を作る
@@ -945,28 +930,43 @@
     return -1;
   }
 
-  // 実績日1日分のM/L/2L/袋の収穫実績を取得する。「転写_収穫URL」タブで
-  // 実績日の年月に対応する外部スプレッドシートIDを引き、その「収獲目標値」
-  // シートからA列が実績日と一致する行のI:L列を読む
+  // 実績日1日分のM/L/2L/袋の収穫実績を取得する。「DB共有」ファイルの「URL_収穫管理表」
+  // タブ（1行目＝見出し：A1「収穫管理表」・B1「いなべ」・C1「群馬」・D1「南丹」）から、
+  // 見出しが「いなべ」の列（列位置は固定しない）で、実績日の年月に対応する外部
+  // スプレッドシートIDを引き、その「収獲目標値」シートからA列が実績日と一致する
+  // 行のI:L列を読む
   async function fetchHarvestActual(date){
     try {
-      var urlJson = await fetchCsvSheet(HARVEST_SHEET_ID, HARVEST_URL_SHEET_GID);
+      var urlJson = await fetchCsvSheet(DB_SHARE_SHEET_ID, HARVEST_URL_SHEET_GID);
       var rows = (urlJson.table && urlJson.table.rows) || [];
+      var headerRow = rows[0] && rows[0].c;
+      var inabeCol = -1;
+      if (headerRow) {
+        for (var h = 1; h < headerRow.length; h++) {
+          if (headerRow[h] && String(headerRow[h].v).trim() === 'いなべ') { inabeCol = h; break; }
+        }
+      }
       var targetSheetId = null;
-      for (var i = 0; i < rows.length; i++) {
-        var c = rows[i].c;
-        var d = gvizCellToDate(c[0]);
-        if (d && d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth()) {
-          var url = c[1] && c[1].v;
-          if (url) {
-            var m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
-            if (m) targetSheetId = m[1];
+      var targetGid = HARVEST_TARGET_GID;
+      if (inabeCol !== -1) {
+        for (var i = 1; i < rows.length; i++) {
+          var c = rows[i] && rows[i].c;
+          if (!c) continue;
+          var d = gvizCellToDate(c[0]);
+          if (d && d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth()) {
+            var url = c[inabeCol] && c[inabeCol].v;
+            if (url) {
+              var m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+              if (m) targetSheetId = m[1];
+              var gidMatch = String(url).match(/gid=(\d+)/);
+              if (gidMatch) targetGid = gidMatch[1];
+            }
+            break;
           }
-          break;
         }
       }
       if (!targetSheetId) return null;
-      var targetJson = await fetchCsvSheet(targetSheetId, HARVEST_TARGET_GID);
+      var targetJson = await fetchCsvSheet(targetSheetId, targetGid);
       var rowIdx = findRowIndexByDate(targetJson, date);
       if (rowIdx < 0) return null;
       return {
@@ -1084,8 +1084,7 @@
   }
 
   // 合計行 = M＋L＋2L＋袋（見出し行を除く実データ行の合計）。秀/優等の.grade-rowは
-  // L等の内訳の再掲であり、含めると二重計上になるため除外する（「②日々の過不足確認_秀優」
-  // シートの12・26・36行目と同じ考え方）
+  // L等の内訳の再掲であり、含めると二重計上になるため除外する
   function recomputeTotalRow(table, colIndexes){
     if (!table) return;
     var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
@@ -1252,8 +1251,7 @@
 
   // table2（収穫予測パネル）のM/L/2L/袋を実データで算出する。実績日1日分の
   // 収穫実績から各サイズの比率を求め、将来日（翌日〜8日後）は「転写」タブの
-  // 日別収穫合計予測値をその比率で按分する（「②日々の過不足確認_秀優」の
-  // B20/B21/B24/B25, C20/C21/C24/C25, D20以降と同じロジック）
+  // 日別収穫合計予測値をその比率で按分する
   var harvestForecastRequestToken = 0;
   window.updateHarvestForecast = async function(harvestDate, baseDate){
     // 実績日・基準日の変更で短時間に複数回呼ばれた場合に、後から完了した古い
@@ -1281,7 +1279,7 @@
         if (ratioCell) { ratioCell.textContent = ratio[size] === null ? STOCK_DASH : (Math.round(ratio[size] * 10000) / 100) + '%'; }
       });
 
-      // 秀/優（Lの内訳）：「転写_秀優比率」シートの「収穫予測」パネル行の比率を、
+      // 秀/優（Lの内訳）：DB共有「収穫_秀優比率」シートの「収穫予測」パネル行の比率を、
       // Lの実績値・日別予測値に対してクライアント側で按分する
       // （新たな数式はスプレッドシート側に追加しない）
       var gradeRatios = { '秀': null, '優': null };
@@ -1360,8 +1358,8 @@
   };
 
   // 在庫予測（table3）：在庫実績＝在庫・出荷予定パネルの製品在庫＋生在庫、
-  // 秀/優は収穫予測パネルと同じ「②日々の過不足確認_秀優」シートのラベル
-  // 埋め込み比率をLの実績に掛ける方式。当日〜8日後は前日の予測結果を土台に
+  // 秀/優は収穫予測パネルと同じ比率埋め込み方式でLの実績に掛ける。
+  // 当日〜8日後は前日の予測結果を土台に
   // 収穫予測を足し・出荷予定を引く積み上げ計算（D30="=B30+D20-D6"等と同じ）
   window.updateStockForecast = async function(){
     var sizes = ['M', 'L', '2L', '袋'];
@@ -1392,7 +1390,7 @@
         if (ratioCell) ratioCell.textContent = ratio[size] === null ? STOCK_DASH : (Math.round(ratio[size] * 10000) / 100) + '%';
       });
 
-      // 秀/優: 「転写_秀優比率」シートの「在庫予測」パネル行の比率を
+      // 秀/優: DB共有「収穫_秀優比率」シートの「在庫予測」パネル行の比率を
       // Lの在庫実績に掛ける（収穫予測の秀/優按分と同じ考え方）
       var gradeRatios = { '秀': null, '優': null };
       try {
