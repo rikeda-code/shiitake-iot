@@ -820,10 +820,22 @@ const KINSHO_SHEET = { id: '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY', gid: 
 
 // 「整理済み_分析」の貼り付け値ではなく、拠点・月ごとの「収穫管理表」ファイルから
 // 直接参照する拠点の一覧（収穫量(kg)のみが対象。栽培内訳・菌床購入数とは独立した別機能）。
-// どのファイルを見るかは、ファーム勤務時間ファイル内「シートURL」シートで年月ごとに管理されている
+// どのファイルを見るかは、ファーム勤務時間ファイル内「URL_収穫管理表」シートで年月ごとに管理されている
 const HARVEST_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
 const HARVEST_URL_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1996914203' };
 const HARVEST_TARGET_SHEET_GID = '676064999'; // 収穫管理表の「収獲目標値」シート（固定gid）
+
+// 「整理済み_分析」の貼り付け値ではなく、「2023/2024/2025/2026売り上げ分析」ファイルの
+// 拠点・年ごとのシートから直接参照する拠点の一覧（出荷量(kg)のみが対象。栽培内訳・
+// 菌床購入数・収穫量の直接参照とは独立した別機能）
+const SHIPMENT_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
+const SHIPMENT_SHEET_ID = '1RyGT1x_qwJnjiKe5PMMn9Eb58wIxWB15XhjowmEcfQM'; // 2023/2024/2025/2026売り上げ分析
+// 拠点 → 年 → シートのgid（年が変わったら追加する）
+const SHIPMENT_SHEET_GIDS = {
+  'いなべ': { '2025': '1703536953', '2026': '1140951232' },
+  '群馬':   { '2025': '823389807',  '2026': '1548875941' },
+  '南丹':   { '2025': '1528070455', '2026': '1253700878' },
+};
 
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
@@ -5389,7 +5401,7 @@ async function applyKinshoDirectOverrides(merged, kinshoPromise) {
    収穫量(kg)の直接参照（HARVEST_DIRECT_SITES対象拠点）
    ──────────────────────────────────────────────────────────────────────
    「整理済み_分析」の貼り付け値ではなく、拠点・月ごとの「収穫管理表」
-   ファイル（「シートURL」シートで年月ごとに管理）の「収獲目標値」シート
+   ファイル（「URL_収穫管理表」シートで年月ごとに管理）の「収獲目標値」シート
    から収穫量(kg)の値だけを直接参照する。栽培内訳・菌床購入数の直接参照
    とは独立した別機能で、そちらのコード・ロジックには一切手を加えない。
    ═══════════════════════════════════════════════════════════════════ */
@@ -5402,7 +5414,7 @@ async function fetchHarvestCsvRows(sheetId, gid) {
   return parseCsv(text);
 }
 
-// 「シートURL」シートの生rows(CSV行=文字列の配列の配列)から、HARVEST_DIRECT_SITES各拠点の
+// 「URL_収穫管理表」シートの生rows(CSV行=文字列の配列の配列)から、HARVEST_DIRECT_SITES各拠点の
 // 年月別URL（スプレッドシートID＋gid）を取得する。純粋関数（テストから直接呼べる）。
 // 1行目の見出しから拠点の列を探す（列固定なし）。2行目以降のA列が年月（"YYYY/M"または
 // "YYYY/M/D"、日は無視）。URLが空欄・IDが取り出せないセルはnull（URLなし）として扱う。
@@ -5539,8 +5551,8 @@ async function applyHarvestDirectOverrides(merged, urlPromise) {
   try {
     urlResult = await urlPromise;
   } catch (e) {
-    console.error('[収穫量直接参照] シートURLシートの取得・パースでエラーが発生しました:', e);
-    harvestDirectWarningMessages.push('収穫量のURL一覧（シートURL）を取得できませんでした');
+    console.error('[収穫量直接参照] URL_収穫管理表シートの取得・パースでエラーが発生しました:', e);
+    harvestDirectWarningMessages.push('収穫量のURL一覧（URL_収穫管理表）を取得できませんでした');
     nullifyAll();
     return { months, records };
   }
@@ -5618,6 +5630,170 @@ async function applyHarvestDirectOverrides(merged, urlPromise) {
   return { months, records };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   出荷量(kg)の直接参照（SHIPMENT_DIRECT_SITES対象拠点）
+   ──────────────────────────────────────────────────────────────────────
+   「整理済み_分析」の貼り付け値ではなく、「2023/2024/2025/2026売り上げ分析」
+   ファイル（拠点・年ごとに別シート、SHIPMENT_SHEET_GIDSで管理）から出荷量(kg)の
+   値だけを直接参照する。栽培内訳・菌床購入数・収穫量の直接参照とは独立した
+   別機能で、そちらのコード・ロジックには一切手を加えない。整理済み_分析の値
+   での補完は行わない（gidが無い年はnull「－」のまま）。
+   ═══════════════════════════════════════════════════════════════════ */
+
+async function fetchShipmentCsvRows(gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHIPMENT_SHEET_ID}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return parseCsv(text);
+}
+
+// 拠点・年ごとの「売り上げ分析」シート(1枚=その年の12ヶ月分)の生rows(CSV)から、
+// 月(1〜12)→出荷量(kg)の値を取得する。純粋関数（テストから直接呼べる）。
+// ・2行目の見出しをNFKC正規化・空白除去したうえで「出荷量」または「出荷量(固定)」に
+//   完全一致する最初の列を使う（列固定なし。「出荷量(実重量)」「出荷量(袋2除く)」等の
+//   列は完全一致しないため拾わない）
+// ・A列が「1月」〜「12月」の行を、シートの上から最初に見つかった12行だけ使う
+//   （行番号は固定しない。下の方に別表の「1月」〜「12月」があっても、12行集め終えた
+//   時点で走査を止めるため拾わない）
+// ・値はカンマを除いて数値化し1000で割ってkgにする。0・空欄・数値でない値（#DIV/0!等）はnull
+// 戻り値は { byMonth, error }。errorがあればbyMonthはnull
+function parseShipmentSiteYearSheet(rows) {
+  rows = rows || [];
+  const headerRow = rows[1] || [];
+  let col = -1;
+  for (let i = 0; i < headerRow.length; i++) {
+    const raw = headerRow[i];
+    if (raw === undefined || raw === null) continue;
+    const s = String(raw).normalize('NFKC').replace(/\s+/g, '');
+    if (s === '出荷量' || s === '出荷量(固定)') { col = i; break; }
+  }
+  if (col === -1) return { byMonth: null, error: 'header_not_found' };
+
+  const byMonth = {};
+  let count = 0;
+  for (let r = 0; r < rows.length && count < 12; r++) {
+    const row = rows[r] || [];
+    const aRaw = row[0];
+    if (aRaw === undefined || aRaw === null) continue;
+    const s = String(aRaw).normalize('NFKC').trim();
+    const m = s.match(/^(\d{1,2})月$/);
+    if (!m) continue;
+    const month = parseInt(m[1], 10);
+    if (month < 1 || month > 12) continue;
+    const valRaw = row[col];
+    const valStr = (valRaw === undefined || valRaw === null) ? '' : String(valRaw).trim();
+    const cleaned = valStr.replace(/,/g, '');
+    const n = Number(cleaned);
+    const valid = cleaned !== '' && !isNaN(n) && isFinite(n);
+    byMonth[month] = (valid && n !== 0) ? n / 1000 : null;
+    count++;
+  }
+  if (count === 0) return { byMonth: null, error: 'month_rows_not_found' };
+  return { byMonth, error: null };
+}
+
+const SHIPMENT_ERROR_REASON_TEXT = {
+  header_not_found: '出荷量の見出し列が見つかりません',
+  month_rows_not_found: '1月〜12月の行が見つかりません',
+  fetch_failed: '取得失敗',
+};
+
+// 取得失敗・見出しや月の行が見つからない等、個別拠点・年の取得失敗の警告メッセージ
+let shipmentDirectWarningMessages = [];
+// gidが未設定の年があれば、その旨を表の下に1回だけ表示する文言
+let shipmentDirectNotices = [];
+
+// 拠点・年ごとに取得・解析結果をメモ化する（並行して複数回呼ばれても取得が1回だけになる。
+// 他の直接参照の取得とも独立しているため並行して進む）。キーは `${site}/${year}`
+let shipmentSiteYearPromises = {};
+function fetchShipmentSiteYearOnce(site, year) {
+  const key = `${site}/${year}`;
+  if (!shipmentSiteYearPromises[key]) {
+    shipmentSiteYearPromises[key] = (async () => {
+      const rows = await fetchShipmentCsvRows(SHIPMENT_SHEET_GIDS[site][year]);
+      return parseShipmentSiteYearSheet(rows);
+    })().catch(e => {
+      console.error(`[出荷量直接参照] ${site} ${year}年の売り上げ分析シートの取得でエラーが発生しました:`, e);
+      return { byMonth: null, error: 'fetch_failed' };
+    });
+  }
+  return shipmentSiteYearPromises[key];
+}
+
+// SHIPMENT_DIRECT_SITES対象拠点の「出荷量(kg)」レコードの値を、拠点・年ごとの
+// 売り上げ分析シートの値で全期間置き換える。レコードは拠点名＋指標名「出荷量(kg)」で
+// 探す（カテゴリ名は使わない）。mergedは栽培内訳・菌床購入数・収穫量の直接参照
+// 適用済みの{months,records}で、戻り値の形・レコードの形は変えない（対象レコードの
+// 値のみ置換する）。取得するのは月一覧（months）に含まれる年のシートだけ。
+// gidが設定されていない年は整理済み_分析の値で補完せず、null（「－」）のままにする
+async function applyShipmentDirectOverrides(merged) {
+  const months = merged.months;
+  const records = merged.records;
+  shipmentDirectWarningMessages = [];
+  shipmentDirectNotices = [];
+
+  // 月一覧("YYYY/M")から、拠点ごとに必要な年だけを洗い出す
+  const neededYearsBySite = {};
+  SHIPMENT_DIRECT_SITES.forEach(site => { neededYearsBySite[site] = new Set(); });
+  months.forEach(m => {
+    const mm = String(m).match(/^(\d{4})\/(\d{1,2})$/);
+    if (!mm) return;
+    const year = mm[1];
+    SHIPMENT_DIRECT_SITES.forEach(site => neededYearsBySite[site].add(year));
+  });
+
+  const missingGidYears = new Set();
+  const tasks = [];
+  SHIPMENT_DIRECT_SITES.forEach(site => {
+    neededYearsBySite[site].forEach(year => {
+      const gid = (SHIPMENT_SHEET_GIDS[site] || {})[year];
+      if (!gid) { missingGidYears.add(year); return; }
+      tasks.push({ site, year });
+    });
+  });
+
+  const resultsBySiteYear = {};
+  await Promise.all(tasks.map(async t => {
+    if (!resultsBySiteYear[t.site]) resultsBySiteYear[t.site] = {};
+    resultsBySiteYear[t.site][t.year] = await fetchShipmentSiteYearOnce(t.site, t.year);
+  }));
+
+  const failureMessages = [];
+  tasks.forEach(t => {
+    const r = resultsBySiteYear[t.site][t.year];
+    if (r && r.error) failureMessages.push(`${t.site} ${t.year}（${SHIPMENT_ERROR_REASON_TEXT[r.error] || r.error}）`);
+  });
+  if (failureMessages.length) {
+    shipmentDirectWarningMessages.push(`出荷量を取得できなかったシート：${failureMessages.join('、')}`);
+  }
+  if (missingGidYears.size) {
+    const sortedYears = Array.from(missingGidYears).sort();
+    shipmentDirectNotices.push(`出荷量のシートが未設定の年：${sortedYears.join('、')}`);
+  }
+
+  SHIPMENT_DIRECT_SITES.forEach(site => {
+    const idx = records.findIndex(r => r.site === site && r.metric === '出荷量(kg)');
+    if (idx === -1) return;
+    records[idx] = {
+      ...records[idx],
+      values: months.map(m => {
+        const mm = String(m).match(/^(\d{4})\/(\d{1,2})$/);
+        if (!mm) return null;
+        const year = mm[1];
+        const month = parseInt(mm[2], 10);
+        const gid = (SHIPMENT_SHEET_GIDS[site] || {})[year];
+        if (!gid) return null; // gid未設定の年は整理済み_分析の値で補完しない
+        const r = (resultsBySiteYear[site] || {})[year];
+        if (!r || r.error) return null;
+        return Object.prototype.hasOwnProperty.call(r.byMonth, month) ? r.byMonth[month] : null;
+      }),
+    };
+  });
+
+  return { months, records };
+}
+
 let productionData = null;
 // 6箇所から並行して呼ばれても実行（整理済み_分析の取得・栽培管理シートの取得/計算）が
 // 1回だけになるよう、結果そのものではなくPromiseをメモ化する
@@ -5636,7 +5812,7 @@ async function fetchProductionSheet() {
     // 可能性があるため、月一覧を組み立てる前に読み込み完了を待つ
     const allDataForMonths = await waitForAllData();
 
-    // 菌床数集計シート・収穫量シートURL一覧の取得は栽培管理シートの取得と独立しているため、
+    // 菌床数集計シート・収穫量のURL一覧（URL_収穫管理表）の取得は栽培管理シートの取得と独立しているため、
     // ここで先に開始しておき（Promiseだけ保持）、applyCultivationDirectOverrides()の完了を
     // 待たずに並行して進める（収穫管理表本体の取得は月一覧確定後でないと開始できない）
     const kinshoPromise = fetchKinshoDirectDataOnce();
@@ -5644,7 +5820,8 @@ async function fetchProductionSheet() {
 
     const cultMerged = await applyCultivationDirectOverrides(base, allDataForMonths);
     const kinshoMerged = await applyKinshoDirectOverrides(cultMerged, kinshoPromise);
-    const merged = await applyHarvestDirectOverrides(kinshoMerged, harvestUrlPromise);
+    const harvestMerged = await applyHarvestDirectOverrides(kinshoMerged, harvestUrlPromise);
+    const merged = await applyShipmentDirectOverrides(harvestMerged);
     productionData = merged;
     return merged;
   })();
@@ -5847,7 +6024,7 @@ function renderProductionTab() {
     // 栽培管理シートの取得・計算に失敗した拠点があれば、表の上部に警告を表示する
     // （他の拠点・他の行の表示は止めない。fetchProductionSheet()の戻り値の形は
     // 変えない方針のため、警告はcultivationDirectWarnings経由で別途反映する）
-    const warningMessages = Object.values(cultivationDirectWarnings).concat(kinshoDirectWarningMessages, harvestDirectWarningMessages);
+    const warningMessages = Object.values(cultivationDirectWarnings).concat(kinshoDirectWarningMessages, harvestDirectWarningMessages, shipmentDirectWarningMessages);
     if (warningMessages.length) {
       main.insertAdjacentHTML('afterbegin', `<div class="error-msg">${warningMessages.join(' / ')}</div>`);
     }
@@ -6298,6 +6475,12 @@ function renderProductionTable({ months: filteredMonths, records }) {
             html += `<td class="col-num">${Math.round(v).toLocaleString('ja-JP')}${backfilled ? '†' : ''}</td>`;
             return;
           }
+          if (r.metric === '出荷量(kg)') {
+            // 出荷量(kg)も収穫量(kg)と同じく表示のみ整数（四捨五入）にする。
+            // 生産データ自体の値（売り上げ分析シートのg→kg換算値）は丸めない
+            html += `<td class="col-num">${Math.round(v).toLocaleString('ja-JP')}</td>`;
+            return;
+          }
           html += `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`;
         });
 
@@ -6312,6 +6495,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
     <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ ${CULTIVATION_DIRECT_SITES.join('・')}の栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
     <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${KINSHO_DIRECT_SITES.join('・')}の菌床購入数は菌床納品実績（菌床数集計）から取得（末締め）</div>
     <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${HARVEST_DIRECT_SITES.join('・')}の収穫量は各拠点の収穫管理表（収獲目標値シートの収穫実績値・合計）から取得（末締め）${harvestDirectNotices.length ? '　' + harvestDirectNotices.join('　') : ''}</div>
+    <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ 出荷量は売り上げ分析（拠点・年ごとのシートの出荷量(固定)）から取得（末締め、g→kg換算）${shipmentDirectNotices.length ? '　' + shipmentDirectNotices.join('　') : ''}</div>
     </div>`;
 
   main.innerHTML = html;
@@ -7312,6 +7496,9 @@ async function loadAll() {
   harvestDirectWarningMessages = [];
   harvestDirectNotices = [];
   harvestDirectBackfilled = {};
+  shipmentSiteYearPromises = {};
+  shipmentDirectWarningMessages = [];
+  shipmentDirectNotices = [];
 
   try {
     const json = await fetchSheet();
@@ -11883,6 +12070,13 @@ window.__cultTest = {
   getHarvestDirectWarningMessages: () => harvestDirectWarningMessages,
   getHarvestDirectNotices: () => harvestDirectNotices,
   getHarvestDirectBackfilled: () => harvestDirectBackfilled,
+  parseShipmentSiteYearSheet,
+  applyShipmentDirectOverrides,
+  SHIPMENT_DIRECT_SITES,
+  SHIPMENT_SHEET_ID,
+  SHIPMENT_SHEET_GIDS,
+  getShipmentDirectWarningMessages: () => shipmentDirectWarningMessages,
+  getShipmentDirectNotices: () => shipmentDirectNotices,
 };
 </script>
 </body>
