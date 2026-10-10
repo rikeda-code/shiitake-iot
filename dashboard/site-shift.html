@@ -244,6 +244,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <span class="leave-btns edit-only" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
+    <button id="legacyBtn" class="edit-only" title="旧シフト表（いなべ）の内容でこの期間を置き換えます">旧シフト表から取り込む</button>
     <button id="reloadBtn" title="整理済み_Mからメンバーを読み直します">メンバー更新</button>
     <span class="who" id="who"></span>
     <button id="logoutBtn">ログアウト</button>
@@ -591,6 +592,7 @@ function showLoadError(err) {
   $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}${/permission/i.test(err.message) ? '（会社のアカウントでログインしているか確認してください）' : ''}</div>`;
 }
 async function load() {
+  updateLegacyBtn();
   if (Object.keys(pending).length) await flush(); // 切り替え前に送る
   allCols = periodCols();
   cols = allCols;
@@ -867,6 +869,38 @@ $('leaveBtns').addEventListener('click', ev => {
 });
 $('site').onchange = () => load();
 $('reloadBtn').onclick = () => refreshMembers(true);
+// 旧シフト表（いなべ・期間ごとのシート）の内容で、今の期間を置き換える。
+// 旧シフト表に載っている人だけが対象で、その人の期間内の日は旧シフト表と同じ内容になる（空欄は消す）
+const LEGACY_SITE = 'いなべ';
+function updateLegacyBtn() { $('legacyBtn').hidden = curSite() !== LEGACY_SITE; }
+$('legacyBtn').onclick = async () => {
+  const from = allCols[0].iso, to = allCols[allCols.length - 1].iso;
+  const ok = await ask(`旧シフト表から ${periodLabel()} を取り込みます。旧シフト表に載っている人は、この期間のシフトが旧シフト表と同じ内容に置き換わります。`, '取り込む');
+  if (!ok) return;
+  const btn = $('legacyBtn'); btn.disabled = true;
+  setStatus('旧シフト表を読み込み中…');
+  try {
+    const res = await api('GET', { action: 'legacy', site: curSite(), from, to });
+    const incoming = {};
+    res.cells.forEach(c => { (incoming[c.key] ||= {})[c.date] = normVal(c.value); });
+    let n = 0;
+    res.keys.forEach(key => allCols.forEach(c => {
+      const v = incoming[key]?.[c.iso] || '';
+      if ((data[key]?.[c.iso] || '') === v) return;
+      if (v) (data[key] ||= {})[c.iso] = v; else if (data[key]) delete data[key][c.iso];
+      queueChange(key, c.iso, v); n++;
+    }));
+    render();
+    const notes = [];
+    if (res.unmatched?.length) notes.push(`整理済み_Mで見つからず取り込まなかった人：${res.unmatched.join('、')}`);
+    if (res.skipped?.length) notes.push(`時間として読めず取り込まなかったセル：${res.skipped.join('、')}`);
+    $('dialogSlot').innerHTML = `<div class="dialog"><span>旧シフト表から${res.keys.length}人分を取り込み、${n}セルを更新しました。${notes.length ? '<br>' + notes.map(esc).join('<br>') : ''}</span><button id="dlgClose">閉じる</button></div>`;
+    $('dlgClose').onclick = () => $('dialogSlot').innerHTML = '';
+  } catch (err) {
+    toast('取り込めませんでした：' + err.message);
+    showSaveState();
+  } finally { btn.disabled = false; }
+};
 $('logoutBtn').onclick = async () => { await flush(); auth.signOut(); };
 $('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); $('ppFrom').value = ''; $('ppTo').value = ''; load(); };
 
