@@ -48,6 +48,12 @@ const FIXED_SHEET_NAME = 'シフト_固定';
 const LEGACY_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
 const LEGACY_SHEET_GID = 872290181;
 const LEGACY_SITE = 'いなべ';
+// 拠点ごとの旧シフト表。gid指定のシートか、期間の始まりの日（例：10/11）を名前に含むタブをすべて読む
+//   nameCol：名前の列（0始まり）。日付の行・シフトの始まりの列は自動で見つける
+const LEGACY_SOURCES = {
+  'いなべ': [{ id: LEGACY_SHEET_ID, gid: LEGACY_SHEET_GID, nameCol: 0 }],
+  '群馬':   [{ id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM', byPeriodName: true, nameCol: 0 }], // 「26.10/11~11/10 収穫班」「…出荷場」
+};
 const LEGACY_FROM = '2026-10-01';
 // 旧シフト表の呼び名 → 整理済み_Mの氏名（work-hours-forecast.html と同じ対応表）
 const LEGACY_NAME_ALIASES = {
@@ -55,6 +61,10 @@ const LEGACY_NAME_ALIASES = {
   'ギエム': 'NGUYEN THANH NGHIEM', 'ハオ': 'NGUYEN VAN HAO', 'エガ': 'EGA ADITIYA KURNIAWAN',
   'アユブ': 'MUHAMAD AYUB FAYYUQI', 'イマム': 'IMAM ADI SAPUTRA', '左右田 耀子': '左右田 煬子',
   '森さん': '森 郁美',
+};
+// 拠点ごとの呼び名の対応（旧シフト表の書き方 → 整理済み_Mの氏名）。名字だけで1人に決まる人は書かなくてよい
+const LEGACY_SITE_ALIASES = {
+  '群馬': {},
 };
 
 const DATA_HEADERS = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
@@ -69,8 +79,7 @@ function doGet(e) {
     if (p.action === 'load') return json_(loadMonth_(p.site, p.month, p.fresh === '1'));
     if (p.action === 'hours') return json_(hoursRange_(p.site, p.from, p.to));
     if (p.action === 'legacy') {
-      if (p.site !== LEGACY_SITE) throw new Error(`旧シフト表があるのは${LEGACY_SITE}だけです`);
-      const r = readLegacy_(p.from, p.to);
+      const r = readLegacy_(p.site, p.from, p.to);
       return json_({ cells: [].concat(...Object.keys(r.cellsByMonth).map(k => r.cellsByMonth[k])), keys: r.keys, unmatched: r.unmatched, skipped: r.skipped.slice(0, 50), from: r.from, to: r.to });
     }
     if (p.action === 'members') return json_({ members: readMembers_(p.fresh === '1').filter(m => m.site === p.site && m.flag !== 8) });
@@ -395,78 +404,115 @@ function hoursRange_(site, from, to) {
 /* ===================== 旧シフト表の取り込み（1回だけ実行） ===================== */
 
 // 旧シフト表の fromIso〜toIso の時間・休みを読み、整理済み_Mの人に照合して返す
-function readLegacy_(fromIso, toIso) {
-  const legacy = SpreadsheetApp.openById(LEGACY_SHEET_ID).getSheets().find(s => s.getSheetId() === LEGACY_SHEET_GID);
-  if (!legacy) throw new Error('旧シフト表のシートが見つかりません（LEGACY_SHEET_GIDを確認）');
-  const vals = legacy.getDataRange().getValues();
-  const disp = legacy.getDataRange().getDisplayValues();
+function readLegacy_(site, fromIso, toIso) {
+  const sources = LEGACY_SOURCES[site];
+  if (!sources) throw new Error(`${site}の旧シフト表は登録されていません`);
+  // 日付は時差の影響を受けないよう、文字列の年・月・日から作る
+  const [fy, fm, fd] = fromIso.split('-').map(Number);
+  const from = new Date(fy, fm - 1, fd);
+  const pad2 = n => ('0' + n).slice(-2);
+  const iso = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
 
-  // 日付の行：上から10行のうち、日付として読めるセルがいちばん多い行
-  const from = new Date(fromIso + 'T00:00:00+09:00');
-  const toDate = (v, d) => {
-    if (v instanceof Date) return fmtDate_(v);
-    const m = String(d || '').normalize('NFKC').match(/(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})/);
-    if (!m) return '';
-    if (m[1]) return `${m[1]}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`;
-    // 年が書かれていない「M/D」は、取り込み開始日にいちばん近い年とみなす
-    let best = '', bestGap = Infinity;
-    [-1, 0, 1].forEach(dy => {
-      const y = from.getFullYear() + dy;
-      const gap = Math.abs(new Date(y, +m[2] - 1, +m[3]) - from);
-      if (gap < bestGap) { bestGap = gap; best = `${y}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`; }
-    });
-    return best;
-  };
-  let dateRow = 0, bestCount = -1;
-  for (let r = 0; r < Math.min(10, vals.length); r++) {
-    const n = vals[r].filter((v, c) => c >= 2 && toDate(v, disp[r][c])).length;
-    if (n > bestCount) { bestCount = n; dateRow = r; }
-  }
-  const dates = vals[dateRow].map((v, c) => c < 2 ? '' : toDate(v, disp[dateRow][c]));
-  const targetCols = dates.map((d, c) => d && d >= fromIso && (!toIso || d <= toIso) ? c : -1).filter(c => c >= 0);
-  Logger.log(`日付の行：${dateRow + 1}行目／${fromIso}以降の列：${targetCols.length}列（${dates[targetCols[0]] || 'なし'}〜${dates[targetCols[targetCols.length - 1]] || 'なし'}）`);
-  if (!targetCols.length) throw new Error('旧シフト表に、その期間の日付が見つかりませんでした（日付の行の例：' + disp[dateRow].slice(2, 8).join(' | ') + '）');
-
-  const members = readMembers_().filter(m => m.site === LEGACY_SITE);
+  // 照合：整理済み_Mの氏名・呼び名の対応表・名字（その拠点で1人に決まるとき）の順に探す
+  const members = readMembers_().filter(m => m.site === site);
+  const aliases = Object.assign({}, LEGACY_NAME_ALIASES, LEGACY_SITE_ALIASES[site] || {});
+  const pick = hits => hits.sort((a, b) => (a.flag === 9) - (b.flag === 9) || (a.flag === 3) - (b.flag === 3))[0] || null;
   const findMember = rawName => {
     const k = normalizeName_(rawName);
-    const aliasKey = Object.keys(LEGACY_NAME_ALIASES).find(a => normalizeName_(a) === k);
-    const target = aliasKey ? normalizeName_(LEGACY_NAME_ALIASES[aliasKey]) : k;
-    const hits = members.filter(m => normalizeName_(m.name) === target);
-    return hits.sort((a, b) => (a.flag === 9) - (b.flag === 9))[0] || null;
+    const aliasKey = Object.keys(aliases).find(a => normalizeName_(a) === k);
+    const target = aliasKey ? normalizeName_(aliases[aliasKey]) : k;
+    const exact = members.filter(m => normalizeName_(m.name) === target);
+    if (exact.length) return pick(exact);
+    const bySurname = members.filter(m => normalizeName_(String(m.name).normalize('NFKC').trim().split(/\s+/)[0]) === target && [1, 2].indexOf(m.flag) >= 0);
+    return bySurname.length === 1 ? bySurname[0] : null;
   };
+
+  // シートを選ぶ
+  const sheets = [];
+  sources.forEach(src => {
+    const all = SpreadsheetApp.openById(src.id).getSheets();
+    const key = `${fm}/${fd}`;
+    const found = src.gid ? all.filter(sh => sh.getSheetId() === src.gid)
+      : all.filter(sh => String(sh.getName()).normalize('NFKC').indexOf(key) >= 0);
+    found.forEach(sh => sheets.push({ sh, src }));
+  });
+  if (!sheets.length) throw new Error(`${site}の旧シフト表に、${fm}/${fd}から始まる期間のタブが見つかりません`);
 
   const cellsByMonth = {};
   const unmatched = [], skipped = [];
-  for (let r = dateRow + 1; r < vals.length; r++) {
-    const rawName = String(vals[r][0] || '').trim();
-    if (!rawName) continue;
-    // この行の対象期間の時間セル
-    const cells = [], bad = [];
-    targetCols.forEach(c => {
-      const raw = String(disp[r][c] || '').trim();
-      if (!raw) return;
-      const value = normalizeShift_(raw);
-      if (workHours_(value) === null) { bad.push(`${rawName} ${dates[c]}「${raw}」`); return; }
-      cells.push({ date: dates[c], value });
+  let firstDate = '', lastDate = '';
+  const seen = {};
+  sheets.forEach(({ sh, src }) => {
+    const vals = sh.getDataRange().getValues();
+    const disp = sh.getDataRange().getDisplayValues();
+    // 日付の読み方：日付・「M/D」・日だけ（11、12…）のどれでもよい
+    const asDate = (v, d) => {
+      if (v instanceof Date) return fmtDate_(v);
+      const t = String(d || '').normalize('NFKC').trim();
+      const m = t.match(/^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})/);
+      if (m) {
+        if (m[1]) return iso(m[1], m[2], m[3]);
+        let best = '', gap = Infinity;
+        [-1, 0, 1].forEach(dy => { const y = fy + dy; const g = Math.abs(new Date(y, +m[2] - 1, +m[3]) - from); if (g < gap) { gap = g; best = iso(y, m[2], m[3]); } });
+        return best;
+      }
+      return /^\d{1,2}$/.test(t) && +t >= 1 && +t <= 31 ? 'D' + t : '';
+    };
+    let dateRow = 0, best = -1;
+    for (let r = 0; r < Math.min(12, vals.length); r++) {
+      const n = vals[r].filter((v, c) => c > src.nameCol && asDate(v, disp[r][c])).length;
+      if (n > best) { best = n; dateRow = r; }
+    }
+    // 日だけの列は、期間の始まりの日から順に月をたどって日付にする
+    let y = fy, mo = fm, prev = 0;
+    const dates = vals[dateRow].map((v, c) => {
+      if (c <= src.nameCol) return '';
+      const d = asDate(v, disp[dateRow][c]);
+      if (!d || d[0] !== 'D') return d;
+      const day = +d.slice(1);
+      if (prev && day < prev) { mo++; if (mo > 12) { mo = 1; y++; } }
+      prev = day;
+      return iso(y, mo, day);
     });
-    const m = findMember(rawName);
-    if (m) skipped.push(...bad); // 集計行の数字などは報告しない
-    if (!cells.length) continue; // 時間の入っていない行は無視
-    if (!m) { unmatched.push(`${rawName}（${cells.length}日分）`); continue; }
-    cells.forEach(x => {
-      const month = x.date.slice(0, 7);
-      (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: m.key, date: x.date, value: x.value });
-    });
-  }
+    const targetCols = dates.map((d, c) => d && d >= fromIso && (!toIso || d <= toIso) ? c : -1).filter(c => c >= 0);
+    Logger.log(`${sh.getName()}：日付の行 ${dateRow + 1}行目／対象 ${targetCols.length}列（${dates[targetCols[0]] || 'なし'}〜${dates[targetCols[targetCols.length - 1]] || 'なし'}）`);
+    if (!targetCols.length) return;
+    if (!firstDate || dates[targetCols[0]] < firstDate) firstDate = dates[targetCols[0]];
+    if (dates[targetCols[targetCols.length - 1]] > lastDate) lastDate = dates[targetCols[targetCols.length - 1]];
+
+    for (let r = dateRow + 1; r < vals.length; r++) {
+      const rawName = String(disp[r][src.nameCol] || '').trim();
+      if (!rawName) continue;
+      const cells = [], bad = [];
+      targetCols.forEach(c => {
+        const raw = String(disp[r][c] || '').trim();
+        if (!raw) return;
+        const value = normalizeShift_(raw);
+        if (workHours_(value) === null) { bad.push(`${rawName} ${dates[c]}「${raw}」`); return; }
+        cells.push({ date: dates[c], value });
+      });
+      const m = findMember(rawName);
+      if (m) skipped.push(...bad); // 集計行の数字などは報告しない
+      if (!cells.length) continue; // 時間の入っていない行は無視
+      if (!m) { unmatched.push(`${rawName}（${sh.getName()}・${cells.length}日分）`); continue; }
+      cells.forEach(x => {
+        const id = `${m.key}|${x.date}`;
+        if (seen[id]) return; // 同じ人が2つのタブにいるときは先のタブを使う
+        seen[id] = true;
+        const month = x.date.slice(0, 7);
+        (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: m.key, date: x.date, value: x.value });
+      });
+    }
+  });
+  if (!firstDate) throw new Error('旧シフト表に、その期間の日付が見つかりませんでした');
   const keys = {};
-  Object.keys(cellsByMonth).forEach(mo => cellsByMonth[mo].forEach(c => { keys[c.key] = true; }));
-  return { cellsByMonth, keys: Object.keys(keys), unmatched, skipped, from: dates[targetCols[0]], to: dates[targetCols[targetCols.length - 1]] };
+  Object.keys(cellsByMonth).forEach(mo2 => cellsByMonth[mo2].forEach(c => { keys[c.key] = true; }));
+  return { cellsByMonth, keys: Object.keys(keys), unmatched, skipped, from: firstDate, to: lastDate };
 }
 
-// 旧シフト表の10/1以降をシフト_データに取り込む（手動で1回だけ実行。アプリ版では画面の「旧シフト表から取り込む」を使う）
+// 旧シフト表（いなべ）の10/1以降をシフト_データに取り込む（手動で1回だけ実行。アプリ版では画面の「旧シフト表から取り込む」を使う）
 function importLegacyShift() {
-  const { cellsByMonth, unmatched, skipped } = readLegacy_(LEGACY_FROM, '');
+  const { cellsByMonth, unmatched, skipped } = readLegacy_(LEGACY_SITE, LEGACY_FROM, '');
   Object.keys(cellsByMonth).sort().forEach(month => {
     const res = saveShifts_({ site: LEGACY_SITE, month, cells: cellsByMonth[month] });
     Logger.log(`${month}: ${res.saved}件を取り込みました`);

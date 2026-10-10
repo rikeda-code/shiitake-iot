@@ -244,7 +244,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <span class="leave-btns edit-only" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
-    <button id="legacyBtn" class="edit-only" title="旧シフト表（いなべ）の内容でこの期間を置き換えます">旧シフト表から取り込む</button>
+    <button id="legacyBtn" class="edit-only" title="旧シフト表の内容でこの期間を置き換えます（いなべ・群馬）">旧シフト表から取り込む</button>
     <button id="reloadBtn" title="整理済み_Mからメンバーを読み直します">メンバー更新</button>
     <span class="who" id="who"></span>
     <button id="logoutBtn">ログアウト</button>
@@ -869,10 +869,10 @@ $('leaveBtns').addEventListener('click', ev => {
 });
 $('site').onchange = () => load();
 $('reloadBtn').onclick = () => refreshMembers(true);
-// 旧シフト表（いなべ・期間ごとのシート）の内容で、今の期間を置き換える。
+// 旧シフト表（いなべ・群馬の期間ごとのシート）の内容で、今の期間を置き換える。
 // 旧シフト表に載っている人だけが対象で、その人の期間内の日は旧シフト表と同じ内容になる（空欄は消す）
-const LEGACY_SITE = 'いなべ';
-function updateLegacyBtn() { $('legacyBtn').hidden = curSite() !== LEGACY_SITE; }
+const LEGACY_SITES = ['いなべ', '群馬']; // 旧シフト表があり、取り込みに対応している拠点
+function updateLegacyBtn() { $('legacyBtn').hidden = !LEGACY_SITES.includes(curSite()); }
 $('legacyBtn').onclick = async () => {
   const from = allCols[0].iso, to = allCols[allCols.length - 1].iso;
   const ok = await ask(`旧シフト表から ${periodLabel()} を取り込みます。旧シフト表に載っている人は、この期間のシフトが旧シフト表と同じ内容に置き換わります。`, '取り込む');
