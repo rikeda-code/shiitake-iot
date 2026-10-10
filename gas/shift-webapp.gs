@@ -52,7 +52,8 @@ const LEGACY_SITE = 'いなべ';
 //   nameCol：名前の列（0始まり）。日付の行・シフトの始まりの列は自動で見つける
 const LEGACY_SOURCES = {
   'いなべ': [{ id: LEGACY_SHEET_ID, gid: LEGACY_SHEET_GID, nameCol: 0 }],
-  '群馬':   [{ id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM', byPeriodName: true, nameCol: 0 }], // 「26.10/11~11/10 収穫班」「…出荷場」
+  // 群馬は社員の空欄が「8:00-17:00」の意味（blankAs：雇用区分に含まれる文字 → 空欄のときの値）
+  '群馬':   [{ id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM', byPeriodName: true, nameCol: 0, blankAs: { '社員': '8:00-17:00' } }], // 「26.10/11~11/10 収穫班」「…出荷場」
 };
 const LEGACY_FROM = '2026-10-01';
 // 旧シフト表の呼び名 → 整理済み_Mの氏名（work-hours-forecast.html と同じ対応表）
@@ -64,7 +65,7 @@ const LEGACY_NAME_ALIASES = {
 };
 // 拠点ごとの呼び名の対応（旧シフト表の書き方 → 整理済み_Mの氏名）。名字だけで1人に決まる人は書かなくてよい
 const LEGACY_SITE_ALIASES = {
-  '群馬': {},
+  '群馬': { 'ソー': 'SAW MIN HTET', 'SAW': 'SAW MIN HTET' },
 };
 
 const DATA_HEADERS = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
@@ -423,9 +424,16 @@ function readLegacy_(site, fromIso, toIso) {
     const target = aliasKey ? normalizeName_(aliases[aliasKey]) : k;
     const exact = members.filter(m => normalizeName_(m.name) === target);
     if (exact.length) return pick(exact);
-    const bySurname = members.filter(m => normalizeName_(String(m.name).normalize('NFKC').trim().split(/\s+/)[0]) === target && [1, 2].indexOf(m.flag) >= 0);
-    return bySurname.length === 1 ? bySurname[0] : null;
+    // 名字の照合：氏名がその文字で始まる人（「小林弘和」のように空白のない氏名も拾う）
+    const starts = m => target.length >= 2 && normalizeName_(m.name).indexOf(target) === 0;
+    const active = members.filter(m => starts(m) && [1, 2].indexOf(m.flag) >= 0);
+    if (active.length === 1) return active[0];
+    if (active.length > 1) { reasons[rawName] = `同じ名字が${active.length}人（${active.map(m => m.name).join('・')}）`; return null; }
+    const others = members.filter(starts);
+    reasons[rawName] = others.length ? `整理済み_MのB列が在職中・入社ではない（${others.map(m => m.name + '：B列' + m.flag).join('・')}）` : `整理済み_Mの${site}に見つからない`;
+    return null;
   };
+  const reasons = {};
 
   // シートを選ぶ
   const sheets = [];
@@ -483,18 +491,20 @@ function readLegacy_(site, fromIso, toIso) {
     for (let r = dateRow + 1; r < vals.length; r++) {
       const rawName = String(disp[r][src.nameCol] || '').trim();
       if (!rawName) continue;
+      const m = findMember(rawName);
+      // 空欄に意味がある人（群馬の社員＝8:00-17:00）
+      const blankType = m && src.blankAs && Object.keys(src.blankAs).find(t => String(m.empType || '').indexOf(t) >= 0);
       const cells = [], bad = [];
       targetCols.forEach(c => {
-        const raw = String(disp[r][c] || '').trim();
-        if (!raw) return;
+        let raw = String(disp[r][c] || '').trim();
+        if (!raw) { if (!blankType) return; raw = src.blankAs[blankType]; }
         const value = normalizeShift_(raw);
         if (workHours_(value) === null) { bad.push(`${rawName} ${dates[c]}「${raw}」`); return; }
         cells.push({ date: dates[c], value });
       });
-      const m = findMember(rawName);
       if (m) skipped.push(...bad); // 集計行の数字などは報告しない
       if (!cells.length) continue; // 時間の入っていない行は無視
-      if (!m) { unmatched.push(`${rawName}（${sh.getName()}・${cells.length}日分）`); continue; }
+      if (!m) { unmatched.push(`${rawName}（${sh.getName()}・${cells.length}日分／${reasons[rawName] || '見つからない'}）`); continue; }
       cells.forEach(x => {
         const id = `${m.key}|${x.date}`;
         if (seen[id]) return; // 同じ人が2つのタブにいるときは先のタブを使う
