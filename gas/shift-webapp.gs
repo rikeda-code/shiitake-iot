@@ -26,6 +26,7 @@
  * ── リクエスト ────────────────────────────────────────
  * GET  ?action=load&site=いなべ&month=2026-11      … メンバー・シフト・固定シフト
  * GET  ?action=members&site=いなべ                 … メンバーだけ
+ * GET  ?action=legacy&site=いなべ&from=2026-10-11&to=2026-11-10 … 旧シフト表の内容（アプリの「旧シフト表から取り込む」用）
  * GET  ?action=hours&site=いなべ&from=2026-10-11&to=2026-10-18 … 日別・人別の実働時間
  * POST (Content-Type: text/plain, 本文はJSON。CORSプリフライト回避のため)
  *   { action:'saveShifts', site, month, cells:[{key,date,value}] }
@@ -53,6 +54,7 @@ const LEGACY_NAME_ALIASES = {
   'ハイ': 'NGUYEN VAN HAI', 'ヴィン': 'HOANG VAN VINH', 'タム': 'DAO VAN TAM',
   'ギエム': 'NGUYEN THANH NGHIEM', 'ハオ': 'NGUYEN VAN HAO', 'エガ': 'EGA ADITIYA KURNIAWAN',
   'アユブ': 'MUHAMAD AYUB FAYYUQI', 'イマム': 'IMAM ADI SAPUTRA', '左右田 耀子': '左右田 煬子',
+  '森さん': '森 郁美',
 };
 
 const DATA_HEADERS = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
@@ -66,6 +68,11 @@ function doGet(e) {
   try {
     if (p.action === 'load') return json_(loadMonth_(p.site, p.month, p.fresh === '1'));
     if (p.action === 'hours') return json_(hoursRange_(p.site, p.from, p.to));
+    if (p.action === 'legacy') {
+      if (p.site !== LEGACY_SITE) throw new Error(`旧シフト表があるのは${LEGACY_SITE}だけです`);
+      const r = readLegacy_(p.from, p.to);
+      return json_({ cells: [].concat(...Object.keys(r.cellsByMonth).map(k => r.cellsByMonth[k])), keys: r.keys, unmatched: r.unmatched, skipped: r.skipped.slice(0, 50), from: r.from, to: r.to });
+    }
     if (p.action === 'members') return json_({ members: readMembers_(p.fresh === '1').filter(m => m.site === p.site && m.flag !== 8) });
     return json_({ status: 'error', message: '不明なactionです' });
   } catch (err) {
@@ -387,14 +394,15 @@ function hoursRange_(site, from, to) {
 
 /* ===================== 旧シフト表の取り込み（1回だけ実行） ===================== */
 
-function importLegacyShift() {
+// 旧シフト表の fromIso〜toIso の時間・休みを読み、整理済み_Mの人に照合して返す
+function readLegacy_(fromIso, toIso) {
   const legacy = SpreadsheetApp.openById(LEGACY_SHEET_ID).getSheets().find(s => s.getSheetId() === LEGACY_SHEET_GID);
   if (!legacy) throw new Error('旧シフト表のシートが見つかりません（LEGACY_SHEET_GIDを確認）');
   const vals = legacy.getDataRange().getValues();
   const disp = legacy.getDataRange().getDisplayValues();
 
   // 日付の行：上から10行のうち、日付として読めるセルがいちばん多い行
-  const from = new Date(LEGACY_FROM + 'T00:00:00+09:00');
+  const from = new Date(fromIso + 'T00:00:00+09:00');
   const toDate = (v, d) => {
     if (v instanceof Date) return fmtDate_(v);
     const m = String(d || '').normalize('NFKC').match(/(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})/);
@@ -415,9 +423,9 @@ function importLegacyShift() {
     if (n > bestCount) { bestCount = n; dateRow = r; }
   }
   const dates = vals[dateRow].map((v, c) => c < 2 ? '' : toDate(v, disp[dateRow][c]));
-  const targetCols = dates.map((d, c) => d && d >= LEGACY_FROM ? c : -1).filter(c => c >= 0);
-  Logger.log(`日付の行：${dateRow + 1}行目／${LEGACY_FROM}以降の列：${targetCols.length}列（${dates[targetCols[0]] || 'なし'}〜${dates[targetCols[targetCols.length - 1]] || 'なし'}）`);
-  if (!targetCols.length) { Logger.log('取り込み対象の日付が見つかりませんでした。日付の行のセルの例：' + disp[dateRow].slice(2, 8).join(' | ')); return; }
+  const targetCols = dates.map((d, c) => d && d >= fromIso && (!toIso || d <= toIso) ? c : -1).filter(c => c >= 0);
+  Logger.log(`日付の行：${dateRow + 1}行目／${fromIso}以降の列：${targetCols.length}列（${dates[targetCols[0]] || 'なし'}〜${dates[targetCols[targetCols.length - 1]] || 'なし'}）`);
+  if (!targetCols.length) throw new Error('旧シフト表に、その期間の日付が見つかりませんでした（日付の行の例：' + disp[dateRow].slice(2, 8).join(' | ') + '）');
 
   const members = readMembers_().filter(m => m.site === LEGACY_SITE);
   const findMember = rawName => {
@@ -451,6 +459,14 @@ function importLegacyShift() {
       (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: m.key, date: x.date, value: x.value });
     });
   }
+  const keys = {};
+  Object.keys(cellsByMonth).forEach(mo => cellsByMonth[mo].forEach(c => { keys[c.key] = true; }));
+  return { cellsByMonth, keys: Object.keys(keys), unmatched, skipped, from: dates[targetCols[0]], to: dates[targetCols[targetCols.length - 1]] };
+}
+
+// 旧シフト表の10/1以降をシフト_データに取り込む（手動で1回だけ実行。アプリ版では画面の「旧シフト表から取り込む」を使う）
+function importLegacyShift() {
+  const { cellsByMonth, unmatched, skipped } = readLegacy_(LEGACY_FROM, '');
   Object.keys(cellsByMonth).sort().forEach(month => {
     const res = saveShifts_({ site: LEGACY_SITE, month, cells: cellsByMonth[month] });
     Logger.log(`${month}: ${res.saved}件を取り込みました`);
