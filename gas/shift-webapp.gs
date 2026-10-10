@@ -52,8 +52,10 @@ const LEGACY_SITE = 'いなべ';
 //   nameCol：名前の列（0始まり）。日付の行・シフトの始まりの列は自動で見つける
 const LEGACY_SOURCES = {
   'いなべ': [{ id: LEGACY_SHEET_ID, gid: LEGACY_SHEET_GID, nameCol: 0 }],
-  // 群馬は社員の空欄が「8:00-17:00」の意味（blankAs：雇用区分に含まれる文字 → 空欄のときの値）
-  '群馬':   [{ id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM', byPeriodName: true, nameCol: 0, blankAs: { '社員': '8:00-17:00' } }], // 「26.10/11~11/10 収穫班」「…出荷場」
+  // 群馬：期間の名前を含み、かつ「収穫班」「出荷場」を含むタブだけを読む（例：「26.10/11~11/10 収穫班」「…出荷場」）
+  //   社員・技能実習生は空欄が「8:00-17:00」の意味（blankAs：雇用区分に含まれる文字 → 空欄のときの値）
+  '群馬':   [{ id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM', byPeriodName: true, tabMatch: /収穫班|出荷場/, nameCol: 0,
+              blankAs: { '社員': '8:00-17:00', '技能実習': '8:00-17:00' } }],
 };
 const LEGACY_FROM = '2026-10-01';
 // 旧シフト表の呼び名 → 整理済み_Mの氏名（work-hours-forecast.html と同じ対応表）
@@ -65,7 +67,7 @@ const LEGACY_NAME_ALIASES = {
 };
 // 拠点ごとの呼び名の対応（旧シフト表の書き方 → 整理済み_Mの氏名）。名字だけで1人に決まる人は書かなくてよい
 const LEGACY_SITE_ALIASES = {
-  '群馬': { 'ソー': 'SAW MIN HTET', 'SAW': 'SAW MIN HTET' },
+  '群馬': { 'ソー': 'SAW MIN HTET', 'SAW': 'SAW MIN HTET', 'デスタ': 'DESTA', 'レフィン': 'REVIN' },
 };
 
 const DATA_HEADERS = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
@@ -442,7 +444,7 @@ function readLegacy_(site, fromIso, toIso) {
     const all = SpreadsheetApp.openById(src.id).getSheets();
     const key = `${fm}/${fd}`;
     const found = src.gid ? all.filter(sh => sh.getSheetId() === src.gid)
-      : all.filter(sh => String(sh.getName()).normalize('NFKC').indexOf(key) >= 0);
+      : all.filter(sh => { const n = String(sh.getName()).normalize('NFKC'); return n.indexOf(key) >= 0 && (!src.tabMatch || src.tabMatch.test(n)); });
     found.forEach(sh => sheets.push({ sh, src }));
   });
   if (!sheets.length) throw new Error(`${site}の旧シフト表に、${fm}/${fd}から始まる期間のタブが見つかりません`);
