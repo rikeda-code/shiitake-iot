@@ -25,9 +25,11 @@
  *
  * ── リクエスト ────────────────────────────────────────
  * GET  ?action=load&site=いなべ&month=2026-11      … メンバー・シフト・固定シフト
+ * GET  ?action=members&site=いなべ                 … メンバーだけ
  * GET  ?action=hours&site=いなべ&from=2026-10-11&to=2026-10-18 … 日別・人別の実働時間
  * POST (Content-Type: text/plain, 本文はJSON。CORSプリフライト回避のため)
  *   { action:'saveShifts', site, month, cells:[{key,date,value}] }
+ *   { action:'upsertCells', site, cells:[{key,date,value}] }   // 変わったセルだけ（valueが空なら削除）。アプリ版が保存のたびに送る
  *   { action:'saveFixed',  site, key, name, pattern:[月..日 の '8:00-17:00' or '休'] }
  *   { action:'addMember',  site, name, dept, empType, joinDate }
  *   { action:'retire',     key, date, flag }   // flag: 9=退職 / 3=退職・異動
@@ -64,6 +66,7 @@ function doGet(e) {
   try {
     if (p.action === 'load') return json_(loadMonth_(p.site, p.month, p.fresh === '1'));
     if (p.action === 'hours') return json_(hoursRange_(p.site, p.from, p.to));
+    if (p.action === 'members') return json_({ members: readMembers_(p.fresh === '1').filter(m => m.site === p.site && m.flag !== 8) });
     return json_({ status: 'error', message: '不明なactionです' });
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
@@ -77,6 +80,7 @@ function doPost(e) {
   try {
     switch (req.action) {
       case 'saveShifts': return json_(saveShifts_(req));
+      case 'upsertCells': return json_(upsertCells_(req));
       case 'saveFixed':  return json_(saveFixed_(req));
       case 'addMember':  clearMemberCache_(); return json_(addMember_(req));
       case 'retire':     clearMemberCache_(); return json_(setRetire_(req.key, req.date, req.flag || 9));
@@ -317,6 +321,38 @@ function saveShifts_(req) {
   if (last >= 2) sh.getRange(2, 1, last - 1, DATA_HEADERS.length).clearContent();
   if (rows.length) sh.getRange(2, 1, rows.length, DATA_HEADERS.length).setValues(rows);
   return { saved: add.length, skipped: bad };
+}
+
+// 変わったセルだけをシフト_データに反映する（Firestore版のアプリが保存のたびに送る）
+function upsertCells_(req) {
+  const { site, cells } = req;
+  if (!site || !Array.isArray(cells)) throw new Error('拠点とセルを指定してください');
+  const byKey = {};
+  readMembers_().forEach(m => byKey[m.key] = m);
+  const sh = sheet_(DATA_SHEET_NAME, DATA_HEADERS);
+  const last = sh.getLastRow();
+  const rows = last >= 2 ? sh.getRange(2, 1, last - 1, DATA_HEADERS.length).getValues().map(r => [cellDate_(r[0])].concat(r.slice(1))) : [];
+  const index = {};
+  rows.forEach((r, i) => { index[`${r[0]}|${r[1]}|${r[2]}`] = i; });
+  const now = new Date();
+  const remove = {};
+  let changed = 0;
+  cells.forEach(c => {
+    const id = `${c.date}|${site}|${c.key}`;
+    const value = normalizeShift_(c.value);
+    const i = index[id];
+    if (!value) { if (i !== undefined) { remove[i] = true; changed++; } return; }
+    const h = workHours_(value);
+    if (h === null) return;
+    const m = byKey[c.key] || {};
+    const row = [c.date, site, c.key, m.name || (i !== undefined ? rows[i][3] : ''), m.dept || (i !== undefined ? rows[i][4] : ''), value, h, now];
+    if (i !== undefined) { rows[i] = row; delete remove[i]; } else { index[id] = rows.length; rows.push(row); }
+    changed++;
+  });
+  const out = rows.filter((r, i) => !remove[i]).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+  if (last >= 2) sh.getRange(2, 1, last - 1, DATA_HEADERS.length).clearContent();
+  if (out.length) sh.getRange(2, 1, out.length, DATA_HEADERS.length).setValues(out);
+  return { changed };
 }
 
 function saveFixed_(req) {

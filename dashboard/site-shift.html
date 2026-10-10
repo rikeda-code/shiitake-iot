@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>拠点シフト表</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
@@ -154,6 +157,16 @@ td.cell .t2 { display: block; }
 .filter-bar label { display: inline-flex; gap: 4px; align-items: center; font-size: .85rem; cursor: pointer; }
 .filter-bar input[type=date] { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .filter-bar .quick button { padding: 3px 10px; font-size: .78rem; }
+/* ログイン画面 */
+.login { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 16px; }
+.login[hidden] { display: none; }
+.login-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 32px 28px; max-width: 380px; width: 100%; display: flex; flex-direction: column; gap: 14px; text-align: center; }
+.login-card h1 { font-size: 1.3rem; margin: 0; }
+.login-card p { color: var(--muted); font-size: .85rem; margin: 0; line-height: 1.7; }
+.login-card .err { color: var(--sun); }
+.login-card button { padding: 10px 16px; font-size: .95rem; }
+.who { font-size: .78rem; color: var(--muted); }
+.status.ok { color: var(--saibai); }
 /* 入力／印刷のタブ */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 8px 18px; font-weight: 700; color: var(--muted); margin-bottom: -1px; }
@@ -209,10 +222,18 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 </style>
 </head>
 <body>
+<div class="login" id="login">
+  <div class="login-card">
+    <h1>拠点シフト表</h1>
+    <p>会社のGoogleアカウント（@10-ff.com）でログインしてください。</p>
+    <p class="err" id="loginErr" hidden></p>
+    <button class="primary" id="loginBtn">Googleでログイン</button>
+  </div>
+</div>
 <div class="wrap">
   <header>
     <h1>拠点シフト表</h1>
-    <p class="sub">整理済み_Mのメンバーで月のシフトを作り、栽培・出荷・配送の時間を日ごとに集計します。保存した内容は直近工数計画の標準労働時間に反映されます。</p>
+    <p class="sub">入力した内容はその場で保存され、ほかの人の画面にもすぐ反映されます。スプレッドシート（シフト_データ）にも自動で書き出します。</p>
   </header>
 
   <div class="toolbar">
@@ -223,8 +244,9 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <span class="leave-btns edit-only" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
-    <button id="reloadBtn" title="スプレッドシートから最新の内容を読み直します">更新</button>
-    <button class="primary edit-only" id="saveBtn">保存</button>
+    <button id="reloadBtn" title="整理済み_Mからメンバーを読み直します">メンバー更新</button>
+    <span class="who" id="who"></span>
+    <button id="logoutBtn">ログアウト</button>
   </div>
   <div id="dialogSlot"></div>
   <div class="tabs" role="tablist">
@@ -314,7 +336,10 @@ let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
 let fixed = {};     // fixed[key] = 月〜日の7要素
-let dirty = false;
+let monthData = {};   // Firestoreから届いた月ごとのシフト：{ 'yyyy-MM': { key: { iso: 値 } } }
+let pending = {};     // まだFirestoreに送っていない変更：{ 'yyyy-MM': { key: { iso: 値（''は消去） } } }
+let ready = false;    // 期間の2か月分とメンバーがそろったか
+let needRender = false;
 let sel = null, anchor = null, cursor = null, dragging = false, editing = null, editing0 = null;
 
 /* ── 共通 ── */
@@ -374,15 +399,22 @@ function cellHours(v) {
 }
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 2200); }
-function setStatus(text, warn) {
+function setStatus(text, kind) {
   $('status').textContent = text;
-  $('status').classList.toggle('dirty', !!warn);
+  $('status').classList.toggle('dirty', kind === 'warn' || kind === true);
+  $('status').classList.toggle('ok', kind === 'ok');
 }
-function setDirty(v) {
-  dirty = v;
-  if (v) setStatus('保存していない変更があります', true);
+// 保存の状況をツールバーに出す
+let saving = 0, sheetWaiting = 0;
+function showSaveState() {
+  if (!navigator.onLine) setStatus('オフラインです。つながったら自動で保存します', 'warn');
+  else if (saving || Object.keys(pending).length) setStatus('保存中…');
+  else if (sheetWaiting) setStatus('保存しました（スプレッドシートへ書き出し中）', 'ok');
+  else setStatus('すべて保存済み', 'ok');
 }
-window.addEventListener('beforeunload', ev => { if (dirty) { ev.preventDefault(); ev.returnValue = ''; } });
+window.addEventListener('online', showSaveState);
+window.addEventListener('offline', showSaveState);
+window.addEventListener('beforeunload', ev => { if (Object.keys(pending).length || saving) { ev.preventDefault(); ev.returnValue = ''; } });
 
 async function api(method, payload) {
   if (!SHIFT_GAS_URL) throw new Error('GASのURLが未設定です');
@@ -394,65 +426,179 @@ async function api(method, payload) {
   return json;
 }
 
-/* ── 読み込み ──
-   開いたときは、この端末に残っている前回の内容をすぐ表示し、裏で最新を読み込んで差し替える。
-   「更新」ボタンはメンバーも含めてスプレッドシートから読み直す */
-const CACHE_PREFIX = 'siteShift2:';
-const cacheKey = () => `${CACHE_PREFIX}${$('site').value}:${monthKey()}`;
-function readCache() { try { return JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) { return null; } }
-function writeCache(res) { try { localStorage.setItem(cacheKey(), JSON.stringify(res)); } catch (e) { /* 保存できなくても動作に影響なし */ } }
-// 画面の今の内容を、この端末の前回の内容として残す（保存直後に使う）
-function cacheCurrent() {
-  const shifts = [];
-  Object.entries(data).forEach(([key, days]) => Object.entries(days).forEach(([iso, v]) => { if (v) shifts.push({ key, date: iso, value: v }); }));
-  writeCache({ members, fixed, shifts });
-}
-function apply(res) {
-  members = res.members;
-  fixed = res.fixed || {};
+/* ── Firebase（Firestore：東京） ──
+   shiftSites/{拠点}/months/{yyyy-MM} … { cells: { key: { 'yyyy-MM-dd': '8:00-17:00' } } }
+   shiftSites/{拠点}/meta/members     … { list: [整理済み_Mのメンバー], updatedAt }
+   shiftSites/{拠点}/meta/fixed       … { key: [月〜日の7要素] } */
+const firebaseConfig = {
+  apiKey: 'AIzaSyDUmBcQAHCnWlv5a5Lv7nS5tRBQ-LvVtjo',
+  authDomain: 'shiitake-iot.firebaseapp.com',
+  projectId: 'shiitake-iot',
+  storageBucket: 'shiitake-iot.firebasestorage.app',
+  messagingSenderId: '118184889783',
+  appId: '1:118184889783:web:fb2e61fa5607e30f0bec32',
+};
+firebase.initializeApp(firebaseConfig);
+const fs = firebase.firestore();
+fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* 使えないブラウザではオフライン保存なしで動く */ });
+const auth = firebase.auth();
+const ALLOWED_DOMAIN = '10-ff.com';
+const MEMBERS_STALE_MS = 30 * 60 * 1000; // メンバーは30分たったら整理済み_Mから読み直す
+const siteRef = site => fs.collection('shiftSites').doc(site);
+const monthRef = (site, ym) => siteRef(site).collection('months').doc(ym);
+const metaRef = (site, name) => siteRef(site).collection('meta').doc(name);
+const curSite = () => $('site').value;
+
+// 届いた月のシフトと、まだ送っていない変更を重ねて、表示用の data を作る
+function rebuildData() {
   data = {};
-  res.shifts.forEach(s => { (data[s.key] ||= {})[s.date] = normVal(s.value); }); // 以前の「有」なども新しい表記にそろえる
-  loadedSite = $('site').value; loadedMonth = monthKey();
-  setDirty(false);
-  render(); renderFixed(); renderMembers();
+  const put = src => Object.entries(src || {}).forEach(([key, days]) => Object.entries(days || {}).forEach(([iso, v]) => {
+    if (v) (data[key] ||= {})[iso] = normVal(v); else if (data[key]) delete data[key][iso];
+  }));
+  periodMonths().forEach(ym => { put(monthData[ym]); put(pending[ym]); });
 }
-// 期間がまたがる2つの月をまとめて読む
-async function fetchPeriod(fresh) {
-  const list = await Promise.all(periodMonths().map(ym => api('GET', { action: 'load', site: $('site').value, month: ym, fresh: fresh ? '1' : '0' })));
-  return { members: list[list.length - 1].members, fixed: list[list.length - 1].fixed, shifts: list.flatMap(r => r.shifts) };
+function onDataChanged() {
+  rebuildData();
+  if (!ready) return;
+  if (editing || dragging || filling) { needRender = true; return; }
+  render();
 }
-let loadSeq = 0;
-async function load(fresh) {
-  if (dirty) {
-    const ok = await ask(`保存していない変更があります。破棄して${$('site').value} ${periodLabel()}を開きますか？`, '破棄して開く');
-    if (!ok) { syncSelectors(); return; }
+
+// 変更はまとめて0.3秒後にFirestoreへ送り、続けてスプレッドシートへの書き出しを予約する
+let flushTimer = null;
+function queueChange(key, iso, v) {
+  const ym = iso.slice(0, 7);
+  ((pending[ym] ||= {})[key] ||= {})[iso] = v;
+  clearTimeout(flushTimer); flushTimer = setTimeout(flush, 300);
+  showSaveState();
+}
+async function flush() {
+  clearTimeout(flushTimer); flushTimer = null;
+  const batch = pending, site = curSite();
+  if (!Object.keys(batch).length) return;
+  const del = firebase.firestore.FieldValue.delete();
+  const sheetCells = [];
+  const writes = Object.entries(batch).map(([ym, keys]) => {
+    const cells = {};
+    Object.entries(keys).forEach(([key, days]) => {
+      cells[key] = {};
+      Object.entries(days).forEach(([iso, v]) => { cells[key][iso] = v || del; sheetCells.push({ key, date: iso, value: v }); });
+    });
+    return monthRef(site, ym).set({ cells, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: auth.currentUser?.email || '' }, { merge: true });
+  });
+  pending = {};
+  saving++; showSaveState();
+  try { await Promise.all(writes); queueSheet(site, sheetCells); }
+  catch (err) { toast('保存できませんでした：' + err.message); }
+  finally { saving--; showSaveState(); }
+}
+
+// スプレッドシート（シフト_データ）への書き出し：3秒ためてGASに送る。失敗したら1分後にもう一度
+const sheetQueue = {};
+let sheetTimer = null;
+function queueSheet(site, cells) {
+  if (!cells.length || !SHIFT_GAS_URL) return;
+  const q = sheetQueue[site] ||= {};
+  cells.forEach(c => { q[`${c.key}|${c.date}`] = c; });
+  sheetWaiting = 1; showSaveState();
+  clearTimeout(sheetTimer); sheetTimer = setTimeout(pushSheet, 3000);
+}
+async function pushSheet() {
+  for (const site of Object.keys(sheetQueue)) {
+    const cells = Object.values(sheetQueue[site]);
+    delete sheetQueue[site];
+    if (!cells.length) continue;
+    try { await api('POST', { action: 'upsertCells', site, cells }); }
+    catch (err) {
+      const q = sheetQueue[site] ||= {};
+      cells.forEach(c => { if (!q[`${c.key}|${c.date}`]) q[`${c.key}|${c.date}`] = c; });
+      setStatus('スプレッドシートへの書き出しに失敗しました。1分後にもう一度試します：' + err.message, 'warn');
+      clearTimeout(sheetTimer); sheetTimer = setTimeout(pushSheet, 60000);
+      return;
+    }
   }
+  sheetWaiting = Object.keys(sheetQueue).length ? 1 : 0;
+  showSaveState();
+}
+
+// メンバーを整理済み_Mから読み直して、Firestoreに写す
+let membersLoading = false;
+async function refreshMembers(fresh) {
+  if (membersLoading) return;
+  membersLoading = true;
+  const site = curSite();
+  try {
+    let res;
+    try { res = await api('GET', { action: 'members', site, fresh: fresh ? '1' : '0' }); }
+    catch (e) { res = await api('GET', { action: 'load', site, month: monthKey(), fresh: fresh ? '1' : '0' }); } // 古いGASでも動くように
+    await metaRef(site, 'members').set({ list: res.members, updatedAt: Date.now() });
+    if (fresh) toast('整理済み_Mからメンバーを読み直しました');
+  } catch (err) { toast('メンバーを読み込めませんでした：' + err.message); }
+  finally { membersLoading = false; }
+}
+
+// Firestoreにまだない月は、スプレッドシートのシフトを1回だけ移す
+const migrating = new Set();
+async function migrateMonth(site, ym) {
+  const id = `${site}|${ym}`;
+  if (migrating.has(id)) return;
+  migrating.add(id);
+  try {
+    const res = await api('GET', { action: 'load', site, month: ym });
+    const cells = {};
+    res.shifts.forEach(x => { (cells[x.key] ||= {})[x.date] = normVal(x.value); });
+    await fs.runTransaction(async tx => {
+      const snap = await tx.get(monthRef(site, ym));
+      if (snap.exists) return; // ほかの人が先に作っていたら何もしない
+      tx.set(monthRef(site, ym), { cells, migratedAt: Date.now() });
+    });
+    const fx = await metaRef(site, 'fixed').get();
+    if (!fx.exists && res.fixed && Object.keys(res.fixed).length) await metaRef(site, 'fixed').set(res.fixed);
+  } catch (err) { toast(`${ym.replace('-', '年')}月のシフトをスプレッドシートから移せませんでした：${err.message}`); migrating.delete(id); }
+}
+
+// 拠点・期間の分のFirestoreを見張る（ほかの人の入力もすぐ届く）
+let unsubs = [];
+let gotMonths = new Set(), gotMembers = false;
+function listen() {
+  unsubs.forEach(u => u()); unsubs = [];
+  const site = curSite();
+  monthData = {}; gotMonths = new Set(); gotMembers = false; ready = false;
+  periodMonths().forEach(ym => {
+    unsubs.push(monthRef(site, ym).onSnapshot({ includeMetadataChanges: false }, snap => {
+      if (!snap.exists && !snap.metadata.fromCache) migrateMonth(site, ym);
+      monthData[ym] = snap.exists ? (snap.data().cells || {}) : {};
+      gotMonths.add(ym); checkReady();
+    }, err => showLoadError(err)));
+  });
+  unsubs.push(metaRef(site, 'members').onSnapshot(snap => {
+    if (snap.exists) { members = snap.data().list || []; gotMembers = true; checkReady(); if (ready) renderMembers(); }
+    if (!snap.metadata.fromCache && (!snap.exists || Date.now() - (snap.data().updatedAt || 0) > MEMBERS_STALE_MS)) refreshMembers(false);
+  }, err => showLoadError(err)));
+  unsubs.push(metaRef(site, 'fixed').onSnapshot(snap => {
+    fixed = snap.exists ? snap.data() : {};
+    if (ready) renderFixed();
+  }, err => showLoadError(err)));
+}
+function checkReady() {
+  const was = ready;
+  ready = gotMembers && periodMonths().every(ym => gotMonths.has(ym));
+  if (!ready) return;
+  if (!was) { rebuildData(); render(); renderFixed(); renderMembers(); showSaveState(); }
+  else onDataChanged();
+}
+function showLoadError(err) {
+  $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}${/permission/i.test(err.message) ? '（会社のアカウントでログインしているか確認してください）' : ''}</div>`;
+}
+async function load() {
+  if (Object.keys(pending).length) await flush(); // 切り替え前に送る
   allCols = periodCols();
   cols = allCols;
   $('edFrom').value = ''; $('edTo').value = '';
-  if (!SHIFT_GAS_URL) {
-    $('gridBox').innerHTML = '<div class="notice">GASのURLがまだ設定されていません。gas/shift-webapp.gs をデプロイし、このページの SHIFT_GAS_URL に設定してください。</div>';
-    return;
-  }
-  const seq = ++loadSeq;
-  const cached = fresh ? null : readCache();
-  if (cached) { apply(cached); setStatus('前回の内容を表示中。最新を読み込んでいます…'); }
-  else { $('gridBox').innerHTML = '<div class="loading">読み込み中…</div>'; setStatus('読み込み中…'); }
-  $('reloadBtn').disabled = true;
-  try {
-    const res = await fetchPeriod(fresh);
-    if (seq !== loadSeq) return; // 途中で拠点・期間を切り替えた
-    writeCache(res);
-    if (dirty) { setStatus('保存していない変更があります（最新の内容は「更新」で読み込めます）', true); return; }
-    apply(res);
-    setStatus(`最新の内容です（${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 読み込み）`);
-  } catch (err) {
-    if (seq !== loadSeq) return;
-    if (cached) setStatus('最新を読み込めませんでした。前回の内容を表示しています：' + err.message, true);
-    else { $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}</div>`; setStatus(''); }
-  } finally {
-    if (seq === loadSeq) $('reloadBtn').disabled = false;
-  }
+  loadedSite = curSite(); loadedMonth = monthKey();
+  $('gridBox').innerHTML = '<div class="loading">読み込み中…</div>';
+  setStatus('読み込み中…');
+  listen();
 }
 let loadedSite = null, loadedMonth = null;
 function syncSelectors() {
@@ -487,6 +633,7 @@ function renderEditFilter(all) {
   if ($('edFrom').value > $('edTo').value) [$('edFrom').value, $('edTo').value] = [$('edTo').value, $('edFrom').value];
 }
 function render() {
+  needRender = false;
   const everyone = visibleMembers();
   renderEditFilter(everyone);
   rows = everyone.filter(m => edDeptSel.has(divOf(m.dept)));
@@ -547,8 +694,8 @@ function setVal(r, c, v) {
   if (!canEdit(r, c)) return;
   const key = rows[r].key, iso = cols[c].iso;
   if ((data[key]?.[iso] || '') === v) return;
-  (data[key] ||= {})[iso] = v;
-  setDirty(true);
+  if (v) (data[key] ||= {})[iso] = v; else if (data[key]) delete data[key][iso];
+  queueChange(key, iso, v);
 }
 function paintSel() {
   const s = norm(sel);
@@ -657,7 +804,7 @@ gridBox.addEventListener('mouseover', ev => {
   if (!dragging) return; const td = ev.target.closest('td.cell'); if (!td) return;
   sel = { r0: anchor.r, c0: anchor.c, r1: +td.dataset.r, c1: +td.dataset.c }; cursor = { r: +td.dataset.r, c: +td.dataset.c }; paintSel();
 });
-document.addEventListener('mouseup', () => dragging = false);
+document.addEventListener('mouseup', () => { dragging = false; if (needRender && !filling && !editing) render(); });
 gridBox.addEventListener('dblclick', ev => { if (ev.target.closest('td.cell')) startEdit(); });
 document.addEventListener('keydown', ev => {
   if (editing || !cursor || ev.target.closest('select, button, input, form')) return;
@@ -718,32 +865,9 @@ $('leaveBtns').addEventListener('click', ev => {
   for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) setVal(r, c, t);
   render();
 });
-$('saveBtn').onclick = async () => {
-  const btn = $('saveBtn'); btn.disabled = true; btn.textContent = '保存中…';
-  try {
-    // 期間がまたがる2つの月を、それぞれ月まるごと送る（期間外の日の内容もそのまま残る）
-    let skipped = 0;
-    for (const ym of periodMonths()) {
-      const cells = [];
-      Object.entries(data).forEach(([key, days]) => Object.entries(days).forEach(([iso, v]) => {
-        if (v && iso.startsWith(ym)) cells.push({ key, date: iso, value: v });
-      }));
-      const r = await api('POST', { action: 'saveShifts', site: $('site').value, month: ym, cells });
-      skipped += r.skipped?.length || 0;
-    }
-    const res = { skipped: { length: skipped } };
-    setDirty(false);
-    setStatus('保存しました');
-    cacheCurrent();
-    toast(res.skipped.length ? `保存しました（形式が正しくない${res.skipped.length}件は保存していません）` : '保存しました');
-  } catch (err) {
-    toast('保存できませんでした：' + err.message);
-  } finally {
-    btn.disabled = false; btn.textContent = '保存';
-  }
-};
 $('site').onchange = () => load();
-$('reloadBtn').onclick = () => load(true);
+$('reloadBtn').onclick = () => refreshMembers(true);
+$('logoutBtn').onclick = async () => { await flush(); auth.signOut(); };
 $('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); $('ppFrom').value = ''; $('ppTo').value = ''; load(); };
 
 // 絞り込みを変えたら選択を解いて描き直す
@@ -804,8 +928,8 @@ $('fxSave').onclick = async () => {
   const m = visibleMembers().find(x => x.key === fxKey); if (!m) return;
   if (fxDraft.some(v => cellHours(v) === null)) { toast('終了が開始より前の曜日があります'); return; }
   try {
-    await api('POST', { action: 'saveFixed', site: $('site').value, key: m.key, name: m.name, pattern: fxDraft });
-    fixed[m.key] = fxDraft.slice(); renderFixed(); if (!dirty) cacheCurrent();
+    await metaRef(curSite(), 'fixed').set({ [m.key]: fxDraft.slice() }, { merge: true });
+    fixed[m.key] = fxDraft.slice(); renderFixed();
     toast(`${m.name}さんの固定シフトを保存しました`);
   } catch (err) { toast('保存できませんでした：' + err.message); }
 };
@@ -833,7 +957,6 @@ $('memTable').addEventListener('click', async ev => {
   const act = b.dataset.act;
   if (act === 'leave') { retiring = key; renderMembers(); return; }
   if (act === 'cancel') { retiring = null; renderMembers(); return; }
-  if (dirty) { toast('先にシフトを保存してください'); return; }
   try {
     if (act === 'ok') {
       await api('POST', { action: 'retire', key, date: $('leaveDate').value, flag: +$('leaveFlag').value });
@@ -842,18 +965,17 @@ $('memTable').addEventListener('click', async ev => {
       await api('POST', { action: 'undoRetire', key });
       toast('在職中に戻しました');
     }
-    retiring = null; await load(true);
+    retiring = null; await refreshMembers(true);
   } catch (err) { toast('書き込めませんでした：' + err.message); }
 });
 $('addForm').addEventListener('submit', async ev => {
   ev.preventDefault();
-  if (dirty) { toast('先にシフトを保存してください'); return; }
   const name = $('newName').value.trim(); if (!name) return;
   try {
     await api('POST', { action: 'addMember', site: $('site').value, name, dept: $('newRole').value, empType: $('newEmp').value, joinDate: $('newJoin').value });
     $('newName').value = '';
     toast(`${name}さんを整理済み_Mに登録しました。固定シフトを設定してください`);
-    await load(true);
+    await refreshMembers(true);
     const added = rows.find(x => x.name === name); if (added) { fxKey = added.key; fxDraft = null; renderFixed(); }
   } catch (err) { toast('登録できませんでした：' + err.message); }
 });
@@ -909,8 +1031,8 @@ function ensureMonths(yms) {
   if (otherSite !== $('site').value) { otherMonths = {}; otherSite = $('site').value; }
   yms.filter(ym => !periodMonths().includes(ym) && !otherMonths[ym] && !loadingMonths.has(ym)).forEach(ym => {
     loadingMonths.add(ym);
-    api('GET', { action: 'load', site: $('site').value, month: ym })
-      .then(res => { otherMonths[ym] = toMonthMap(res); })
+    monthRef(curSite(), ym).get()
+      .then(snap => { otherMonths[ym] = snap.exists ? (snap.data().cells || {}) : {}; })
       .catch(err => toast(`${ym.replace('-', '年')}月のシフトを読み込めませんでした：${err.message}`))
       .finally(() => { loadingMonths.delete(ym); if (document.body.dataset.view === 'print') renderPrint(); });
   });
@@ -1013,7 +1135,28 @@ function fitPreview() {
   }
   [year, month] = mo.value.split('-').map(Number);
   $('newJoin').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  load();
+
+  // ログイン：会社のGoogleアカウント（@10-ff.com）だけ通す
+  let started = false;
+  const loginErr = msg => { $('loginErr').textContent = msg || ''; $('loginErr').hidden = !msg; };
+  $('loginBtn').onclick = () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ hd: ALLOWED_DOMAIN, prompt: 'select_account' });
+    auth.signInWithPopup(provider).catch(err => {
+      if (/popup/i.test(err.code || '')) auth.signInWithRedirect(provider); // ポップアップが使えないときは画面ごと移動
+      else loginErr('ログインできませんでした：' + err.message);
+    });
+  };
+  auth.onAuthStateChanged(user => {
+    if (!user) { $('login').hidden = false; return; }
+    if (!String(user.email || '').toLowerCase().endsWith('@' + ALLOWED_DOMAIN)) {
+      loginErr(`${user.email} は使えません。会社のアカウント（@${ALLOWED_DOMAIN}）でログインしてください`);
+      auth.signOut(); $('login').hidden = false; return;
+    }
+    loginErr(''); $('login').hidden = true;
+    $('who').textContent = user.email;
+    if (!started) { started = true; load(); }
+  });
 })();
 </script>
 
