@@ -892,6 +892,7 @@ $('legacyBtn').onclick = async () => {
     }));
     render();
     const notes = [];
+    if (res.sheets?.length) notes.push(`読んだタブ：${res.sheets.join('、')}`);
     if (res.unmatched?.length) notes.push(`整理済み_Mで見つからず取り込まなかった人：${res.unmatched.join('、')}`);
     if (res.skipped?.length) notes.push(`時間として読めず取り込まなかったセル：${res.skipped.join('、')}`);
     $('dialogSlot').innerHTML = `<div class="dialog"><span>旧シフト表から${res.keys.length}人分を取り込み、${n}セルを更新しました。${notes.length ? '<br>' + notes.map(esc).join('<br>') : ''}</span><button id="dlgClose">閉じる</button></div>`;

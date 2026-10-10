@@ -81,7 +81,7 @@ function doGet(e) {
     if (p.action === 'hours') return json_(hoursRange_(p.site, p.from, p.to));
     if (p.action === 'legacy') {
       const r = readLegacy_(p.site, p.from, p.to);
-      return json_({ cells: [].concat(...Object.keys(r.cellsByMonth).map(k => r.cellsByMonth[k])), keys: r.keys, unmatched: r.unmatched, skipped: r.skipped.slice(0, 50), from: r.from, to: r.to });
+      return json_({ cells: [].concat(...Object.keys(r.cellsByMonth).map(k => r.cellsByMonth[k])), keys: r.keys, unmatched: r.unmatched, skipped: r.skipped.slice(0, 50), from: r.from, to: r.to, sheets: r.sheets });
     }
     if (p.action === 'members') return json_({ members: readMembers_(p.fresh === '1').filter(m => m.site === p.site && m.flag !== 8) });
     return json_({ status: 'error', message: '不明なactionです' });
@@ -419,7 +419,8 @@ function readLegacy_(site, fromIso, toIso) {
   const aliases = Object.assign({}, LEGACY_NAME_ALIASES, LEGACY_SITE_ALIASES[site] || {});
   const pick = hits => hits.sort((a, b) => (a.flag === 9) - (b.flag === 9) || (a.flag === 3) - (b.flag === 3))[0] || null;
   const findMember = rawName => {
-    const k = normalizeName_(rawName);
+    // 「野呂8」「中島5(3)」のような後ろの数字・括弧は外して照合する
+    const k = normalizeName_(rawName).replace(/[0-9]+$/, '');
     const aliasKey = Object.keys(aliases).find(a => normalizeName_(a) === k);
     const target = aliasKey ? normalizeName_(aliases[aliasKey]) : k;
     const exact = members.filter(m => normalizeName_(m.name) === target);
@@ -496,28 +497,33 @@ function readLegacy_(site, fromIso, toIso) {
       const blankType = m && src.blankAs && Object.keys(src.blankAs).find(t => String(m.empType || '').indexOf(t) >= 0);
       const cells = [], bad = [];
       targetCols.forEach(c => {
-        let raw = String(disp[r][c] || '').trim();
-        if (!raw) { if (!blankType) return; raw = src.blankAs[blankType]; }
+        let raw = String(disp[r][c] || '').trim(), rank = 3; // 3=時間 2=休み 1=空欄の決まり（社員の8:00-17:00）
+        if (!raw) { if (!blankType) return; raw = src.blankAs[blankType]; rank = 1; }
         const value = normalizeShift_(raw);
-        if (workHours_(value) === null) { bad.push(`${rawName} ${dates[c]}「${raw}」`); return; }
-        cells.push({ date: dates[c], value });
+        const h = workHours_(value);
+        if (h === null) { bad.push(`${rawName} ${dates[c]}「${raw}」`); return; }
+        if (rank === 3 && h === 0) rank = 2;
+        cells.push({ date: dates[c], value, rank });
       });
       if (m) skipped.push(...bad); // 集計行の数字などは報告しない
       if (!cells.length) continue; // 時間の入っていない行は無視
       if (!m) { unmatched.push(`${rawName}（${sh.getName()}・${cells.length}日分／${reasons[rawName] || '見つからない'}）`); continue; }
+      // 同じ人が複数のタブにいるときは、時間 → 休み → 空欄の決まり の順に優先する
       cells.forEach(x => {
         const id = `${m.key}|${x.date}`;
-        if (seen[id]) return; // 同じ人が2つのタブにいるときは先のタブを使う
-        seen[id] = true;
-        const month = x.date.slice(0, 7);
-        (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: m.key, date: x.date, value: x.value });
+        if (seen[id] && seen[id].rank >= x.rank) return;
+        seen[id] = { key: m.key, date: x.date, value: x.value, rank: x.rank };
       });
     }
   });
   if (!firstDate) throw new Error('旧シフト表に、その期間の日付が見つかりませんでした');
+  Object.keys(seen).forEach(id => {
+    const x = seen[id], month = x.date.slice(0, 7);
+    (cellsByMonth[month] = cellsByMonth[month] || []).push({ key: x.key, date: x.date, value: x.value });
+  });
   const keys = {};
   Object.keys(cellsByMonth).forEach(mo2 => cellsByMonth[mo2].forEach(c => { keys[c.key] = true; }));
-  return { cellsByMonth, keys: Object.keys(keys), unmatched, skipped, from: firstDate, to: lastDate };
+  return { cellsByMonth, keys: Object.keys(keys), unmatched, skipped, from: firstDate, to: lastDate, sheets: sheets.map(x => x.sh.getName()) };
 }
 
 // 旧シフト表（いなべ）の10/1以降をシフト_データに取り込む（手動で1回だけ実行。アプリ版では画面の「旧シフト表から取り込む」を使う）
