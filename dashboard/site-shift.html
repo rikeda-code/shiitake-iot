@@ -442,7 +442,8 @@ async function api(method, payload) {
    shiftSites/{拠点}/meta/fixed       … { key: [月〜日の7要素] } */
 const firebaseConfig = {
   apiKey: 'AIzaSyDUmBcQAHCnWlv5a5Lv7nS5tRBQ-LvVtjo',
-  authDomain: 'shiitake-iot.firebaseapp.com',
+  // Firebase Hosting（shiitake-iot.web.app）で開いたときは、ログインもページと同じ場所で行う（ブラウザの設定に左右されない）
+  authDomain: /(^|\.)shiitake-iot\.(web\.app|firebaseapp\.com)$/.test(location.hostname) ? location.hostname : 'shiitake-iot.firebaseapp.com',
   projectId: 'shiitake-iot',
   storageBucket: 'shiitake-iot.firebasestorage.app',
   messagingSenderId: '118184889783',
