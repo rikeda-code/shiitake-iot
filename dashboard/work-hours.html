@@ -818,19 +818,22 @@ const CULTIVATION_SHEETS = {
 const KINSHO_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
 const KINSHO_SHEET = { id: '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY', gid: '1209158168' };
 
+// 設定用のシート（URL_収穫管理表・URL_売上分析など）をまとめて置いている「DB共有」ファイル
+const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
+
 // 「整理済み_分析」の貼り付け値ではなく、拠点・月ごとの「収穫管理表」ファイルから
 // 直接参照する拠点の一覧（収穫量(kg)のみが対象。栽培内訳・菌床購入数とは独立した別機能）。
-// どのファイルを見るかは、ファーム勤務時間ファイル内「URL_収穫管理表」シートで年月ごとに管理されている
+// どのファイルを見るかは、DB共有ファイル内「URL_収穫管理表」シートで年月ごとに管理されている
 const HARVEST_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
-const HARVEST_URL_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1996914203' };
+const HARVEST_URL_SHEET = { id: DB_SHARE_SHEET_ID, gid: '1996914203' };
 const HARVEST_TARGET_SHEET_GID = '676064999'; // 収穫管理表の「収獲目標値」シート（固定gid）
 
 // 「整理済み_分析」の貼り付け値ではなく、拠点・年ごとの「売り上げ分析」シートから
 // 直接参照する拠点の一覧（出荷量(kg)のみが対象。栽培内訳・菌床購入数・収穫量の直接
-// 参照とは独立した別機能）。どのファイル・シートを見るかは、ファーム勤務時間ファイル
+// 参照とは独立した別機能）。どのファイル・シートを見るかは、DB共有ファイル
 // 内「URL_売上分析」シートで年・拠点ごとに管理されている
 const SHIPMENT_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
-const SHIPMENT_URL_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1981610050' }; // URL_売上分析
+const SHIPMENT_URL_SHEET = { id: DB_SHARE_SHEET_ID, gid: '1981610050' }; // URL_売上分析
 
 // 要員計画タブ：GAS側で計算しファーム勤務時間ファイル内「整理済み_計画_更新」シートに
 // 書き込む方式へ移行（旧・ダッシュボード側で「26/生産計画」をgviz直読みする方式は廃止）。
@@ -12147,6 +12150,7 @@ window.__cultTest = {
   KINSHO_DIRECT_SITES,
   KINSHO_SHEET,
   getKinshoDirectWarningMessages: () => kinshoDirectWarningMessages,
+  DB_SHARE_SHEET_ID,
   parseHarvestUrlSheet,
   parseHarvestTargetSheet,
   applyHarvestDirectOverrides,
