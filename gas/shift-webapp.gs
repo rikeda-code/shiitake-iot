@@ -65,6 +65,13 @@ const LEGACY_NAME_ALIASES = {
   'アユブ': 'MUHAMAD AYUB FAYYUQI', 'イマム': 'IMAM ADI SAPUTRA', '左右田 耀子': '左右田 煬子',
   '森さん': '森 郁美',
 };
+// 旧シフト表の書き方の読み替え（いなべ・群馬共通）。'' は空欄扱い（取り込まず、読めなかった一覧にも出さない）
+const LEGACY_VALUE_MAP = {
+  '1': '8:00-17:00',    // 1日分
+  '0.5': '8:00-12:00',  // 半日
+  '半': '8:00-12:00',   // 半日
+  '入社': '',
+};
 // 拠点ごとの呼び名の対応（旧シフト表の書き方 → 整理済み_Mの氏名）。名字だけで1人に決まる人は書かなくてよい
 const LEGACY_SITE_ALIASES = {
   '群馬': { 'ソー': 'SAW MIN HTET', 'SAW': 'SAW MIN HTET', 'デスタ': 'DESTA', 'レフィン': 'REVIN' },
@@ -499,7 +506,8 @@ function readLegacy_(site, fromIso, toIso) {
       const blankType = m && src.blankAs && Object.keys(src.blankAs).find(t => String(m.empType || '').indexOf(t) >= 0);
       const cells = [], bad = [];
       targetCols.forEach(c => {
-        let raw = String(disp[r][c] || '').trim(), rank = 3; // 3=時間 2=休み 1=空欄の決まり（社員の8:00-17:00）
+        let raw = String(disp[r][c] || '').trim().normalize('NFKC'), rank = 3; // 3=時間 2=休み 1=空欄の決まり（社員の8:00-17:00）
+        if (Object.prototype.hasOwnProperty.call(LEGACY_VALUE_MAP, raw)) raw = LEGACY_VALUE_MAP[raw];
         if (!raw) { if (!blankType) return; raw = src.blankAs[blankType]; rank = 1; }
         const value = normalizeShift_(raw);
         const h = workHours_(value);
