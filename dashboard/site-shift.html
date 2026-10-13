@@ -165,6 +165,10 @@ td.cell .t2 { display: block; }
 .login-card p { color: var(--muted); font-size: .85rem; margin: 0; line-height: 1.7; }
 .login-card .err { color: var(--sun); }
 .login-card button { padding: 10px 16px; font-size: .95rem; }
+.login-card .guide { display: flex; flex-direction: column; gap: 8px; background: var(--accent-soft); border-radius: 8px; padding: 12px; text-align: left; }
+.login-card .guide[hidden], .login-card .err[hidden] { display: none; }
+.login-card .guide p { color: var(--ink); }
+.login-card .guide input { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: .78rem; background: var(--surface); }
 .who { font-size: .78rem; color: var(--muted); }
 .status.ok { color: var(--saibai); }
 /* 入力／印刷のタブ */
@@ -227,6 +231,11 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <h1>拠点シフト表</h1>
     <p>会社のGoogleアカウント（@10-ff.com）でログインしてください。</p>
     <p class="err" id="loginErr" hidden></p>
+    <div class="guide" id="loginGuide" hidden>
+      <p id="guideText"></p>
+      <input id="guideUrl" readonly aria-label="このページのURL">
+      <button id="guideCopy">URLをコピー</button>
+    </div>
     <button class="primary" id="loginBtn">Googleでログイン</button>
   </div>
 </div>
@@ -1174,11 +1183,47 @@ function fitPreview() {
   // ログイン：会社のGoogleアカウント（@10-ff.com）だけ通す
   let started = false;
   const loginErr = msg => { $('loginErr').textContent = msg || ''; $('loginErr').hidden = !msg; };
+
+  // Googleログインが使えない開き方（アプリ内ブラウザ・ファイル・データ保存オフ）を見つけて、直し方を出す
+  const APP_URL = 'https://rikeda-code.github.io/shiitake-iot/site-shift.html';
+  function envProblem() {
+    if (!/^https?:$/.test(location.protocol)) return 'file';
+    const ua = navigator.userAgent;
+    if (/\bLine\//i.test(ua)) return 'line';
+    if (/FBAN|FBAV|Instagram|MicroMessenger|KAKAOTALK|Teams\/|GSA\/|; wv\)/i.test(ua)) return 'inapp';
+    try {
+      localStorage.setItem('__t', '1'); localStorage.removeItem('__t');
+      sessionStorage.setItem('__t', '1'); sessionStorage.removeItem('__t');
+    } catch (e) { return 'storage'; }
+    return '';
+  }
+  const GUIDE = {
+    file: 'このページはファイルとして開かれているため、ログインできません。下のURLを Chrome・Safari・Edge で開いてください。',
+    line: 'LINEの中のブラウザではGoogleログインが使えません。右上のメニューから「ブラウザで開く」を選ぶか、下のURLをコピーして Chrome・Safari で開いてください。',
+    inapp: 'アプリの中のブラウザ（Gmail・Teams・Googleアプリなど）ではGoogleログインが使えないことがあります。メニューの「ブラウザで開く」を選ぶか、下のURLをコピーして Chrome・Safari・Edge で開いてください。',
+    storage: 'ブラウザのCookie（サイトのデータ保存）がオフになっているため、ログインできません。ブラウザの設定で許可するか、プライベート（シークレット）モードをやめて開き直してください。',
+  };
+  function showGuide(kind) {
+    $('guideText').textContent = GUIDE[kind] || GUIDE.inapp;
+    $('guideUrl').value = APP_URL;
+    $('loginGuide').hidden = false;
+  }
+  $('guideCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(APP_URL); $('guideCopy').textContent = 'コピーしました'; }
+    catch (e) { $('guideUrl').focus(); $('guideUrl').select(); $('guideCopy').textContent = '選んだURLをコピーしてください'; }
+  };
+  const problem = envProblem();
+  // LINEで開かれたら、スマホのふつうのブラウザで開き直す（LINEの決まりの印を付ける）
+  if (problem === 'line' && !/openExternalBrowser=1/.test(location.search)) {
+    location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);
+  }
+  if (problem) showGuide(problem);
   $('loginBtn').onclick = () => {
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ hd: ALLOWED_DOMAIN, prompt: 'select_account' });
     auth.signInWithPopup(provider).catch(err => {
-      if (/popup/i.test(err.code || '')) auth.signInWithRedirect(provider); // ポップアップが使えないときは画面ごと移動
+      if (/operation-not-supported|web-storage-unsupported/i.test(err.code || '')) { loginErr(''); showGuide(envProblem() || 'inapp'); }
+      else if (/popup/i.test(err.code || '')) auth.signInWithRedirect(provider); // ポップアップが使えないときは画面ごと移動
       else loginErr('ログインできませんでした：' + err.message);
     });
   };
