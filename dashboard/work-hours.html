@@ -797,6 +797,8 @@ const PROD_GID = '2016642543'; // 整理済み_分析
 const PLAN_GID = '530402103';  // 整理済み_計画_更新
 const THREE_SITE_MERGE_GID = '1404355975'; // 3拠点マージ（予実＞比較（繁忙期見込み）タブの未来月・標準/最大労働時間補完用）
 const STD_SETTINGS_SHEET_NAME = '標準工数設定';
+// 標準工数設定シート（将来DB共有ファイルへ移行予定。移行時はこの値だけ変更する）
+const STD_SETTINGS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '381752617' };
 const PAST_YEAR_SHEET_NAME = '時間_過去実績'; // 標準労働時間タブ「前年実績」棒のデータ元
 // 標準労働時間タブ「人数」画面「前年実績」棒のデータ元。gviz/tqのsheet=名前指定
 // エンドポイントが編集後の内容を長時間反映しない（古いキャッシュを返し続ける）
@@ -2010,14 +2012,28 @@ function rerenderCurrentView() {
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
-let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu'
-const YOJITSU_MODES = ['plan', 'planstdhours', 'plancompare2', 'decplan', 'yojitsustdset'];
+let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu' | 'settings'
+const YOJITSU_MODES = ['plan', 'planstdhours', 'plancompare2', 'decplan'];
+// 「設定」グループ（絞り込みフィルターの対象外。今後ほかの設定タブもここに追加する）
+const SETTINGS_MODES = ['stdset'];
 
 function renderTabs(bases) {
   // Determine active group from current mode
-  activeGroup = YOJITSU_MODES.includes(activeMode) ? 'yojitsu' : 'jisseki';
+  activeGroup = YOJITSU_MODES.includes(activeMode) ? 'yojitsu' : (SETTINGS_MODES.includes(activeMode) ? 'settings' : 'jisseki');
   renderGroupTabs(bases);
   renderSubTabs(bases);
+}
+
+// 「設定」グループを開いている間は、画面上部の絞り込み（開始月・表示月数・拠点・
+// 業務区分・雇用形態・振替なし／あり）を非表示にする。勤務実績・予実に戻ったら
+// 再表示する（選択状態はグローバル変数のままなので変わらない）
+function updateFilterVisibility() {
+  const show = activeGroup !== 'settings';
+  ['header-period-filter', 'header-site-filter', 'header-role-filter', 'header-emp-filter', 'transfer-toggle']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = show ? '' : 'none';
+    });
 }
 
 function renderGroupTabs(bases) {
@@ -2026,6 +2042,7 @@ function renderGroupTabs(bases) {
   [
     { id: 'jisseki', label: '📋 勤務実績' },
     { id: 'yojitsu', label: '📅 予実' },
+    { id: 'settings', label: '⚙️ 設定' },
   ].forEach(g => {
     const btn = document.createElement('button');
     btn.className = 'group-btn' + (g.id === activeGroup ? ' active' : '');
@@ -2034,6 +2051,7 @@ function renderGroupTabs(bases) {
       activeGroup = g.id;
       document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      updateFilterVisibility();
       document.getElementById('main').innerHTML = '';
       renderSubTabs(bases);
       const firstTab = document.querySelector('.tab-btn');
@@ -2041,6 +2059,7 @@ function renderGroupTabs(bases) {
     };
     groupEl.appendChild(btn);
   });
+  updateFilterVisibility();
 }
 
 function renderSubTabs(bases) {
@@ -2113,21 +2132,6 @@ function renderSubTabs(bases) {
   };
   tabsEl.appendChild(prBtn);
 
-  // 標準工数設定 tab
-  const stBtn = document.createElement('button');
-  stBtn.className = 'tab-btn stdset-tab' + (activeMode === 'stdset' ? ' active' : '');
-  stBtn.textContent = '⚙️ 標準工数設定';
-  stBtn.onclick = () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    stBtn.classList.add('active');
-    activeMode = 'stdset';
-    saveSessionState();
-    document.getElementById('main').innerHTML = '';
-    renderStdSetTab();
-    renderTransferAlerts();
-  };
-  tabsEl.appendChild(stBtn);
-
   // 標準工数(h) tab
   const shBtn = document.createElement('button');
   shBtn.className = 'tab-btn stdhours-tab' + (activeMode === 'stdhours' ? ' active' : '');
@@ -2193,10 +2197,6 @@ function renderSubTabs(bases) {
         cls: 'dec-plan-tab', text: '📅 26/12向け計画', mode: 'decplan',
         render: () => { renderDecPlanTab(); },
       },
-      {
-        cls: 'yojitsu-stdset-tab', text: '⚙️ 標準工数設定', mode: 'yojitsustdset',
-        render: () => { renderYojitsuStdSetTab(); },
-      },
     ];
 
     yojitsuTabs.forEach(t => {
@@ -2217,6 +2217,37 @@ function renderSubTabs(bases) {
     // 予実グループの初期表示
     if (!YOJITSU_MODES.includes(activeMode)) {
       activeMode = 'plan';
+    }
+  }
+
+  // 「設定」グループ（勤務実績・予実と同じく、サブタブを並べられるデータ駆動の構造。
+  // 今後ほかの設定タブを追加する場合はこの配列に加える）
+  if (activeGroup === 'settings') {
+    const settingsTabs = [
+      {
+        cls: 'stdset-tab', text: '⚙️ 標準工数設定', mode: 'stdset',
+        render: () => { renderStdSetTab(); },
+      },
+    ];
+
+    settingsTabs.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'tab-btn ' + t.cls + (activeMode === t.mode ? ' active' : '');
+      btn.textContent = t.text;
+      btn.onclick = () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeMode = t.mode;
+        saveSessionState();
+        document.getElementById('main').innerHTML = '';
+        t.render();
+      };
+      tabsEl.appendChild(btn);
+    });
+
+    // 設定グループの初期表示
+    if (!SETTINGS_MODES.includes(activeMode)) {
+      activeMode = 'stdset';
     }
   }
 }
@@ -3260,8 +3291,8 @@ function renderSummaryEmpChartDevContent(prodData, planData) {
   let stdEngine = null, stdRows = [], stdRowsByDiv = {};
   if (planData) {
     const { months: planMonths, records: planRecords } = planData;
-    stdRows = loadYojitsuStdSettings();
-    const conv = loadYojitsuCsConv();
+    stdRows = loadStdSettings();
+    const conv = loadCsConv();
     console.log('[empChartDev] planMonths:', planMonths?.length, 'planRecords:', planRecords?.length, 'stdRows:', stdRows?.length);
     stdEngine = createStdHoursEngine(planRecords, planMonths, months, planMonths.length, conv, null, '実数計画');
     ROLE_TYPES.forEach(wt => {
@@ -6315,8 +6346,8 @@ function renderPlanStdHoursTab() {
 
 function renderPlanStdHoursTable({ months: planMonths, records }) {
   const main = document.getElementById('main');
-  const rows = loadYojitsuStdSettings();
-  const conv = loadYojitsuCsConv();
+  const rows = loadStdSettings();
+  const conv = loadCsConv();
 
   const originalCount = planMonths.length;
   const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, null, '実数計画');
@@ -6740,28 +6771,18 @@ let currentStdRows = null;
 let currentStdConv = null;
 let stdSettingsPromise = null;
 
-// 予実グループ用の独立した標準工数設定（勤務実績タブとは別管理）
-let yojitsuStdRows = null;
-let yojitsuStdConv = null;
-
 function loadStdSettingsSheetOnce() {
   if (!stdSettingsPromise) {
     stdSettingsPromise = fetchStdSettingsSheet().then(data => {
       stdSettingsSheetData = data;
       currentStdRows = JSON.parse(JSON.stringify(data.rows));
       currentStdConv = { ...data.conv };
-      // 予実タブ用（初回読み込み時のみ初期化。以降は独立して編集可能）
-      if (!yojitsuStdRows) {
-        yojitsuStdRows = JSON.parse(JSON.stringify(data.rows));
-        yojitsuStdConv = { ...data.conv };
-      }
       return data;
     }).catch(e => {
       console.error('[標準工数設定] シート取得エラー:', e);
       stdSettingsSheetData = { conv: { ...STD_CS_DEFAULT }, rows: [], error: e.message };
       currentStdRows = [];
       currentStdConv = { ...STD_CS_DEFAULT };
-      if (!yojitsuStdRows) { yojitsuStdRows = []; yojitsuStdConv = { ...STD_CS_DEFAULT }; }
       throw e;
     });
   }
@@ -6769,13 +6790,17 @@ function loadStdSettingsSheetOnce() {
 }
 
 async function fetchStdSettingsSheet() {
-  // headers=0：見出し行の結合をgvizに任せず、1行目から全行を生データのまま受け取る
-  // （1〜3行目のcs換算設定はセル単位の値を個別に読む必要があるため）
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(STD_SETTINGS_SHEET_NAME)}&headers=0`;
+  // gid指定の/export?format=csvで取得する（gviz/tqのsheet=名前指定は、更新後も半日〜1日
+  // 反映が遅れることがあるため。詳細はfetchPastYearCountSheet()のコメントを参照）。
+  // CSVの2次元配列をgvizのJSON形式相当（{c:[{v},...]}）に詰め替えることで、
+  // 既存のparseStdSettingsSheet()をそのまま再利用する
+  const url = `https://docs.google.com/spreadsheets/d/${STD_SETTINGS_SHEET.id}/export?format=csv&gid=${STD_SETTINGS_SHEET.gid}`;
   const res = await fetch(url);
-  const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^{]+/, '').replace(/[^}]+$/, ''));
-  return parseStdSettingsSheet(json);
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // /exportはUTF-8 BOM付きで返ることがあるため除去
+  const csvRows = parseCsv(text);
+  const fakeJson = { table: { rows: csvRows.map(cells => ({ c: cells.map(v => ({ v })) })) } };
+  return parseStdSettingsSheet(fakeJson);
 }
 
 function parseStdSettingsSheet(json) {
@@ -6786,8 +6811,22 @@ function parseStdSettingsSheet(json) {
     return c ? (c.v !== undefined ? c.v : null) : null;
   };
 
-  // 出荷cs換算設定（1〜3行目）：ラベル文字列を含むセルを探し、同じ列の直下のセルを値として読む。
-  // 実際の列位置に依存しない作りにすることで、シート側の細かいレイアウト差異を吸収する。
+  // 係数表の列見出し文言（4行目固定）。cs換算設定の値として誤ってこれらの文字列を
+  // 拾ってしまわないようにする（findLabelValueのガード用。下記の不具合を参照）
+  const COEF_TABLE_HEADER_LABELS = new Set([
+    '業務区分', '作業区分', '1コンテナ当たり', '時間当たり(kg/h)', '1cs当たり',
+    '1個当たり', '固定時間(h)', '単位', '考え方',
+  ]);
+
+  // 出荷cs換算設定（1〜3行目）：ラベル文字列を含むセルを探し、値を読む。
+  // 値の位置は「同じ列の直下のセル」（縦並びレイアウト）を優先するが、シート側の
+  // 実際のレイアウトでは2つ目以降の設定（バラのメトリック名等）が1つ目の設定の
+  // 値と同じ行に横並びで追加されており、その場合「直下のセル」は係数表の列見出し行
+  // （4行目）と重なってしまい、見出し文字列（「時間当たり(kg/h)」）をそのまま
+  // バラのメトリック名の値として読んでしまう不具合があった
+  // （baraMetricRaw:"時間当たり(kg/h)"）。そのため、直下のセルが既知の列見出し
+  // 文言と一致する場合は値として採用せず、同じ行の右隣のセル（横並びレイアウト）を
+  // 試すフォールバックを追加する。
   // 1行目はタイトル行（例:「cs数=(合計点数-バラ数)÷P/cs+バラ数」）で"P/cs"のような
   // 短い文字列を含むことがあるため、検索は2行目以降に限定し、かつラベルは見出しに
   // 実際に入っている文言そのもの（十分に長い・特定的な文字列）で照合する
@@ -6799,7 +6838,11 @@ function parseStdSettingsSheet(json) {
         const cell = row.c[c];
         const text = cell ? String(cell.v ?? cell.f ?? '') : '';
         if (text.includes(labelSubstr)) {
-          return cellAt(r + 1, c);
+          const below = cellAt(r + 1, c);
+          const belowText = (typeof below === 'string') ? below.trim() : below;
+          if (belowText !== null && belowText !== '' && !COEF_TABLE_HEADER_LABELS.has(belowText)) return below;
+          const beside = cellAt(r, c + 1);
+          if (beside !== null && beside !== '') return beside;
         }
       }
     }
@@ -6892,7 +6935,7 @@ function renderStdSetTab() {
         <button class="select-btn" style="padding:3px 14px" onclick="resetStdSettings()">リセット</button>
       </span>
     </div>
-    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値は「${STD_SETTINGS_SHEET_NAME}」シートから読み込んでいます（画面読み込み時のみ取得）。ここでの編集は一時的な上書きで、保存はされません。単位は各セルの下に表示。</p>
+    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値は「${STD_SETTINGS_SHEET_NAME}」シートから読み込んでいます（画面読み込み時のみ取得）。ここでの編集は一時的な試算用で、保存はされません。勤務実績・予実のすべてのタブに反映されます。</p>
     <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
       <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">
         📦 出荷cs換算設定　<span style="font-weight:400;font-size:0.72rem">cs数 = (合計点数 − バラ数) ÷ P/cs + バラ数</span>
@@ -6970,123 +7013,6 @@ window.resetStdSettings = function() {
   window._stdRows = currentStdRows;
   window._stdConv = currentStdConv;
   renderStdSetTab();
-};
-
-/* ── 予実タブ用 標準工数設定（独立） ──────────────────────────────── */
-function loadYojitsuStdSettings() {
-  return yojitsuStdRows || [];
-}
-function loadYojitsuCsConv() {
-  return yojitsuStdConv || { ...STD_CS_DEFAULT };
-}
-
-function renderYojitsuStdSetTab() {
-  const main = document.getElementById('main');
-
-  if (!stdSettingsSheetData) {
-    main.innerHTML = '<div class="loading">標準工数設定を読み込み中...</div>';
-    loadStdSettingsSheetOnce().then(() => renderYojitsuStdSetTab()).catch(e => {
-      main.innerHTML = `<div class="error-msg">「${STD_SETTINGS_SHEET_NAME}」シートの取得エラー: ${e.message}</div>`;
-    });
-    return;
-  }
-
-  const rows = yojitsuStdRows;
-  window._yojitsuStdRows = rows;
-
-  const colLabel = { perContainer: '1コンテナ当たり', kgPerH: '時間当たり(kg/h)', perCs: '1cs当たり', perPiece: '1個当たり', fixedH: '固定時間(h)' };
-  const allCols  = ['perContainer', 'kgPerH', 'perCs', 'perPiece', 'fixedH'];
-
-  const divCount = {};
-  rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
-
-  const conv = yojitsuStdConv;
-  window._yojitsuStdConv = conv;
-
-  let html = `<div class="prod-panel panel-fit-content">
-    <div class="chart-section-label">⚙️ 標準工数設定（予実）
-      <span style="float:right;display:flex;gap:8px;align-items:center">
-        <button class="select-btn" style="padding:3px 14px" onclick="resetYojitsuStdSettings()">リセット</button>
-      </span>
-    </div>
-    <p style="color:var(--muted);font-size:0.78rem;margin:6px 16px 10px">値は「${STD_SETTINGS_SHEET_NAME}」シートから読み込んでいます（画面読み込み時のみ取得）。ここでの編集は予実タブにのみ反映され、勤務実績タブの設定とは独立しています。</p>
-    <div style="margin:0 0 16px;padding:10px 16px;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
-      <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:4px;width:100%">
-        📦 出荷cs換算設定　<span style="font-weight:400;font-size:0.72rem">cs数 = (合計点数 − バラ数) ÷ P/cs + バラ数</span>
-      </div>
-      <label style="font-size:0.78rem;color:var(--muted)">パック・袋 P/cs
-        <div><input type="number" id="yj-cs-pcs" value="${conv.pcsPerCs || 30}" min="1"
-          style="width:70px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-        <span style="font-size:0.7rem;color:var(--muted)"> 個/cs</span></div>
-      </label>
-      <label style="font-size:0.78rem;color:var(--muted)">バラのメトリック名
-        <div><input type="text" id="yj-cs-bara" value="${conv.baraMetric || 'バラ数'}"
-          style="width:90px;background:#0d1017;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-        <span style="font-size:0.7rem;color:var(--muted)"> (計画シートのメトリック名)</span></div>
-      </label>
-      <div style="font-size:0.72rem;color:var(--muted)">バラ→1cs、パック・袋→${conv.pcsPerCs || 30}P/cs</div>
-    </div>
-    <div class="prod-table-wrap">
-    <table class="prod-table std-set-table">
-      <thead><tr>
-        <th class="th-left" style="min-width:60px">業務区分</th>
-        <th class="th-left" style="min-width:130px">作業区分</th>
-        ${allCols.map(c => `<th style="min-width:110px">${colLabel[c]}</th>`).join('')}
-        <th class="th-left" style="min-width:180px">考え方</th>
-      </tr></thead>
-      <tbody>`;
-
-  let lastDiv = '';
-  rows.forEach((r, i) => {
-    const divCell = r.div !== lastDiv
-      ? `<td class="col-site" style="color:${r.div === '栽培' ? 'var(--accent-gunma)' : 'var(--accent-inabe)'};font-weight:600" rowspan="${divCount[r.div]}">${r.div}</td>`
-      : '';
-    if (r.div !== lastDiv) lastDiv = r.div;
-
-    html += `<tr>${divCell}<td class="col-metric" style="font-size:0.82rem">${r.task}</td>`;
-    allCols.forEach(col => {
-      if (r.col === col) {
-        const v = (r.val !== null && r.val !== undefined) ? r.val : '';
-        html += `<td class="col-num" style="padding:2px 4px">
-          <input type="number" class="yj-std-input" data-idx="${i}"
-            value="${v}" placeholder="—"
-            style="width:80px;text-align:right;background:#1a1f35;border:1px solid #3a3f5c;color:#e2e8f0;padding:3px 6px;border-radius:4px;font-size:0.82rem">
-          <div style="font-size:0.68rem;color:var(--muted);text-align:right">${r.unit}</div>
-        </td>`;
-      } else {
-        html += `<td class="col-num empty" style="color:var(--muted)">—</td>`;
-      }
-    });
-    html += `<td class="col-metric" style="font-size:0.75rem;color:var(--muted)">${r.note}</td></tr>`;
-  });
-
-  html += `</tbody></table></div></div>`;
-  main.innerHTML = html;
-
-  main.querySelectorAll('.yj-std-input').forEach(inp => {
-    inp.addEventListener('input', () => {
-      const idx = parseInt(inp.dataset.idx);
-      window._yojitsuStdRows[idx].val = inp.value === '' ? null : parseFloat(inp.value);
-    });
-  });
-
-  ['yj-cs-pcs', 'yj-cs-bara'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('input', () => {
-      window._yojitsuStdConv.pcsPerCs   = parseFloat(document.getElementById('yj-cs-pcs').value) || 30;
-      window._yojitsuStdConv.baraMetric = document.getElementById('yj-cs-bara').value.trim() || 'バラ数';
-    });
-  });
-}
-
-window.resetYojitsuStdSettings = function() {
-  if (!confirm('シート読み込み時の値にリセットしますか？（編集内容は破棄されます）')) return;
-  yojitsuStdRows = JSON.parse(JSON.stringify(stdSettingsSheetData.rows));
-  yojitsuStdConv = { ...stdSettingsSheetData.conv };
-  window._yojitsuStdRows = yojitsuStdRows;
-  window._yojitsuStdConv = yojitsuStdConv;
-  renderYojitsuStdSetTab();
 };
 
 /* ── 標準工数(h) ────────────────────────────────────────────────────── */
@@ -7685,8 +7611,6 @@ function renderActiveTabContent(summarySubtab) {
     renderPlanStdHoursTab();
   } else if (activeMode === 'decplan') {
     renderDecPlanTab();
-  } else if (activeMode === 'yojitsustdset') {
-    renderYojitsuStdSetTab();
   }
   renderTransferAlerts();
 }
@@ -7736,8 +7660,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
     return { ...r, values: merged };
   });
-  const rows = loadYojitsuStdSettings();
-  const conv = loadYojitsuCsConv();
+  const rows = loadStdSettings();
+  const conv = loadCsConv();
   const originalCount = planMonths.length;
   const { calcRow, getProdVal } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, null, '実数計画');
 
@@ -10722,7 +10646,7 @@ function renderCompareSiteCharts(prodData) {
   const upperCountBySite = countBySiteFor(e => isPartTime(e));
 
   // ●マーカー①：標準工数（拠点別）。既存の予定標準工数と同じロジック
-  // （loadYojitsuStdSettings()/createStdHoursEngine()のcalcRow()）を使う。
+  // （loadStdSettings()/createStdHoursEngine()のcalcRow()）を使う。
   // 雇用形態フィルタは適用しない（既存の予定標準工数と同じ理由）
   let stdTaskBySite = null;
   // ●マーカー②：標準労働時間（拠点別、過去分のみ）。既存の
@@ -10743,8 +10667,8 @@ function renderCompareSiteCharts(prodData) {
   });
   if (prodData) {
     const { months: prodMonths, records } = prodData;
-    const stdSettingRows = loadYojitsuStdSettings();
-    const stdConv = loadYojitsuCsConv();
+    const stdSettingRows = loadStdSettings();
+    const stdConv = loadCsConv();
     const { calcRow } = createStdHoursEngine(records, prodMonths, commonMonths, originalCount, stdConv);
     const stdRowsFiltered = stdSettingRows.filter(r => divs.includes(r.div));
     stdTaskBySite = availSites.map(site => commonMonths.map((_, mi) => {
@@ -11657,8 +11581,8 @@ function renderDecPlanContent(planData, mergeData) {
   const main = document.getElementById('main');
   const { employees, months: activeMonths } = getActiveData();
   const { months: planMonths, records: planRecords } = planData;
-  const stdRows = loadYojitsuStdSettings();
-  const conv = loadYojitsuCsConv();
+  const stdRows = loadStdSettings();
+  const conv = loadCsConv();
   const originalCount = planMonths.length;
   const engine = createStdHoursEngine(planRecords, planMonths, planMonths, originalCount, conv, null, '実数計画');
 
@@ -12169,6 +12093,13 @@ window.__cultTest = {
   parseShipmentUrlSheet,
   getShipmentDirectWarningMessages: () => shipmentDirectWarningMessages,
   getShipmentDirectNotices: () => shipmentDirectNotices,
+  STD_SETTINGS_SHEET,
+  STD_CS_DEFAULT,
+  parseStdSettingsSheet,
+  createStdHoursEngine,
+  calcCs,
+  loadStdSettings,
+  loadCsConv,
 };
 </script>
 </body>
