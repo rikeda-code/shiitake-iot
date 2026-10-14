@@ -380,9 +380,10 @@
     '群馬':   { id: '12Xa_bkHE5tw9-YgGPIONzAj9ex3jr0Au-3B1k6DSZDY', gid: '1776859904' },
     '南丹':   { id: '1WBnGT3tkVfGhDJ7OZ2mZE4Juvd-t7le68bUlVRHGIeM', gid: '2146042804' },
   };
-  var STD_HOURS_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
-  var STD_WORK_HOURS_GID = '381752617';
-  var STD_LABOR_HOURS_GID = '1404355975';
+  var DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg'; // DB共有
+  var STD_WORK_HOURS_SHEET = { id: DB_SHARE_SHEET_ID, gid: '264266810' }; // DB共有「標準工数設定」
+  // 標準労働時間は、引き続きファーム勤務時間ファイルから読む
+  var STD_LABOR_HOURS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1404355975' };
   var SHIFT_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
   var SHIFT_SHEET_GID = '872290181'; // シフト表は期間ごとに新しいシートが作られるため、差し替え時はここだけ変更する
   // 拠点シフト表（site-shift.html）のGAS WebアプリURL。設定されていればこちらから実働時間を読み、
@@ -971,7 +972,7 @@
   }
 
   async function fetchStdWorkHoursRows(){
-    var json = await fetchCsvSheet(STD_HOURS_SHEET_ID, STD_WORK_HOURS_GID);
+    var json = await fetchCsvSheet(STD_WORK_HOURS_SHEET.id, STD_WORK_HOURS_SHEET.gid);
     return parseStdWorkHoursRows(json.table.rows);
   }
 
@@ -1292,7 +1293,7 @@
   }
 
   async function fetchStdLaborRows(){
-    var json = await fetchCsvSheet(STD_HOURS_SHEET_ID, STD_LABOR_HOURS_GID);
+    var json = await fetchCsvSheet(STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid);
     return parseStdLaborRows(json.table.rows);
   }
 

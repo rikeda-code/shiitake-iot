@@ -797,8 +797,6 @@ const PROD_GID = '2016642543'; // 整理済み_分析
 const PLAN_GID = '530402103';  // 整理済み_計画_更新
 const THREE_SITE_MERGE_GID = '1404355975'; // 3拠点マージ（予実＞比較（繁忙期見込み）タブの未来月・標準/最大労働時間補完用）
 const STD_SETTINGS_SHEET_NAME = '標準工数設定';
-// 標準工数設定シート（将来DB共有ファイルへ移行予定。移行時はこの値だけ変更する）
-const STD_SETTINGS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '381752617' };
 const PAST_YEAR_SHEET_NAME = '時間_過去実績'; // 標準労働時間タブ「前年実績」棒のデータ元
 // 標準労働時間タブ「人数」画面「前年実績」棒のデータ元。gviz/tqのsheet=名前指定
 // エンドポイントが編集後の内容を長時間反映しない（古いキャッシュを返し続ける）
@@ -820,8 +818,11 @@ const CULTIVATION_SHEETS = {
 const KINSHO_DIRECT_SITES = ['いなべ', '群馬', '南丹'];
 const KINSHO_SHEET = { id: '1oR_Qp16haR6zccY7LZJ_OW1hqu8_dnb9k_yj1iLunzY', gid: '1209158168' };
 
-// 設定用のシート（URL_収穫管理表・URL_売上分析など）をまとめて置いている「DB共有」ファイル
+// 設定用のシート（URL_収穫管理表・URL_売上分析・標準工数設定など）をまとめて
+// 置いている「DB共有」ファイル
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
+// 標準工数設定シート（DB共有ファイルの「標準工数設定」）
+const STD_SETTINGS_SHEET = { id: DB_SHARE_SHEET_ID, gid: '264266810' };
 
 // 「整理済み_分析」の貼り付け値ではなく、拠点・月ごとの「収穫管理表」ファイルから
 // 直接参照する拠点の一覧（収穫量(kg)のみが対象。栽培内訳・菌床購入数とは独立した別機能）。
