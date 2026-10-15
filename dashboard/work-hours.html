@@ -3288,14 +3288,13 @@ function renderSummaryEmpChartDevContent(prodData, planData) {
   const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
   const { months: prodMonths, records } = prodData;
 
-  // 標準工数エンジン（planDataがある場合のみ初期化）
+  // 標準工数エンジン（planDataがある場合のみ初期化。境目以前の月は生産実績データ、
+  // それより後の月は計画データで計算する）
   let stdEngine = null, stdRows = [], stdRowsByDiv = {};
   if (planData) {
-    const { months: planMonths, records: planRecords } = planData;
     stdRows = loadStdSettings();
     const conv = loadCsConv();
-    console.log('[empChartDev] planMonths:', planMonths?.length, 'planRecords:', planRecords?.length, 'stdRows:', stdRows?.length);
-    stdEngine = createStdHoursEngine(planRecords, planMonths, months, planMonths.length, conv, null, '実数計画');
+    stdEngine = createYojitsuStdHoursEngine(prodData, planData, months, conv);
     ROLE_TYPES.forEach(wt => {
       stdRowsByDiv[wt] = stdRows.filter(r => r.div === wt);
       console.log(`[empChartDev] stdRowsByDiv[${wt}]:`, stdRowsByDiv[wt]?.length);
@@ -6338,20 +6337,21 @@ function renderPlanTable({ months: planMonths, records }) {
 function renderPlanStdHoursTab() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">予定標準工数を計算中...</div>';
-  Promise.all([fetchPlanSheet(), loadStdSettingsSheetOnce()]).then(([planData]) => {
-    renderPlanStdHoursTable(planData);
+  Promise.all([fetchPlanSheet(), fetchProductionSheet(), loadStdSettingsSheetOnce()]).then(([planData, prodData]) => {
+    renderPlanStdHoursTable(planData, prodData);
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
   });
 }
 
-function renderPlanStdHoursTable({ months: planMonths, records }) {
+function renderPlanStdHoursTable(planData, prodData) {
+  const { months: planMonths, records } = planData;
   const main = document.getElementById('main');
   const rows = loadStdSettings();
   const conv = loadCsConv();
 
-  const originalCount = planMonths.length;
-  const { calcRow } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, null, '実数計画');
+  // 境目以前の月は生産実績データ、それより後の月は計画データで標準工数を計算する
+  const { calcRow, cutoffMonth } = createYojitsuStdHoursEngine(prodData, planData, planMonths, conv);
 
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
   const divCount = {};
@@ -6364,7 +6364,7 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
 
   let html = `<div class="prod-panel panel-fit-content">
     <div class="chart-section-label">📋 予定標準工数(h) ／ 生産計画 × 標準工数設定
-      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 整理済み_計画_更新シートの計画値 × 標準工数設定で算出　係数は⚙️標準工数設定タブで変更可</span>
+      <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:12px">※ 整理済み_計画_更新シートの計画値 × 標準工数設定で算出　係数は⚙️標準工数設定タブで変更可　過去の月（〜${cutoffMonth}）は生産実績、以降は生産計画で算出</span>
     </div>`;
 
   availSites.forEach(site => {
@@ -6376,7 +6376,10 @@ function renderPlanStdHoursTable({ months: planMonths, records }) {
           <th class="th-left col-site" style="min-width:60px">業務区分</th>
           <th class="th-left col-work" style="min-width:130px">作業区分</th>
           <th class="th-left col-basis" style="min-width:140px">計算根拠</th>
-          ${planMonths.map(m => `<th>${m}</th>`).join('')}
+          ${planMonths.map(m => {
+            const isActual = monthToNum(m) <= monthToNum(cutoffMonth);
+            return `<th>${m}<div style="font-size:0.62rem;font-weight:400;color:${isActual ? '#34d399' : 'var(--muted)'}">${isActual ? '実績' : '計画'}</div></th>`;
+          }).join('')}
           <th class="th-left" style="min-width:130px">計算方法</th>
         </tr></thead><tbody>`;
 
@@ -6686,12 +6689,20 @@ function createStdHoursEngine(records, prodMonths, displayMonths, originalCount,
   const aliases = metricAliases || {};
 
   function getRawVal(site, metricKey, pi) {
+    // catが指定されている場合（preferredCat経由。計画シートの「実数計画」等）は、
+    // まずそのカテゴリの行を探す。見つからない場合、「構成比」カテゴリ（パック数＝
+    // 0.77等の割合値）だけは代わりに使わないが、それ以外のカテゴリ（計画シートの
+    // 栽培内訳・生産実績等、そもそも「実数計画」カテゴリの行が存在しない指標）は
+    // 従来どおりカテゴリを問わず同じ指標名の行を使う。完全にカテゴリ無指定の
+    // フォールバックをやめてしまうと、実数計画カテゴリの行がない栽培内訳・収穫量
+    // 等がすべてnullになってしまう不具合があったため
     const lookup = (key, cat) => {
       if (cat) {
-        const r = records.find(rr => rr.site === site && rr.metric === key && rr.cat === cat);
-        if (r) return r;
+        const exact = records.find(rr => rr.site === site && rr.metric === key && rr.cat === cat);
+        if (exact) return exact;
+        return records.find(rr => rr.site === site && rr.metric === key && rr.cat !== '構成比') || null;
       }
-      return records.find(rr => rr.site === site && rr.metric === key);
+      return records.find(rr => rr.site === site && rr.metric === key) || null;
     };
     let r = lookup(metricKey, preferredCat);
     if (!r && aliases[metricKey]) r = lookup(aliases[metricKey], preferredCat);
@@ -6761,6 +6772,52 @@ function createStdHoursEngine(records, prodMonths, displayMonths, originalCount,
   }
 
   return { getProdVal, calcRow };
+}
+
+// 予実グループ（予定標準工数(h)・比較（繁忙期見込み）・26/12向け計画・サマリーの
+// 業務区分別グラフ等）で使う、実績と計画の境目月。「比較（繁忙期見込み）」タブの
+// ACTUAL_CUTOFFと同じ考え方（整理済み_Mの実データ最終月）を用いる
+function getActualCutoffMonth() {
+  const realMonths = getRealMonths();
+  return normalizeMonth(realMonths[realMonths.length - 1]);
+}
+function monthToNum(m) {
+  const [y, mo] = normalizeMonth(m).split('/').map(Number);
+  return y * 100 + mo;
+}
+
+// 予実グループの標準工数計算用エンジン。境目（getActualCutoffMonth()）以前の月は
+// 生産実績データ（勤務実績＞標準工数(h)と同じ取り方＝prodData、preferredCatなし）、
+// 境目より後の月は計画データ（planData、preferredCat='実数計画'）で計算する。
+// 計画シートの過去月には実績を手で写した値と計画値が混在し、生産実績と一致しない
+// ことがあるため、境目以前の月は常に生産実績データを使い、計画データにフォール
+// バックしない（生産実績データに値が無ければnull＝「－」のまま）。
+// displayMonths: 結果を返す際のインデックスに対応する月ラベルの配列
+// （planData.monthsと同じ配列を渡すことが多いが、サマリー側の拡張月リスト等、
+// 別の月リストを渡すこともできる）
+function createYojitsuStdHoursEngine(prodData, planData, displayMonths, conv) {
+  const cutoff = monthToNum(getActualCutoffMonth());
+  const prodEngine = (prodData && prodData.records)
+    ? createStdHoursEngine(prodData.records, prodData.months, displayMonths, displayMonths.length, conv)
+    : null;
+  const planEngine = createStdHoursEngine(planData.records, planData.months, displayMonths, displayMonths.length, conv, null, '実数計画');
+
+  function engineFor(mi) {
+    const m = displayMonths[mi];
+    if (m && monthToNum(m) <= cutoff) return prodEngine;
+    return planEngine;
+  }
+
+  function getProdVal(site, metricKey, mi) {
+    const engine = engineFor(mi);
+    return engine ? engine.getProdVal(site, metricKey, mi) : null;
+  }
+  function calcRow(site, r, mi) {
+    const engine = engineFor(mi);
+    return engine ? engine.calcRow(site, r, mi) : { h: null, containers: null };
+  }
+
+  return { getProdVal, calcRow, cutoffMonth: getActualCutoffMonth() };
 }
 
 // stdSettingsSheetData: 「標準工数設定」シートから読み取った値そのもの（リセット時の復元元）。
@@ -7643,28 +7700,15 @@ function renderPlanCompareTab2() {
 function renderPlanCompareCharts2(planData, prodData, mergeData) {
   const main = document.getElementById('main');
   const { months: planMonths, records: rawPlanRecords } = planData;
-  const { months: actualMonths, records: actualRecords } = prodData || { months: [], records: [] };
 
-  // 計画シートの実数計画カテゴリで null になっている月を、実績シートの同名メトリックで補完する
-  // （過去月は計画シートに実績値がなく予定標準工数が 0 になるため）
-  const records = rawPlanRecords.map(r => {
-    if (r.cat !== '実数計画') return r;
-    const hasNull = r.values.some(v => v === null);
-    if (!hasNull) return r;
-    const fallback = actualRecords.find(ar => ar.site === r.site && ar.metric === r.metric);
-    if (!fallback) return r;
-    const merged = r.values.map((v, pi) => {
-      if (v !== null) return v;
-      const month = planMonths[pi];
-      const ai = actualMonths.indexOf(month);
-      return ai >= 0 ? (fallback.values[ai] ?? null) : null;
-    });
-    return { ...r, values: merged };
-  });
+  // 境目（ACTUAL_CUTOFFと同じ、整理済み_Mの実データ最終月）以前の月は生産実績データ、
+  // それより後の月は計画データで標準工数を計算する（createYojitsuStdHoursEngine()）。
+  // 計画シートの過去月は実績を手で写した値と計画値が混在し生産実績と一致しないことが
+  // あるため、以前のnull補完方式（過去月のnullだけ実績で埋める）はやめ、過去月は
+  // 常に生産実績データを使う
   const rows = loadStdSettings();
   const conv = loadCsConv();
-  const originalCount = planMonths.length;
-  const { calcRow, getProdVal } = createStdHoursEngine(records, planMonths, planMonths, originalCount, conv, null, '実数計画');
+  const { calcRow, getProdVal } = createYojitsuStdHoursEngine(prodData, planData, planMonths, conv);
 
   // div ごとの生産計画量を拠点・月別に返す（右軸の折れ線用）
   const DIV_METRIC = { '栽培': '収穫量(kg)', '出荷': '出荷量(kg)' };
@@ -7673,7 +7717,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     return getProdVal(site, DIV_METRIC[div], mi);
   }
 
-  const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
+  const availSites = [...new Set(rawPlanRecords.map(r => r.site))].filter(s => SITE_COLORS[s]);
 
   // 計画月（"2025/12"形式）に対応する実績工数を返す
   function workHoursForPlanMonths(site, typeFilter) {
@@ -11571,21 +11615,21 @@ let decPlanInputs = {};
 function renderDecPlanTab() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">データを計算中...</div>';
-  Promise.all([fetchPlanSheet(), loadStdSettingsSheetOnce(), fetchThreeSiteMergeSheet()])
-    .then(([planData, , mergeData]) => { renderDecPlanContent(planData, mergeData); })
+  Promise.all([fetchPlanSheet(), fetchProductionSheet(), loadStdSettingsSheetOnce(), fetchThreeSiteMergeSheet()])
+    .then(([planData, prodData, , mergeData]) => { renderDecPlanContent(planData, prodData, mergeData); })
     .catch(e => {
       main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
     });
 }
 
-function renderDecPlanContent(planData, mergeData) {
+function renderDecPlanContent(planData, prodData, mergeData) {
   const main = document.getElementById('main');
   const { employees, months: activeMonths } = getActiveData();
-  const { months: planMonths, records: planRecords } = planData;
+  const { months: planMonths } = planData;
   const stdRows = loadStdSettings();
   const conv = loadCsConv();
-  const originalCount = planMonths.length;
-  const engine = createStdHoursEngine(planRecords, planMonths, planMonths, originalCount, conv, null, '実数計画');
+  // 境目以前の月は生産実績データ、それより後の月は計画データで標準工数を計算する
+  const engine = createYojitsuStdHoursEngine(prodData, planData, planMonths, conv);
 
   const SITES_ORD = ['いなべ', '群馬', '南丹'];
   // ①6月実績：作成時点（2026年6月）に固定。表示文言・計算対象月とも変更しない
@@ -12098,6 +12142,9 @@ window.__cultTest = {
   STD_CS_DEFAULT,
   parseStdSettingsSheet,
   createStdHoursEngine,
+  createYojitsuStdHoursEngine,
+  getActualCutoffMonth,
+  monthToNum,
   calcCs,
   loadStdSettings,
   loadCsConv,
