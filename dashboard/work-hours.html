@@ -6690,13 +6690,17 @@ function createStdHoursEngine(records, prodMonths, displayMonths, originalCount,
 
   function getRawVal(site, metricKey, pi) {
     // catが指定されている場合（preferredCat経由。計画シートの「実数計画」等）は、
-    // そのカテゴリの行だけを探し、見つからなくてもカテゴリ無指定の行にフォール
-    // バックしない。フォールバックすると、同名メトリックの別カテゴリの行（例：
-    // 計画シートの「構成比」カテゴリのパック数＝0.77等の割合）を誤って実数として
-    // 使ってしまう不具合があったため
+    // まずそのカテゴリの行を探す。見つからない場合、「構成比」カテゴリ（パック数＝
+    // 0.77等の割合値）だけは代わりに使わないが、それ以外のカテゴリ（計画シートの
+    // 栽培内訳・生産実績等、そもそも「実数計画」カテゴリの行が存在しない指標）は
+    // 従来どおりカテゴリを問わず同じ指標名の行を使う。完全にカテゴリ無指定の
+    // フォールバックをやめてしまうと、実数計画カテゴリの行がない栽培内訳・収穫量
+    // 等がすべてnullになってしまう不具合があったため
     const lookup = (key, cat) => {
       if (cat) {
-        return records.find(rr => rr.site === site && rr.metric === key && rr.cat === cat) || null;
+        const exact = records.find(rr => rr.site === site && rr.metric === key && rr.cat === cat);
+        if (exact) return exact;
+        return records.find(rr => rr.site === site && rr.metric === key && rr.cat !== '構成比') || null;
       }
       return records.find(rr => rr.site === site && rr.metric === key) || null;
     };
