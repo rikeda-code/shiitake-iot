@@ -38,13 +38,23 @@
 
   .wrap{ max-width:1180px; margin:0 auto; }
 
+  /* 1行目(タイトル・区分トグル・拠点トグル)＋2行目(基準日の操作)をまとめて
+     ページ上端に固定する領域。position:stickyは通常のフロー内に高さを残す
+     ため、下に続くパネルの上端が隠れることはない */
+  .sticky-head{
+    position:sticky;
+    top:0;
+    z-index:10;
+    background:var(--paper);
+    padding-bottom:6px;
+    border-bottom:2px solid var(--brown);
+    margin-bottom:10px;
+  }
   header{
     display:flex;
     align-items:flex-end;
     justify-content:space-between;
     gap:20px;
-    padding-bottom:6px;
-    border-bottom:2px solid var(--brown);
     margin-bottom:8px;
     flex-wrap:wrap;
   }
@@ -191,32 +201,34 @@
 <body>
 <div class="wrap">
 
-  <header>
-    <div class="title-block">
-      <h1>直近工数計画ダッシュボード</h1>
-    </div>
-    <div class="toggle-cluster">
-      <div class="site-toggle" id="businessToggle">
-        <button type="button" class="active" data-business="栽培">栽培</button>
-        <button type="button" data-business="出荷">出荷</button>
-        <button type="button" data-business="配送">配送</button>
+  <div class="sticky-head">
+    <header>
+      <div class="title-block">
+        <h1>直近工数計画ダッシュボード</h1>
       </div>
-      <div class="site-toggle" id="siteToggle">
-        <button type="button" class="active" data-site="いなべ">いなべ</button>
-        <button type="button" data-site="群馬">群馬</button>
-        <button type="button" data-site="南丹">南丹</button>
+      <div class="toggle-cluster">
+        <div class="site-toggle" id="businessToggle">
+          <button type="button" class="active" data-business="栽培">栽培</button>
+          <button type="button" data-business="出荷">出荷</button>
+          <button type="button" data-business="配送">配送</button>
+        </div>
+        <div class="site-toggle" id="siteToggle">
+          <button type="button" class="active" data-site="いなべ">いなべ</button>
+          <button type="button" data-site="群馬">群馬</button>
+          <button type="button" data-site="南丹">南丹</button>
+        </div>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <div class="day-nav" style="margin-bottom:10px;">
-    <button id="prevMonth" aria-label="前月">«</button>
-    <button id="prevDay" aria-label="前日">‹</button>
-    <span class="label">基準日</span>
-    <input type="date" id="basisDateInput">
-    <button id="nextDay" aria-label="翌日">›</button>
-    <button id="nextMonth" aria-label="翌月">»</button>
-    <button id="todayBtn" class="today-btn">今日</button>
+    <div class="day-nav">
+      <button id="prevMonth" aria-label="前月">«</button>
+      <button id="prevDay" aria-label="前日">‹</button>
+      <span class="label">基準日</span>
+      <input type="date" id="basisDateInput">
+      <button id="nextDay" aria-label="翌日">›</button>
+      <button id="nextMonth" aria-label="翌月">»</button>
+      <button id="todayBtn" class="today-btn">今日</button>
+    </div>
   </div>
 
   <div id="unsupportedPanel" class="panel unsupported" style="display:none;">
