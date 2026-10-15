@@ -402,13 +402,13 @@
   // 空のときだけ上の旧シフト表（期間ごとのシート）を読む
   var SHIFT_GAS_URL = ''; // 反映は保留中。拠点シフト表のGAS URL: https://script.google.com/macros/s/AKfycbzVm0SzILDzMTPabtrxeYxJz5__APrMgb8Vt4Ga_VFLItC9QAVWooPcRjrlPuBGutgWvg/exec
   // 日別収穫kgの取得先（拠点ごと）。typeで取得方式を切り替える：
-  // 'yearMonthColumns'=いなべ(従来どおり。1シートの年月列×日番号行)、
-  // 'monthlySheets'=群馬(「2026年ファーム売上高・収穫量」の月ごとのシートを
+  // 'yearMonthColumns'=いなべ・群馬(1シートの年月列×日番号行。群馬は転写シートに
+  // 年月の列を追加すれば自動で反映)、
+  // 'monthlySheets'=南丹(「2026年ファーム売上高・収穫量」の月ごとのシートを
   // 年月→gidで手動管理。シート一覧の仕組みができるまでは月を追加するたびにここに足す)
   var FORECAST_HARVEST_SOURCES = {
     'いなべ': { type: 'yearMonthColumns', id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' },
-    '群馬': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
-             gids: { '2026.10': '1913253722' } },
+    '群馬': { type: 'yearMonthColumns', id: '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y', gid: '1272257227' }, // 2026.5群馬収穫計画「転写」
     '南丹': { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
              gids: { '2026.10': '1061657376' } }, // 南丹10月売上高＆収穫量
   };
@@ -1104,7 +1104,8 @@
   }
 
   // 収穫予測パネル(shiitake-shipment-plan.htmlのtable2)と同じ取得方法を複製。
-  // 「2026.5いなべ収穫計画」の「転写」タブから、年月一致列×日番号一致行の日合計を取得する。
+  // 「2026.5いなべ収穫計画」「2026.5群馬収穫計画」等の「転写」タブから、年月一致列×
+  // 日番号一致行の日合計を取得する（拠点専用の前提は持たず、src.id/gidのみに依存）。
   // 拠点の取得先が未設定の場合は取得せずnullを返す。typeによって取得方式を振り分ける
   async function fetchDailyHarvestTotal(date, cache, site){
     var src = FORECAST_HARVEST_SOURCES[site];
