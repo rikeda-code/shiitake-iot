@@ -241,7 +241,7 @@
   <section class="panel cult">
     <div class="panel-head">
       <h2>工程件数・稼働コンテナ数</h2>
-      <span class="note">単位：件　/　当日〜7日後</span>
+      <span class="note">単位：件　/　<span class="basis-range-note">当日〜7日後</span></span>
     </div>
     <div class="panel-error" id="cultError"></div>
     <div class="table-scroll">
@@ -250,8 +250,8 @@
         <thead>
           <tr>
             <th class="sticky-1" colspan="2">工程</th>
-            <th class="today-col">当日</th>
-            <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="today-col basis-label-0">当日</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
@@ -279,7 +279,7 @@
   <section class="panel work">
     <div class="panel-head">
       <h2>標準工数</h2>
-      <span class="note">単位：h　/　当日〜7日後</span>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
     </div>
     <div class="panel-error" id="workError"></div>
     <div class="table-scroll">
@@ -288,8 +288,8 @@
         <thead>
           <tr>
             <th class="sticky-1" colspan="2">作業区分</th>
-            <th class="today-col">当日</th>
-            <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="today-col basis-label-0">当日</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
@@ -312,7 +312,7 @@
   <section class="panel labor">
     <div class="panel-head">
       <h2>標準労働時間</h2>
-      <span class="note">単位：h　/　当日〜7日後</span>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
     </div>
     <div class="panel-error" id="laborError"></div>
     <div class="table-scroll">
@@ -321,8 +321,8 @@
         <thead>
           <tr>
             <th class="sticky-1" colspan="2">項目</th>
-            <th class="today-col">当日</th>
-            <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="today-col basis-label-0">当日</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
@@ -367,8 +367,8 @@
           <thead>
             <tr>
               <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
-              <th class="today-col">当日</th>
-              <th>翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+              <th class="today-col basis-label-0">当日</th>
+              <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
             </tr>
           </thead>
           <tbody id="table3laborDetailBody"></tbody>
@@ -1801,8 +1801,7 @@
     var parts = s.split('-').map(Number);
     return new Date(parts[0], parts[1] - 1, parts[2]);
   }
-  basisInput.max = todayISO;
-  basisInput.value = todayISO;
+  basisInput.value = todayISO; // 初期表示の基準日は今日のまま。未来の日付への上限は設けない
 
   /* ===================== 選択（区分・拠点）の保持 ===================== */
 
@@ -1913,6 +1912,19 @@
       var offset = parseInt(cell.getAttribute('data-offset'), 10);
       cell.textContent = fmtDateLabel(addDays(basisDate, offset));
     });
+  }
+
+  // 基準日が今日かどうかで、列見出しの1列目(「当日」/「基準日」)・2列目(「翌日」/「1日後」)・
+  // 各パネルの注記(「当日〜7日後」/「基準日〜7日後」)を切り替える。render()のたびに
+  // 基準日を見て同期的に行うため(非同期フェッチを伴わない)、PR #487の世代チェックとは
+  // 無関係に、常に最新のrender()呼び出しの内容がそのまま反映される
+  function updateBasisLabels(isToday){
+    var label0 = isToday ? '当日' : '基準日';
+    var label1 = isToday ? '翌日' : '1日後';
+    var rangeNote = isToday ? '当日〜7日後' : '基準日〜7日後';
+    document.querySelectorAll('.basis-label-0').forEach(function(el){ el.textContent = label0; });
+    document.querySelectorAll('.basis-label-1').forEach(function(el){ el.textContent = label1; });
+    document.querySelectorAll('.basis-range-note').forEach(function(el){ el.textContent = rangeNote; });
   }
 
   function buildRowHtml(label, key, attr, offsetCount){
@@ -2187,10 +2199,7 @@
     var basisDate = fromISO(basisInput.value);
     var site = currentSite;
     renderDcols(basisDate);
-
-    var isToday = basisInput.value === todayISO;
-    document.getElementById('nextDay').disabled = isToday;
-    document.getElementById('nextMonth').disabled = isToday;
+    updateBasisLabels(basisInput.value === todayISO);
 
     // 3パネルは独立して描画する。相互依存する過不足計算は、全パネルの
     // 結果(成功/失敗いずれも)が揃ってから最後に行う
@@ -2208,13 +2217,12 @@
     renderLaborTable(laborResult, workSubtotals);
   };
 
-  function clamp(){ if (basisInput.value > todayISO) basisInput.value = todayISO; }
-  document.getElementById('prevDay').addEventListener('click', function(){ basisInput.value = toISO(addDays(fromISO(basisInput.value), -1)); clamp(); render(); });
-  document.getElementById('nextDay').addEventListener('click', function(){ basisInput.value = toISO(addDays(fromISO(basisInput.value), 1)); clamp(); render(); });
-  document.getElementById('prevMonth').addEventListener('click', function(){ basisInput.value = toISO(addMonths(fromISO(basisInput.value), -1)); clamp(); render(); });
-  document.getElementById('nextMonth').addEventListener('click', function(){ basisInput.value = toISO(addMonths(fromISO(basisInput.value), 1)); clamp(); render(); });
+  document.getElementById('prevDay').addEventListener('click', function(){ basisInput.value = toISO(addDays(fromISO(basisInput.value), -1)); render(); });
+  document.getElementById('nextDay').addEventListener('click', function(){ basisInput.value = toISO(addDays(fromISO(basisInput.value), 1)); render(); });
+  document.getElementById('prevMonth').addEventListener('click', function(){ basisInput.value = toISO(addMonths(fromISO(basisInput.value), -1)); render(); });
+  document.getElementById('nextMonth').addEventListener('click', function(){ basisInput.value = toISO(addMonths(fromISO(basisInput.value), 1)); render(); });
   document.getElementById('todayBtn').addEventListener('click', function(){ basisInput.value = todayISO; render(); });
-  basisInput.addEventListener('change', function(){ clamp(); render(); });
+  basisInput.addEventListener('change', function(){ render(); });
 
   document.querySelectorAll('#businessToggle button').forEach(function(btn){
     btn.addEventListener('click', function(){
