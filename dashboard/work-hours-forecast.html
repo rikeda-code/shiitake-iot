@@ -1063,11 +1063,13 @@
     return null;
   }
 
-  // パネル2下部に表示する「取得できなかった」警告（年月・拠点ごとに1回だけ出す）
-  var harvestMonthlyWarnings = [];
-  function addHarvestMonthlyWarning(site, monthKey, reason){
+  // パネル2下部に表示する「取得できなかった」警告（年月・拠点ごとに1回だけ出す）。
+  // render()の呼び出しごとにローカルなcache(harvestCache)のcache.warningsに積む
+  // (グローバル共有配列だと、並行して走る別のrender()の結果と混ざってしまうため)
+  function addHarvestMonthlyWarning(cache, site, monthKey, reason){
+    if (!cache.warnings) cache.warnings = [];
     var msg = site + 'の収穫見込（' + monthKey + '）を取得できませんでした（' + reason + '）';
-    if (harvestMonthlyWarnings.indexOf(msg) === -1) harvestMonthlyWarnings.push(msg);
+    if (cache.warnings.indexOf(msg) === -1) cache.warnings.push(msg);
   }
 
   // 群馬型：「2026年ファーム売上高・収穫量」の年月ごとのシート(gids)から、該当日の
@@ -1087,14 +1089,14 @@
           var header = findHarvestPlanHeader(json.table.rows);
           if (!header) {
             cache.monthlyStatus[monthKey] = 'error';
-            addHarvestMonthlyWarning(site, monthKey, '見出しが見つかりません');
+            addHarvestMonthlyWarning(cache, site, monthKey, '見出しが見つかりません');
           } else {
             cache.monthlyData[monthKey] = { rows: json.table.rows, header: header };
             cache.monthlyStatus[monthKey] = 'ok';
           }
         } catch (e) {
           cache.monthlyStatus[monthKey] = 'error';
-          addHarvestMonthlyWarning(site, monthKey, '取得エラー');
+          addHarvestMonthlyWarning(cache, site, monthKey, '取得エラー');
         }
       }
     }
@@ -1773,7 +1775,7 @@
     };
   }
 
-  async function renderLaborNantan(basisDate){
+  async function renderLaborNantan(basisDate, gen){
     showPanelError('laborError', null);
     try {
       var sheets = await fetchNantanShiftSheets();
@@ -1781,6 +1783,7 @@
       return result;
     } catch (err) {
       console.error('[標準労働時間(南丹)] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
       showPanelError('laborError', err.message || String(err));
       return null;
     }
@@ -2048,16 +2051,22 @@
 
   /* ===================== render() ===================== */
 
-  var dailyTotalCache = {};
+  // render()を呼ぶたびに1つ進める世代カウンター。区分・拠点の切り替えや基準日の変更で
+  // 前の render() の読み込みが終わる前に次の render() が始まった場合、前の render() の
+  // 結果が後から届いてパネルを上書きしてしまう「追い越し」を防ぐため、各パネルの描画
+  // 直前に「自分がまだ最新の render() か」を確認し、古ければ何も描画せずに捨てる
+  var renderGeneration = 0;
 
-  async function renderCultivation(basisDate, site){
+  async function renderCultivation(basisDate, site, gen){
     showPanelError('cultError', null);
     try {
       var result = await fetchCultivationPanel(basisDate, site);
+      if (gen !== renderGeneration) return result; // 追い越されていたら描画しない
       renderCultivationTable(result);
       return result;
     } catch (err) {
       console.error('[工程件数・稼働コンテナ数] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
       showPanelError('cultError', err.message || String(err));
       renderCultivationTable(null);
       return null;
@@ -2076,30 +2085,31 @@
     }
   }
 
-  async function renderWork(basisDate, cultResult, site){
+  async function renderWork(basisDate, cultResult, site, gen){
     showPanelError('workError', null);
     try {
       var rows = await fetchStdWorkHoursRows();
       var harvestKgByDay = [];
-      dailyTotalCache = {};
-      harvestMonthlyWarnings = [];
+      var harvestCache = {}; // render()呼び出しごとにローカル(他のrender()と共有しない)
       for (var o = 0; o < DAY_COUNT; o++) {
-        harvestKgByDay.push(await fetchDailyHarvestTotal(addDays(basisDate, o), dailyTotalCache, site));
+        harvestKgByDay.push(await fetchDailyHarvestTotal(addDays(basisDate, o), harvestCache, site));
       }
-      renderHarvestMonthlyWarnings(harvestMonthlyWarnings);
       var fallbackCult = cultResult || { processCounts: new Array(DAY_COUNT).fill({}), containerCounts: new Array(DAY_COUNT).fill(0) };
       var perDay = computeStandardWorkHours(rows, fallbackCult, harvestKgByDay, basisDate);
+      if (gen !== renderGeneration) return perDay; // 追い越されていたら描画しない
+      renderHarvestMonthlyWarnings(harvestCache.warnings || []);
       renderWorkHoursTable(rows, perDay);
       return perDay;
     } catch (err) {
       console.error('[標準工数] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
       showPanelError('workError', err.message || String(err));
       renderWorkHoursTable([], null);
       return null;
     }
   }
 
-  async function renderLabor(basisDate){
+  async function renderLabor(basisDate, gen){
     showPanelError('laborError', null);
     try {
       var persons, laborRows;
@@ -2114,6 +2124,7 @@
       return result;
     } catch (err) {
       console.error('[標準労働時間] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
       showPanelError('laborError', err.message || String(err));
       return null;
     }
@@ -2151,7 +2162,7 @@
     return { periodKeys: periodKeys, perPeriod: perPeriod };
   }
 
-  async function renderLaborGunma(basisDate){
+  async function renderLaborGunma(basisDate, gen){
     showPanelError('laborError', null);
     try {
       var periodsData = await fetchGunmaShiftPeriodData(basisDate);
@@ -2160,12 +2171,15 @@
       return result;
     } catch (err) {
       console.error('[標準労働時間(群馬)] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
       showPanelError('laborError', err.message || String(err));
       return null;
     }
   }
 
   window.render = async function(){
+    var gen = ++renderGeneration; // この呼び出し自身の世代番号を確定する
+
     document.getElementById('unsupportedPanel').style.display = isSupported() ? 'none' : '';
     document.getElementById('supportedPanels').style.display = isSupported() ? '' : 'none';
     if (!isSupported()) return;
@@ -2180,14 +2194,15 @@
 
     // 3パネルは独立して描画する。相互依存する過不足計算は、全パネルの
     // 結果(成功/失敗いずれも)が揃ってから最後に行う
-    var cultPromise = renderCultivation(basisDate, site);
-    var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site); });
+    var cultPromise = renderCultivation(basisDate, site, gen);
+    var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site, gen); });
 
-    var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate)
-      : (site === '南丹') ? renderLaborNantan(basisDate)
-      : renderLabor(basisDate);
+    var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate, gen)
+      : (site === '南丹') ? renderLaborNantan(basisDate, gen)
+      : renderLabor(basisDate, gen);
 
     var results = await Promise.allSettled([workPromise, laborPromise]);
+    if (gen !== renderGeneration) return; // 追い越されていたら、過不足の合成も描画しない
     var workSubtotals = results[0].status === 'fulfilled' ? results[0].value : null;
     var laborResult = results[1].status === 'fulfilled' ? results[1].value : null;
     renderLaborTable(laborResult, workSubtotals);
