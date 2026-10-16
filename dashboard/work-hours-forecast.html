@@ -190,6 +190,16 @@
 
   .unsupported{ padding:40px 18px; text-align:center; color:var(--ink-soft); font-size:15px; }
 
+  /* 出荷：合計点数・cs数のような太字の集計行、サンプルデータ使用中の帯、
+     「計算方法未定」等の行内の小さな補足文 */
+  .agg-row td, .agg-row th{ background:#f3ead4; font-weight:700; }
+  .sample-data-banner{
+    margin:0 0 10px; padding:9px 16px; border-radius:6px;
+    background:var(--amber); color:var(--brown-deep); font-weight:700; font-size:14px;
+    text-align:center; border:1px solid var(--brown);
+  }
+  .sub-note{ font-size:10.5px; font-weight:400; color:var(--ink-soft); white-space:normal; }
+
   @media (max-width:640px){
     body{ padding:18px 10px 40px; }
     header{ align-items:flex-start; }
@@ -379,6 +389,142 @@
 
   </div>
 
+  <div id="shippingSampleBanner" class="sample-data-banner" style="display:none;">サンプルデータを表示しています（実データ未接続）</div>
+
+  <div id="shippingPanels" style="display:none;">
+
+  <!-- ============ ①出荷数量（サンプルデータ） ============ -->
+  <section class="panel cult">
+    <div class="panel-head">
+      <h2>出荷数量</h2>
+      <span class="note">単位：個・cs　/　<span class="basis-range-note">当日〜7日後</span></span>
+    </div>
+    <div class="panel-error" id="shipQtyError"></div>
+    <div class="table-scroll">
+      <table id="table1ship">
+        <colgroup></colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1" colspan="2">項目</th>
+            <th class="today-col basis-label-0">当日</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody id="table1shipBody">
+        </tbody>
+      </table>
+    </div>
+    <details class="detail-rows">
+      <summary>詳細（出荷予定量kg：M・L・2L・袋）※参考（工数の計算には使わない）</summary>
+      <div class="table-scroll">
+        <table id="table1shipDetail">
+          <colgroup></colgroup>
+          <tbody id="table1shipDetailBody"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <!-- ============ ②標準工数（出荷） ============ -->
+  <section class="panel work">
+    <div class="panel-head">
+      <h2>標準工数</h2>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
+    </div>
+    <div class="panel-error" id="shipWorkError"></div>
+    <div class="table-scroll">
+      <table id="table2ship">
+        <colgroup></colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1" colspan="2">作業区分</th>
+            <th class="today-col basis-label-0">当日</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody id="table2shipBody">
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ ③標準労働時間（出荷、サンプルデータ） ============ -->
+  <section class="panel labor">
+    <div class="panel-head">
+      <h2>標準労働時間</h2>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
+    </div>
+    <div class="panel-error" id="shipLaborError"></div>
+    <div class="table-scroll">
+      <table id="table3ship">
+        <colgroup></colgroup>
+        <thead>
+          <tr>
+            <th class="sticky-1" colspan="2">項目</th>
+            <th class="today-col basis-label-0">当日</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="dcol today-col" data-offset="0"></th>
+            <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="sticky-1" colspan="2">標準労働時間合計</th>
+            <td class="today-col" data-shiplabor-total-offset="0">－</td>
+            <td data-shiplabor-total-offset="1">－</td><td data-shiplabor-total-offset="2">－</td><td data-shiplabor-total-offset="3">－</td>
+            <td data-shiplabor-total-offset="4">－</td><td data-shiplabor-total-offset="5">－</td><td data-shiplabor-total-offset="6">－</td><td data-shiplabor-total-offset="7">－</td>
+          </tr>
+          <tr>
+            <th class="sticky-1" colspan="2">出勤人数</th>
+            <td class="today-col" data-shipattendance-offset="0">－</td>
+            <td data-shipattendance-offset="1">－</td><td data-shipattendance-offset="2">－</td><td data-shipattendance-offset="3">－</td>
+            <td data-shipattendance-offset="4">－</td><td data-shipattendance-offset="5">－</td><td data-shipattendance-offset="6">－</td><td data-shipattendance-offset="7">－</td>
+          </tr>
+          <tr>
+            <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
+            <td class="today-col" data-shipshortfall-offset="0">－</td>
+            <td data-shipshortfall-offset="1">－</td><td data-shipshortfall-offset="2">－</td><td data-shipshortfall-offset="3">－</td>
+            <td data-shipshortfall-offset="4">－</td><td data-shipshortfall-offset="5">－</td><td data-shipshortfall-offset="6">－</td><td data-shipshortfall-offset="7">－</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <details class="detail-rows">
+      <summary>人別内訳</summary>
+      <div class="table-scroll">
+        <table id="table3shipDetail">
+          <colgroup></colgroup>
+          <thead>
+            <tr>
+              <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
+              <th class="today-col basis-label-0">当日</th>
+              <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            </tr>
+          </thead>
+          <tbody id="table3shipDetailBody"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  </div>
+
 </div>
 
 <script>
@@ -439,7 +585,8 @@
   // 同じ290px幅に揃えることで、全テーブルの当日〜7日後の列が縦にそろう
   var COLGROUP_HTML = '<col style="width:180px;"><col style="width:110px;"><col span="' + DAY_COUNT + '" style="width:92px;">';
   function applySharedColgroups(){
-    ['table1cult', 'table1cultDetail', 'table2work', 'table3labor', 'table3laborDetail'].forEach(function(id){
+    ['table1cult', 'table1cultDetail', 'table2work', 'table3labor', 'table3laborDetail',
+     'table1ship', 'table1shipDetail', 'table2ship', 'table3ship', 'table3shipDetail'].forEach(function(id){
       var table = document.getElementById(id);
       var colgroup = table && table.querySelector('colgroup');
       if (colgroup) colgroup.innerHTML = COLGROUP_HTML;
@@ -951,8 +1098,10 @@
   var CONTAINER_BASED_ITEMS = ['コンテナ移動時間', 'コンテナ点検時間'];
 
   // 標準工数設定シートのA〜I列のみを読む(J列以降の別ブロックは無視)。
-  // 業務区分(A列)は空欄なら直前の値を引き継ぐ
-  function parseStdWorkHoursRows(rows){
+  // 業務区分(A列)は空欄なら直前の値を引き継ぐ。targetDivで対象の業務区分を選べる
+  // (省略時は栽培。出荷の標準工数(パネル2)も同じ読み取り処理で業務区分「出荷」を指定して使う)
+  function parseStdWorkHoursRows(rows, targetDiv){
+    targetDiv = targetDiv || '栽培';
     rows = rows || [];
     var out = [];
     var lastDiv = null;
@@ -963,7 +1112,7 @@
       var divText = (divRaw !== undefined && divRaw !== null) ? String(divRaw).trim() : '';
       var div = divText !== '' ? divText : lastDiv;
       if (divText !== '') lastDiv = divText;
-      if (div !== '栽培') continue;
+      if (div !== targetDiv) continue;
 
       var waku = String(cell(1) == null ? '' : cell(1)).trim();
       if (!waku) continue;
@@ -983,9 +1132,46 @@
     return out;
   }
 
-  async function fetchStdWorkHoursRows(){
+  async function fetchStdWorkHoursRows(targetDiv){
     var json = await fetchCsvSheet(STD_WORK_HOURS_SHEET.id, STD_WORK_HOURS_SHEET.gid);
-    return parseStdWorkHoursRows(json.table.rows);
+    return parseStdWorkHoursRows(json.table.rows, targetDiv);
+  }
+
+  // 標準工数設定シートの「cs換算設定」(1〜3行目)から、P/cs(パック・袋の1cs当たり個数)を
+  // 読む。work-hours.htmlのparseStdSettingsSheet()のfindLabelValue()と同じ探し方を複製
+  // (出荷のcs数計算に最低限必要なP/csのみ。バラのメトリック名はこのダッシュボードでは
+  // 固定でバラ数を使うため読まない)
+  function parseShippingPcsPerCs(rows){
+    rows = rows || [];
+    var COEF_TABLE_HEADER_LABELS = { '業務区分': 1, '作業区分': 1, '1コンテナ当たり': 1, '時間当たり(kg/h)': 1, '1cs当たり': 1, '1個当たり': 1, '固定時間(h)': 1, '単位': 1, '考え方': 1 };
+    function cellAt(rIdx, cIdx){ var row = rows[rIdx]; var c = row && row.c && row.c[cIdx]; return c ? (c.v !== undefined ? c.v : null) : null; }
+    function findLabelValue(labelSubstr, startRow, endRow){
+      for (var r = startRow; r < Math.min(endRow, rows.length); r++) {
+        var row = rows[r];
+        if (!row || !row.c) continue;
+        for (var c = 0; c < row.c.length; c++) {
+          var cell = row.c[c];
+          var text = cell ? String(cell.v == null ? '' : cell.v) : '';
+          if (text.indexOf(labelSubstr) !== -1) {
+            var below = cellAt(r + 1, c);
+            var belowText = (typeof below === 'string') ? below.trim() : below;
+            if (belowText !== null && belowText !== '' && !COEF_TABLE_HEADER_LABELS[belowText]) return below;
+            var beside = cellAt(r, c + 1);
+            if (beside !== null && beside !== '') return beside;
+          }
+        }
+      }
+      return null;
+    }
+    var raw = findLabelValue('パック・袋P/cs', 1, 4);
+    if (raw === null) raw = findLabelValue('パック・袋', 1, 4);
+    var num = Number(raw);
+    return (raw !== null && raw !== '' && !isNaN(num) && num > 0) ? num : 30;
+  }
+
+  async function fetchShippingPcsPerCs(){
+    var json = await fetchCsvSheet(STD_WORK_HOURS_SHEET.id, STD_WORK_HOURS_SHEET.gid);
+    return parseShippingPcsPerCs(json.table.rows);
   }
 
   function yearMonthKey(d){ return d.getFullYear() + '.' + (d.getMonth() + 1); }
@@ -1898,7 +2084,10 @@
   })();
 
   // 栽培×いなべ・群馬・南丹に対応
-  function isSupported(){ return currentBusiness === '栽培' && (currentSite === 'いなべ' || currentSite === '群馬' || currentSite === '南丹'); }
+  function isSupported(){
+    return (currentBusiness === '栽培' || currentBusiness === '出荷') &&
+      (currentSite === 'いなべ' || currentSite === '群馬' || currentSite === '南丹');
+  }
 
   function showPanelError(elId, message){
     var el = document.getElementById(elId);
@@ -1927,12 +2116,12 @@
     document.querySelectorAll('.basis-range-note').forEach(function(el){ el.textContent = rangeNote; });
   }
 
-  function buildRowHtml(label, key, attr, offsetCount){
+  function buildRowHtml(label, key, attr, offsetCount, trClass){
     var tds = '';
     for (var o = 0; o < offsetCount; o++) {
       tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attr + '="' + key + '" data-' + attr + '-offset="' + o + '">' + DASH + '</td>';
     }
-    return '<tr><th class="sticky-1" colspan="2">' + label + '</th>' + tds + '</tr>';
+    return '<tr' + (trClass ? ' class="' + trClass + '"' : '') + '><th class="sticky-1" colspan="2">' + label + '</th>' + tds + '</tr>';
   }
 
   function renderCultivationTable(result){
@@ -2069,6 +2258,307 @@
   // 直前に「自分がまだ最新の render() か」を確認し、古ければ何も描画せずに捨てる
   var renderGeneration = 0;
 
+  /* ===================== 出荷（サンプルデータ、実データ未接続） ===================== */
+  // パネル1〜3とも、現時点ではサンプルデータで画面・計算の仕組みだけを作る。
+  // getShippingQuantitiesSample()・getShippingLaborSample()を実データ取得の関数に
+  // 差し替えるだけで、パネル1〜3がそのまま動く作りにしてある
+
+  // 拠点ごとの基準値(1日当たり)。いなべ パック数2,000〜3,500個/日・袋数400〜700個/日・
+  // バラ数0〜30個/日が目安になるよう、曜日係数(0.85〜1.1倍)を掛けても範囲に収まる値にする。
+  // 群馬・南丹はいなべの7〜8割程度
+  var SHIPPING_QTY_BASE = {
+    'いなべ': { pack: 2700, bag: 550, bara: 15 },
+    '群馬':   { pack: 2050, bag: 420, bara: 12 },
+    '南丹':   { pack: 1950, bag: 400, bara: 11 },
+  };
+  // 曜日(日=0〜土=6)で増減をつけるための係数。乱数は使わず、同じ拠点・同じ日付なら
+  // 常に同じ値になるようにする(日付と曜日だけから決まる固定的な値)
+  var SHIPPING_WEEKDAY_FACTOR = [0.85, 1.05, 1.05, 1.0, 1.05, 1.1, 0.9];
+
+  // 出荷数量のサンプルデータ。{ 日付のISO文字列: { pack, bag, bara, kg: { M, L, '2L', bag } } }
+  // の形で返す。実データに差し替えるときは、この関数(または呼び出し側)を実際の出荷実績・
+  // 計画シートを読む非同期関数に置き換える
+  function getShippingQuantitiesSample(site, dates){
+    var base = SHIPPING_QTY_BASE[site] || SHIPPING_QTY_BASE['いなべ'];
+    var out = {};
+    (dates || []).forEach(function(d){
+      var f = SHIPPING_WEEKDAY_FACTOR[d.getDay()];
+      var pack = Math.round(base.pack * f);
+      var bag = Math.round(base.bag * f);
+      var bara = Math.round(base.bara * f);
+      out[toISO(d)] = {
+        pack: pack, bag: bag, bara: bara,
+        // 出荷予定量(kg)は参考値(工数の計算には使わない)。パック・袋の個数から
+        // それらしい重量感になる比率で機械的に算出する
+        kg: {
+          M: Math.round(pack * 0.12 * 10) / 10,
+          L: Math.round(pack * 0.08 * 10) / 10,
+          '2L': Math.round(pack * 0.03 * 10) / 10,
+          bag: Math.round(bag * 0.15 * 10) / 10,
+        },
+      };
+    });
+    return out;
+  }
+
+  // cs数 = (合計点数 - バラ数) ÷ P/cs + バラ数(work-hours.htmlのcalcCs()と同じ式)
+  function calcShippingCs(totalPieces, bara, pcsPerCs){
+    var nonBara = Math.max(0, totalPieces - bara);
+    return nonBara / pcsPerCs + bara;
+  }
+
+  // 標準工数設定(出荷)の作業区分名→使う数量の対応。work-hours.htmlのTASK_METRIC_KEYSと
+  // 同じ対応にする。「合計(点数)」の作業は、work-hours.html(perCs方式)と同じ考え方で、
+  // 合計点数とバラ数からその場でcs数を導出する代わりに、パネル1で計算済みのcs数をそのまま使う
+  var SHIPPING_TASK_METRIC_KEYS = {
+    'パック並べる': 'パック数',
+    '袋入れ・閉じ': '袋数',
+    '段ボール詰める': '合計(点数)',
+    '段ボール作成': '合計(点数)',
+    '計量': '合計(点数)',
+    '椎茸運搬(生在庫)': '合計(点数)',
+    '椎茸運搬(製品)': '合計(点数)',
+  };
+  // 特定の作業区分を適用する拠点を制限する(work-hours.htmlのTASK_SITE_FILTERと同じ考え方。
+  // null/未掲載 = 全拠点)
+  var SHIPPING_SITE_FILTER = { '付帯作業': ['南丹', '群馬'] };
+
+  // 係数(row.factor)に単位(秒・分・h)を適用して時間(h)に変換する
+  function shippingToHours(value, unit){
+    if (unit === '秒') return value / 3600;
+    if (unit === '分') return value / 60;
+    return value; // 'h'等。栽培側の時間系の係数と同じ扱い
+  }
+
+  // 標準工数設定の出荷の係数行 x パネル1の出荷数量(qtyByOffset)から、当日〜7日後の
+  // 標準工数を算出する。純粋関数(テストから直接呼べる)。rowsは呼び出し側で
+  // 拠点によって「付帯作業」行を含めるかどうかをあらかじめ絞り込んでおくこと
+  function computeShippingWorkHours(rows, qtyByOffset, basisDate){
+    var perDay = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var items = {};
+      var subtotal = 0;
+      var qty = qtyByOffset ? qtyByOffset[o] : null;
+      rows.forEach(function(row){
+        var v = null;
+        if (row.waku === '付帯作業') {
+          // 計算方法が未定のため、値は常に「－」(表示側で補足「計算方法未定」を添える)
+          items[row.waku] = null;
+          return;
+        }
+        if (row.waku === '納品書・伝票作成') {
+          if (row.factor !== null) {
+            var d = addDays(basisDate, o);
+            v = row.factor / daysInMonth(d);
+          }
+        } else {
+          var metricKey = SHIPPING_TASK_METRIC_KEYS[row.waku];
+          var count = !qty ? null
+            : metricKey === 'パック数' ? qty.pack
+            : metricKey === '袋数' ? qty.bag
+            : metricKey === '合計(点数)' ? qty.cs
+            : null;
+          if (count !== null && row.factor !== null) v = shippingToHours(count * row.factor, row.unit);
+        }
+        items[row.waku] = v;
+        if (v !== null && !isNaN(v)) subtotal += v;
+      });
+      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10 });
+    }
+    return perDay;
+  }
+
+  // 標準労働時間(出荷)のサンプルデータ。work-hours.html側のcomputeStandardLaborHours()等と
+  // 同じ形({ perDayTotal, perDayAttendance, personBreakdown, warnings, notices,
+  // periodNotices })で返すことで、renderShippingLaborTable()をそのまま使えるようにする。
+  // 実データに差し替えるときは、この関数を実際の勤務表を読む非同期関数に置き換える
+  function getShippingLaborSample(site, dates){
+    var names = ['出荷 サンプルA', '出荷 サンプルB', '出荷 サンプルC'];
+    var personBreakdown = names.map(function(name, i){
+      var dayHours = (dates || []).map(function(d){
+        var wd = d.getDay();
+        if (wd === 0) return 0; // 日曜休み(サンプル)
+        var base = 7 + i; // サンプルA=7h,B=8h,C=9h
+        return wd === 6 ? Math.max(0, base - 2) : base; // 土曜は短縮(サンプル)
+      });
+      return { name: name, dept: '出荷', dayHours: dayHours };
+    });
+    var perDayTotal = [], perDayAttendance = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var total = 0, attend = 0;
+      personBreakdown.forEach(function(p){ total += p.dayHours[o]; if (p.dayHours[o] > 0) attend++; });
+      perDayTotal.push(Math.round(total * 10) / 10);
+      perDayAttendance.push(attend);
+    }
+    return { perDayTotal: perDayTotal, perDayAttendance: perDayAttendance, personBreakdown: personBreakdown, warnings: [], notices: [], periodNotices: [] };
+  }
+
+  async function renderShippingQuantities(basisDate, site, gen){
+    showPanelError('shipQtyError', null);
+    try {
+      var dates = [];
+      for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
+      var sampleByDate = getShippingQuantitiesSample(site, dates);
+      var pcsPerCs = await fetchShippingPcsPerCs();
+      var qtyByOffset = dates.map(function(d){
+        var s = sampleByDate[toISO(d)];
+        if (!s) return null;
+        var totalPieces = s.pack + s.bag + s.bara;
+        var cs = calcShippingCs(totalPieces, s.bara, pcsPerCs);
+        return { pack: s.pack, bag: s.bag, bara: s.bara, totalPieces: totalPieces, cs: cs, kg: s.kg };
+      });
+      if (gen !== renderGeneration) return qtyByOffset; // 追い越されていたら描画しない
+      renderShippingQuantityTable(qtyByOffset);
+      return qtyByOffset;
+    } catch (err) {
+      console.error('[出荷数量] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
+      showPanelError('shipQtyError', err.message || String(err));
+      renderShippingQuantityTable(new Array(DAY_COUNT).fill(null));
+      return null;
+    }
+  }
+
+  function renderShippingQuantityTable(qtyByOffset){
+    var bodyMain = document.getElementById('table1shipBody');
+    var html = '';
+    html += buildRowHtml('パック数', 'パック数', 'shipqty', DAY_COUNT);
+    html += buildRowHtml('袋数', '袋数', 'shipqty', DAY_COUNT);
+    html += buildRowHtml('バラ数', 'バラ数', 'shipqty', DAY_COUNT);
+    html += buildRowHtml('合計点数', '合計点数', 'shipqty', DAY_COUNT, 'agg-row');
+    html += buildRowHtml('cs数', 'cs数', 'shipqty', DAY_COUNT, 'agg-row');
+    bodyMain.innerHTML = html;
+
+    var detailBody = document.getElementById('table1shipDetailBody');
+    var detailHtml = '';
+    ['M', 'L', '2L', '袋'].forEach(function(label){ detailHtml += buildRowHtml(label, label, 'shipqtykg', DAY_COUNT); });
+    detailBody.innerHTML = detailHtml;
+
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var q = qtyByOffset ? qtyByOffset[o] : null;
+      setShipQtyCell('パック数', o, q ? q.pack : null);
+      setShipQtyCell('袋数', o, q ? q.bag : null);
+      setShipQtyCell('バラ数', o, q ? q.bara : null);
+      setShipQtyCell('合計点数', o, q ? q.totalPieces : null);
+      setShipQtyCell('cs数', o, q ? q.cs : null);
+      ['M', 'L', '2L', '袋'].forEach(function(label){
+        var cell = document.querySelector('[data-shipqtykg="' + label + '"][data-shipqtykg-offset="' + o + '"]');
+        if (cell) cell.textContent = (q && q.kg) ? fmtNum(q.kg[label]) : DASH;
+      });
+    }
+    function setShipQtyCell(key, o2, v){
+      var cell = document.querySelector('[data-shipqty="' + key + '"][data-shipqty-offset="' + o2 + '"]');
+      if (cell) cell.textContent = fmtNum(v);
+    }
+  }
+
+  async function renderShippingWork(basisDate, qtyByOffset, site, gen){
+    showPanelError('shipWorkError', null);
+    try {
+      var rows = await fetchStdWorkHoursRows('出荷');
+      var allowedSites = SHIPPING_SITE_FILTER['付帯作業'] || [];
+      var visibleRows = rows.filter(function(row){
+        return row.waku !== '付帯作業' || allowedSites.indexOf(site) !== -1;
+      });
+      var fallbackQty = qtyByOffset || new Array(DAY_COUNT).fill(null);
+      var perDay = computeShippingWorkHours(visibleRows, fallbackQty, basisDate);
+      if (gen !== renderGeneration) return perDay; // 追い越されていたら描画しない
+      renderShippingWorkTable(visibleRows, perDay);
+      return perDay;
+    } catch (err) {
+      console.error('[出荷標準工数] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
+      showPanelError('shipWorkError', err.message || String(err));
+      renderShippingWorkTable([], null);
+      return null;
+    }
+  }
+
+  function renderShippingWorkTable(rows, perDay){
+    var body = document.getElementById('table2shipBody');
+    var html = '';
+    (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'shipwork', DAY_COUNT); });
+    var subtotalTds = '';
+    for (var o = 0; o < DAY_COUNT; o++) {
+      subtotalTds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-shipwork-subtotal-offset="' + o + '">' + DASH + '</td>';
+    }
+    html += '<tr><th class="sticky-1" colspan="2">小計（出荷 標準工数合計）</th>' + subtotalTds + '</tr>';
+    body.innerHTML = html;
+
+    if (!perDay) return;
+    (rows || []).forEach(function(row){
+      for (var o = 0; o < DAY_COUNT; o++) {
+        var cell = document.querySelector('[data-shipwork="' + row.waku + '"][data-shipwork-offset="' + o + '"]');
+        if (!cell) continue;
+        if (row.waku === '付帯作業') {
+          cell.innerHTML = DASH + '<div class="sub-note">計算方法未定</div>';
+        } else {
+          cell.textContent = fmtNum(perDay[o].items[row.waku]);
+        }
+      }
+    });
+    for (var o2 = 0; o2 < DAY_COUNT; o2++) {
+      var subCell = document.querySelector('[data-shipwork-subtotal-offset="' + o2 + '"]');
+      if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal);
+    }
+  }
+
+  async function renderShippingLabor(basisDate, site, gen){
+    showPanelError('shipLaborError', null);
+    try {
+      var dates = [];
+      for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
+      var result = getShippingLaborSample(site, dates);
+      return result;
+    } catch (err) {
+      console.error('[出荷標準労働時間] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
+      showPanelError('shipLaborError', err.message || String(err));
+      return null;
+    }
+  }
+
+  function renderShippingLaborTable(laborResult, workSubtotals){
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var totalCell = document.querySelector('[data-shiplabor-total-offset="' + o + '"]');
+      var attendCell = document.querySelector('[data-shipattendance-offset="' + o + '"]');
+      var shortfallCell = document.querySelector('[data-shipshortfall-offset="' + o + '"]');
+      var total = laborResult ? laborResult.perDayTotal[o] : null;
+      if (!laborResult || total === null || total === undefined) {
+        if (totalCell) totalCell.textContent = DASH;
+        if (attendCell) attendCell.textContent = DASH;
+        if (shortfallCell) { shortfallCell.textContent = DASH; shortfallCell.classList.remove('neg', 'pos'); }
+        continue;
+      }
+      if (totalCell) totalCell.textContent = fmtNum(total);
+      if (attendCell) attendCell.textContent = String(laborResult.perDayAttendance[o]);
+      if (shortfallCell) {
+        var sub = workSubtotals && workSubtotals[o] ? workSubtotals[o].subtotal : null;
+        if (sub === null || sub === undefined) {
+          shortfallCell.textContent = DASH;
+          shortfallCell.classList.remove('neg', 'pos');
+        } else {
+          var shortfall = Math.round((total - sub) * 10) / 10;
+          shortfallCell.textContent = fmtNum(shortfall);
+          shortfallCell.classList.toggle('neg', shortfall < 0);
+          shortfallCell.classList.toggle('pos', shortfall >= 0);
+        }
+      }
+    }
+
+    var detailBody = document.getElementById('table3shipDetailBody');
+    if (laborResult && laborResult.personBreakdown.length) {
+      detailBody.innerHTML = laborResult.personBreakdown.map(function(p){
+        var tds = p.dayHours.map(function(h, o){
+          return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
+        }).join('');
+        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '</tr>';
+      }).join('');
+    } else {
+      detailBody.innerHTML = '';
+    }
+  }
+
   async function renderCultivation(basisDate, site, gen){
     showPanelError('cultError', null);
     try {
@@ -2192,16 +2682,34 @@
   window.render = async function(){
     var gen = ++renderGeneration; // この呼び出し自身の世代番号を確定する
 
-    document.getElementById('unsupportedPanel').style.display = isSupported() ? 'none' : '';
-    document.getElementById('supportedPanels').style.display = isSupported() ? '' : 'none';
-    if (!isSupported()) return;
+    var supported = isSupported();
+    var showCult = supported && currentBusiness === '栽培';
+    var showShip = supported && currentBusiness === '出荷';
+    document.getElementById('unsupportedPanel').style.display = supported ? 'none' : '';
+    document.getElementById('supportedPanels').style.display = showCult ? '' : 'none';
+    document.getElementById('shippingPanels').style.display = showShip ? '' : 'none';
+    document.getElementById('shippingSampleBanner').style.display = showShip ? '' : 'none';
+    if (!supported) return;
 
     var basisDate = fromISO(basisInput.value);
     var site = currentSite;
     renderDcols(basisDate);
     updateBasisLabels(basisInput.value === todayISO);
 
-    // 3パネルは独立して描画する。相互依存する過不足計算は、全パネルの
+    if (currentBusiness === '出荷') {
+      var shipQtyPromise = renderShippingQuantities(basisDate, site, gen);
+      var shipWorkPromise = shipQtyPromise.then(function(qty){ return renderShippingWork(basisDate, qty, site, gen); });
+      var shipLaborPromise = renderShippingLabor(basisDate, site, gen);
+
+      var shipResults = await Promise.allSettled([shipWorkPromise, shipLaborPromise]);
+      if (gen !== renderGeneration) return; // 追い越されていたら、過不足の合成も描画しない
+      var shipWorkSubtotals = shipResults[0].status === 'fulfilled' ? shipResults[0].value : null;
+      var shipLaborResult = shipResults[1].status === 'fulfilled' ? shipResults[1].value : null;
+      renderShippingLaborTable(shipLaborResult, shipWorkSubtotals);
+      return;
+    }
+
+    // 栽培：3パネルは独立して描画する。相互依存する過不足計算は、全パネルの
     // 結果(成功/失敗いずれも)が揃ってから最後に行う
     var cultPromise = renderCultivation(basisDate, site, gen);
     var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site, gen); });
@@ -2309,6 +2817,14 @@
     readStoredSelection: readStoredSelection,
     writeStoredSelection: writeStoredSelection,
     getCurrentSelection: function(){ return { business: currentBusiness, site: currentSite }; },
+    isSupported: isSupported,
+    parseShippingPcsPerCs: parseShippingPcsPerCs,
+    getShippingQuantitiesSample: getShippingQuantitiesSample,
+    calcShippingCs: calcShippingCs,
+    SHIPPING_TASK_METRIC_KEYS: SHIPPING_TASK_METRIC_KEYS,
+    SHIPPING_SITE_FILTER: SHIPPING_SITE_FILTER,
+    computeShippingWorkHours: computeShippingWorkHours,
+    getShippingLaborSample: getShippingLaborSample,
   };
 })();
 </script>
