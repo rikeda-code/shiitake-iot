@@ -697,6 +697,13 @@
   function fmtNum(v){
     return (v === null || v === undefined || isNaN(v)) ? DASH : Number(v).toFixed(1);
   }
+  // 出荷パネル1（個数）の表示専用フォーマッタ。計算に使う値は丸めず、表示だけを変える。
+  function fmtShipInt(v){
+    return (v === null || v === undefined || isNaN(v)) ? DASH : Math.round(Number(v)).toLocaleString('ja-JP');
+  }
+  function fmtShipDecimal1(v){
+    return (v === null || v === undefined || isNaN(v)) ? DASH : Number(v).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
 
   /* ===================== 日付の解析（年の補完） ===================== */
 
@@ -2609,7 +2616,7 @@
       setShipQtyCell('cs数', o, q ? q.cs : null);
       ['パック', '袋', 'バラ', '合計'].forEach(function(label){
         var cell = document.querySelector('[data-shipqtykg="' + label + '"][data-shipqtykg-offset="' + o + '"]');
-        if (cell) cell.textContent = (q && q.kg) ? fmtNum(q.kg[KG_KEY_BY_LABEL[label]]) : DASH;
+        if (cell) cell.textContent = (q && q.kg) ? fmtShipDecimal1(q.kg[KG_KEY_BY_LABEL[label]]) : DASH;
       });
       var kindCell = document.querySelector('[data-kind-offset="' + o + '"]');
       if (kindCell) kindCell.textContent = (q && q.source) ? q.source : '';
@@ -2619,7 +2626,7 @@
     }
     function setShipQtyCell(key, o2, v){
       var cell = document.querySelector('[data-shipqty="' + key + '"][data-shipqty-offset="' + o2 + '"]');
-      if (cell) cell.textContent = fmtNum(v);
+      if (cell) cell.textContent = (key === 'cs数') ? fmtShipDecimal1(v) : fmtShipInt(v);
     }
 
     // 販売抽出シートにまだ無い日付(月をまたいだ先など)がある場合の補足
@@ -3028,6 +3035,8 @@
     aggregateShippingSalesForDate: aggregateShippingSalesForDate,
     fetchShippingQuantities: fetchShippingQuantities,
     SHIPPING_SALES_URL_SHEET: SHIPPING_SALES_URL_SHEET,
+    fmtShipInt: fmtShipInt,
+    fmtShipDecimal1: fmtShipDecimal1,
   };
 })();
 </script>
