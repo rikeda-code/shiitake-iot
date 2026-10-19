@@ -436,7 +436,6 @@
           <tbody id="table1shipDetailBody"></tbody>
         </table>
       </div>
-      <div class="note" id="shipExcludedNote" style="display:none; padding:4px 18px 8px;"></div>
     </details>
   </section>
 
@@ -2343,20 +2342,17 @@
     return bySiteKind;
   }
 
-  // 商品名からパック・袋・バラを判定する「仮のルール」。上から順に判定し、最初に
-  // 当てはまったものにする。あとから直しやすいよう、ここに表としてまとめてある
-  // (kind: 'pack'|'bag'|'bara'|null。nullは集計しない=除外)。
+  // 商品名からパック・袋・バラを判定するルール。上から順に判定し、最初に当てはまった
+  // ものにする。あとから直しやすいよう、ここに表としてまとめてある(kind: 'pack'|'bag'|'bara')。
   // 「秀バラパック 3kg」「優バラパック 3kg」「袋①150gパック 150g」「チビ用カップ 80g」
-  // 「BC65g」「BC75g」「A5 100g」「秀バラ1kg 200g」は、下のルールにそのまま当てはめた
-  // 結果を採用している(商品名の実態と判定が合っているかは確認待ち)
+  // 「BC65g」「BC75g」「A5 100g」「秀バラ1kg 200g」を含む、いなべ・群馬・南丹の全商品に
+  // ついて、下のルールの判定結果を2026/10 ユーザー確認済み
   var SHIPPING_PRODUCT_CLASSIFICATION_RULES = [
-    // 順1: 前後の空白を除くと「25g」「350g」のように数字+gだけの名前は集計しない(除外)
-    { label: '除外(重量のみの商品名)', kind: null, test: function(name){ return /^\d+(\.\d+)?g$/.test(name); } },
+    // 順1:「袋」を含む(「袋」と「バラ」の両方を含む商品名があれば袋とする)
+    { label: '袋', kind: 'bag', test: function(name){ return name.indexOf('袋') !== -1; } },
     // 順2:「バラ」を含む
     { label: 'バラ', kind: 'bara', test: function(name){ return name.indexOf('バラ') !== -1; } },
-    // 順3:「袋」を含む
-    { label: '袋', kind: 'bag', test: function(name){ return name.indexOf('袋') !== -1; } },
-    // 順4: それ以外はすべてパック
+    // 順3: それ以外はすべてパック(商品名が空欄で重さだけの行「25g」「350g」等も含む)
     { label: 'パック', kind: 'pack', test: function(){ return true; } },
   ];
   function classifyShippingProduct(name){
@@ -2394,13 +2390,13 @@
   }
 
   // parseShippingSalesSheet()の解析結果 x 対象日(ISO文字列)から、パック・袋・バラ別の
-  // 個数・kgの合計と、除外した商品(名前→個数)を集計する。純粋関数(テストから直接呼べる)。
+  // 個数・kgの合計を集計する。純粋関数(テストから直接呼べる)。
   // 対象日の列が無ければnullを返す(「日付がない」ことと「値が0件」を区別するため)
   function aggregateShippingSalesForDate(parsed, isoDate){
     if (!parsed || parsed.colIdx.kind < 0 || parsed.colIdx.product < 0) return null;
     var colIdx = parsed.dateCol[isoDate];
     if (colIdx === undefined) return null;
-    var result = { count: { pack: 0, bag: 0, bara: 0 }, kg: { pack: 0, bag: 0, bara: 0 }, excluded: {} };
+    var result = { count: { pack: 0, bag: 0, bara: 0 }, kg: { pack: 0, bag: 0, bara: 0 } };
     var rows = parsed.rows;
     for (var r = 1; r < rows.length; r++) {
       var cells = (rows[r] && rows[r].c) || [];
@@ -2415,10 +2411,6 @@
       var kindRaw = cells[parsed.colIdx.kind] ? cells[parsed.colIdx.kind].v : null;
       var kindText = kindRaw == null ? '' : String(kindRaw).trim();
       var cls = classifyShippingProduct(product);
-      if (cls === null) {
-        if (kindText === '個数') result.excluded[product] = (result.excluded[product] || 0) + n;
-        continue;
-      }
       if (kindText === '個数') result.count[cls] += n;
       else if (kindText === '重量') result.kg[cls] += n;
     }
@@ -2461,7 +2453,7 @@
   // 出荷数量を販売抽出シート(商品別)から取得する。表示する日付が今日より前なら「実績」、
   // 今日以降(今日を含む)なら「受注」のタブを使う(「今日」は基準日ではなく実際の今日)。
   // 必要な区分(実績・受注のどちらか、または両方)のタブだけを、1回ずつ取得する。
-  // 戻り値: { byDate: { 日付ISO文字列: {pack,bag,bara,kg:{pack,bag,bara,total},excluded,source} | null },
+  // 戻り値: { byDate: { 日付ISO文字列: {pack,bag,bara,kg:{pack,bag,bara,total},source} | null },
   //           missingDates: [対象シートにその日付の列が無かったDateの配列] }
   async function fetchShippingQuantities(site, dates){
     var realToday = new Date(); realToday.setHours(0, 0, 0, 0); // 実際の今日(基準日ではない)
@@ -2481,7 +2473,6 @@
       byDate[iso] = {
         pack: agg.count.pack, bag: agg.count.bag, bara: agg.count.bara,
         kg: { pack: agg.kg.pack, bag: agg.kg.bag, bara: agg.kg.bara, total: agg.kg.pack + agg.kg.bag + agg.kg.bara },
-        excluded: Object.keys(agg.excluded).map(function(name){ return { name: name, count: agg.excluded[name] }; }),
         source: kind,
       };
     });
@@ -2592,7 +2583,7 @@
         if (!s) return null;
         var totalPieces = s.pack + s.bag + s.bara;
         var cs = calcShippingCs(totalPieces, s.bara, pcsPerCs);
-        return { pack: s.pack, bag: s.bag, bara: s.bara, totalPieces: totalPieces, cs: cs, kg: s.kg, excluded: s.excluded, source: s.source };
+        return { pack: s.pack, bag: s.bag, bara: s.bara, totalPieces: totalPieces, cs: cs, kg: s.kg, source: s.source };
       });
       if (gen !== renderGeneration) return qtyByOffset; // 追い越されていたら描画しない
       renderShippingQuantityTable(qtyByOffset, salesResult.missingDates);
@@ -2623,7 +2614,6 @@
     detailBody.innerHTML = detailHtml;
 
     var KG_KEY_BY_LABEL = { 'パック': 'pack', '袋': 'bag', 'バラ': 'bara', '合計': 'total' };
-    var excludedTotals = {}; // 表示している8日間で除外された商品名→合計個数
     for (var o = 0; o < DAY_COUNT; o++) {
       var q = qtyByOffset ? qtyByOffset[o] : null;
       setShipQtyCell('パック数', o, q ? q.pack : null);
@@ -2637,9 +2627,6 @@
       });
       var kindCell = document.querySelector('[data-kind-offset="' + o + '"]');
       if (kindCell) kindCell.textContent = (q && q.source) ? q.source : '';
-      (q && q.excluded ? q.excluded : []).forEach(function(ex){
-        excludedTotals[ex.name] = (excludedTotals[ex.name] || 0) + ex.count;
-      });
     }
     function setShipQtyCell(key, o2, v){
       var cell = document.querySelector('[data-shipqty="' + key + '"][data-shipqty-offset="' + o2 + '"]');
@@ -2655,19 +2642,6 @@
     } else {
       periodNoticeBox.textContent = '';
       periodNoticeBox.style.display = 'none';
-    }
-
-    // 除外した商品(重量のみの商品名等)があれば、名前と個数を詳細に表示する
-    var excludedBox = document.getElementById('shipExcludedNote');
-    var excludedNames = Object.keys(excludedTotals);
-    if (excludedNames.length) {
-      excludedBox.textContent = '除外した商品：' + excludedNames.map(function(name){
-        return name + '(' + fmtNum(excludedTotals[name]) + '個)';
-      }).join('、');
-      excludedBox.style.display = '';
-    } else {
-      excludedBox.textContent = '';
-      excludedBox.style.display = 'none';
     }
   }
 
