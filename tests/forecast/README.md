@@ -28,6 +28,7 @@ npx playwright install chromium
    ```sh
    node tests/forecast/verify_forecast_shipping_sales.js
    node tests/forecast/verify_regression_consolidated.js
+   node tests/forecast/verify_forecast_shipping_labor_inabe.js
    ```
 
    各行末に `: OK` / `: NG` が出力され、最後に `すべてOK` / `NGあり` と `DONE` が表示されれば実行完了です。
@@ -37,8 +38,9 @@ npx playwright install chromium
 
 - `verify_forecast_shipping_sales.js` — 出荷パネル1（販売抽出シートの実績・受注データ接続、商品分類ルール、個数の表示形式など）の検証。
 - `verify_regression_consolidated.js` — 栽培・出荷の既存機能全般の回帰確認（複数拠点のパネル表示、スティッキーヘッダー、基準日の未来選択、描画の世代チェック、URL保持など）。
+- `verify_forecast_shipping_labor_inabe.js` — 出荷×いなべのパネル3（標準労働時間）をシフト表の実データに接続した機能の検証（部門「出荷」「配送・出荷」での絞り込み、シフトの値の扱い、標準労働時間シートとの照合・エイリアス・部門不一致時の未照合警告、拠点シフト表GAS経由での絞り込み、過不足の計算、シフト表の日付範囲外の扱い、群馬・南丹は引き続きサンプルであること、栽培/出荷の切替で部門が混ざらないこと）。
 
-両ファイルとも、CSVモックの組み立てや日付固定（`fixTodayTo`）などの補助関数をファイル内に直接含んでおり、他ファイルへの依存はありません。
+いずれのファイルも、CSVモックの組み立てや日付固定（`fixTodayTo`）などの補助関数をファイル内に直接含んでおり、他ファイルへの依存はありません。
 
 ## 公開対象からの除外について
 

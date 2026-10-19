@@ -469,7 +469,7 @@
     </div>
   </section>
 
-  <!-- ============ ③標準労働時間（出荷、サンプルデータ） ============ -->
+  <!-- ============ ③標準労働時間（出荷。いなべは実データ、群馬・南丹はサンプルデータ） ============ -->
   <section class="panel labor">
     <div class="panel-head">
       <h2>標準労働時間</h2>
@@ -514,6 +514,11 @@
         </tbody>
       </table>
     </div>
+    <div class="warnings" id="shipLaborWarnings" style="display:none;">
+      <strong>未照合の警告</strong>
+      <ul id="shipLaborWarningsList"></ul>
+    </div>
+    <div class="note" id="shipLaborPeriodNotices" style="display:none; padding:2px 18px 8px;"></div>
     <details class="detail-rows">
       <summary>人別内訳</summary>
       <div class="table-scroll">
@@ -1435,49 +1440,54 @@
     return { type: 'other' };
   }
 
-  // シフト表からいなべ×栽培(部門='栽培'または'配送・栽培')の人だけを抽出する。純粋関数
-  function extractShiftPersons(rows, basisDate){
+  // シフト表からいなべ×指定部門(depts、例：['栽培','配送・栽培']または['出荷','配送・出荷'])の
+  // 人だけを抽出する。純粋関数。戻り値の配列には、表示8日間のうちシフト表に日付の列が無い
+  // オフセット番号の一覧をmissingOffsetsプロパティとして付与する(どの部門で呼んでも同じ値)
+  function extractShiftPersons(rows, basisDate, depts){
     rows = rows || [];
     var dateRowCells = rows[0] ? rows[0].c.slice(2) : [];
     var mdList = dateRowCells.map(function(c){ return parseMD(c && c.v); });
     var fullDates = buildDatesWithYearInference(mdList, basisDate);
     var dayColIdx = [];
+    var missingOffsets = [];
     for (var off = 0; off < DAY_COUNT; off++) {
       var target = addDays(basisDate, off);
       var idx = -1;
       for (var k = 0; k < fullDates.length; k++) { if (fullDates[k] && sameDate(fullDates[k], target)) { idx = k; break; } }
       dayColIdx.push(idx);
+      if (idx === -1) missingOffsets.push(off);
     }
     var persons = [];
     for (var r = 13; r < rows.length; r++) { // 14行目以降(0-based index13)
       var c = (rows[r] && rows[r].c) || [];
       var name = c[0] ? String(c[0].v == null ? '' : c[0].v).trim() : '';
       var dept = c[1] ? String(c[1].v == null ? '' : c[1].v).trim() : '';
-      if (dept !== '栽培' && dept !== '配送・栽培') continue;
+      if (depts.indexOf(dept) === -1) continue;
       var cellsFull = c.slice(2);
       var dayCells = dayColIdx.map(function(idx){
         return (idx >= 0 && cellsFull[idx]) ? cellsFull[idx].v : '';
       });
       persons.push({ name: name, dept: dept, dayCells: dayCells });
     }
+    persons.missingOffsets = missingOffsets;
     return persons;
   }
 
-  async function fetchShiftPersons(basisDate){
+  async function fetchShiftPersons(basisDate, depts){
     var json = await fetchCsvSheet(SHIFT_SHEET_ID, SHIFT_SHEET_GID);
-    return extractShiftPersons(json.table.rows, basisDate);
+    return extractShiftPersons(json.table.rows, basisDate, depts);
   }
 
-  // 拠点シフト表のGASから、いなべ×栽培(部門='栽培'または'配送・栽培')の人の当日〜7日後の
-  // 実働時間を取得する。休憩は拠点シフト表側のルール（拘束5時間以上で1時間）で計算済み
-  async function fetchShiftPersonsFromApp(basisDate){
+  // 拠点シフト表のGASから、いなべ×指定部門(depts)の人の当日〜7日後の実働時間を取得する。
+  // 休憩は拠点シフト表側のルール（拘束5時間以上で1時間）で計算済み
+  async function fetchShiftPersonsFromApp(basisDate, depts){
     var from = toISO(basisDate), to = toISO(addDays(basisDate, DAY_COUNT - 1));
     var url = SHIFT_GAS_URL + '?action=hours&site=' + encodeURIComponent('いなべ') + '&from=' + from + '&to=' + to;
     var res = await fetch(url, { cache: 'no-store' });
     var json = await res.json();
     if (json.status !== 'ok') throw new Error(json.message || 'シフトを取得できませんでした');
     return json.persons
-      .filter(function(p){ return p.dept === '栽培' || p.dept === '配送・栽培'; })
+      .filter(function(p){ return depts.indexOf(p.dept) !== -1; })
       .map(function(p){
         var dayHours = [];
         for (var o = 0; o < DAY_COUNT; o++) dayHours.push(p.days[toISO(addDays(basisDate, o))] || 0);
@@ -1550,8 +1560,11 @@
   }
 
   // シフト表の人一覧 x 標準労働時間シートから、当日〜7日後の標準労働時間合計・出勤人数・
-  // 人別内訳・未照合警告を算出する。純粋関数
-  function computeStandardLaborHours(persons, laborRows){
+  // 人別内訳・未照合警告を算出する。純粋関数。missingOffsets(省略可)は、シフト表に
+  // 日付の列が無いオフセット番号の一覧(extractShiftPersons()のmissingOffsetsをそのまま渡す
+  // ことを想定)。該当オフセットは合計・人別とも計算せずnull(表示側で「－」になる)にする
+  function computeStandardLaborHours(persons, laborRows, missingOffsets){
+    missingOffsets = missingOffsets || [];
     var perDayTotal = new Array(DAY_COUNT).fill(0);
     var perDayAttendance = new Array(DAY_COUNT).fill(0);
     var warningSet = {};
@@ -1588,6 +1601,10 @@
     });
 
     perDayTotal = perDayTotal.map(function(v){ return Math.round(v * 10) / 10; });
+    missingOffsets.forEach(function(o){
+      perDayTotal[o] = null;
+      personBreakdown.forEach(function(p){ p.dayHours[o] = null; });
+    });
     return {
       perDayTotal: perDayTotal,
       perDayAttendance: perDayAttendance,
@@ -2705,12 +2722,33 @@
     }
   }
 
+  // いなべ×出荷(部門='出荷'または'配送・出荷')の標準労働時間。読み込み・計算は栽培の
+  // いなべ(renderLabor())と同じ関数(fetchShiftPersons/fetchShiftPersonsFromApp/
+  // computeStandardLaborHours)を使い、対象部門の一覧だけを変えている
+  var SHIPPING_LABOR_DEPTS = ['出荷', '配送・出荷'];
+  async function fetchShippingLaborInabe(basisDate){
+    var persons, laborRows;
+    if (SHIFT_GAS_URL) {
+      persons = await fetchShiftPersonsFromApp(basisDate, SHIPPING_LABOR_DEPTS);
+      laborRows = [];
+    } else {
+      persons = await fetchShiftPersons(basisDate, SHIPPING_LABOR_DEPTS);
+      laborRows = await fetchStdLaborRows();
+    }
+    var result = computeStandardLaborHours(persons, laborRows, persons.missingOffsets);
+    var missing = persons.missingOffsets || [];
+    result.periodNotices = missing.length
+      ? ['シフト表に' + fmtYMD(addDays(basisDate, Math.min.apply(null, missing))) + '以降の日付がありません']
+      : [];
+    return result;
+  }
+
   async function renderShippingLabor(basisDate, site, gen){
     showPanelError('shipLaborError', null);
     try {
       var dates = [];
       for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
-      var result = getShippingLaborSample(site, dates);
+      var result = (site === 'いなべ') ? await fetchShippingLaborInabe(basisDate) : getShippingLaborSample(site, dates);
       return result;
     } catch (err) {
       console.error('[出荷標準労働時間] 取得エラー:', err);
@@ -2746,6 +2784,25 @@
           shortfallCell.classList.toggle('pos', shortfall >= 0);
         }
       }
+    }
+
+    var warningsBox = document.getElementById('shipLaborWarnings');
+    var warningsList = document.getElementById('shipLaborWarningsList');
+    if (laborResult && laborResult.warnings && laborResult.warnings.length) {
+      warningsList.innerHTML = laborResult.warnings.map(function(w){ return '<li>' + w + '</li>'; }).join('');
+      warningsBox.style.display = '';
+    } else {
+      warningsList.innerHTML = '';
+      warningsBox.style.display = 'none';
+    }
+
+    var periodNoticesBox = document.getElementById('shipLaborPeriodNotices');
+    if (laborResult && laborResult.periodNotices && laborResult.periodNotices.length) {
+      periodNoticesBox.textContent = laborResult.periodNotices.join('　');
+      periodNoticesBox.style.display = '';
+    } else {
+      periodNoticesBox.textContent = '';
+      periodNoticesBox.style.display = 'none';
     }
 
     var detailBody = document.getElementById('table3shipDetailBody');
@@ -2818,10 +2875,10 @@
     try {
       var persons, laborRows;
       if (SHIFT_GAS_URL) {
-        persons = await fetchShiftPersonsFromApp(basisDate);
+        persons = await fetchShiftPersonsFromApp(basisDate, ['栽培', '配送・栽培']);
         laborRows = [];
       } else {
-        persons = await fetchShiftPersons(basisDate);
+        persons = await fetchShiftPersons(basisDate, ['栽培', '配送・栽培']);
         laborRows = await fetchStdLaborRows();
       }
       var result = computeStandardLaborHours(persons, laborRows);
@@ -2890,11 +2947,11 @@
     document.getElementById('unsupportedPanel').style.display = supported ? 'none' : '';
     document.getElementById('supportedPanels').style.display = showCult ? '' : 'none';
     document.getElementById('shippingPanels').style.display = showShip ? '' : 'none';
-    document.getElementById('shippingSampleBanner').style.display = showShip ? '' : 'none';
+    var site = currentSite;
+    document.getElementById('shippingSampleBanner').style.display = (showShip && site !== 'いなべ') ? '' : 'none';
     if (!supported) return;
 
     var basisDate = fromISO(basisInput.value);
-    var site = currentSite;
     renderDcols(basisDate);
     updateBasisLabels(basisInput.value === todayISO);
 
@@ -2988,6 +3045,9 @@
     parseStdLaborRows: parseStdLaborRows,
     findLaborMatch: findLaborMatch,
     computeStandardLaborHours: computeStandardLaborHours,
+    fetchShiftPersons: fetchShiftPersons,
+    fetchShiftPersonsFromApp: fetchShiftPersonsFromApp,
+    fetchStdLaborRows: fetchStdLaborRows,
     SHIFT_NAME_ALIASES: SHIFT_NAME_ALIASES,
     yearMonthKey: yearMonthKey,
     normalizeHarvestHeaderCell: normalizeHarvestHeaderCell,
@@ -3026,6 +3086,8 @@
     SHIPPING_SITE_FILTER: SHIPPING_SITE_FILTER,
     computeShippingWorkHours: computeShippingWorkHours,
     getShippingLaborSample: getShippingLaborSample,
+    SHIPPING_LABOR_DEPTS: SHIPPING_LABOR_DEPTS,
+    fetchShippingLaborInabe: fetchShippingLaborInabe,
     extractShippingSheetIdGidFromUrl: extractShippingSheetIdGidFromUrl,
     parseShippingSalesUrlSheet: parseShippingSalesUrlSheet,
     SHIPPING_PRODUCT_CLASSIFICATION_RULES: SHIPPING_PRODUCT_CLASSIFICATION_RULES,
