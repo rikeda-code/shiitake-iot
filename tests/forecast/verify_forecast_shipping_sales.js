@@ -220,6 +220,10 @@ async function shippingWorkRows(page) {
         e: t.classifyShippingProduct('秀L バラ5kg 5,000g'),
         f: t.classifyShippingProduct(' 25g'),
         g: t.classifyShippingProduct('350g'),
+        h: t.classifyShippingProduct('優2L袋 200g'),
+        i: t.classifyShippingProduct('規格外袋500g'),
+        j: t.classifyShippingProduct('規格外バラ3キロ'),
+        k: t.classifyShippingProduct('秀バラ袋 200g'), // 「袋」と「バラ」の両方を含む→袋が優先
         ruleCount: t.SHIPPING_PRODUCT_CLASSIFICATION_RULES.length,
       };
     });
@@ -229,9 +233,13 @@ async function shippingWorkRows(page) {
     check('「優バラ1kg 1,000g」→バラ', r.c === 'bara');
     check('「秀袋 200g」→袋', r.d === 'bag');
     check('「秀L バラ5kg 5,000g」→バラ', r.e === 'bara');
-    check('「 25g」(前後空白除くと数字+gのみ)→除外(null)', r.f === null);
-    check('「350g」→除外(null)', r.g === null);
-    check('判定ルールが表(配列)として4件存在する', r.ruleCount === 4);
+    check('「 25g」(商品名が空欄で重さだけ)→パックとして計上', r.f === 'pack');
+    check('「350g」→パックとして計上', r.g === 'pack');
+    check('「優2L袋 200g」→袋', r.h === 'bag');
+    check('「規格外袋500g」→袋', r.i === 'bag');
+    check('「規格外バラ3キロ」→バラ', r.j === 'bara');
+    check('「袋」と「バラ」の両方を含む商品名→袋が優先される', r.k === 'bag');
+    check('判定ルールが表(配列)として3件(袋→バラ→パック)存在する', r.ruleCount === 3);
 
     // 設定の表を直接書き換えて判定が変わることを確認(「バラ」を含む名前を強制的にパック扱いにする設定に差し替え)
     const changed = await page.evaluate(() => {
@@ -493,6 +501,43 @@ async function shippingWorkRows(page) {
     check('値がない日(10/20以降)はパック数が「－」のまま', pack.cells.slice(1).every(v => v === '－'));
     check('値がない日(10/20以降)はcs数が「－」のまま', cs.cells.slice(1).every(v => v === '－'));
     check('値がない日(10/20以降)はkg詳細が「－」のまま', packKg.cells.slice(1).every(v => v === '－'));
+    await page.close();
+  }
+
+  console.log('\n=== ⑪商品名が空欄で重さだけの行がパックとして計上され、除外の表示が出ないこと ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19);
+    const d0 = new Date(2026, 9, 19);
+    const csv = buildSalesSheetCsv([d0], [
+      { kind: '個数', product: ' 25g', valuesByDate: { [isoKey(d0)]: 400 } },        // 商品名が空欄で重さだけ(群馬の例)
+      { kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(d0)]: 100 } },   // 通常のパック商品
+    ]);
+    const urlCsv = buildSalesUrlListCsv([{ site: 'いなべ', kind: '受注', url: salesSheetUrl('nameless1', '8101') }]);
+    await setupRoutes(page, [
+      staticHandler([[DB_SHARE_SHEET_ID, SALES_URL_SHEET_GID]], urlCsv),
+      staticHandler([['nameless1', '8101']], csv),
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv({ shipFactors: { '段ボール詰める': { factor: 1, unit: 'h' } } })),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(500);
+    await page.click('[data-business="出荷"]');
+    await page.waitForTimeout(1000);
+    const rows = await shippingQtyRows(page);
+    const workRows = await shippingWorkRows(page);
+    const pack = rows.find(r => r.label === 'パック数');
+    const total = rows.find(r => r.label === '合計点数');
+    const cs = rows.find(r => r.label === 'cs数');
+    const box = workRows.find(r => r.label === '段ボール詰める');
+    console.log('pack:', pack.cells[0], 'total:', total.cells[0], 'cs:', cs.cells[0], '段ボール詰める:', box.cells[0]);
+    // パック数=400(25g)+100(秀L6 130g)=500、合計点数=500、cs=500÷30=16.666...→16.7
+    check('商品名が空欄で重さだけの行(「 25g」、400個)がパック数に含まれる(400+100=500)', pack.cells[0] === '500');
+    check('合計点数にも含まれる(500)', total.cells[0] === '500');
+    const expectedCs = Math.round((500 / 30) * 10) / 10;
+    check(`cs数にも含まれる(${expectedCs})`, cs.cells[0] === expectedCs.toFixed(1));
+    check('パネル2「段ボール詰める」がcs数(500÷30=16.7)から計算される', box.cells[0] === expectedCs.toFixed(1));
+    const excludedBoxExists = await page.evaluate(() => document.getElementById('shipExcludedNote') !== null);
+    check('詳細(折りたたみ)に「除外した商品」の表示欄が無い', !excludedBoxExists);
     await page.close();
   }
 
