@@ -29,6 +29,7 @@ npx playwright install chromium
    node tests/forecast/verify_forecast_shipping_sales.js
    node tests/forecast/verify_regression_consolidated.js
    node tests/forecast/verify_forecast_shipping_labor_inabe.js
+   node tests/forecast/verify_forecast_shipping_labor_gunma.js
    ```
 
    各行末に `: OK` / `: NG` が出力され、最後に `すべてOK` / `NGあり` と `DONE` が表示されれば実行完了です。
@@ -38,7 +39,8 @@ npx playwright install chromium
 
 - `verify_forecast_shipping_sales.js` — 出荷パネル1（販売抽出シートの実績・受注データ接続、商品分類ルール、個数の表示形式など）の検証。
 - `verify_regression_consolidated.js` — 栽培・出荷の既存機能全般の回帰確認（複数拠点のパネル表示、スティッキーヘッダー、基準日の未来選択、描画の世代チェック、URL保持など）。
-- `verify_forecast_shipping_labor_inabe.js` — 出荷×いなべのパネル3（標準労働時間）をシフト表の実データに接続した機能の検証（部門「出荷」「配送・出荷」での絞り込み、シフトの値の扱い、標準労働時間シートとの照合・エイリアス・部門不一致時の未照合警告、拠点シフト表GAS経由での絞り込み、過不足の計算、シフト表の日付範囲外の扱い、群馬・南丹は引き続きサンプルであること、栽培/出荷の切替で部門が混ざらないこと）。
+- `verify_forecast_shipping_labor_inabe.js` — 出荷×いなべのパネル3（標準労働時間）をシフト表の実データに接続した機能の検証（部門「出荷」「配送・出荷」での絞り込み、シフトの値の扱い、標準労働時間シートとの照合・エイリアス・部門不一致時の未照合警告、拠点シフト表GAS経由での絞り込み、過不足の計算、シフト表の日付範囲外の扱い、南丹は引き続きサンプルであること、栽培/出荷の切替で部門が混ざらないこと）。
+- `verify_forecast_shipping_labor_gunma.js` — 出荷×群馬のパネル3（標準労働時間）を勤務表「出荷場」シートの実データに接続した機能の検証（社員・パートの集計、配送担当（吉村(出)・高橋(出)）の除外、名前が空欄の行・集計行の読み飛ばし、標準労働時間シートとの照合・エイリアス（ソー→SAW MIN HTET）・未登録社員の8h補足、シフト値（時刻・休・有休等）の扱い、過不足の計算、月度シートの日付範囲外の扱い、いなべ・南丹は今までどおりであること、栽培と出荷で読むシートが混ざらないこと）。
 
 いずれのファイルも、CSVモックの組み立てや日付固定（`fixTodayTo`）などの補助関数をファイル内に直接含んでおり、他ファイルへの依存はありません。
 
