@@ -199,6 +199,7 @@
     text-align:center; border:1px solid var(--brown);
   }
   .sub-note{ font-size:10.5px; font-weight:400; color:var(--ink-soft); white-space:normal; }
+  .dcol-kind{ font-size:10.5px; font-style:italic; }
 
   @media (max-width:640px){
     body{ padding:18px 10px 40px; }
@@ -389,11 +390,11 @@
 
   </div>
 
-  <div id="shippingSampleBanner" class="sample-data-banner" style="display:none;">サンプルデータを表示しています（実データ未接続）</div>
+  <div id="shippingSampleBanner" class="sample-data-banner" style="display:none;">パネル3（標準労働時間）はサンプルデータです（実データ未接続）</div>
 
   <div id="shippingPanels" style="display:none;">
 
-  <!-- ============ ①出荷数量（サンプルデータ） ============ -->
+  <!-- ============ ①出荷数量（販売抽出シート(商品別)の実績・受注） ============ -->
   <section class="panel cult">
     <div class="panel-head">
       <h2>出荷数量</h2>
@@ -415,19 +416,27 @@
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
           </tr>
+          <tr class="weekday">
+            <th class="sticky-1" colspan="2"></th>
+            <th class="dcol-kind today-col" data-kind-offset="0"></th>
+            <th class="dcol-kind" data-kind-offset="1"></th><th class="dcol-kind" data-kind-offset="2"></th><th class="dcol-kind" data-kind-offset="3"></th>
+            <th class="dcol-kind" data-kind-offset="4"></th><th class="dcol-kind" data-kind-offset="5"></th><th class="dcol-kind" data-kind-offset="6"></th><th class="dcol-kind" data-kind-offset="7"></th>
+          </tr>
         </thead>
         <tbody id="table1shipBody">
         </tbody>
       </table>
     </div>
+    <div class="note" id="shipQtyPeriodNotice" style="display:none; padding:4px 18px 8px;"></div>
     <details class="detail-rows">
-      <summary>詳細（出荷予定量kg：M・L・2L・袋）※参考（工数の計算には使わない）</summary>
+      <summary>詳細（出荷予定量kg：パック・袋・バラ・合計）※参考（工数の計算には使わない）</summary>
       <div class="table-scroll">
         <table id="table1shipDetail">
           <colgroup></colgroup>
           <tbody id="table1shipDetailBody"></tbody>
         </table>
       </div>
+      <div class="note" id="shipExcludedNote" style="display:none; padding:4px 18px 8px;"></div>
     </details>
   </section>
 
@@ -540,6 +549,9 @@
   };
   var DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg'; // DB共有
   var STD_WORK_HOURS_SHEET = { id: DB_SHARE_SHEET_ID, gid: '264266810' }; // DB共有「標準工数設定」
+  // DB共有「販売抽出シート(商品別)」の参照先一覧(拠点／区分／URL)。ここから実績・受注の
+  // タブのURL(id・gid)を取り出して使う(URL自体はコードに直接書かない)
+  var SHIPPING_SALES_URL_SHEET = { id: DB_SHARE_SHEET_ID, gid: '1130067935' };
   // 標準労働時間は、引き続きファーム勤務時間ファイルから読む
   var STD_LABOR_HOURS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1404355975' };
   var SHIFT_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
@@ -2258,47 +2270,198 @@
   // 直前に「自分がまだ最新の render() か」を確認し、古ければ何も描画せずに捨てる
   var renderGeneration = 0;
 
-  /* ===================== 出荷（サンプルデータ、実データ未接続） ===================== */
-  // パネル1〜3とも、現時点ではサンプルデータで画面・計算の仕組みだけを作る。
-  // getShippingQuantitiesSample()・getShippingLaborSample()を実データ取得の関数に
-  // 差し替えるだけで、パネル1〜3がそのまま動く作りにしてある
+  /* ===================== 出荷（パネル1：販売抽出シート(商品別)の実績・受注） ===================== */
+  // パネル1(出荷数量)は、販売抽出シート(商品別)の実績・受注の実データを読む。
+  // パネル3(標準労働時間)は引き続きサンプルデータ(getShippingLaborSample())。
+  // 実データに差し替えるときは、この関数(またはrenderShippingLabor()内の呼び出し箇所)を
+  // 実際の勤務表を読む非同期関数に置き換えるだけでよい
 
-  // 拠点ごとの基準値(1日当たり)。いなべ パック数2,000〜3,500個/日・袋数400〜700個/日・
-  // バラ数0〜30個/日が目安になるよう、曜日係数(0.85〜1.1倍)を掛けても範囲に収まる値にする。
-  // 群馬・南丹はいなべの7〜8割程度
-  var SHIPPING_QTY_BASE = {
-    'いなべ': { pack: 2700, bag: 550, bara: 15 },
-    '群馬':   { pack: 2050, bag: 420, bara: 12 },
-    '南丹':   { pack: 1950, bag: 400, bara: 11 },
-  };
-  // 曜日(日=0〜土=6)で増減をつけるための係数。乱数は使わず、同じ拠点・同じ日付なら
-  // 常に同じ値になるようにする(日付と曜日だけから決まる固定的な値)
-  var SHIPPING_WEEKDAY_FACTOR = [0.85, 1.05, 1.05, 1.0, 1.05, 1.1, 0.9];
+  // URLセルからスプレッドシートID・gidを取り出す(work-hours.htmlの
+  // extractSheetIdGidFromUrl()と同じ処理)。URLが空欄・IDまたはgidが取り出せない
+  // セルはnullを返す
+  function extractShippingSheetIdGidFromUrl(url){
+    if (!url) return null;
+    var idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (!idMatch) return null;
+    var gidMatch = url.match(/gid=(\d+)/);
+    if (!gidMatch) return null;
+    return { id: idMatch[1], gid: gidMatch[1] };
+  }
 
-  // 出荷数量のサンプルデータ。{ 日付のISO文字列: { pack, bag, bara, kg: { M, L, '2L', bag } } }
-  // の形で返す。実データに差し替えるときは、この関数(または呼び出し側)を実際の出荷実績・
-  // 計画シートを読む非同期関数に置き換える
-  function getShippingQuantitiesSample(site, dates){
-    var base = SHIPPING_QTY_BASE[site] || SHIPPING_QTY_BASE['いなべ'];
-    var out = {};
+  // DB共有「販売抽出シート(商品別)」の参照先一覧の生rows(gviz形式)から、拠点・区分
+  // (月初・MRP・受注・実績)ごとのURL(スプレッドシートID+gid)を取得する。純粋関数
+  // (テストから直接呼べる)。1行目が見出し(拠点／区分／URL)で、列の位置は固定せず
+  // 見出し文字列で探す。戻り値は bySiteKind[拠点][区分] = {id,gid} または null
+  function parseShippingSalesUrlSheet(rows){
+    rows = rows || [];
+    var header = (rows[0] && rows[0].c) || [];
+    var col = { site: -1, kind: -1, url: -1 };
+    for (var c = 0; c < header.length; c++) {
+      var text = header[c] && header[c].v != null ? String(header[c].v).trim() : '';
+      if (text === '拠点' && col.site === -1) col.site = c;
+      if (text === '区分' && col.kind === -1) col.kind = c;
+      if (text === 'URL' && col.url === -1) col.url = c;
+    }
+    var bySiteKind = {};
+    if (col.site === -1 || col.kind === -1 || col.url === -1) return bySiteKind;
+    for (var r = 1; r < rows.length; r++) {
+      var cells = (rows[r] && rows[r].c) || [];
+      var siteRaw = cells[col.site] ? cells[col.site].v : null;
+      var site = siteRaw == null ? '' : String(siteRaw).trim();
+      var kindRaw = cells[col.kind] ? cells[col.kind].v : null;
+      var kind = kindRaw == null ? '' : String(kindRaw).trim();
+      if (!site || !kind) continue;
+      var urlRaw = cells[col.url] ? cells[col.url].v : null;
+      var url = urlRaw == null ? '' : String(urlRaw).trim();
+      if (!bySiteKind[site]) bySiteKind[site] = {};
+      bySiteKind[site][kind] = extractShippingSheetIdGidFromUrl(url);
+    }
+    return bySiteKind;
+  }
+
+  // 商品名からパック・袋・バラを判定する「仮のルール」。上から順に判定し、最初に
+  // 当てはまったものにする。あとから直しやすいよう、ここに表としてまとめてある
+  // (kind: 'pack'|'bag'|'bara'|null。nullは集計しない=除外)。
+  // 「秀バラパック 3kg」「優バラパック 3kg」「袋①150gパック 150g」「チビ用カップ 80g」
+  // 「BC65g」「BC75g」「A5 100g」「秀バラ1kg 200g」は、下のルールにそのまま当てはめた
+  // 結果を採用している(商品名の実態と判定が合っているかは確認待ち)
+  var SHIPPING_PRODUCT_CLASSIFICATION_RULES = [
+    // 順1: 前後の空白を除くと「25g」「350g」のように数字+gだけの名前は集計しない(除外)
+    { label: '除外(重量のみの商品名)', kind: null, test: function(name){ return /^\d+(\.\d+)?g$/.test(name); } },
+    // 順2:「バラ」を含む
+    { label: 'バラ', kind: 'bara', test: function(name){ return name.indexOf('バラ') !== -1; } },
+    // 順3:「袋」を含む
+    { label: '袋', kind: 'bag', test: function(name){ return name.indexOf('袋') !== -1; } },
+    // 順4: それ以外はすべてパック
+    { label: 'パック', kind: 'pack', test: function(){ return true; } },
+  ];
+  function classifyShippingProduct(name){
+    var n = (name == null ? '' : String(name)).trim();
+    for (var i = 0; i < SHIPPING_PRODUCT_CLASSIFICATION_RULES.length; i++) {
+      if (SHIPPING_PRODUCT_CLASSIFICATION_RULES[i].test(n)) return SHIPPING_PRODUCT_CLASSIFICATION_RULES[i].kind;
+    }
+    return 'pack';
+  }
+
+  // 見出しセルの日付文字列("yyyy/MM/dd")をDateにする。この形式以外はnull
+  function parseShippingSalesDateHeader(text){
+    var m = String(text == null ? '' : text).trim().match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (!m) return null;
+    return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  }
+
+  // 販売抽出シート(商品別)の1タブ(例：いなべ_受注)の生rows(gviz形式)を解析する。
+  // 純粋関数(テストから直接呼べる)。1行目を見出しとし、列の位置は固定せず見出し文字列
+  // (「個数/重量(kg)」「商品」、日付は"yyyy/MM/dd"形式)で探す。戻り値:
+  // { rows, colIdx:{kind,product}, dateCol:{"yyyy-mm-dd": colIdx} }
+  function parseShippingSalesSheet(rows){
+    rows = rows || [];
+    var header = (rows[0] && rows[0].c) || [];
+    var colIdx = { kind: -1, product: -1 };
+    var dateCol = {};
+    for (var c = 0; c < header.length; c++) {
+      var text = header[c] && header[c].v != null ? String(header[c].v).trim() : '';
+      if (text === '個数/重量(kg)' && colIdx.kind === -1) colIdx.kind = c;
+      if (text === '商品' && colIdx.product === -1) colIdx.product = c;
+      var d = parseShippingSalesDateHeader(text);
+      if (d) dateCol[toISO(d)] = c;
+    }
+    return { rows: rows, colIdx: colIdx, dateCol: dateCol };
+  }
+
+  // parseShippingSalesSheet()の解析結果 x 対象日(ISO文字列)から、パック・袋・バラ別の
+  // 個数・kgの合計と、除外した商品(名前→個数)を集計する。純粋関数(テストから直接呼べる)。
+  // 対象日の列が無ければnullを返す(「日付がない」ことと「値が0件」を区別するため)
+  function aggregateShippingSalesForDate(parsed, isoDate){
+    if (!parsed || parsed.colIdx.kind < 0 || parsed.colIdx.product < 0) return null;
+    var colIdx = parsed.dateCol[isoDate];
+    if (colIdx === undefined) return null;
+    var result = { count: { pack: 0, bag: 0, bara: 0 }, kg: { pack: 0, bag: 0, bara: 0 }, excluded: {} };
+    var rows = parsed.rows;
+    for (var r = 1; r < rows.length; r++) {
+      var cells = (rows[r] && rows[r].c) || [];
+      var productRaw = cells[parsed.colIdx.product] ? cells[parsed.colIdx.product].v : null;
+      var product = productRaw == null ? '' : String(productRaw).trim();
+      if (!product) continue; // 商品名が空の行(末尾の空行等)は読み飛ばす
+      var valRaw = cells[colIdx] ? cells[colIdx].v : null;
+      var valText = valRaw == null ? '' : String(valRaw).trim();
+      if (valText === '') continue; // この日付の値が空の行は読み飛ばす
+      var n = Number(valText.replace(/,/g, ''));
+      if (isNaN(n)) continue;
+      var kindRaw = cells[parsed.colIdx.kind] ? cells[parsed.colIdx.kind].v : null;
+      var kindText = kindRaw == null ? '' : String(kindRaw).trim();
+      var cls = classifyShippingProduct(product);
+      if (cls === null) {
+        if (kindText === '個数') result.excluded[product] = (result.excluded[product] || 0) + n;
+        continue;
+      }
+      if (kindText === '個数') result.count[cls] += n;
+      else if (kindText === '重量') result.kg[cls] += n;
+    }
+    return result;
+  }
+
+  // DB共有の参照先一覧をメモ化して1回だけ取得する(他の拠点・区分の取得とも共有)
+  var shippingSalesUrlPromise = null;
+  function fetchShippingSalesUrlData(){
+    if (!shippingSalesUrlPromise) {
+      var p = fetchCsvSheet(SHIPPING_SALES_URL_SHEET.id, SHIPPING_SALES_URL_SHEET.gid).then(function(json){
+        return parseShippingSalesUrlSheet(json.table.rows);
+      });
+      p.catch(function(){ if (shippingSalesUrlPromise === p) shippingSalesUrlPromise = null; });
+      shippingSalesUrlPromise = p;
+    }
+    return shippingSalesUrlPromise;
+  }
+
+  // 拠点・区分(実績/受注)ごとに、販売抽出シートのタブの取得・解析結果をメモ化する
+  // (同じrender()の中はもちろん、拠点・基準日を切り替えて戻ってきた場合も再取得しない)
+  var shippingSalesSheetCache = {};
+  function fetchShippingSalesSheetParsed(site, kind){
+    var key = site + '/' + kind;
+    if (!shippingSalesSheetCache[key]) {
+      var p = fetchShippingSalesUrlData().then(function(urlData){
+        var loc = urlData[site] && urlData[site][kind];
+        if (!loc) {
+          var e = new Error(site + 'の' + kind + 'のURLが販売抽出シートの一覧に見つかりません');
+          throw e;
+        }
+        return fetchCsvSheet(loc.id, loc.gid).then(function(json){ return parseShippingSalesSheet(json.table.rows); });
+      });
+      p.catch(function(){ if (shippingSalesSheetCache[key] === p) delete shippingSalesSheetCache[key]; });
+      shippingSalesSheetCache[key] = p;
+    }
+    return shippingSalesSheetCache[key];
+  }
+
+  // 出荷数量を販売抽出シート(商品別)から取得する。表示する日付が今日より前なら「実績」、
+  // 今日以降(今日を含む)なら「受注」のタブを使う(「今日」は基準日ではなく実際の今日)。
+  // 必要な区分(実績・受注のどちらか、または両方)のタブだけを、1回ずつ取得する。
+  // 戻り値: { byDate: { 日付ISO文字列: {pack,bag,bara,kg:{pack,bag,bara,total},excluded,source} | null },
+  //           missingDates: [対象シートにその日付の列が無かったDateの配列] }
+  async function fetchShippingQuantities(site, dates){
+    var realToday = new Date(); realToday.setHours(0, 0, 0, 0); // 実際の今日(基準日ではない)
+    var neededKinds = {};
+    (dates || []).forEach(function(d){ neededKinds[d < realToday ? '実績' : '受注'] = true; });
+    var parsedByKind = {};
+    await Promise.all(Object.keys(neededKinds).map(function(kind){
+      return fetchShippingSalesSheetParsed(site, kind).then(function(parsed){ parsedByKind[kind] = parsed; });
+    }));
+    var byDate = {};
+    var missingDates = [];
     (dates || []).forEach(function(d){
-      var f = SHIPPING_WEEKDAY_FACTOR[d.getDay()];
-      var pack = Math.round(base.pack * f);
-      var bag = Math.round(base.bag * f);
-      var bara = Math.round(base.bara * f);
-      out[toISO(d)] = {
-        pack: pack, bag: bag, bara: bara,
-        // 出荷予定量(kg)は参考値(工数の計算には使わない)。パック・袋の個数から
-        // それらしい重量感になる比率で機械的に算出する
-        kg: {
-          M: Math.round(pack * 0.12 * 10) / 10,
-          L: Math.round(pack * 0.08 * 10) / 10,
-          '2L': Math.round(pack * 0.03 * 10) / 10,
-          bag: Math.round(bag * 0.15 * 10) / 10,
-        },
+      var kind = d < realToday ? '実績' : '受注';
+      var iso = toISO(d);
+      var agg = aggregateShippingSalesForDate(parsedByKind[kind], iso);
+      if (!agg) { byDate[iso] = null; missingDates.push(d); return; }
+      byDate[iso] = {
+        pack: agg.count.pack, bag: agg.count.bag, bara: agg.count.bara,
+        kg: { pack: agg.kg.pack, bag: agg.kg.bag, bara: agg.kg.bara, total: agg.kg.pack + agg.kg.bag + agg.kg.bara },
+        excluded: Object.keys(agg.excluded).map(function(name){ return { name: name, count: agg.excluded[name] }; }),
+        source: kind,
       };
     });
-    return out;
+    return { byDate: byDate, missingDates: missingDates };
   }
 
   // cs数 = (合計点数 - バラ数) ÷ P/cs + バラ数(work-hours.htmlのcalcCs()と同じ式)
@@ -2398,28 +2561,28 @@
     try {
       var dates = [];
       for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
-      var sampleByDate = getShippingQuantitiesSample(site, dates);
+      var salesResult = await fetchShippingQuantities(site, dates);
       var pcsPerCs = await fetchShippingPcsPerCs();
       var qtyByOffset = dates.map(function(d){
-        var s = sampleByDate[toISO(d)];
+        var s = salesResult.byDate[toISO(d)];
         if (!s) return null;
         var totalPieces = s.pack + s.bag + s.bara;
         var cs = calcShippingCs(totalPieces, s.bara, pcsPerCs);
-        return { pack: s.pack, bag: s.bag, bara: s.bara, totalPieces: totalPieces, cs: cs, kg: s.kg };
+        return { pack: s.pack, bag: s.bag, bara: s.bara, totalPieces: totalPieces, cs: cs, kg: s.kg, excluded: s.excluded, source: s.source };
       });
       if (gen !== renderGeneration) return qtyByOffset; // 追い越されていたら描画しない
-      renderShippingQuantityTable(qtyByOffset);
+      renderShippingQuantityTable(qtyByOffset, salesResult.missingDates);
       return qtyByOffset;
     } catch (err) {
       console.error('[出荷数量] 取得エラー:', err);
       if (gen !== renderGeneration) return null;
       showPanelError('shipQtyError', err.message || String(err));
-      renderShippingQuantityTable(new Array(DAY_COUNT).fill(null));
+      renderShippingQuantityTable(new Array(DAY_COUNT).fill(null), []);
       return null;
     }
   }
 
-  function renderShippingQuantityTable(qtyByOffset){
+  function renderShippingQuantityTable(qtyByOffset, missingDates){
     var bodyMain = document.getElementById('table1shipBody');
     var html = '';
     html += buildRowHtml('パック数', 'パック数', 'shipqty', DAY_COUNT);
@@ -2431,9 +2594,12 @@
 
     var detailBody = document.getElementById('table1shipDetailBody');
     var detailHtml = '';
-    ['M', 'L', '2L', '袋'].forEach(function(label){ detailHtml += buildRowHtml(label, label, 'shipqtykg', DAY_COUNT); });
+    ['パック', '袋', 'バラ'].forEach(function(label){ detailHtml += buildRowHtml(label, label, 'shipqtykg', DAY_COUNT); });
+    detailHtml += buildRowHtml('合計', '合計', 'shipqtykg', DAY_COUNT, 'agg-row');
     detailBody.innerHTML = detailHtml;
 
+    var KG_KEY_BY_LABEL = { 'パック': 'pack', '袋': 'bag', 'バラ': 'bara', '合計': 'total' };
+    var excludedTotals = {}; // 表示している8日間で除外された商品名→合計個数
     for (var o = 0; o < DAY_COUNT; o++) {
       var q = qtyByOffset ? qtyByOffset[o] : null;
       setShipQtyCell('パック数', o, q ? q.pack : null);
@@ -2441,14 +2607,43 @@
       setShipQtyCell('バラ数', o, q ? q.bara : null);
       setShipQtyCell('合計点数', o, q ? q.totalPieces : null);
       setShipQtyCell('cs数', o, q ? q.cs : null);
-      ['M', 'L', '2L', '袋'].forEach(function(label){
+      ['パック', '袋', 'バラ', '合計'].forEach(function(label){
         var cell = document.querySelector('[data-shipqtykg="' + label + '"][data-shipqtykg-offset="' + o + '"]');
-        if (cell) cell.textContent = (q && q.kg) ? fmtNum(q.kg[label]) : DASH;
+        if (cell) cell.textContent = (q && q.kg) ? fmtNum(q.kg[KG_KEY_BY_LABEL[label]]) : DASH;
+      });
+      var kindCell = document.querySelector('[data-kind-offset="' + o + '"]');
+      if (kindCell) kindCell.textContent = (q && q.source) ? q.source : '';
+      (q && q.excluded ? q.excluded : []).forEach(function(ex){
+        excludedTotals[ex.name] = (excludedTotals[ex.name] || 0) + ex.count;
       });
     }
     function setShipQtyCell(key, o2, v){
       var cell = document.querySelector('[data-shipqty="' + key + '"][data-shipqty-offset="' + o2 + '"]');
       if (cell) cell.textContent = fmtNum(v);
+    }
+
+    // 販売抽出シートにまだ無い日付(月をまたいだ先など)がある場合の補足
+    var periodNoticeBox = document.getElementById('shipQtyPeriodNotice');
+    if (missingDates && missingDates.length) {
+      var earliest = missingDates.reduce(function(a, b){ return a.getTime() < b.getTime() ? a : b; });
+      periodNoticeBox.textContent = '販売抽出シートに' + fmtYMD(earliest) + '以降の日付がありません';
+      periodNoticeBox.style.display = '';
+    } else {
+      periodNoticeBox.textContent = '';
+      periodNoticeBox.style.display = 'none';
+    }
+
+    // 除外した商品(重量のみの商品名等)があれば、名前と個数を詳細に表示する
+    var excludedBox = document.getElementById('shipExcludedNote');
+    var excludedNames = Object.keys(excludedTotals);
+    if (excludedNames.length) {
+      excludedBox.textContent = '除外した商品：' + excludedNames.map(function(name){
+        return name + '(' + fmtNum(excludedTotals[name]) + '個)';
+      }).join('、');
+      excludedBox.style.display = '';
+    } else {
+      excludedBox.textContent = '';
+      excludedBox.style.display = 'none';
     }
   }
 
@@ -2819,12 +3014,20 @@
     getCurrentSelection: function(){ return { business: currentBusiness, site: currentSite }; },
     isSupported: isSupported,
     parseShippingPcsPerCs: parseShippingPcsPerCs,
-    getShippingQuantitiesSample: getShippingQuantitiesSample,
     calcShippingCs: calcShippingCs,
     SHIPPING_TASK_METRIC_KEYS: SHIPPING_TASK_METRIC_KEYS,
     SHIPPING_SITE_FILTER: SHIPPING_SITE_FILTER,
     computeShippingWorkHours: computeShippingWorkHours,
     getShippingLaborSample: getShippingLaborSample,
+    extractShippingSheetIdGidFromUrl: extractShippingSheetIdGidFromUrl,
+    parseShippingSalesUrlSheet: parseShippingSalesUrlSheet,
+    SHIPPING_PRODUCT_CLASSIFICATION_RULES: SHIPPING_PRODUCT_CLASSIFICATION_RULES,
+    classifyShippingProduct: classifyShippingProduct,
+    parseShippingSalesDateHeader: parseShippingSalesDateHeader,
+    parseShippingSalesSheet: parseShippingSalesSheet,
+    aggregateShippingSalesForDate: aggregateShippingSalesForDate,
+    fetchShippingQuantities: fetchShippingQuantities,
+    SHIPPING_SALES_URL_SHEET: SHIPPING_SALES_URL_SHEET,
   };
 })();
 </script>
