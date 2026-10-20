@@ -339,9 +339,9 @@
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 const SITES = [
-  { name: 'いなべ', id: '1TWOwAAFlV4ufYwaicbWGZ_Agv3ZF-rbDXZQDxYqHAiQ', color: '#38bdf8', indexSheet: '収穫実績集計表1' },
-  { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#f97316', indexSheet: '収穫実績集計表' },
-  { name: '南丹',   id: '1bAdmTLPGtwn6JH6C16m2nzr3RJhZpgAuSMaVtIL1aRc', color: '#34d399', indexSheet: '収穫実績集計表' },
+  { name: 'いなべ', id: '1TWOwAAFlV4ufYwaicbWGZ_Agv3ZF-rbDXZQDxYqHAiQ', color: '#38bdf8', indexSheet: '号機別サマリー' },
+  { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#f97316', indexSheet: '号機別サマリー' },
+  { name: '南丹',   id: '1bAdmTLPGtwn6JH6C16m2nzr3RJhZpgAuSMaVtIL1aRc', color: '#34d399', indexSheet: '号機別サマリー' },
   { name: '鹿沼',   id: '18it-bRqgO_kcC828X8QRJy_ox9KzZxKr7Ze2DCheZpk', color: '#fb7185', indexSheet: '' },
 ];
 
@@ -563,16 +563,22 @@ async function loadNormalized(force = false) {
       }
     }));
 
-    // 3) 担当者名（従来の集計表から補う。取れなくても動く）
+    // 3) 担当者名（担当号機の 号機別サマリー から補う。取れなくても動く）
+    // F列の表示名は「36(10/8)自社菌床」とロット名がフルなので、こちらの命名
+    // 「36(10/8)自社」と一致しない。U列(号機)・C列(投入日)・V列(ロット名)から組み立て直す。
+    // 号機列は数値と文字列が混在し、gviz JSON だと少数派の型が null になるため CSV で読む。
     await Promise.all(SITES.map(async site => {
       if (!site.indexSheet) return;
       try {
-        const t = await fetchSheet(site.id, site.indexSheet);
+        const t = await fetchSheetCsv(site.id, site.indexSheet);
         (t.rows || []).forEach(row => {
           const c = row.c || [];
-          const name = normCellStr(c[5]);
           const person = normCellStr(c[1]);
-          if (name && person && person !== '担当者') normStore.personByKey[`${site.name}|${name}`] = person;
+          const no = normCellStr(c[20]);
+          const m = normCellStr(c[2]).match(/^\d{4}[\/-](\d{1,2})[\/-](\d{1,2})/);
+          if (!person || person === '担当者名' || !no || !m) return;
+          const name = `${no}(${+m[1]}/${+m[2]})${normLotSuffix(normCellStr(c[21]), '')}`;
+          normStore.personByKey[`${site.name}|${name}`] = person;
         });
       } catch (e) { normErr(`担当者名(${site.name})`, e); }
     }));
@@ -597,6 +603,18 @@ function normBuildSite(siteName) {
 
   const byNo = {};
   cycles.forEach(c => { (byNo[c.no] = byNo[c.no] || []).push(c); });
+
+  // 実効終了日 ＝ MIN(廃棄日, 次サイクルの投入日−1)。号機別サマリー(40_号機別サマリー)と同じ区切り。
+  // 工程表に廃棄の記入が無いサイクルを「終わりなし」として扱うと、古いサイクルが
+  // 後のサイクルの収穫まで吸い込んでしまう。
+  Object.values(byNo).forEach(list => {
+    list.forEach((c, i) => {
+      const next = list[i + 1];
+      let lim = null;
+      if (next) { lim = new Date(next.start); lim.setDate(lim.getDate() - 1); }
+      c._end = (c.end && lim) ? (c.end < lim ? c.end : lim) : (c.end || lim || null);
+    });
+  });
 
   // サイクルごとの入れ物
   const bucket = new Map();
@@ -625,7 +643,7 @@ function normBuildSite(siteName) {
   const unmatched = [];
   (normStore.rowsBySite[siteName] || []).forEach(r => {
     const list = byNo[r.no];
-    let hit = list && list.find(c => r.date >= c.start && (!c.end || r.date <= c.end));
+    let hit = list && list.find(c => r.date >= c.start && (!c._end || r.date <= c._end));
     if (!hit) {
       unmatched.push(r);
       if (!list) orphanReason.号機なし++; else orphanReason.期間外++;
@@ -659,8 +677,8 @@ function normBuildSite(siteName) {
       name,
       no: c.no,
       startDate: normFmt(c.start),
-      endDate:   normFmt(c.end),
-      days:      Math.round(((c.end || today) - c.start) / 86400000),
+      endDate:   normFmt(c._end),
+      days:      Math.round(((c._end || today) - c.start) / 86400000),
       harvest:   (c.bedCount && b.sum > 0) ? Math.round(b.sum * 1000 / c.bedCount) : null,
       packRate:  b.sum > 0 ? Math.round(packSum / b.sum * 100) : null,
       person:    normStore.personByKey[`${siteName}|${name}`] || '',
@@ -672,7 +690,7 @@ function normBuildSite(siteName) {
     };
     data[name] = { bedCount: c.bedCount, rows: b.rows, lot: rec.lot };
     sizeRows[name] = b.sizeRows;
-    if (c.end && c.end < today) ended.push(rec); else active.push(rec);
+    if (c._end && c._end < today) ended.push(rec); else active.push(rec);
   });
 
   // 台帳に当てはまらなかった収穫は「(台帳なし)」コンテナとして表示しつつ、理由を出す。
