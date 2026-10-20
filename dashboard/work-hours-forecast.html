@@ -602,7 +602,8 @@
   // gidsに設定した月度も、次の月度の「前の月度の名簿」として使われる(例：2026.10の
   // 判断には2026.9のシート(gids)を使う。2026.9の判断には2026.8のシート(referenceGids、
   // gidsが決まれば追加)を使う)。blankRule:'perPerson'は、出荷場の「空行の位置ではなく
-  // 人ごとに空欄を判断する」ルール(classifyGunmaBlankPolicy())を使うことを示す
+  // 人ごと・セルごとに空欄を判断する」ルール(classifyGunmaLeadingBlankPolicy()・
+  // classifyGunmaMiddleBlankPolicy())を使うことを示す
   var FORECAST_SHIPPING_SHIFT_SOURCES = {
     '群馬': { type: 'gunmaPeriodSheets', id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM',
              gids: {
@@ -1654,6 +1655,13 @@
     if (m < 1) { m = 12; y -= 1; }
     return y + '.' + m;
   }
+  // 月度キー("YYYY.M")の1つ後の月度キーを返す(例："2026.10"→"2026.11"、"2026.12"→"2027.1")
+  function nextGunmaPeriodKey(periodKey){
+    var parts = periodKey.split('.').map(Number);
+    var y = parts[0], m = parts[1] + 1;
+    if (m > 12) { m = 1; y += 1; }
+    return y + '.' + m;
+  }
   function fmtYMD(d){ return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate(); }
   function fmtMD(d){ return (d.getMonth() + 1) + '/' + d.getDate(); }
 
@@ -1755,11 +1763,13 @@
       var cellsFull = c.slice(1);
       var nyushaIdx = -1;
       var firstEntryIdx = -1; // 最初の記入(空欄以外)の列番号。全部空欄なら-1
+      var lastRestIdx = -1; // 最後の「休みの印」(時刻・空欄・「入社」以外)の列番号。無ければ-1
       for (var ci = 0; ci < dayNumbers.length; ci++) {
         var cell = cellsFull[ci];
         var ct = classifyGunmaShiftCell(cell ? cell.v : null).type;
         if (firstEntryIdx === -1 && ct !== 'blank') firstEntryIdx = ci;
         if (nyushaIdx === -1 && ct === 'nyusha') nyushaIdx = ci;
+        if (ct === 'other') lastRestIdx = ci;
       }
       persons.push({
         rawName: trimmed,
@@ -1768,6 +1778,7 @@
         cellsFull: cellsFull,
         nyushaIdx: nyushaIdx,
         firstEntryIdx: firstEntryIdx,
+        lastRestIdx: lastRestIdx,
       });
     }
 
@@ -1791,32 +1802,58 @@
     return pool[0];
   }
 
-  // 出荷場(blankRule:'perPerson')での、1人分の空欄の扱いを判定する。純粋関数（テストから
-  // 直接呼べる）。上から順に判断する：
+  // 出荷場(blankRule:'perPerson')での、1人分の「先頭(最初の記入より前)」の空欄の扱いを
+  // 判定する。純粋関数（テストから直接呼べる）。行が全部空欄(firstEntryIdx===-1)の場合は
+  // 呼び出し側で別扱いするため、ここには来ない想定。上から順に判断する：
   // ①「入社」の記載がある→新しい人。入社日(nyushaIdx)以前の空欄は計上しない
   // ②前の月度のシートに同じ名前がいる(existing)→既存の人。空欄はすべて出勤(cutoffIdx=-1)
-  // ③行が全部空欄(firstEntryIdx===-1)→判断できない。計上せず、アラート(allBlank)
-  // ④先頭に空欄がない(firstEntryIdx===0)→アラートなし。空欄はすべて出勤
-  // ⑤前の月度のシートが読めて名前がいない→新しい人。最初の記入より前の空欄は計上しない
-  // ⑥前の月度のシートが読めない/未設定→判断できない。最初の記入より前の空欄は計上せず、アラート
-  // 戻り値：{ cutoffIdx, alert: null|{ allBlank: boolean } }(空欄のうちcolIdx<=cutoffIdxは
-  // 計上しない。cutoffIdx=-1は常に計上、Infinityは常に計上しない)
-  function classifyGunmaBlankPolicy(p, previousPeriodInfo){
+  // ③先頭に空欄がない(firstEntryIdx===0)→アラートなし。空欄はすべて出勤
+  // ④前の月度のシートが読めて名前がいない→新しい人。最初の記入より前の空欄は計上しない
+  // ⑤前の月度のシートが読めない/未設定→判断できない。最初の記入より前の空欄は計上せず、アラート
+  // 戻り値：{ cutoffIdx, alert: null|{} }(空欄のうちcolIdx<=cutoffIdxは計上しない。
+  // cutoffIdx=-1は常に計上)
+  function classifyGunmaLeadingBlankPolicy(p, previousPeriodInfo){
+    if (p.firstEntryIdx === -1) return { cutoffIdx: Infinity, alert: null };
     if (p.nyushaIdx !== -1) return { cutoffIdx: p.nyushaIdx, alert: null };
     var hasReference = !!(previousPeriodInfo && previousPeriodInfo.status === 'ok');
     var existing = hasReference && !!previousPeriodInfo.names[p.name];
     if (existing) return { cutoffIdx: -1, alert: null };
-    if (p.firstEntryIdx === -1) return { cutoffIdx: Infinity, alert: { allBlank: true } };
     if (p.firstEntryIdx === 0) return { cutoffIdx: -1, alert: null };
     if (hasReference) return { cutoffIdx: p.firstEntryIdx - 1, alert: null };
-    return { cutoffIdx: p.firstEntryIdx - 1, alert: { allBlank: false } };
+    return { cutoffIdx: p.firstEntryIdx - 1, alert: {} };
+  }
+
+  // 出荷場(blankRule:'perPerson')での、1人分の「先頭より後(最初の記入より後)」の空欄の
+  // 扱いを判定する。純粋関数（テストから直接呼べる）。上から順に判断する：
+  // ①同じ月度の残り(colIdxより後)に休みの印(lastRestIdx)がある→出勤
+  // ②次の月度のシートが読めて、同じ名前の人の行に休みの印がある→出勤
+  // ③次の月度のシートが読めたが、休みの印がない(または名前がない)→休み扱い(計上しない)
+  // ④次の月度のシートが未設定・読めない→計上しない(判断できない)
+  // nextPeriodInfo: { status: 'ok'|'unavailable', hasRestByName: {正規化後の名前: boolean} }
+  // 戻り値：{ counted: boolean, alert: null|{ kind: 'restMissing'|'nextUnavailable' } }
+  function classifyGunmaMiddleBlankPolicy(p, colIdx, nextPeriodInfo){
+    if (colIdx < p.lastRestIdx) return { counted: true, alert: null };
+    if (nextPeriodInfo && nextPeriodInfo.status === 'ok') {
+      if (nextPeriodInfo.hasRestByName[p.name]) return { counted: true, alert: null };
+      return { counted: false, alert: { kind: 'restMissing' } };
+    }
+    return { counted: false, alert: { kind: 'nextUnavailable' } };
+  }
+
+  // 1人分のアラート文(名前+日付の範囲+補足)を組み立てる
+  function formatGunmaRangeNotice(prefix, name, dates, suffix){
+    var sorted = dates.slice().sort(function(a, b){ return a.getTime() - b.getTime(); });
+    var first = sorted[0], last = sorted[sorted.length - 1];
+    var rangeText = sameDate(first, last) ? fmtMD(first) : (fmtMD(first) + '〜' + fmtMD(last));
+    return prefix + name + '（' + rangeText + '）' + (suffix || '');
   }
 
   // 群馬の勤務表（収穫班・出荷場で共通）の生rows(gviz形式)群(月度ごと) x 標準労働時間シートから、
   // 当日〜7日後の標準労働時間合計・出勤人数・人別内訳・補足・未設定期間の注記を算出する。
   // periodsData: { periodKeys, perPeriod: { "YYYY.M": { status: 'ok'|'no_gid'|'error', parsed? } } }
-  // blankOpts(省略可、出荷場のみ使用): { rule: 'perPerson', previousPeriodNames: {
-  //   "YYYY.M": { status: 'ok'|'unavailable', names: {正規化後の名前: true} } } }。
+  // blankOpts(省略可、出荷場のみ使用): { rule: 'perPerson',
+  //   previousPeriodNames: { "YYYY.M": { status: 'ok'|'unavailable', names: {...} } },
+  //   nextPeriodRestInfo: { "YYYY.M": { status: 'ok'|'unavailable', hasRestByName: {...} } } }。
   // 省略時(栽培の呼び出し)は従来どおり空行の位置(category)で空欄を判定する
   // 純粋関数（テストから直接呼べる）
   function computeGunmaStandardLaborHours(periodsData, basisDate, laborRows, blankOpts){
@@ -1857,11 +1894,12 @@
 
       var perPerson = !!(blankOpts && blankOpts.rule === 'perPerson');
       var previousPeriodInfo = perPerson && blankOpts.previousPeriodNames ? blankOpts.previousPeriodNames[pk] : undefined;
+      var nextPeriodInfo = perPerson && blankOpts.nextPeriodRestInfo ? blankOpts.nextPeriodRestInfo[nextGunmaPeriodKey(pk)] : undefined;
 
       parsed.persons.forEach(function(p){
         var key = p.name;
         if (!personMap[key]) {
-          personMap[key] = { name: p.name, dept: '－', dayHours: new Array(DAY_COUNT).fill(null), excluded: false, matched: null, category: p.category, stdHoursPerDay: null, usedFallbackHours: false, blankAlertDates: [], blankAlertNeedsReference: false };
+          personMap[key] = { name: p.name, dept: '－', dayHours: new Array(DAY_COUNT).fill(null), excluded: false, matched: null, category: p.category, stdHoursPerDay: null, usedFallbackHours: false, allBlankAlert: false, leadingAlertDates: [], restMissingDates: [], nextUnavailableDates: [] };
           personOrder.push(key);
         }
         var entry = personMap[key];
@@ -1896,16 +1934,31 @@
           h = cls.hours;
         } else if (cls.type === 'blank') {
           if (perPerson) {
-            var policy = classifyGunmaBlankPolicy(p, previousPeriodInfo);
-            if (colIdx <= policy.cutoffIdx) {
+            if (p.firstEntryIdx === -1) {
+              // 行が全部空欄：既存/新規の判断より優先して、常に計上しない+アラート
               h = 0;
-              if (policy.alert) {
-                entry.blankAlertDates.push(date);
-                if (!policy.alert.allBlank) entry.blankAlertNeedsReference = true;
+              entry.allBlankAlert = true;
+            } else if (colIdx < p.firstEntryIdx) {
+              // 先頭(最初の記入より前)の空欄
+              var leading = classifyGunmaLeadingBlankPolicy(p, previousPeriodInfo);
+              if (colIdx <= leading.cutoffIdx) {
+                h = 0;
+                if (leading.alert) entry.leadingAlertDates.push(date);
+              } else {
+                h = entry.stdHoursPerDay || 0;
+                if (entry.matched === false) entry.usedFallbackHours = true;
               }
             } else {
-              h = entry.stdHoursPerDay || 0;
-              if (entry.matched === false) entry.usedFallbackHours = true;
+              // 先頭より後の空欄
+              var middle = classifyGunmaMiddleBlankPolicy(p, colIdx, nextPeriodInfo);
+              if (middle.counted) {
+                h = entry.stdHoursPerDay || 0;
+                if (entry.matched === false) entry.usedFallbackHours = true;
+              } else {
+                h = 0;
+                if (middle.alert.kind === 'restMissing') entry.restMissingDates.push(date);
+                else entry.nextUnavailableDates.push(date);
+              }
             }
           } else if (p.nyushaIdx !== -1 && colIdx <= p.nyushaIdx) {
             h = 0; // 入社日以前の空欄は0h
@@ -1941,13 +1994,23 @@
           noticedNames[key] = true;
           notices.push('標準労働時間シート未登録のため8h/日で計算：' + entry.name);
         }
-        if (entry.blankAlertDates.length) {
-          var sorted = entry.blankAlertDates.slice().sort(function(a, b){ return a.getTime() - b.getTime(); });
-          var first = sorted[0], last = sorted[sorted.length - 1];
-          var rangeText = sameDate(first, last) ? fmtMD(first) : (fmtMD(first) + '〜' + fmtMD(last));
-          var msg = '勤務表で出勤かどうか判断できない空欄があるため計上していません：' + entry.name + '（' + rangeText + '）';
-          if (entry.blankAlertNeedsReference) msg += '（前の月度のシートを設定すると判断できます）';
-          notices.push(msg);
+        if (entry.allBlankAlert) {
+          notices.push('勤務表の行がすべて空欄のため計上していません：' + entry.name);
+        }
+        if (entry.leadingAlertDates.length) {
+          notices.push(formatGunmaRangeNotice(
+            '勤務表で出勤かどうか判断できない空欄があるため計上していません：', entry.name,
+            entry.leadingAlertDates, '（前の月度のシートを設定すると判断できます）'));
+        }
+        if (entry.nextUnavailableDates.length) {
+          notices.push(formatGunmaRangeNotice(
+            '次の月度の勤務表がないため、出勤かどうか判断できない空欄を計上していません：', entry.name,
+            entry.nextUnavailableDates, '（次の月度のシートを設定すると判断できます）'));
+        }
+        if (entry.restMissingDates.length) {
+          notices.push(formatGunmaRangeNotice(
+            '次の月度まで休みの記載がないため、休みとして扱っています（退職・長期の休み・記入漏れの可能性）：',
+            entry.name, entry.restMissingDates, ''));
         }
       });
     }
@@ -2837,7 +2900,9 @@
     var blankOpts;
     if (src.blankRule === 'perPerson') {
       var previousPeriodNames = await fetchGunmaPreviousPeriodNames(periodsData.periodKeys, src);
-      blankOpts = { rule: 'perPerson', previousPeriodNames: previousPeriodNames };
+      var neededNextPeriods = findGunmaNeededNextPeriods(periodsData, basisDate);
+      var nextPeriodRestInfo = neededNextPeriods.length ? await fetchGunmaNextPeriodRestInfo(neededNextPeriods, src) : {};
+      blankOpts = { rule: 'perPerson', previousPeriodNames: previousPeriodNames, nextPeriodRestInfo: nextPeriodRestInfo };
     }
     return computeGunmaStandardLaborHours(periodsData, basisDate, laborRows, blankOpts);
   }
@@ -3067,6 +3132,62 @@
     return result;
   }
 
+  // periodsDataとbasisDateから、表示している8日間のうち「先頭より後の空欄で、同じ月度の
+  // 残りに休みの印がないもの」があるかどうかを調べ、そのオフセットが含まれる月度の
+  // 「1つ後の月度」のキーの一覧を返す(重複なし)。純粋関数（テストから直接呼べる）。
+  // 次の月度のシートを読む必要があるかどうかを事前に判定し、不要な読み込みを避けるために使う
+  function findGunmaNeededNextPeriods(periodsData, basisDate){
+    var needed = {};
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var date = addDays(basisDate, o);
+      var pk = gunmaPeriodKey(date);
+      var info = periodsData.perPeriod[pk];
+      if (!info || info.status !== 'ok') continue;
+      var parsed = info.parsed;
+      var colIdx = -1;
+      for (var k = 0; k < parsed.fullDates.length; k++) {
+        if (parsed.fullDates[k] && sameDate(parsed.fullDates[k], date)) { colIdx = k; break; }
+      }
+      if (colIdx < 0) continue;
+      parsed.persons.forEach(function(p){
+        if (p.firstEntryIdx === -1 || colIdx <= p.firstEntryIdx) return; // 全部空欄・先頭は対象外
+        var cellObj = p.cellsFull[colIdx];
+        if (classifyGunmaShiftCell(cellObj ? cellObj.v : null).type !== 'blank') return;
+        if (colIdx < p.lastRestIdx) return; // 同じ月度の残りに休みの印がある
+        needed[nextGunmaPeriodKey(pk)] = true;
+      });
+    }
+    return Object.keys(needed);
+  }
+
+  // findGunmaNeededNextPeriods()が返した「1つ後の月度」のキーごとに、そのシートを
+  // (表示用とは別に)取得し、人ごとに「休みの印(lastRestIdx)があるかどうか」の一覧を作る。
+  // 次の月度は、src.gids(表示にも使う設定)にあるものだけを対象にする(referenceGidsは
+  // 前の月度の判断専用のため使わない)。シートの取得・キャッシュはfetchGunmaShiftPeriodData()
+  // と同じgunmaShiftCacheを共有する(表示にも使われている月度を重複して取得しない)
+  async function fetchGunmaNextPeriodRestInfo(nextPeriodKeys, src){
+    var result = {};
+    for (var i = 0; i < nextPeriodKeys.length; i++) {
+      var nk = nextPeriodKeys[i];
+      var gid = src.gids[nk];
+      if (!gid) { result[nk] = { status: 'unavailable', hasRestByName: null }; continue; }
+      if (gunmaShiftCache[gid] === undefined) {
+        try {
+          var json = await fetchCsvSheet(src.id, gid);
+          gunmaShiftCache[gid] = { status: 'ok', parsed: parseGunmaShiftSheet(json.table.rows, nk, src.excludedNames) };
+        } catch (e) {
+          gunmaShiftCache[gid] = { status: 'error' };
+        }
+      }
+      var cached = gunmaShiftCache[gid];
+      if (cached.status !== 'ok') { result[nk] = { status: 'unavailable', hasRestByName: null }; continue; }
+      var hasRestByName = {};
+      cached.parsed.persons.forEach(function(p){ hasRestByName[p.name] = p.lastRestIdx !== -1; });
+      result[nk] = { status: 'ok', hasRestByName: hasRestByName };
+    }
+    return result;
+  }
+
   async function renderLaborGunma(basisDate, gen){
     showPanelError('laborError', null);
     try {
@@ -3203,6 +3324,7 @@
     FORECAST_SHIFT_SOURCES: FORECAST_SHIFT_SOURCES,
     gunmaPeriodKey: gunmaPeriodKey,
     prevGunmaPeriodKey: prevGunmaPeriodKey,
+    nextGunmaPeriodKey: nextGunmaPeriodKey,
     fmtYMD: fmtYMD,
     fmtMD: fmtMD,
     classifyGunmaShiftCell: classifyGunmaShiftCell,
@@ -3210,10 +3332,13 @@
     GUNMA_SHIFT_NAME_ALIASES: GUNMA_SHIFT_NAME_ALIASES,
     parseGunmaShiftSheet: parseGunmaShiftSheet,
     findLaborMatchGunma: findLaborMatchGunma,
-    classifyGunmaBlankPolicy: classifyGunmaBlankPolicy,
+    classifyGunmaLeadingBlankPolicy: classifyGunmaLeadingBlankPolicy,
+    classifyGunmaMiddleBlankPolicy: classifyGunmaMiddleBlankPolicy,
     computeGunmaStandardLaborHours: computeGunmaStandardLaborHours,
     fetchGunmaShiftPeriodData: fetchGunmaShiftPeriodData,
     fetchGunmaPreviousPeriodNames: fetchGunmaPreviousPeriodNames,
+    findGunmaNeededNextPeriods: findGunmaNeededNextPeriods,
+    fetchGunmaNextPeriodRestInfo: fetchGunmaNextPeriodRestInfo,
     classifyNantanShiftCell: classifyNantanShiftCell,
     parseNantanDatedHoursSheet: parseNantanDatedHoursSheet,
     fetchNantanShiftSheets: fetchNantanShiftSheets,
