@@ -128,19 +128,25 @@ async function shippingLaborDetailRows(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('#table3shipDetailBody tr')).map(tr => ({
     name: tr.querySelector('th').textContent.trim(),
     dept: tr.querySelector('td.dept-col').textContent.trim(),
-    cells: Array.from(tr.querySelectorAll('td')).slice(1).map(td => td.textContent.trim()),
+    cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).slice(1).map(td => td.textContent.trim()),
   })));
 }
 async function laborDetailRows(page) { // 栽培側
   return page.evaluate(() => Array.from(document.querySelectorAll('#table3laborDetailBody tr')).map(tr => ({
     name: tr.querySelector('th').textContent.trim(),
     dept: tr.querySelector('td.dept-col').textContent.trim(),
-    cells: Array.from(tr.querySelectorAll('td')).slice(1).map(td => td.textContent.trim()),
+    cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).slice(1).map(td => td.textContent.trim()),
   })));
 }
 async function shipLaborTotals(page) {
-  return page.evaluate(() => Array.from({ length: 8 }, (_, o) =>
+  return page.evaluate(() => Array.from({ length: 7 }, (_, o) =>
     document.querySelector(`[data-shiplabor-total-offset="${o}"]`).textContent.trim()));
+}
+async function shipLaborGrandTotal(page) {
+  return page.evaluate(() => {
+    const cell = document.querySelector('[data-shiplabor-total-offset="total"]');
+    return { html: cell.innerHTML.trim(), text: cell.textContent.trim() };
+  });
 }
 async function shipLaborWarnings(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('#shipLaborWarningsList li')).map(li => li.textContent.trim()));
@@ -213,8 +219,8 @@ async function shipLaborWarnings(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const dates = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 26)); // 8日
-    const vals = ['09:00-17:00', '1', '１', '0.5', '✖', '休', '夏季休暇', '廃菌床処理'];
+    const dates = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 25)); // 7日(基準日〜6日後)
+    const vals = ['09:00-17:00', '1', '１', '0.5', '✖', '休', '夏季休暇'];
     const cellsByIso = {};
     dates.forEach((d, i) => { cellsByIso[isoKey(d)] = vals[i]; });
     const people = [{ name: '田中出荷', dept: '出荷', cellsByIso }];
@@ -238,11 +244,14 @@ async function shipLaborWarnings(page) {
     check('「✖」→0.0h', tanaka && tanaka.cells[4] === '0.0');
     check('「休」→0.0h', tanaka && tanaka.cells[5] === '0.0');
     check('「夏季休暇」→0.0h', tanaka && tanaka.cells[6] === '0.0');
-    check('「廃菌床処理」(文字)→0.0h', tanaka && tanaka.cells[7] === '0.0');
+    // 合計列：7.3+8.0+8.0+4.0+0.0+0.0+0.0=27.3（丸める前の値を足してから丸める）。7日分そろうので注記なし
+    const grandTotal3 = await shipLaborGrandTotal(page);
+    console.log('③合計列:', grandTotal3);
+    check('合計列が7日分の合計(27.3)になる', grandTotal3.html === '27.3');
 
-    const otherWords = ['有休', '代休', '時間調整休', 'レンタカー返却', '自社配送', '志摩応援', '研修', '荷物'];
+    const otherWords = ['有休', '代休', '時間調整休', 'レンタカー返却', '自社配送', '志摩応援', '研修', '荷物', '廃菌床処理'];
     const classifyResults = await page.evaluate((words) => words.map(w => window.__test.classifyCell(w).type), otherWords);
-    check('有休・代休・時間調整休・レンタカー返却・自社配送・志摩応援・研修・荷物は、いずれもclassifyCell()で"other"(0時間)に分類される',
+    check('有休・代休・時間調整休・レンタカー返却・自社配送・志摩応援・研修・荷物・廃菌床処理は、いずれもclassifyCell()で"other"(0時間)に分類される',
       classifyResults.every(t => t === 'other'));
     await page.close();
   }
@@ -380,6 +389,11 @@ async function shipLaborWarnings(page) {
     const periodNotice = await page.evaluate(() => document.getElementById('shipLaborPeriodNotices').textContent.trim());
     console.log('periodNotice:', periodNotice);
     check('「シフト表に2026/11/11以降の日付がありません」の補足が出る', periodNotice.includes('2026/11/11'));
+    // 合計列：シート範囲内の3日分(11/8〜11/10)だけの部分合計＋「（3日分）」になる
+    const grandTotal = await shipLaborGrandTotal(page);
+    console.log('grandTotal:', grandTotal);
+    check('合計列が範囲内3日分の部分合計になる', /^\d+\.\d$/.test(grandTotal.html.split('<')[0]));
+    check('合計列に「（3日分）」の注記が付く', grandTotal.html.includes('（3日分）'));
     await page.close();
   }
 

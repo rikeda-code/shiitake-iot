@@ -144,10 +144,29 @@ function allSalesHandlers(site, dates) {
         cultError: document.getElementById('cultError').classList.contains('show'),
         workError: document.getElementById('workError').classList.contains('show'),
         laborError: document.getElementById('laborError').classList.contains('show'),
+        dcolTotalCult: document.querySelector('#table1cult .dcol-total').textContent.trim(),
+        containerTotal: document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="total"]').textContent.trim(),
+        harvestCultTotal: document.querySelector('[data-cult="収穫"][data-cult-offset="total"]').textContent.trim(),
+        harvestWorkTotalHtml: document.querySelector('[data-work="収穫"][data-work-offset="total"]').innerHTML.trim(),
+        laborTotal: document.querySelector('[data-labor-total-offset="total"]').textContent.trim(),
       }));
       check(`${site}：収穫件数が表示される(1.0)`, r.cultHarvest0 === '1.0');
       check(`${site}：パネル1・2・3がエラー表示にならない`, !r.cultError && !r.workError && !r.laborError);
+      check(`${site}：合計列の見出しが基準日〜6日後の範囲(10/19〜10/25)になる`, r.dcolTotalCult === '10/19〜10/25');
+      check(`${site}：稼働コンテナ数の合計列が7日分の合計(7.0)になる`, r.containerTotal === '7.0');
+      check(`${site}：工程件数(収穫)の合計列が7日分の合計(7.0)になる(件数は毎日判断できる値のため日数の注記は付かない)`, r.harvestCultTotal === '7.0');
     }
+    // 標準工数(収穫)の合計列：いなべ・群馬は収穫見込みが1日分しか設定されていないモックのため
+    // 部分合計＋「（1日分）」になり、収穫見込みの設定が全く無い南丹は合計も「－」になる
+    await page.click('[data-site="いなべ"]'); await page.waitForTimeout(1200);
+    const inabeWork = await page.evaluate(() => document.querySelector('[data-work="収穫"][data-work-offset="total"]').innerHTML.trim());
+    check('いなべ：標準工数(収穫)の合計列が1日分の部分合計(10.0)＋「（1日分）」になる(収穫見込みは1日分しかモックしていないため)', inabeWork.startsWith('10.0') && inabeWork.includes('（1日分）'));
+    await page.click('[data-site="群馬"]'); await page.waitForTimeout(1200);
+    const gunmaWork = await page.evaluate(() => document.querySelector('[data-work="収穫"][data-work-offset="total"]').innerHTML.trim());
+    check('群馬：標準工数(収穫)の合計列が1日分の部分合計(6.0)＋「（1日分）」になる(収穫見込みは1日分しかモックしていないため)', gunmaWork.startsWith('6.0') && gunmaWork.includes('（1日分）'));
+    await page.click('[data-site="南丹"]'); await page.waitForTimeout(1200);
+    const nantanWork = await page.evaluate(() => document.querySelector('[data-work="収穫"][data-work-offset="total"]').textContent.trim());
+    check('南丹：標準工数(収穫)は収穫見込みのモックが無く7日とも「－」のため、合計列も「－」になる(注記なし)', nantanWork === '－');
     await page.close();
   }
 
@@ -270,6 +289,58 @@ function allSalesHandlers(site, dates) {
       site: document.querySelector('#siteToggle button.active').dataset.site,
     }));
     check('URL(?div=栽培&site=群馬)で開くと群馬が選択される', r.business === '栽培' && r.site === '群馬');
+    await page.close();
+  }
+
+  console.log('\n=== ⑦合計列（基準日〜6日後＋合計）：出荷での部分合計・延べ人数・過不足の確認 ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19); // 基準日=2026-10-19(今日)。offset0-6=10/19〜10/25
+    const dates7 = []; for (let o = 0; o < 7; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates7.push(d); }
+    // 出荷数量：offset3(10/22)だけ日付列が無いCSVにして、合計列が部分合計＋「（6日分）」になることを確認する
+    const partialDates = dates7.filter((_, i) => i !== 3);
+    const s1 = {
+      urlEntry: { site: 'いなべ', kind: '受注', url: salesSheetUrl('sales_partial', '1') },
+      handler: staticHandler([['sales_partial', '1']], buildSalesSheetCsv(partialDates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(partialDates.map(d => [isoKey(d), 10])) }])),
+    };
+    // いなべの出荷シフト表：7日間、1名(山田・出荷)が毎日「8:00-17:00」(拘束9h→休憩控除後8h)勤務
+    const shiftRows = [['', ''].concat(dates7.map(d => `${d.getMonth() + 1}/${d.getDate()}`))];
+    for (let i = 1; i < 13; i++) shiftRows.push(['', '']);
+    shiftRows.push(['山田', '出荷'].concat(dates7.map(() => '8:00-17:00')));
+    const shiftCsv = toCsvText(shiftRows);
+    const SHIFT_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
+    const SHIFT_SHEET_GID = '872290181';
+
+    await setupRoutes(page, [
+      staticHandler([[DB_SHARE_SHEET_ID, SALES_URL_SHEET_GID]], buildSalesUrlListCsv([s1.urlEntry])),
+      s1.handler,
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+      staticHandler([[SHIFT_SHEET_ID, SHIFT_SHEET_GID]], shiftCsv),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html' + q('出荷', 'いなべ'), { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(1500);
+
+    const r = await page.evaluate(() => ({
+      rangeHeader: document.querySelector('#table1ship .dcol-total').textContent.trim(),
+      packTotalHtml: document.querySelector('[data-shipqty="パック数"][data-shipqty-offset="total"]').innerHTML.trim(),
+      laborTotal: document.querySelector('[data-shiplabor-total-offset="total"]').textContent.trim(),
+      attendTotal: document.querySelector('[data-shipattendance-offset="total"]').textContent.trim(),
+      shortfallTotal: document.querySelector('[data-shipshortfall-offset="total"]').textContent.trim(),
+      personTotalHtml: (() => {
+        const td = document.querySelector('#table3shipDetailBody tr td.total-col');
+        return td ? td.innerHTML.trim() : null;
+      })(),
+    }));
+    console.log(JSON.stringify(r, null, 2));
+    check('合計列の見出しが基準日〜6日後の範囲になる(10/19〜10/25)', r.rangeHeader === '10/19〜10/25');
+    check('出荷数量パック数：1日(10/22)欠けている場合、部分合計(60＝10×6日)＋「（6日分）」が表示される', r.packTotalHtml.startsWith('60') && r.packTotalHtml.includes('（6日分）'));
+    check('出荷標準労働時間合計：7日×8.0h(拘束9h－休憩1h)の合計＝56.0', r.laborTotal === '56.0');
+    check('出荷出勤人数：延べ人数(7日×1人)＝7', r.attendTotal === '7');
+    // 標準工数小計の合計列＝パック並べる(10個×10秒×6日=100秒×6÷3600=0.1667h、丸める前の値)。
+    // 過不足の合計列＝56.0－0.1667h(丸める前)＝55.8333...→丸めて55.8(labor・work小計それぞれの
+    // 「合計どうしの差」であり、日ごとの過不足を丸めてから足したものではない)
+    check('出荷過不足：合計列は標準労働時間合計の合計(56.0)－標準工数小計の合計(0.1667h)＝55.8になる', r.shortfallTotal === '55.8');
+    check('出荷人別内訳：合計列にその人の7日分の合計(56.0)が表示される', !!(r.personTotalHtml && r.personTotalHtml.includes('56.0')));
     await page.close();
   }
 

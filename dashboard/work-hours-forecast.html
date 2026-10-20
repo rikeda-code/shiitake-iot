@@ -169,6 +169,11 @@
   .work td.today-col, .work th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
   .labor td.today-col, .labor th.today-col{ background:var(--green-soft) !important; font-weight:700; }
 
+  /* 合計列：基準日の強調(today-col)とは別の背景色にして見分けられるようにする */
+  thead th.total-col{ background:#cdd3da !important; }
+  thead tr.weekday th.total-col{ background:#dde2e7 !important; }
+  tbody td.total-col, tbody th.total-col{ background:#e4e8ec !important; }
+
   .neg{ color:var(--red); }
   .pos{ color:var(--green); }
   .dept-col{ text-align:center; white-space:normal; }
@@ -252,7 +257,7 @@
   <section class="panel cult">
     <div class="panel-head">
       <h2>工程件数・稼働コンテナ数</h2>
-      <span class="note">単位：件　/　<span class="basis-range-note">当日〜7日後</span></span>
+      <span class="note">単位：件　/　<span class="basis-range-note">当日〜6日後・合計</span></span>
     </div>
     <div class="panel-error" id="cultError"></div>
     <div class="table-scroll">
@@ -262,13 +267,13 @@
           <tr>
             <th class="sticky-1" colspan="2">工程</th>
             <th class="today-col basis-label-0">当日</th>
-            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
-            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
         </thead>
         <tbody id="table1cultBody">
@@ -290,7 +295,7 @@
   <section class="panel work">
     <div class="panel-head">
       <h2>標準工数</h2>
-      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜6日後・合計</span></span>
     </div>
     <div class="panel-error" id="workError"></div>
     <div class="table-scroll">
@@ -300,13 +305,13 @@
           <tr>
             <th class="sticky-1" colspan="2">作業区分</th>
             <th class="today-col basis-label-0">当日</th>
-            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
-            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
         </thead>
         <tbody id="table2workBody">
@@ -323,7 +328,7 @@
   <section class="panel labor">
     <div class="panel-head">
       <h2>標準労働時間</h2>
-      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜6日後・合計</span></span>
     </div>
     <div class="panel-error" id="laborError"></div>
     <div class="table-scroll">
@@ -333,13 +338,13 @@
           <tr>
             <th class="sticky-1" colspan="2">項目</th>
             <th class="today-col basis-label-0">当日</th>
-            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
-            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
         </thead>
         <tbody>
@@ -347,19 +352,19 @@
             <th class="sticky-1" colspan="2">標準労働時間合計</th>
             <td class="today-col" data-labor-total-offset="0">－</td>
             <td data-labor-total-offset="1">－</td><td data-labor-total-offset="2">－</td><td data-labor-total-offset="3">－</td>
-            <td data-labor-total-offset="4">－</td><td data-labor-total-offset="5">－</td><td data-labor-total-offset="6">－</td><td data-labor-total-offset="7">－</td>
+            <td data-labor-total-offset="4">－</td><td data-labor-total-offset="5">－</td><td data-labor-total-offset="6">－</td><td class="total-col" data-labor-total-offset="total">－</td>
           </tr>
           <tr>
             <th class="sticky-1" colspan="2">出勤人数</th>
             <td class="today-col" data-attendance-offset="0">－</td>
             <td data-attendance-offset="1">－</td><td data-attendance-offset="2">－</td><td data-attendance-offset="3">－</td>
-            <td data-attendance-offset="4">－</td><td data-attendance-offset="5">－</td><td data-attendance-offset="6">－</td><td data-attendance-offset="7">－</td>
+            <td data-attendance-offset="4">－</td><td data-attendance-offset="5">－</td><td data-attendance-offset="6">－</td><td class="total-col" data-attendance-offset="total">－</td>
           </tr>
           <tr>
             <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
             <td class="today-col" data-shortfall-offset="0">－</td>
             <td data-shortfall-offset="1">－</td><td data-shortfall-offset="2">－</td><td data-shortfall-offset="3">－</td>
-            <td data-shortfall-offset="4">－</td><td data-shortfall-offset="5">－</td><td data-shortfall-offset="6">－</td><td data-shortfall-offset="7">－</td>
+            <td data-shortfall-offset="4">－</td><td data-shortfall-offset="5">－</td><td data-shortfall-offset="6">－</td><td class="total-col" data-shortfall-offset="total">－</td>
           </tr>
         </tbody>
       </table>
@@ -379,7 +384,7 @@
             <tr>
               <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
               <th class="today-col basis-label-0">当日</th>
-              <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+              <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
             </tr>
           </thead>
           <tbody id="table3laborDetailBody"></tbody>
@@ -398,7 +403,7 @@
   <section class="panel cult">
     <div class="panel-head">
       <h2>出荷数量</h2>
-      <span class="note">単位：個・cs　/　<span class="basis-range-note">当日〜7日後</span></span>
+      <span class="note">単位：個・cs　/　<span class="basis-range-note">当日〜6日後・合計</span></span>
     </div>
     <div class="panel-error" id="shipQtyError"></div>
     <div class="table-scroll">
@@ -408,19 +413,19 @@
           <tr>
             <th class="sticky-1" colspan="2">項目</th>
             <th class="today-col basis-label-0">当日</th>
-            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
-            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2"></th>
             <th class="dcol-kind today-col" data-kind-offset="0"></th>
             <th class="dcol-kind" data-kind-offset="1"></th><th class="dcol-kind" data-kind-offset="2"></th><th class="dcol-kind" data-kind-offset="3"></th>
-            <th class="dcol-kind" data-kind-offset="4"></th><th class="dcol-kind" data-kind-offset="5"></th><th class="dcol-kind" data-kind-offset="6"></th><th class="dcol-kind" data-kind-offset="7"></th>
+            <th class="dcol-kind" data-kind-offset="4"></th><th class="dcol-kind" data-kind-offset="5"></th><th class="dcol-kind" data-kind-offset="6"></th><th class="total-col"></th>
           </tr>
         </thead>
         <tbody id="table1shipBody">
@@ -443,7 +448,7 @@
   <section class="panel work">
     <div class="panel-head">
       <h2>標準工数</h2>
-      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜6日後・合計</span></span>
     </div>
     <div class="panel-error" id="shipWorkError"></div>
     <div class="table-scroll">
@@ -453,13 +458,13 @@
           <tr>
             <th class="sticky-1" colspan="2">作業区分</th>
             <th class="today-col basis-label-0">当日</th>
-            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
-            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
         </thead>
         <tbody id="table2shipBody">
@@ -472,7 +477,7 @@
   <section class="panel labor">
     <div class="panel-head">
       <h2>標準労働時間</h2>
-      <span class="note">単位：h　/　<span class="basis-range-note">当日〜7日後</span></span>
+      <span class="note">単位：h　/　<span class="basis-range-note">当日〜6日後・合計</span></span>
     </div>
     <div class="panel-error" id="shipLaborError"></div>
     <div class="table-scroll">
@@ -482,13 +487,13 @@
           <tr>
             <th class="sticky-1" colspan="2">項目</th>
             <th class="today-col basis-label-0">当日</th>
-            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+            <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
             <th class="sticky-1" colspan="2">日付／曜日</th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
-            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol" data-offset="7"></th>
+            <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
         </thead>
         <tbody>
@@ -496,19 +501,19 @@
             <th class="sticky-1" colspan="2">標準労働時間合計</th>
             <td class="today-col" data-shiplabor-total-offset="0">－</td>
             <td data-shiplabor-total-offset="1">－</td><td data-shiplabor-total-offset="2">－</td><td data-shiplabor-total-offset="3">－</td>
-            <td data-shiplabor-total-offset="4">－</td><td data-shiplabor-total-offset="5">－</td><td data-shiplabor-total-offset="6">－</td><td data-shiplabor-total-offset="7">－</td>
+            <td data-shiplabor-total-offset="4">－</td><td data-shiplabor-total-offset="5">－</td><td data-shiplabor-total-offset="6">－</td><td class="total-col" data-shiplabor-total-offset="total">－</td>
           </tr>
           <tr>
             <th class="sticky-1" colspan="2">出勤人数</th>
             <td class="today-col" data-shipattendance-offset="0">－</td>
             <td data-shipattendance-offset="1">－</td><td data-shipattendance-offset="2">－</td><td data-shipattendance-offset="3">－</td>
-            <td data-shipattendance-offset="4">－</td><td data-shipattendance-offset="5">－</td><td data-shipattendance-offset="6">－</td><td data-shipattendance-offset="7">－</td>
+            <td data-shipattendance-offset="4">－</td><td data-shipattendance-offset="5">－</td><td data-shipattendance-offset="6">－</td><td class="total-col" data-shipattendance-offset="total">－</td>
           </tr>
           <tr>
             <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
             <td class="today-col" data-shipshortfall-offset="0">－</td>
             <td data-shipshortfall-offset="1">－</td><td data-shipshortfall-offset="2">－</td><td data-shipshortfall-offset="3">－</td>
-            <td data-shipshortfall-offset="4">－</td><td data-shipshortfall-offset="5">－</td><td data-shipshortfall-offset="6">－</td><td data-shipshortfall-offset="7">－</td>
+            <td data-shipshortfall-offset="4">－</td><td data-shipshortfall-offset="5">－</td><td data-shipshortfall-offset="6">－</td><td class="total-col" data-shipshortfall-offset="total">－</td>
           </tr>
         </tbody>
       </table>
@@ -528,7 +533,7 @@
             <tr>
               <th class="sticky-1">氏名</th><th class="dept-col">部門</th>
               <th class="today-col basis-label-0">当日</th>
-              <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th>7日後</th>
+              <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
             </tr>
           </thead>
           <tbody id="table3shipDetailBody"></tbody>
@@ -619,12 +624,13 @@
 
   var DASH = '－';
   var BASE_BEDS = 2520;
-  var DAY_COUNT = 8; // 当日〜7日後
+  var DAY_COUNT = 7; // 基準日〜6日後（実際に取得・計算する日数。8日目は合計列のため取得しない）
+  var TOTAL_COL_COUNT = DAY_COUNT + 1; // 表の列数（日ごとの列7＋合計列1）
 
   // 全テーブル共通のcolgroup（見出し列1=180px＋見出し列2=110px＋日付列92px×8＝1,026px）。
   // 「氏名＋部門」の人別内訳テーブルは2列そのまま、他のテーブルは見出しセルをcolspan=2にして
   // 同じ290px幅に揃えることで、全テーブルの当日〜7日後の列が縦にそろう
-  var COLGROUP_HTML = '<col style="width:180px;"><col style="width:110px;"><col span="' + DAY_COUNT + '" style="width:92px;">';
+  var COLGROUP_HTML = '<col style="width:180px;"><col style="width:110px;"><col span="' + TOTAL_COL_COUNT + '" style="width:92px;">';
   function applySharedColgroups(){
     ['table1cult', 'table1cultDetail', 'table2work', 'table3labor', 'table3laborDetail',
      'table1ship', 'table1shipDetail', 'table2ship', 'table3ship', 'table3shipDetail'].forEach(function(id){
@@ -732,6 +738,63 @@
   }
   function fmtShipDecimal1(v){
     return (v === null || v === undefined || isNaN(v)) ? DASH : Number(v).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+
+  /* ===================== 合計列（基準日〜6日後の7日分の合計） ===================== */
+
+  // 合計列向け：日ごとの値の配列(長さDAY_COUNT。null=その日は判断できず計上しない。
+  // undefined/数値でない値は「対象外・0」として扱う＝常に計上した上で0を足す)から、
+  // 合計値と実際に計上した日数を算出する。純粋関数（テストから直接呼べる）。
+  // 丸めは呼び出し側（fmtNum等）で合計値に対して1回だけ行う（日ごとに丸めてから
+  // 足し合わせると誤差が積み重なるため、この関数には丸め前の値を渡すこと）。
+  // 全日が判断できない(null)場合はvalue:nullを返す(表示側で「－」にする)
+  function computeRowTotal(dailyValues){
+    var sum = 0, count = 0;
+    for (var i = 0; i < dailyValues.length; i++) {
+      var v = dailyValues[i];
+      if (v === null) continue;
+      if (v === undefined || typeof v !== 'number' || isNaN(v)) v = 0;
+      sum += v;
+      count++;
+    }
+    if (count === 0) return { value: null, count: 0 };
+    return { value: sum, count: count };
+  }
+
+  // 合計セル(1個)に値を書き込む。fmtFnは丸め込み後の表示用フォーマッタ(fmtNum等、
+  // DASH変換も担う)。7日分そろっていない場合は値の下に「（◯日分）」を小さく添える
+  function renderTotalCell(cell, totalInfo, fmtFn){
+    if (!cell) return;
+    if (!totalInfo || totalInfo.value === null) { cell.innerHTML = DASH; return; }
+    var html = fmtFn(totalInfo.value);
+    if (totalInfo.count < DAY_COUNT) html += '<div class="sub-note">（' + totalInfo.count + '日分）</div>';
+    cell.innerHTML = html;
+  }
+
+  // alignWithと同じ「その日が判断できたか」のパターン(null=判断できない)で、別の配列
+  // (values)を合計する。出勤人数の合計列を、標準労働時間合計と同じ日数(計上した日数)で
+  // 揃えるために使う（標準労働時間シートが未設定の日の出勤人数は合計に含めない）
+  function computeAlignedRowTotal(alignWith, values){
+    var sum = 0, count = 0;
+    for (var i = 0; i < alignWith.length; i++) {
+      if (alignWith[i] === null) continue;
+      sum += values[i] || 0;
+      count++;
+    }
+    if (count === 0) return { value: null, count: 0 };
+    return { value: sum, count: count };
+  }
+
+  // 合計列の見出し用：月日をゼロ埋めした"MM/DD"にする(例の表記"11/03〜11/09"に合わせる。
+  // 既存のfmtMD()はゼロ埋めしないため、合計列専用に別関数として用意する)
+  function fmtMDPadded(d){
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return m + '/' + day;
+  }
+  // 合計列の見出し("MM/DD〜MM/DD"、基準日〜6日後の範囲)を算出する
+  function fmtTotalRangeLabel(basisDate){
+    return fmtMDPadded(basisDate) + '〜' + fmtMDPadded(addDays(basisDate, DAY_COUNT - 1));
   }
 
   /* ===================== 日付の解析（年の補完） ===================== */
@@ -1111,6 +1174,14 @@
       throw mismatchErr;
     }
 
+    // 合計列の計算用に、丸める前の値を控えておく（丸めてから合計すると誤差が積み重なるため）
+    var rawProcessCounts = processCounts.map(function(obj){
+      var copy = {};
+      Object.keys(obj).forEach(function(k){ copy[k] = obj[k]; });
+      return copy;
+    });
+    var rawContainerCounts = containerCounts.slice();
+
     for (var o3 = 0; o3 < DAY_COUNT; o3++) {
       Object.keys(processCounts[o3]).forEach(function(key){
         processCounts[o3][key] = Math.round(processCounts[o3][key] * 10) / 10;
@@ -1118,7 +1189,8 @@
       containerCounts[o3] = Math.round(containerCounts[o3] * 10) / 10;
     }
 
-    return { dates: dayDates, processCounts: processCounts, containerCounts: containerCounts };
+    return { dates: dayDates, processCounts: processCounts, containerCounts: containerCounts,
+      rawProcessCounts: rawProcessCounts, rawContainerCounts: rawContainerCounts };
   }
 
   // 拠点ごとの栽培管理シートの生rows(gviz形式)を取得する。取得結果は拠点ごとにメモ化し、
@@ -1404,7 +1476,7 @@
         items[row.waku] = v;
         if (v !== null && !isNaN(v)) subtotal += v;
       });
-      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10, harvestMissing: harvestMissing });
+      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10, rawSubtotal: subtotal, harvestMissing: harvestMissing });
     }
     return perDay;
   }
@@ -1597,13 +1669,15 @@
     persons.forEach(function(p){
       // 拠点シフト表から来た人は実働時間が計算済み（照合不要）
       if (p.dayHours) {
+        var rawHrs = p.dayHours.slice();
         var hrs = p.dayHours.map(function(h){ return Math.round(h * 10) / 10; });
         hrs.forEach(function(h, o){ perDayTotal[o] += h; if (h > 0) perDayAttendance[o]++; });
-        personBreakdown.push({ name: p.name, dept: p.dept, dayHours: hrs });
+        personBreakdown.push({ name: p.name, dept: p.dept, dayHours: hrs, rawDayHours: rawHrs });
         return;
       }
       var match = findLaborMatch(p.name, p.dept, laborRows);
       var dayHours = [];
+      var rawDayHours = [];
       p.dayCells.forEach(function(raw, o){
         var cls = classifyCell(raw);
         var h = 0;
@@ -1618,19 +1692,23 @@
           }
         }
         dayHours.push(Math.round(h * 10) / 10);
+        rawDayHours.push(h);
         perDayTotal[o] += h;
         if (h > 0) perDayAttendance[o]++;
       });
-      personBreakdown.push({ name: p.name, dept: p.dept, dayHours: dayHours });
+      personBreakdown.push({ name: p.name, dept: p.dept, dayHours: dayHours, rawDayHours: rawDayHours });
     });
 
+    var rawPerDayTotal = perDayTotal.slice();
     perDayTotal = perDayTotal.map(function(v){ return Math.round(v * 10) / 10; });
     missingOffsets.forEach(function(o){
       perDayTotal[o] = null;
-      personBreakdown.forEach(function(p){ p.dayHours[o] = null; });
+      rawPerDayTotal[o] = null;
+      personBreakdown.forEach(function(p){ p.dayHours[o] = null; p.rawDayHours[o] = null; });
     });
     return {
       perDayTotal: perDayTotal,
+      rawPerDayTotal: rawPerDayTotal,
       perDayAttendance: perDayAttendance,
       warnings: Object.keys(warningSet),
       personBreakdown: personBreakdown,
@@ -1899,7 +1977,7 @@
       parsed.persons.forEach(function(p){
         var key = p.name;
         if (!personMap[key]) {
-          personMap[key] = { name: p.name, dept: '－', dayHours: new Array(DAY_COUNT).fill(null), excluded: false, matched: null, category: p.category, stdHoursPerDay: null, usedFallbackHours: false, allBlankAlert: false, leadingAlertDates: [], restMissingDates: [], nextUnavailableDates: [] };
+          personMap[key] = { name: p.name, dept: '－', dayHours: new Array(DAY_COUNT).fill(null), rawDayHours: new Array(DAY_COUNT).fill(null), excluded: false, matched: null, category: p.category, stdHoursPerDay: null, usedFallbackHours: false, allBlankAlert: false, leadingAlertDates: [], restMissingDates: [], nextUnavailableDates: [] };
           personOrder.push(key);
         }
         var entry = personMap[key];
@@ -1973,16 +2051,18 @@
         // （いなべ側のcomputeStandardLaborHoursと同じ方式。先に丸めてから積算すると、
         // 人数が多いほど丸め誤差が積み重なってしまうため）
         entry.dayHours[o] = Math.round(h * 10) / 10;
+        entry.rawDayHours[o] = h;
         perDayTotal[o] += h;
         if (h > 0) perDayAttendance[o]++;
       });
     }
 
+    var rawPerDayTotal = perDayTotal.slice();
     perDayTotal = perDayTotal.map(function(v){ return v === null ? null : Math.round(v * 10) / 10; });
     var personBreakdown = personOrder
       .map(function(key){ return personMap[key]; })
       .filter(function(e){ return !e.excluded; })
-      .map(function(e){ return { name: e.name, dept: e.dept, dayHours: e.dayHours }; });
+      .map(function(e){ return { name: e.name, dept: e.dept, dayHours: e.dayHours, rawDayHours: e.rawDayHours }; });
 
     // 出荷場(perPerson)のみ：実際に8h代用を使った人の補足と、空欄の判断ができず
     // 計上しなかった人のアラートを、集計が終わってから(全日・全人分を見てから)出す
@@ -2017,6 +2097,7 @@
 
     return {
       perDayTotal: perDayTotal,
+      rawPerDayTotal: rawPerDayTotal,
       perDayAttendance: perDayAttendance,
       warnings: [],
       personBreakdown: personBreakdown,
@@ -2142,7 +2223,7 @@
       sheet.persons.forEach(function(p){
         var key = p.name;
         if (!personMap[key]) {
-          personMap[key] = { name: p.name, dept: DASH, dayHours: new Array(DAY_COUNT).fill(null) };
+          personMap[key] = { name: p.name, dept: DASH, dayHours: new Array(DAY_COUNT).fill(null), rawDayHours: new Array(DAY_COUNT).fill(null) };
           personOrder.push(key);
         }
         var entry = personMap[key];
@@ -2150,17 +2231,20 @@
         var cls = classifyNantanShiftCell(cellObj ? cellObj.v : null);
         var h = cls.hours;
         entry.dayHours[o] = Math.round(h * 10) / 10;
+        entry.rawDayHours[o] = h;
         perDayTotal[o] += h;
         if (h > 0) perDayAttendance[o]++;
       });
     }
     flushRange();
 
+    var rawPerDayTotal = perDayTotal.slice();
     perDayTotal = perDayTotal.map(function(v){ return v === null ? null : Math.round(v * 10) / 10; });
     var personBreakdown = personOrder.map(function(key){ return personMap[key]; });
 
     return {
       perDayTotal: perDayTotal,
+      rawPerDayTotal: rawPerDayTotal,
       perDayAttendance: perDayAttendance,
       warnings: [],
       personBreakdown: personBreakdown,
@@ -2309,6 +2393,9 @@
       var offset = parseInt(cell.getAttribute('data-offset'), 10);
       cell.textContent = fmtDateLabel(addDays(basisDate, offset));
     });
+    document.querySelectorAll('.dcol-total').forEach(function(cell){
+      cell.textContent = fmtTotalRangeLabel(basisDate);
+    });
   }
 
   // 基準日が今日かどうかで、列見出しの1列目(「当日」/「基準日」)・2列目(「翌日」/「1日後」)・
@@ -2318,7 +2405,7 @@
   function updateBasisLabels(isToday){
     var label0 = isToday ? '当日' : '基準日';
     var label1 = isToday ? '翌日' : '1日後';
-    var rangeNote = isToday ? '当日〜7日後' : '基準日〜7日後';
+    var rangeNote = isToday ? '当日〜6日後・合計' : '基準日〜6日後・合計';
     document.querySelectorAll('.basis-label-0').forEach(function(el){ el.textContent = label0; });
     document.querySelectorAll('.basis-label-1').forEach(function(el){ el.textContent = label1; });
     document.querySelectorAll('.basis-range-note').forEach(function(el){ el.textContent = rangeNote; });
@@ -2329,7 +2416,19 @@
     for (var o = 0; o < offsetCount; o++) {
       tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attr + '="' + key + '" data-' + attr + '-offset="' + o + '">' + DASH + '</td>';
     }
+    tds += '<td class="total-col" data-' + attr + '="' + key + '" data-' + attr + '-offset="total">' + DASH + '</td>';
     return '<tr' + (trClass ? ' class="' + trClass + '"' : '') + '><th class="sticky-1" colspan="2">' + label + '</th>' + tds + '</tr>';
+  }
+
+  // buildRowHtml()とは別に、キー名を持たない「合計行」(小計等)のtdを組み立てる共通関数。
+  // attrNameは例えば'work-subtotal'（data-work-subtotal-offset="0"等になる）
+  function buildOffsetOnlyTds(attrName, dayCount){
+    var tds = '';
+    for (var o = 0; o < dayCount; o++) {
+      tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attrName + '-offset="' + o + '">' + DASH + '</td>';
+    }
+    tds += '<td class="total-col" data-' + attrName + '-offset="total">' + DASH + '</td>';
+    return tds;
   }
 
   function renderCultivationTable(result){
@@ -2354,17 +2453,24 @@
       var contCell = document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="' + o + '"]');
       if (contCell) contCell.textContent = fmtNum(result.containerCounts[o]);
     }
+
+    // 合計列：件数はどの日も必ず判断できる値（該当する工程が無い日は0件）なので、
+    // 7日分をそのまま合計する（「（◯日分）」の表示は出ない）
+    DISPLAY_PROCESSES.concat(DETAIL_PROCESSES).forEach(function(name){
+      var dailyRaw = [];
+      for (var o2 = 0; o2 < DAY_COUNT; o2++) dailyRaw.push(result.rawProcessCounts[o2][name]);
+      var totalCell = document.querySelector('[data-cult="' + name + '"][data-cult-offset="total"]');
+      renderTotalCell(totalCell, computeRowTotal(dailyRaw), fmtNum);
+    });
+    var contTotalCell = document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="total"]');
+    renderTotalCell(contTotalCell, computeRowTotal(result.rawContainerCounts.slice(0, DAY_COUNT)), fmtNum);
   }
 
   function renderWorkHoursTable(rows, perDay){
     var body = document.getElementById('table2workBody');
     var html = '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT); });
-    var subtotalTds = '';
-    for (var o = 0; o < DAY_COUNT; o++) {
-      subtotalTds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-work-subtotal-offset="' + o + '">' + DASH + '</td>';
-    }
-    html += '<tr><th class="sticky-1" colspan="2">小計（栽培 標準工数合計）</th>' + subtotalTds + '</tr>';
+    html += '<tr><th class="sticky-1" colspan="2">小計（栽培 標準工数合計）</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT) + '</tr>';
     body.innerHTML = html;
 
     var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
@@ -2377,11 +2483,20 @@
         var cell = document.querySelector('[data-work="' + row.waku + '"][data-work-offset="' + o + '"]');
         if (cell) cell.textContent = fmtNum(v);
       }
+      var dailyRaw = [];
+      for (var oi = 0; oi < DAY_COUNT; oi++) dailyRaw.push(perDay[oi].items[row.waku]);
+      var totalCell = document.querySelector('[data-work="' + row.waku + '"][data-work-offset="total"]');
+      renderTotalCell(totalCell, computeRowTotal(dailyRaw), fmtNum);
     });
     for (var o2 = 0; o2 < DAY_COUNT; o2++) {
       var subCell = document.querySelector('[data-work-subtotal-offset="' + o2 + '"]');
       if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal) + (perDay[o2].harvestMissing ? '*' : '');
     }
+    // 小計の合計列：各日の小計は必ず数値（丸める前の値rawSubtotal）になるため、
+    // 常に7日分の合計になる（「（◯日分）」の表示は出ない）
+    var rawSubtotals = perDay.map(function(d){ return d.rawSubtotal; });
+    var subTotalCell = document.querySelector('[data-work-subtotal-offset="total"]');
+    renderTotalCell(subTotalCell, computeRowTotal(rawSubtotals), fmtNum);
   }
 
   function renderLaborTable(laborResult, workSubtotals){
@@ -2445,13 +2560,43 @@
       periodNoticesBox.style.display = 'none';
     }
 
+    // 合計列：標準労働時間合計(7日分の合計)・出勤人数(延べ人数)・過不足(両者の合計どうしの差)
+    var laborTotalInfo = laborResult ? computeRowTotal(laborResult.rawPerDayTotal.slice(0, DAY_COUNT)) : { value: null, count: 0 };
+    renderTotalCell(document.querySelector('[data-labor-total-offset="total"]'), laborTotalInfo, fmtNum);
+    var attendTotalInfo = laborResult
+      ? computeAlignedRowTotal(laborResult.rawPerDayTotal.slice(0, DAY_COUNT), laborResult.perDayAttendance.slice(0, DAY_COUNT))
+      : { value: null, count: 0 };
+    renderTotalCell(document.querySelector('[data-attendance-offset="total"]'), attendTotalInfo, function(v){ return String(v); });
+    var workSubtotalTotalInfo = workSubtotals
+      ? computeRowTotal(workSubtotals.slice(0, DAY_COUNT).map(function(d){ return d.rawSubtotal; }))
+      : { value: null, count: 0 };
+    var shortfallTotalCell = document.querySelector('[data-shortfall-offset="total"]');
+    if (shortfallTotalCell) {
+      if (laborTotalInfo.value === null || workSubtotalTotalInfo.value === null) {
+        shortfallTotalCell.textContent = DASH;
+        shortfallTotalCell.classList.remove('neg', 'pos');
+      } else {
+        var shortfallTotal = Math.round((laborTotalInfo.value - workSubtotalTotalInfo.value) * 10) / 10;
+        shortfallTotalCell.textContent = fmtNum(shortfallTotal);
+        shortfallTotalCell.classList.toggle('neg', shortfallTotal < 0);
+        shortfallTotalCell.classList.toggle('pos', shortfallTotal >= 0);
+      }
+    }
+
     var detailBody = document.getElementById('table3laborDetailBody');
     if (laborResult && laborResult.personBreakdown.length) {
       detailBody.innerHTML = laborResult.personBreakdown.map(function(p){
         var tds = p.dayHours.map(function(h, o){
           return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
         }).join('');
-        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '</tr>';
+        var rawDaily = (p.rawDayHours || p.dayHours).slice(0, DAY_COUNT);
+        var totalHtml = fmtNum(null);
+        var personTotalInfo = computeRowTotal(rawDaily);
+        if (personTotalInfo.value !== null) {
+          totalHtml = fmtNum(personTotalInfo.value);
+          if (personTotalInfo.count < DAY_COUNT) totalHtml += '<div class="sub-note">（' + personTotalInfo.count + '日分）</div>';
+        }
+        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '<td class="total-col">' + totalHtml + '</td></tr>';
       }).join('');
     } else {
       detailBody.innerHTML = '';
@@ -2714,7 +2859,7 @@
         items[row.waku] = v;
         if (v !== null && !isNaN(v)) subtotal += v;
       });
-      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10 });
+      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10, rawSubtotal: subtotal });
     }
     return perDay;
   }
@@ -2732,7 +2877,7 @@
         var base = 7 + i; // サンプルA=7h,B=8h,C=9h
         return wd === 6 ? Math.max(0, base - 2) : base; // 土曜は短縮(サンプル)
       });
-      return { name: name, dept: '出荷', dayHours: dayHours };
+      return { name: name, dept: '出荷', dayHours: dayHours, rawDayHours: dayHours.slice() };
     });
     var perDayTotal = [], perDayAttendance = [];
     for (var o = 0; o < DAY_COUNT; o++) {
@@ -2741,7 +2886,7 @@
       perDayTotal.push(Math.round(total * 10) / 10);
       perDayAttendance.push(attend);
     }
-    return { perDayTotal: perDayTotal, perDayAttendance: perDayAttendance, personBreakdown: personBreakdown, warnings: [], notices: [], periodNotices: [] };
+    return { perDayTotal: perDayTotal, rawPerDayTotal: perDayTotal.slice(), perDayAttendance: perDayAttendance, personBreakdown: personBreakdown, warnings: [], notices: [], periodNotices: [] };
   }
 
   async function renderShippingQuantities(basisDate, site, gen){
@@ -2806,6 +2951,27 @@
       if (cell) cell.textContent = (key === 'cs数') ? fmtShipDecimal1(v) : fmtShipInt(v);
     }
 
+    // 合計列：実績・受注シートにその日の列が無かった(q===null)日は計上せず「（◯日分）」を
+    // 添える。個数系はfmtShipInt(丸めて3桁区切り)、cs数・kgはfmtShipDecimal1(小数1桁)
+    function dailyQty(getter){
+      var out = [];
+      for (var oi = 0; oi < DAY_COUNT; oi++) { var qi = qtyByOffset ? qtyByOffset[oi] : null; out.push(qi ? getter(qi) : null); }
+      return out;
+    }
+    function setShipQtyTotalCell(key, fmtFn, getter){
+      var cell = document.querySelector('[data-shipqty="' + key + '"][data-shipqty-offset="total"]');
+      renderTotalCell(cell, computeRowTotal(dailyQty(getter)), fmtFn);
+    }
+    setShipQtyTotalCell('パック数', fmtShipInt, function(q){ return q.pack; });
+    setShipQtyTotalCell('袋数', fmtShipInt, function(q){ return q.bag; });
+    setShipQtyTotalCell('バラ数', fmtShipInt, function(q){ return q.bara; });
+    setShipQtyTotalCell('合計点数', fmtShipInt, function(q){ return q.totalPieces; });
+    setShipQtyTotalCell('cs数', fmtShipDecimal1, function(q){ return q.cs; });
+    ['パック', '袋', 'バラ', '合計'].forEach(function(label){
+      var cell = document.querySelector('[data-shipqtykg="' + label + '"][data-shipqtykg-offset="total"]');
+      renderTotalCell(cell, computeRowTotal(dailyQty(function(q){ return q.kg ? q.kg[KG_KEY_BY_LABEL[label]] : null; })), fmtShipDecimal1);
+    });
+
     // 販売抽出シートにまだ無い日付(月をまたいだ先など)がある場合の補足
     var periodNoticeBox = document.getElementById('shipQtyPeriodNotice');
     if (missingDates && missingDates.length) {
@@ -2844,11 +3010,7 @@
     var body = document.getElementById('table2shipBody');
     var html = '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'shipwork', DAY_COUNT); });
-    var subtotalTds = '';
-    for (var o = 0; o < DAY_COUNT; o++) {
-      subtotalTds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-shipwork-subtotal-offset="' + o + '">' + DASH + '</td>';
-    }
-    html += '<tr><th class="sticky-1" colspan="2">小計（出荷 標準工数合計）</th>' + subtotalTds + '</tr>';
+    html += '<tr><th class="sticky-1" colspan="2">小計（出荷 標準工数合計）</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT) + '</tr>';
     body.innerHTML = html;
 
     if (!perDay) return;
@@ -2862,11 +3024,23 @@
           cell.textContent = fmtNum(perDay[o].items[row.waku]);
         }
       }
+      var totalCell = document.querySelector('[data-shipwork="' + row.waku + '"][data-shipwork-offset="total"]');
+      if (row.waku === '付帯作業') {
+        if (totalCell) totalCell.textContent = DASH;
+      } else {
+        var dailyRaw = [];
+        for (var oi = 0; oi < DAY_COUNT; oi++) dailyRaw.push(perDay[oi].items[row.waku]);
+        renderTotalCell(totalCell, computeRowTotal(dailyRaw), fmtNum);
+      }
     });
     for (var o2 = 0; o2 < DAY_COUNT; o2++) {
       var subCell = document.querySelector('[data-shipwork-subtotal-offset="' + o2 + '"]');
       if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal);
     }
+    // 小計の合計列：各日の小計は必ず数値(rawSubtotal)のため常に7日分の合計になる
+    var rawSubtotals = perDay.map(function(d){ return d.rawSubtotal; });
+    var subTotalCell = document.querySelector('[data-shipwork-subtotal-offset="total"]');
+    renderTotalCell(subTotalCell, computeRowTotal(rawSubtotals), fmtNum);
   }
 
   // いなべ×出荷(部門='出荷'または'配送・出荷')の標準労働時間。読み込み・計算は栽培の
@@ -2980,13 +3154,43 @@
       periodNoticesBox.style.display = 'none';
     }
 
+    // 合計列：標準労働時間合計(7日分の合計)・出勤人数(延べ人数)・過不足(両者の合計どうしの差)
+    var shipLaborTotalInfo = laborResult ? computeRowTotal(laborResult.rawPerDayTotal.slice(0, DAY_COUNT)) : { value: null, count: 0 };
+    renderTotalCell(document.querySelector('[data-shiplabor-total-offset="total"]'), shipLaborTotalInfo, fmtNum);
+    var shipAttendTotalInfo = laborResult
+      ? computeAlignedRowTotal(laborResult.rawPerDayTotal.slice(0, DAY_COUNT), laborResult.perDayAttendance.slice(0, DAY_COUNT))
+      : { value: null, count: 0 };
+    renderTotalCell(document.querySelector('[data-shipattendance-offset="total"]'), shipAttendTotalInfo, function(v){ return String(v); });
+    var shipWorkSubtotalTotalInfo = workSubtotals
+      ? computeRowTotal(workSubtotals.slice(0, DAY_COUNT).map(function(d){ return d.rawSubtotal; }))
+      : { value: null, count: 0 };
+    var shipShortfallTotalCell = document.querySelector('[data-shipshortfall-offset="total"]');
+    if (shipShortfallTotalCell) {
+      if (shipLaborTotalInfo.value === null || shipWorkSubtotalTotalInfo.value === null) {
+        shipShortfallTotalCell.textContent = DASH;
+        shipShortfallTotalCell.classList.remove('neg', 'pos');
+      } else {
+        var shipShortfallTotal = Math.round((shipLaborTotalInfo.value - shipWorkSubtotalTotalInfo.value) * 10) / 10;
+        shipShortfallTotalCell.textContent = fmtNum(shipShortfallTotal);
+        shipShortfallTotalCell.classList.toggle('neg', shipShortfallTotal < 0);
+        shipShortfallTotalCell.classList.toggle('pos', shipShortfallTotal >= 0);
+      }
+    }
+
     var detailBody = document.getElementById('table3shipDetailBody');
     if (laborResult && laborResult.personBreakdown.length) {
       detailBody.innerHTML = laborResult.personBreakdown.map(function(p){
         var tds = p.dayHours.map(function(h, o){
           return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
         }).join('');
-        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '</tr>';
+        var rawDaily = (p.rawDayHours || p.dayHours).slice(0, DAY_COUNT);
+        var totalHtml = DASH;
+        var personTotalInfo = computeRowTotal(rawDaily);
+        if (personTotalInfo.value !== null) {
+          totalHtml = fmtNum(personTotalInfo.value);
+          if (personTotalInfo.count < DAY_COUNT) totalHtml += '<div class="sub-note">（' + personTotalInfo.count + '日分）</div>';
+        }
+        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '<td class="total-col">' + totalHtml + '</td></tr>';
       }).join('');
     } else {
       detailBody.innerHTML = '';
@@ -3281,6 +3485,15 @@
 
   /* ===================== テスト用エクスポート ===================== */
   window.__test = {
+    DAY_COUNT: DAY_COUNT,
+    TOTAL_COL_COUNT: TOTAL_COL_COUNT,
+    computeRowTotal: computeRowTotal,
+    computeAlignedRowTotal: computeAlignedRowTotal,
+    fmtNum: fmtNum,
+    fmtMDPadded: fmtMDPadded,
+    fmtTotalRangeLabel: fmtTotalRangeLabel,
+    buildRowHtml: buildRowHtml,
+    buildOffsetOnlyTds: buildOffsetOnlyTds,
     parseCsv: parseCsv,
     gvizCellToDate: gvizCellToDate,
     sameDate: sameDate,
