@@ -56,7 +56,7 @@ function buildStdWorkHoursCsv(opts) {
   rows.push(['cs数=(合計点数-バラ数)÷P/cs+バラ数', '', '', '', '', '', '', '']);
   rows.push(['パック・袋P/cs', '', '', '', '', '', '', '']);
   rows.push(['30', '', '', '', '', '', '', '']);
-  const cultFactors = { '菌床入れ': { factor: 10, unit: '分' }, '収穫': { factor: 50, unit: 'kg/h' } };
+  const cultFactors = { '菌床入れ': { factor: 10, unit: '分' }, '収穫': { factor: 50, unit: 'kg/h' }, 'コンテナ点検時間': { factor: 2, unit: 'h' } };
   Object.keys(cultFactors).forEach((waku, i) => {
     const f = cultFactors[waku];
     rows.push([i === 0 ? '栽培' : '', waku, f.factor, '', '', '', '', f.unit]);
@@ -149,12 +149,14 @@ function allSalesHandlers(site, dates) {
         harvestCultTotal: document.querySelector('[data-cult="収穫"][data-cult-offset="total"]').textContent.trim(),
         harvestWorkTotalHtml: document.querySelector('[data-work="収穫"][data-work-offset="total"]').innerHTML.trim(),
         laborTotal: document.querySelector('[data-labor-total-offset="total"]').textContent.trim(),
+        containerWorkTotal: document.querySelector('[data-work="コンテナ点検時間"][data-work-offset="total"]').textContent.trim(),
       }));
       check(`${site}：収穫件数が表示される(1.0)`, r.cultHarvest0 === '1.0');
       check(`${site}：パネル1・2・3がエラー表示にならない`, !r.cultError && !r.workError && !r.laborError);
       check(`${site}：合計列の見出しが基準日〜6日後の範囲(10/19〜10/25)になる`, r.dcolTotalCult === '10/19〜10/25');
-      check(`${site}：稼働コンテナ数の合計列が7日分の合計(7.0)になる`, r.containerTotal === '7.0');
+      check(`${site}：稼働コンテナ数はその日時点の台数(状態のスナップショット)のため、合計列は「－」になる`, r.containerTotal === '－');
       check(`${site}：工程件数(収穫)の合計列が7日分の合計(7.0)になる(件数は毎日判断できる値のため日数の注記は付かない)`, r.harvestCultTotal === '7.0');
+      check(`${site}：稼働コンテナ数「から計算される」標準工数の行(コンテナ点検時間)は、今までどおり7日分の合計(2.0h×7日=14.0)になる`, r.containerWorkTotal === '14.0');
     }
     // 標準工数(収穫)の合計列：いなべ・群馬は収穫見込みが1日分しか設定されていないモックのため
     // 部分合計＋「（1日分）」になり、収穫見込みの設定が全く無い南丹は合計も「－」になる

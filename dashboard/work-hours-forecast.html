@@ -2462,8 +2462,10 @@
       var totalCell = document.querySelector('[data-cult="' + name + '"][data-cult-offset="total"]');
       renderTotalCell(totalCell, computeRowTotal(dailyRaw), fmtNum);
     });
+    // 稼働コンテナ数はその日時点で稼働しているコンテナの台数（状態のスナップショット値）
+    // であり、7日分を足しても実際の台数にはならないため、合計列は常に「－」にする
     var contTotalCell = document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="total"]');
-    renderTotalCell(contTotalCell, computeRowTotal(result.rawContainerCounts.slice(0, DAY_COUNT)), fmtNum);
+    if (contTotalCell) contTotalCell.textContent = DASH;
   }
 
   function renderWorkHoursTable(rows, perDay){
