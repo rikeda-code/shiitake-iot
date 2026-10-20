@@ -5,7 +5,9 @@
 // 選択可能セルの判定(「－」等は選べるが集計に入らない。見出し行・列や実績/受注印の行は
 // 選べない)・基準日/拠点/区分の切替での選択解除(描画の世代チェックとの整合)・
 // 栽培 標準工数 小計の合計列への「*」伝播、栽培・出荷×いなべ・群馬・南丹の全6画面での
-// 選択可能性を確認する。
+// 選択可能性、および集計帯の高さ(文字1行+最小限の余白。注意表示・「選択を解除」ボタンが
+// 同じ行に収まること、幅375pxでボタンが帯に収まり押せて文字が切れないこと、ページ下の
+// 余白が帯の高さ以上あること)を確認する。
 const { chromium } = require('playwright');
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -496,6 +498,76 @@ async function center(page, selector) {
     await page.waitForTimeout(600);
     await page.click('[data-business="栽培"]');
     await page.waitForTimeout(600);
+  }
+
+  console.log('=== ⑫集計帯の高さ：文字1行+最小限の余白になっていること ===');
+  {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(() => window.__test.clearCellSelection());
+    const c0 = await center(page, '[data-cult="芽かき"][data-cult-offset="0"]');
+    await page.mouse.click(c0.x, c0.y);
+    const barH1 = await page.evaluate(() => document.getElementById('aggBar').getBoundingClientRect().height);
+    check(`幅1280pxで、警告なしのとき帯の高さが28px以下(実測${barH1.toFixed(1)}px)`, barH1 <= 28);
+
+    const workCell = await center(page, '[data-work="コンテナ点検時間"][data-work-offset="0"]');
+    const modifier2 = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.down(modifier2);
+    await page.mouse.click(workCell.x, workCell.y);
+    await page.keyboard.up(modifier2);
+    const withWarn = await page.evaluate(() => ({
+      height: document.getElementById('aggBar').getBoundingClientRect().height,
+      unitWarnShown: document.getElementById('aggWarnUnit').style.display !== 'none',
+    }));
+    check('単位混在の注意表示が出ている(前提)', withWarn.unitWarnShown);
+    check(`幅1280pxでは、単位混在の注意表示が出ていても帯の高さは変わらず1行に収まる(実測${withWarn.height.toFixed(1)}px)`, Math.abs(withWarn.height - barH1) < 2);
+
+    const bodyPadding = await page.evaluate(() => parseFloat(getComputedStyle(document.body).paddingBottom));
+    check(`帯が出ている間、ページ下の余白(${bodyPadding}px)が帯の高さ(${withWarn.height.toFixed(1)}px)以上あり、最後の行が隠れない`, bodyPadding >= withWarn.height);
+
+    await page.evaluate(() => window.__test.clearCellSelection());
+  }
+
+  console.log('=== ⑬幅375pxで「選択を解除」ボタンが帯に収まり押せる。文字が切れない ===');
+  {
+    await page.setViewportSize({ width: 375, height: 700 });
+    await page.waitForTimeout(300);
+    const c0 = await center(page, '[data-cult="芽かき"][data-cult-offset="0"]');
+    await page.mouse.click(c0.x, c0.y);
+    // 合計列(total)は幅375pxでは横スクロールしないと見えないため、先にスクロールしてから座標を取得する
+    await page.evaluate(() => {
+      document.querySelector('[data-cult="芽かき"][data-cult-offset="total"]').scrollIntoView({ inline: 'end', block: 'nearest' });
+    });
+    await page.waitForTimeout(150);
+    const totalC = await center(page, '[data-cult="芽かき"][data-cult-offset="total"]');
+    const modifier3 = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.down(modifier3);
+    await page.mouse.click(totalC.x, totalC.y);
+    await page.keyboard.up(modifier3);
+    const info = await page.evaluate(() => {
+      const bar = document.getElementById('aggBar');
+      const btn = document.getElementById('aggClearBtn');
+      const warn = document.getElementById('aggWarnDouble');
+      const barBox = bar.getBoundingClientRect();
+      const btnBox = btn.getBoundingClientRect();
+      return {
+        doubleWarnShown: warn.style.display !== 'none',
+        btnFullyInsideBar: btnBox.top >= barBox.top - 1 && btnBox.bottom <= barBox.bottom + 1 && btnBox.left >= 0 && btnBox.right <= window.innerWidth + 1,
+        warnText: warn.textContent,
+        warnOverflowHidden: getComputedStyle(warn).overflow === 'hidden',
+        warnEllipsis: getComputedStyle(warn).textOverflow === 'ellipsis',
+      };
+    });
+    check('合計列を含む選択のため「二重に数えている可能性」の注意表示が出る(前提)', info.doubleWarnShown);
+    check('注意表示の文字が省略されていない(フルテキストのまま)', info.warnText === '合計の列を含むため、二重に数えている可能性があります');
+    check('注意表示がoverflow:hidden/text-overflow:ellipsisで切れていない', !info.warnOverflowHidden && !info.warnEllipsis);
+    check('「選択を解除」ボタンが帯の高さの範囲内・画面幅内に収まっている', info.btnFullyInsideBar);
+
+    const btnCenter = await center(page, '#aggClearBtn');
+    await page.mouse.click(btnCenter.x, btnCenter.y);
+    check('幅375pxでも「選択を解除」ボタンが押せて選択が解除される', await page.evaluate(() => window.__test.getCellSelection().length === 0 && !document.getElementById('aggBar').classList.contains('show')));
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.waitForTimeout(300);
   }
 
   await page.close();
