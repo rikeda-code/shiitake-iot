@@ -145,7 +145,7 @@ function allSalesHandlers(site, dates) {
         workError: document.getElementById('workError').classList.contains('show'),
         laborError: document.getElementById('laborError').classList.contains('show'),
         dcolTotalCult: document.querySelector('#table1cult .dcol-total').textContent.trim(),
-        containerTotal: document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="total"]').textContent.trim(),
+        containerTotalHtml: document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="total"]').innerHTML.trim(),
         harvestCultTotal: document.querySelector('[data-cult="収穫"][data-cult-offset="total"]').textContent.trim(),
         harvestWorkTotalHtml: document.querySelector('[data-work="収穫"][data-work-offset="total"]').innerHTML.trim(),
         laborTotal: document.querySelector('[data-labor-total-offset="total"]').textContent.trim(),
@@ -154,7 +154,7 @@ function allSalesHandlers(site, dates) {
       check(`${site}：収穫件数が表示される(1.0)`, r.cultHarvest0 === '1.0');
       check(`${site}：パネル1・2・3がエラー表示にならない`, !r.cultError && !r.workError && !r.laborError);
       check(`${site}：合計列の見出しが基準日〜6日後の範囲(10/19〜10/25)になる`, r.dcolTotalCult === '10/19〜10/25');
-      check(`${site}：稼働コンテナ数はその日時点の台数(状態のスナップショット)のため、合計列は「－」になる`, r.containerTotal === '－');
+      check(`${site}：稼働コンテナ数は状態のスナップショット値のため、合計列は延べ台数(7.0)＋「延べ」の注記になる`, r.containerTotalHtml.startsWith('7.0') && r.containerTotalHtml.includes('延べ'));
       check(`${site}：工程件数(収穫)の合計列が7日分の合計(7.0)になる(件数は毎日判断できる値のため日数の注記は付かない)`, r.harvestCultTotal === '7.0');
       check(`${site}：稼働コンテナ数「から計算される」標準工数の行(コンテナ点検時間)は、今までどおり7日分の合計(2.0h×7日=14.0)になる`, r.containerWorkTotal === '14.0');
     }
@@ -291,6 +291,27 @@ function allSalesHandlers(site, dates) {
       site: document.querySelector('#siteToggle button.active').dataset.site,
     }));
     check('URL(?div=栽培&site=群馬)で開くと群馬が選択される', r.business === '栽培' && r.site === '群馬');
+    const toggleOrder = await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('.toggle-cluster > div'));
+      return els.map(el => el.id);
+    });
+    check('トグルのDOM順が左から拠点(siteToggle)→区分(businessToggle)になっている', toggleOrder[0] === 'siteToggle' && toggleOrder[1] === 'businessToggle');
+    await page.click('[data-business="出荷"]');
+    await page.waitForTimeout(500);
+    const afterClickUrl = await page.evaluate(() => decodeURIComponent(location.search));
+    const afterClickActive = await page.evaluate(() => document.querySelector('#businessToggle button.active').dataset.business);
+    check('左右入れ替え後も区分トグルのクリックで選択・URL(div=出荷)が切り替わる', afterClickActive === '出荷' && afterClickUrl.includes('div=出荷'));
+    await page.click('[data-site="南丹"]');
+    await page.waitForTimeout(500);
+    const afterSiteClick = await page.evaluate(() => document.querySelector('#siteToggle button.active').dataset.site);
+    check('左右入れ替え後も拠点トグルのクリックで選択が切り替わる(南丹)', afterSiteClick === '南丹');
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(800);
+    const afterReload = await page.evaluate(() => ({
+      business: document.querySelector('#businessToggle button.active').dataset.business,
+      site: document.querySelector('#siteToggle button.active').dataset.site,
+    }));
+    check('リロード後もURL経由で選択(出荷・南丹)が保持される', afterReload.business === '出荷' && afterReload.site === '南丹');
     await page.close();
   }
 
@@ -346,7 +367,7 @@ function allSalesHandlers(site, dates) {
     await page.close();
   }
 
-  console.log('\n=== ⑧栽培：工程件数の詳細行のうち、芽待ち／成長待ち・芽発生・培養は状態のスナップショットのため合計列が「－」になり、コンテナ掃除・コンテナ点検は出来事の件数のため合計列が7日分の合計になること ===');
+  console.log('\n=== ⑧栽培：工程件数の詳細行のうち、芽待ち／成長待ち・芽発生・培養は状態のスナップショットのため合計列が延べ台数＋「延べ」の注記になり、コンテナ掃除・コンテナ点検は出来事の件数のため合計列が普通の7日分の合計になること ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19); // 基準日=2026-10-19(今日)。offset0-6=10/19〜10/25
@@ -370,26 +391,49 @@ function allSalesHandlers(site, dates) {
     await page.evaluate(() => { document.querySelectorAll('details').forEach(d => { d.open = true; }); });
     const r = await page.evaluate(() => ({
       waiting0: document.querySelector('[data-cult="芽待ち／成長待ち"][data-cult-offset="0"]').textContent.trim(),
-      waitingTotal: document.querySelector('[data-cult="芽待ち／成長待ち"][data-cult-offset="total"]').textContent.trim(),
+      waitingTotalHtml: document.querySelector('[data-cult="芽待ち／成長待ち"][data-cult-offset="total"]').innerHTML.trim(),
       sprout0: document.querySelector('[data-cult="芽発生"][data-cult-offset="0"]').textContent.trim(),
-      sproutTotal: document.querySelector('[data-cult="芽発生"][data-cult-offset="total"]').textContent.trim(),
+      sproutTotalHtml: document.querySelector('[data-cult="芽発生"][data-cult-offset="total"]').innerHTML.trim(),
       culture0: document.querySelector('[data-cult="培養"][data-cult-offset="0"]').textContent.trim(),
-      cultureTotal: document.querySelector('[data-cult="培養"][data-cult-offset="total"]').textContent.trim(),
+      cultureTotalHtml: document.querySelector('[data-cult="培養"][data-cult-offset="total"]').innerHTML.trim(),
       cleaning0: document.querySelector('[data-cult="コンテナ掃除"][data-cult-offset="0"]').textContent.trim(),
-      cleaningTotal: document.querySelector('[data-cult="コンテナ掃除"][data-cult-offset="total"]').textContent.trim(),
+      cleaningTotalHtml: document.querySelector('[data-cult="コンテナ掃除"][data-cult-offset="total"]').innerHTML.trim(),
       inspection0: document.querySelector('[data-cult="コンテナ点検"][data-cult-offset="0"]').textContent.trim(),
-      inspectionTotal: document.querySelector('[data-cult="コンテナ点検"][data-cult-offset="total"]').textContent.trim(),
+      inspectionTotalHtml: document.querySelector('[data-cult="コンテナ点検"][data-cult-offset="total"]').innerHTML.trim(),
     }));
     check('詳細「芽待ち／成長待ち」：日ごとの値は表示される(1.0)', r.waiting0 === '1.0');
-    check('詳細「芽待ち／成長待ち」：状態のスナップショットのため合計列は「－」になる', r.waitingTotal === '－');
+    check('詳細「芽待ち／成長待ち」：状態のスナップショットのため合計列は延べ台数(7.0)＋「延べ」の注記になる', r.waitingTotalHtml.startsWith('7.0') && r.waitingTotalHtml.includes('延べ'));
     check('詳細「芽発生」：日ごとの値は表示される(1.0)', r.sprout0 === '1.0');
-    check('詳細「芽発生」：状態のスナップショットのため合計列は「－」になる', r.sproutTotal === '－');
+    check('詳細「芽発生」：状態のスナップショットのため合計列は延べ台数(7.0)＋「延べ」の注記になる', r.sproutTotalHtml.startsWith('7.0') && r.sproutTotalHtml.includes('延べ'));
     check('詳細「培養」：日ごとの値は表示される(1.0)', r.culture0 === '1.0');
-    check('詳細「培養」：状態のスナップショットのため合計列は「－」になる', r.cultureTotal === '－');
+    check('詳細「培養」：状態のスナップショットのため合計列は延べ台数(7.0)＋「延べ」の注記になる', r.cultureTotalHtml.startsWith('7.0') && r.cultureTotalHtml.includes('延べ'));
     check('詳細「コンテナ掃除」：日ごとの値は表示される(1.0)', r.cleaning0 === '1.0');
-    check('詳細「コンテナ掃除」：出来事の件数のため合計列は7日分の合計(7.0)になる', r.cleaningTotal === '7.0');
+    check('詳細「コンテナ掃除」：出来事の件数のため合計列は普通の7日分の合計(7.0)になり「延べ」は付かない', r.cleaningTotalHtml === '7.0');
     check('詳細「コンテナ点検」：日ごとの値は表示される(1.0)', r.inspection0 === '1.0');
-    check('詳細「コンテナ点検」：出来事の件数のため合計列は7日分の合計(7.0)になる', r.inspectionTotal === '7.0');
+    check('詳細「コンテナ点検」：出来事の件数のため合計列は普通の7日分の合計(7.0)になり「延べ」は付かない', r.inspectionTotalHtml === '7.0');
+    await page.close();
+  }
+
+  console.log('\n=== ⑧b栽培：稼働コンテナ数・芽待ち／成長待ち等で一部の日にコンテナが無い場合、合計は部分合計＋「（◯日分）」になり、「延べ」の注記も合わせて表示されること ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19); // 基準日=2026-10-19(今日)。offset0-6=10/19〜10/25
+    const dates7 = []; for (let o = 0; o < 7; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates7.push(d); }
+    const header = ['', '', ''].concat(dates7.map(d => `${d.getMonth() + 1}/${d.getDate()}`));
+    const weekdayRow = ['', '', ''].concat(dates7.map(d => WD[d.getDay()]));
+    // コンテナ1は最初の3日だけ「芽待ち」、残り4日は空欄(その段階を離れた)にする
+    const waitingRow = ['1', '', '1'].concat(dates7.map((d, i) => i < 3 ? '芽待ち' : ''));
+    const csv = toCsvText([header, weekdayRow, waitingRow]);
+    await setupRoutes(page, [
+      staticHandler([[CULTIVATION_SHEETS['いなべ'].id, CULTIVATION_SHEETS['いなべ'].gid]], csv),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html' + q('栽培', 'いなべ'), { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => { document.querySelectorAll('details').forEach(d => { d.open = true; }); });
+    const html = await page.evaluate(() => document.querySelector('[data-cult="芽待ち／成長待ち"][data-cult-offset="total"]').innerHTML.trim());
+    // 件数系の行は「該当する工程が無い日は0件」として扱われる(nullではない)ため、
+    // 7日分すべて計上され、値は1+1+1+0+0+0+0=3.0。件数は常に判断できるため「（◯日分）」は付かない
+    check('芽待ち／成長待ち：一部の日しか値が無くても、件数は毎日0として計上されるため合計は3.0(注記「（◯日分）」は付かない)で「延べ」が付く', html.startsWith('3.0') && !html.includes('日分') && html.includes('延べ'));
     await page.close();
   }
 

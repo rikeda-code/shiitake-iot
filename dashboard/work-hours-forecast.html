@@ -223,15 +223,15 @@
         <h1>直近工数計画ダッシュボード</h1>
       </div>
       <div class="toggle-cluster">
-        <div class="site-toggle" id="businessToggle">
-          <button type="button" class="active" data-business="栽培">栽培</button>
-          <button type="button" data-business="出荷">出荷</button>
-          <button type="button" data-business="配送">配送</button>
-        </div>
         <div class="site-toggle" id="siteToggle">
           <button type="button" class="active" data-site="いなべ">いなべ</button>
           <button type="button" data-site="群馬">群馬</button>
           <button type="button" data-site="南丹">南丹</button>
+        </div>
+        <div class="site-toggle" id="businessToggle">
+          <button type="button" class="active" data-business="栽培">栽培</button>
+          <button type="button" data-business="出荷">出荷</button>
+          <button type="button" data-business="配送">配送</button>
         </div>
       </div>
     </header>
@@ -762,12 +762,16 @@
   }
 
   // 合計セル(1個)に値を書き込む。fmtFnは丸め込み後の表示用フォーマッタ(fmtNum等、
-  // DASH変換も担う)。7日分そろっていない場合は値の下に「（◯日分）」を小さく添える
-  function renderTotalCell(cell, totalInfo, fmtFn){
+  // DASH変換も担う)。7日分そろっていない場合は値の下に「（◯日分）」を小さく添える。
+  // extraLabel（省略可）を渡すと、さらにその下に小さく注記を添える（出勤人数や
+  // 稼働コンテナ数のように、合計が「延べ」の数であることを示す場合に使う）。
+  // 全日「－」(totalInfo.value===null)の場合はいずれの注記も出さない
+  function renderTotalCell(cell, totalInfo, fmtFn, extraLabel){
     if (!cell) return;
     if (!totalInfo || totalInfo.value === null) { cell.innerHTML = DASH; return; }
     var html = fmtFn(totalInfo.value);
     if (totalInfo.count < DAY_COUNT) html += '<div class="sub-note">（' + totalInfo.count + '日分）</div>';
+    if (extraLabel) html += '<div class="sub-note">' + extraLabel + '</div>';
     cell.innerHTML = html;
   }
 
@@ -899,9 +903,11 @@
   // 詳細行のうち、芽待ち／成長待ち・芽発生・培養は、稼働コンテナ数と同じ数え方
   // （その日の列に該当キーワードを含むセルの数＝その日時点でその段階にある台数という
   // 状態のスナップショット値。aggregateCultivation()のprocessCounts集計を参照）で
-  // 求めているため、稼働コンテナ数と同様に合計列を出さない（常に「－」）。
+  // 求めている。稼働コンテナ数と同様に合計は出すが、実際の台数ではなく7日分の
+  // 延べ台数であることが分かるよう、合計セルに「延べ」の注記を添える
+  // （renderCultivationTable()を参照）。
   // コンテナ掃除・コンテナ点検は、その日に行った作業の件数（出来事の積み上げ）であり、
-  // 他の工程と同じく合計列を出す
+  // 他の工程と同じ普通の合計を出す（「延べ」の注記は付けない）
   var CULT_STATE_PROCESSES = ['芽待ち／成長待ち', '芽発生', '培養'];
 
   function matchProcess(text){
@@ -2462,21 +2468,20 @@
     }
 
     // 合計列：件数はどの日も必ず判断できる値（該当する工程が無い日は0件）なので、
-    // 7日分をそのまま合計する（「（◯日分）」の表示は出ない）
+    // 7日分をそのまま合計する（「（◯日分）」の表示は出ない）。CULT_STATE_PROCESSES
+    // （芽待ち／成長待ち・芽発生・培養）は状態のスナップショット値の積み上げのため、
+    // 実際の台数ではなく延べ台数であることを示す「延べ」の注記を添える
     DISPLAY_PROCESSES.concat(DETAIL_PROCESSES).forEach(function(name){
       var totalCell = document.querySelector('[data-cult="' + name + '"][data-cult-offset="total"]');
-      if (CULT_STATE_PROCESSES.indexOf(name) !== -1) {
-        if (totalCell) totalCell.textContent = DASH;
-        return;
-      }
       var dailyRaw = [];
       for (var o2 = 0; o2 < DAY_COUNT; o2++) dailyRaw.push(result.rawProcessCounts[o2][name]);
-      renderTotalCell(totalCell, computeRowTotal(dailyRaw), fmtNum);
+      var extraLabel = CULT_STATE_PROCESSES.indexOf(name) !== -1 ? '延べ' : null;
+      renderTotalCell(totalCell, computeRowTotal(dailyRaw), fmtNum, extraLabel);
     });
-    // 稼働コンテナ数はその日時点で稼働しているコンテナの台数（状態のスナップショット値）
-    // であり、7日分を足しても実際の台数にはならないため、合計列は常に「－」にする
+    // 稼働コンテナ数も同様に、状態のスナップショット値の7日分の延べ台数として合計し、
+    // 「延べ」の注記を添える（実際にその場にある台数ではないことが分かるように）
     var contTotalCell = document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="total"]');
-    if (contTotalCell) contTotalCell.textContent = DASH;
+    renderTotalCell(contTotalCell, computeRowTotal(result.rawContainerCounts), fmtNum, '延べ');
   }
 
   function renderWorkHoursTable(rows, perDay){
