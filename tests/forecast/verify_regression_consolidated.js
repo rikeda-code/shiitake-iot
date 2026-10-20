@@ -346,6 +346,53 @@ function allSalesHandlers(site, dates) {
     await page.close();
   }
 
+  console.log('\n=== ⑧栽培：工程件数の詳細行のうち、芽待ち／成長待ち・芽発生・培養は状態のスナップショットのため合計列が「－」になり、コンテナ掃除・コンテナ点検は出来事の件数のため合計列が7日分の合計になること ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19); // 基準日=2026-10-19(今日)。offset0-6=10/19〜10/25
+    const dates7 = []; for (let o = 0; o < 7; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates7.push(d); }
+    const header = ['', '', ''].concat(dates7.map(d => `${d.getMonth() + 1}/${d.getDate()}`));
+    const weekdayRow = ['', '', ''].concat(dates7.map(d => WD[d.getDay()]));
+    // 5つのコンテナ(1〜5)に1つずつ割り当て、7日間すべて同じキーワードのセルにする
+    // (このCSVはbuildCultCsv()とは別の専用モックのため、既存の稼働コンテナ数・
+    // コンテナ点検時間の検証には影響しない)
+    const waitingRow = ['1', '', '1'].concat(dates7.map(() => '芽待ち'));
+    const sproutRow = ['1', '', '2'].concat(dates7.map(() => '芽発生'));
+    const cultureRow = ['1', '', '3'].concat(dates7.map(() => '培養'));
+    const cleaningRow = ['1', '', '4'].concat(dates7.map(() => 'コンテナ掃除'));
+    const inspectionRow = ['1', '', '5'].concat(dates7.map(() => 'コンテナ点検'));
+    const csv = toCsvText([header, weekdayRow, waitingRow, sproutRow, cultureRow, cleaningRow, inspectionRow]);
+    await setupRoutes(page, [
+      staticHandler([[CULTIVATION_SHEETS['いなべ'].id, CULTIVATION_SHEETS['いなべ'].gid]], csv),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html' + q('栽培', 'いなべ'), { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => { document.querySelectorAll('details').forEach(d => { d.open = true; }); });
+    const r = await page.evaluate(() => ({
+      waiting0: document.querySelector('[data-cult="芽待ち／成長待ち"][data-cult-offset="0"]').textContent.trim(),
+      waitingTotal: document.querySelector('[data-cult="芽待ち／成長待ち"][data-cult-offset="total"]').textContent.trim(),
+      sprout0: document.querySelector('[data-cult="芽発生"][data-cult-offset="0"]').textContent.trim(),
+      sproutTotal: document.querySelector('[data-cult="芽発生"][data-cult-offset="total"]').textContent.trim(),
+      culture0: document.querySelector('[data-cult="培養"][data-cult-offset="0"]').textContent.trim(),
+      cultureTotal: document.querySelector('[data-cult="培養"][data-cult-offset="total"]').textContent.trim(),
+      cleaning0: document.querySelector('[data-cult="コンテナ掃除"][data-cult-offset="0"]').textContent.trim(),
+      cleaningTotal: document.querySelector('[data-cult="コンテナ掃除"][data-cult-offset="total"]').textContent.trim(),
+      inspection0: document.querySelector('[data-cult="コンテナ点検"][data-cult-offset="0"]').textContent.trim(),
+      inspectionTotal: document.querySelector('[data-cult="コンテナ点検"][data-cult-offset="total"]').textContent.trim(),
+    }));
+    check('詳細「芽待ち／成長待ち」：日ごとの値は表示される(1.0)', r.waiting0 === '1.0');
+    check('詳細「芽待ち／成長待ち」：状態のスナップショットのため合計列は「－」になる', r.waitingTotal === '－');
+    check('詳細「芽発生」：日ごとの値は表示される(1.0)', r.sprout0 === '1.0');
+    check('詳細「芽発生」：状態のスナップショットのため合計列は「－」になる', r.sproutTotal === '－');
+    check('詳細「培養」：日ごとの値は表示される(1.0)', r.culture0 === '1.0');
+    check('詳細「培養」：状態のスナップショットのため合計列は「－」になる', r.cultureTotal === '－');
+    check('詳細「コンテナ掃除」：日ごとの値は表示される(1.0)', r.cleaning0 === '1.0');
+    check('詳細「コンテナ掃除」：出来事の件数のため合計列は7日分の合計(7.0)になる', r.cleaningTotal === '7.0');
+    check('詳細「コンテナ点検」：日ごとの値は表示される(1.0)', r.inspection0 === '1.0');
+    check('詳細「コンテナ点検」：出来事の件数のため合計列は7日分の合計(7.0)になる', r.inspectionTotal === '7.0');
+    await page.close();
+  }
+
   console.log('\n=== 総合判定 ===');
   console.log(allOk ? 'すべてOK' : 'NGあり');
 
