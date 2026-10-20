@@ -152,12 +152,19 @@ async function shippingLaborDetailRows(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('#table3shipDetailBody tr')).map(tr => ({
     name: tr.querySelector('th').textContent.trim(),
     dept: tr.querySelector('td.dept-col').textContent.trim(),
-    cells: Array.from(tr.querySelectorAll('td')).slice(1).map(td => td.textContent.trim()),
+    cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).slice(1).map(td => td.textContent.trim()),
+    totalHtml: tr.querySelector('td.total-col') ? tr.querySelector('td.total-col').innerHTML.trim() : null,
   })));
 }
 async function shipLaborTotals(page) {
-  return page.evaluate(() => Array.from({ length: 8 }, (_, o) =>
+  return page.evaluate(() => Array.from({ length: 7 }, (_, o) =>
     document.querySelector(`[data-shiplabor-total-offset="${o}"]`).textContent.trim()));
+}
+async function shipLaborGrandTotal(page) {
+  return page.evaluate(() => {
+    const cell = document.querySelector('[data-shiplabor-total-offset="total"]');
+    return { html: cell.innerHTML.trim(), text: cell.textContent.trim() };
+  });
 }
 async function shipLaborNotices(page) {
   return page.evaluate(() => document.getElementById('shipLaborNotices').textContent.trim());
@@ -189,7 +196,7 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
     await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-10-11'); // offset0-7 = index0-7
+    await setBasisDate(page, '2026-10-11'); // offset0-6 = index0-6
     const rows = await shippingLaborDetailRows(page);
     const takayama = rows.find(r => r.name === '高山');
     console.log('高山(休,空欄,空欄,休,...):', JSON.stringify(takayama && takayama.cells));
@@ -199,6 +206,11 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     check('index3(休)=0.0h', takayama && takayama.cells[3] === '0.0');
     const notices = await shipLaborNotices(page);
     check('休みの印の間の空欄にはアラートが出ない', !notices.includes('高山'));
+    // 合計列：index0,3,6が休(0.0)で残り4日が出勤(8.5)。すべて実際に判断できた値(0.0h含む)
+    // なので7日分の合計(8.5×4=34.0)になり「（◯日分）」は付かない
+    const takayamaTotal = (await shippingLaborDetailRows(page)).find(r => r.name === '高山').totalHtml;
+    console.log('高山 合計列:', takayamaTotal);
+    check('合計列が7日分の合計(34.0)になり日数の注記が付かない', takayamaTotal === '34.0');
     await page.close();
   }
 
@@ -226,7 +238,7 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     ]);
     await gotoGunmaShipping(page);
     await setFakeNextPeriodGid(page, '2026.11', SHIP_GUNMA_GID_FAKE_202611);
-    await setBasisDate(page, '2026-11-03'); // offset0-7 = 11/3〜11/10(すべて2026.10期間、最後の休(10/15)より後)
+    await setBasisDate(page, '2026-11-03'); // offset0-6 = 11/3〜11/9(すべて2026.10期間、最後の休(10/15)より後)
     const rows = await shippingLaborDetailRows(page);
     const takayama = rows.find(r => r.name === '高山');
     console.log('高山(11/3〜11/10、次月度に休みあり):', JSON.stringify(takayama && takayama.cells));
@@ -264,7 +276,7 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     check('次の月度に休みの印が無いため、休み扱い(0.0h)になる', takayama && takayama.cells.every(v => v === '0.0'));
     const notices = await shipLaborNotices(page);
     console.log('補足:', notices);
-    check('「次の月度まで休みの記載がない」旨のアラートが出る(名前・日付範囲入り)', notices.includes('高山') && notices.includes('次の月度まで休みの記載がない') && notices.includes('11/3') && notices.includes('11/10'));
+    check('「次の月度まで休みの記載がない」旨のアラートが出る(名前・日付範囲入り)', notices.includes('高山') && notices.includes('次の月度まで休みの記載がない') && notices.includes('11/3') && notices.includes('11/9'));
     await page.close();
   }
 
@@ -298,19 +310,26 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
     await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-11-03'); // offset0-7 = 11/3〜11/10
+    // 基準日〜6日後(7日分)=11/4〜11/10にする(旧仕様の基準日11/3〜11/10の8日分から、
+    // 表示が7日になった分だけ1日後ろにずらし、11/10までの同じ検証内容を保つ)
+    await setBasisDate(page, '2026-11-04'); // offset0-6 = 11/4〜11/10
     const rows = await shippingLaborDetailRows(page);
     const takayama = rows.find(r => r.name === '高山');
     const hiramoto = rows.find(r => r.name === '平本');
-    console.log('高山(11/3〜11/10):', JSON.stringify(takayama && takayama.cells));
-    console.log('平本(11/3〜11/10):', JSON.stringify(hiramoto && hiramoto.cells));
-    // 11/3〜11/7はoffset0-4、11/8がoffset5、11/9がoffset6、11/10がoffset7
-    check('高山：11/3〜11/6(休み(11/7)より前)は出勤(8.5h)', takayama && takayama.cells.slice(0, 4).every(v => v === '8.5'));
-    check('高山：11/7(休み)は0.0h', takayama && takayama.cells[4] === '0.0');
-    check('高山：11/8〜11/10(次の月度未設定)は計上されない(0.0h)', takayama && takayama.cells.slice(5).every(v => v === '0.0'));
-    check('平本：11/3〜11/8(休み(11/9)より前)は出勤(8.0h)', hiramoto && hiramoto.cells.slice(0, 6).every(v => v === '8.0'));
-    check('平本：11/9(休み)は0.0h', hiramoto && hiramoto.cells[6] === '0.0');
-    check('平本：11/10(次の月度未設定)は計上されない(0.0h)', hiramoto && hiramoto.cells[7] === '0.0');
+    console.log('高山(11/4〜11/10):', JSON.stringify(takayama && takayama.cells), takayama && takayama.totalHtml);
+    console.log('平本(11/4〜11/10):', JSON.stringify(hiramoto && hiramoto.cells), hiramoto && hiramoto.totalHtml);
+    // 11/4〜11/6はoffset0-2、11/7がoffset3(休)、11/8〜11/10がoffset4-6(次の月度未設定)
+    check('高山：11/4〜11/6(休み(11/7)より前)は出勤(8.5h)', takayama && takayama.cells.slice(0, 3).every(v => v === '8.5'));
+    check('高山：11/7(休み)は0.0h', takayama && takayama.cells[3] === '0.0');
+    check('高山：11/8〜11/10(次の月度未設定)は計上されない(0.0h)', takayama && takayama.cells.slice(4).every(v => v === '0.0'));
+    check('平本：11/4〜11/8(休み(11/9)より前)は出勤(8.0h)', hiramoto && hiramoto.cells.slice(0, 5).every(v => v === '8.0'));
+    check('平本：11/9(休み)は0.0h', hiramoto && hiramoto.cells[5] === '0.0');
+    check('平本：11/10(次の月度未設定)は計上されない(0.0h)', hiramoto && hiramoto.cells[6] === '0.0');
+    // 合計列：休み・次の月度未設定の空欄は「判断できず計上しない(null)」ではなく「0hと確定した値」
+    // なので、7日分すべてが計上対象になり「（◯日分）」は付かない
+    // 高山=8.5×3+0×4=25.5、平本=8.0×5+0×2=40.0
+    check('高山の合計列が7日分の合計(25.5)になり日数の注記が付かない', takayama && takayama.totalHtml === '25.5');
+    check('平本の合計列が7日分の合計(40.0)になり日数の注記が付かない', hiramoto && hiramoto.totalHtml === '40.0');
     const notices = await shipLaborNotices(page);
     console.log('補足:', notices);
     check('高山に「次の月度の勤務表がない」旨のアラートが出る(11/8〜11/10)', notices.includes('高山') && notices.includes('次の月度の勤務表がないため') && notices.includes('11/8') && notices.includes('11/10'));
@@ -415,7 +434,7 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     await page.close();
   }
 
-  console.log('\n=== ⑧表示8日間に「次の月度が必要な空欄」が無いときは、次の月度のシートを読まないこと ===');
+  console.log('\n=== ⑧表示7日間に「次の月度が必要な空欄」が無いときは、次の月度のシートを読まないこと ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
@@ -434,7 +453,7 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     ]);
     await gotoGunmaShipping(page);
     await setFakeNextPeriodGid(page, '2026.11', SHIP_GUNMA_GID_FAKE_202611);
-    await setBasisDate(page, '2026-10-11'); // 表示する8日間はすべて同じ月度内の休みの印で解決できる
+    await setBasisDate(page, '2026-10-11'); // 表示する7日間はすべて同じ月度内の休みの印で解決できる
     await page.waitForTimeout(500);
     console.log('2026.11(仮)への読み込み回数:', novCounter.count);
     check('次の月度のシートが読まれない(不要な読み込みをしない)', novCounter.count === 0);
@@ -475,7 +494,7 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     await setBasisDate(page, '2026-10-11');
     const cultRows = await page.evaluate(() => Array.from(document.querySelectorAll('#table3laborDetailBody tr')).map(tr => ({
       name: tr.querySelector('th').textContent.trim(),
-      cells: Array.from(tr.querySelectorAll('td')).slice(1).map(td => td.textContent.trim()),
+      cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).slice(1).map(td => td.textContent.trim()),
     })));
     const noro = cultRows.find(r => r.name === '野呂');
     const sukedachi = cultRows.find(r => r.name === '助っ人');

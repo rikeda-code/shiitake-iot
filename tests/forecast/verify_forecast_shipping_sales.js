@@ -106,22 +106,29 @@ function staticHandler(idGidPairs, body) {
 async function shippingQtyRows(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('#table1shipBody tr')).map(tr => ({
     label: tr.querySelector('th').textContent.trim(),
-    cells: Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()),
+    cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).map(td => td.textContent.trim()),
+    totalHtml: tr.querySelector('td.total-col') ? tr.querySelector('td.total-col').innerHTML.trim() : null,
+    totalText: tr.querySelector('td.total-col') ? tr.querySelector('td.total-col').textContent.trim() : null,
   })));
 }
 async function shippingQtyDetailRows(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('#table1shipDetailBody tr')).map(tr => ({
     label: tr.querySelector('th').textContent.trim(),
-    cells: Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()),
+    cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).map(td => td.textContent.trim()),
+    totalText: tr.querySelector('td.total-col') ? tr.querySelector('td.total-col').textContent.trim() : null,
   })));
 }
 async function shippingKinds(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('[data-kind-offset]')).map(el => el.textContent.trim()));
 }
+async function shippingTotalRangeHeader(page) {
+  return page.evaluate(() => document.querySelector('#table1ship .dcol-total').textContent.trim());
+}
 async function shippingWorkRows(page) {
   return page.evaluate(() => Array.from(document.querySelectorAll('#table2shipBody tr')).map(tr => ({
     label: tr.querySelector('th').textContent.trim(),
-    cells: Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()),
+    cells: Array.from(tr.querySelectorAll('td:not(.total-col)')).map(td => td.textContent.trim()),
+    totalText: tr.querySelector('td.total-col') ? tr.querySelector('td.total-col').textContent.trim() : null,
   })));
 }
 
@@ -134,7 +141,7 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19); // 今日=2026/10/19
-    const dates = []; for (let o = 0; o < 8; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates.push(d); }
+    const dates = []; for (let o = 0; o < 7; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates.push(d); }
     const sites = ['いなべ', '群馬', '南丹'];
     const urlEntries = [];
     const handlers = [];
@@ -151,6 +158,8 @@ async function shippingWorkRows(page) {
     await page.waitForTimeout(500);
     await page.click('[data-business="出荷"]');
     await page.waitForTimeout(1000);
+    const headerRange = await shippingTotalRangeHeader(page);
+    check('見出しが基準日〜6日後の7日分になり、合計列の見出しが期間(10/19〜10/25)になる', headerRange === '10/19〜10/25');
     for (let i = 0; i < sites.length; i++) {
       const site = sites[i];
       if (site !== 'いなべ') { await page.click(`[data-site="${site}"]`); await page.waitForTimeout(800); }
@@ -158,6 +167,9 @@ async function shippingWorkRows(page) {
       const packRow = rows.find(r => r.label === 'パック数');
       const expected = String(100 + i * 10);
       check(`${site}：DB共有の一覧から受注のタブが見つかり、パネル1に値が表示される(${expected})`, packRow && packRow.cells[0] === expected);
+      // 合計列：7日分(j=0..6)の合計＝7×(100+i×10)+21。7日分そろうので「（◯日分）」は付かない
+      const expectedTotal = (7 * (100 + i * 10) + 21).toLocaleString('ja-JP');
+      check(`${site}：合計列が7日分の合計(${expectedTotal})になり、日数の注記が付かない`, packRow.totalHtml === expectedTotal);
       const err = await page.evaluate(() => document.getElementById('shipQtyError').classList.contains('show'));
       check(`${site}：パネル1がエラー表示にならない`, !err);
     }
@@ -308,8 +320,12 @@ async function shippingWorkRows(page) {
     }));
     console.log('pack:', JSON.stringify(packRow.cells), 'notice:', JSON.stringify(notice));
     check('10/19〜10/24は値が表示される', packRow.cells.slice(0, 6).every(v => v !== '－'));
-    check('10/25・10/26(シートに無い日付)は「－」になる', packRow.cells[6] === '－' && packRow.cells[7] === '－');
+    check('10/25(シートに無い日付。基準日〜6日後の最後の日)は「－」になる', packRow.cells[6] === '－');
     check('「販売抽出シートに2026/10/25以降の日付がありません」の補足が出る(表示は止まらない)', notice.shown && notice.text.includes('2026/10/25'));
+    // 合計列：10/19〜10/24の6日分(300+301+302+303+304+305=1815)の部分合計＋「（6日分）」になる
+    console.log('pack total:', packRow.totalHtml);
+    check('合計列が部分合計(1,815)になる', packRow.totalHtml.startsWith('1,815'));
+    check('合計列に「（6日分）」の注記が付く', packRow.totalHtml.includes('（6日分）'));
 
     // モックで日付の列を右に追加する(10/25,26も含める)
     const orderDates2 = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 26));
@@ -328,7 +344,8 @@ async function shippingWorkRows(page) {
     const rows2 = await shippingQtyRows(page2);
     const packRow2 = rows2.find(r => r.label === 'パック数');
     console.log('列追加後のpack:', JSON.stringify(packRow2.cells));
-    check('モックで日付の列を追加すると、10/25・10/26にも値が入る', packRow2.cells[6] !== '－' && packRow2.cells[7] !== '－');
+    check('モックで日付の列を追加すると、10/25にも値が入る', packRow2.cells[6] !== '－');
+    check('7日分そろうと合計列に「（◯日分）」が付かない', !!packRow2.totalHtml && !packRow2.totalHtml.includes('日分'));
     await page.close();
     await page2.close();
   }
@@ -538,6 +555,25 @@ async function shippingWorkRows(page) {
     check('パネル2「段ボール詰める」がcs数(500÷30=16.7)から計算される', box.cells[0] === expectedCs.toFixed(1));
     const excludedBoxExists = await page.evaluate(() => document.getElementById('shipExcludedNote') !== null);
     check('詳細(折りたたみ)に「除外した商品」の表示欄が無い', !excludedBoxExists);
+    await page.close();
+  }
+
+  console.log('\n=== ⑫合計列は丸める前の値を足してから丸めること(日ごとに丸めてから足すと誤差が積み重なる例) ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await page.route('**/export**', async route => { await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: '﻿\r\n' }); });
+    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => {
+      const t = window.__test;
+      const daily = [0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04]; // 日ごとに丸めると0.0×7=0.0になってしまう例
+      const total = t.computeRowTotal(daily);
+      return { value: total.value, count: total.count, fmt: t.fmtNum(total.value) };
+    });
+    console.log('0.04×7日分:', JSON.stringify(r));
+    check('合計(丸める前)が0.28になる', Math.abs(r.value - 0.28) < 1e-9);
+    check('7日分すべて計上される(count=7)', r.count === 7);
+    check('表示は丸める前の値を足してから1回だけ丸めるため0.3になる(日ごとに丸めてから足す0.0にはならない)', r.fmt === '0.3');
     await page.close();
   }
 
