@@ -468,7 +468,7 @@
     </div>
   </section>
 
-  <!-- ============ ③標準労働時間（出荷。いなべは実データ、群馬・南丹はサンプルデータ） ============ -->
+  <!-- ============ ③標準労働時間（出荷。いなべ・群馬は実データ、南丹はサンプルデータ） ============ -->
   <section class="panel labor">
     <div class="panel-head">
       <h2>標準労働時間</h2>
@@ -517,6 +517,7 @@
       <strong>未照合の警告</strong>
       <ul id="shipLaborWarningsList"></ul>
     </div>
+    <div class="note" id="shipLaborNotices" style="display:none; padding:2px 18px 8px;"></div>
     <div class="note" id="shipLaborPeriodNotices" style="display:none; padding:2px 18px 8px;"></div>
     <details class="detail-rows">
       <summary>人別内訳</summary>
@@ -590,6 +591,20 @@
              } },
     '南丹': { type: 'datedHoursSheet', id: '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8',
              gids: ['716401757'] }, // 南丹勤務表（2026/10/11〜10/31）の「勤務表」シート
+  };
+  // 出荷(群馬)の勤務表取得先。栽培と同じファイル(id)の「出荷場」シート(収穫班シートと
+  // 同じ形式)を、月度(11日〜翌月10日)ごとに別シートとして持つ。月度を追加するときは、
+  // ここのgidsに { "YYYY.M": "gid" } を追記するだけでよい(栽培のFORECAST_SHIFT_SOURCESとは
+  // 別に持っており、栽培側の設定・読み込みには影響しない)。excludedNamesは、出荷に含めない
+  // 配送担当の名前(A列の名前そのもの。parseGunmaShiftSheet()がNFKC正規化・前後の空白を
+  // 除いて比較する)
+  var FORECAST_SHIPPING_SHIFT_SOURCES = {
+    '群馬': { type: 'gunmaPeriodSheets', id: '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM',
+             gids: {
+               // '2026.9' (26.9/11~10/10 出荷場) は後で追加する。今は未設定のままにする
+               '2026.10': '1087258434', // 26.10/11~11/10 出荷場
+             },
+             excludedNames: ['吉村(出)', '高橋(出)'] }, // 配送の担当のため出荷には含めない
   };
 
   var DASH = '－';
@@ -1661,13 +1676,18 @@
     'ティエン': 'PHAM VAN TIEN',
     'デスタ': 'DESTA RINO',
     'レフィン': 'REVIN NAUFAL ALMAS',
+    'ソー': 'SAW MIN HTET', // 出荷場シートのみに登場(収穫班シートにはいないため栽培の値は変わらない)
   };
 
-  // 勤務表(収穫班)の生rows(gviz形式)を解析する。純粋関数（テストから直接呼べる）。
+  // 勤務表(収穫班・出荷場で共通)の生rows(gviz形式)を解析する。純粋関数（テストから直接呼べる）。
+  // excludedNames(省略可)は対象外にする名前(A列の名前そのもの。NFKC正規化・前後の空白を
+  // 除いて比較する。normalizeGunmaShiftName()後の名字だけでは比較しない)。
+  // 栽培(収穫班)の呼び出しはこの引数を渡さないため、栽培の結果は変わらない
   // 戻り値：{ fullDates, weekdayMismatches, persons }
   // persons各要素：{ rawName, name(正規化後), category('employee'|'other'), cellsFull, nyushaIdx }
-  function parseGunmaShiftSheet(rows, periodKey){
+  function parseGunmaShiftSheet(rows, periodKey, excludedNames){
     rows = rows || [];
+    excludedNames = excludedNames || [];
     var dayRowCells = rows[2] ? rows[2].c.slice(1) : []; // 3行目(0-index2)、B列以降(index1〜)
     var weekdayRowCells = rows[3] ? rows[3].c.slice(1) : []; // 4行目(0-index3)
 
@@ -1713,6 +1733,7 @@
       if (trimmed === '') { seenBlank = true; continue; } // 空行は読み飛ばす(社員区分の終端の目印にもする)
       if (trimmed.indexOf('パート合計') === 0) break; // 集計欄以降は読まない
       if (trimmed.indexOf('(仮)') !== -1 || trimmed.indexOf('（仮）') !== -1) continue; // 仮の枠は対象外
+      if (excludedNames.indexOf(String(rawName).normalize('NFKC').trim()) !== -1) continue; // 対象外の名前(配送担当等)
 
       var cellsFull = c.slice(1);
       var nyushaIdx = -1;
@@ -2717,12 +2738,24 @@
     return result;
   }
 
+  // 群馬×出荷の標準労働時間。読み込み・計算は栽培の群馬(renderLaborGunma())と同じ関数
+  // (fetchGunmaShiftPeriodData/computeGunmaStandardLaborHours)を使い、読むシート
+  // (FORECAST_SHIPPING_SHIFT_SOURCES['群馬']のgid)と対象外の名前だけを変えている
+  async function fetchShippingLaborGunma(basisDate){
+    var src = FORECAST_SHIPPING_SHIFT_SOURCES['群馬'];
+    var periodsData = await fetchGunmaShiftPeriodData(basisDate, src, src.excludedNames);
+    var laborRows = await fetchStdLaborRows();
+    return computeGunmaStandardLaborHours(periodsData, basisDate, laborRows);
+  }
+
   async function renderShippingLabor(basisDate, site, gen){
     showPanelError('shipLaborError', null);
     try {
       var dates = [];
       for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
-      var result = (site === 'いなべ') ? await fetchShippingLaborInabe(basisDate) : getShippingLaborSample(site, dates);
+      var result = (site === 'いなべ') ? await fetchShippingLaborInabe(basisDate)
+        : (site === '群馬') ? await fetchShippingLaborGunma(basisDate)
+        : getShippingLaborSample(site, dates);
       return result;
     } catch (err) {
       console.error('[出荷標準労働時間] 取得エラー:', err);
@@ -2768,6 +2801,15 @@
     } else {
       warningsList.innerHTML = '';
       warningsBox.style.display = 'none';
+    }
+
+    var noticesBox = document.getElementById('shipLaborNotices');
+    if (laborResult && laborResult.notices && laborResult.notices.length) {
+      noticesBox.textContent = laborResult.notices.join('　');
+      noticesBox.style.display = '';
+    } else {
+      noticesBox.textContent = '';
+      noticesBox.style.display = 'none';
     }
 
     var periodNoticesBox = document.getElementById('shipLaborPeriodNotices');
@@ -2865,12 +2907,15 @@
     }
   }
 
-  // 群馬の勤務表（収穫班）の月度ごとのシートを取得する。表示する8日間に必要な月度を
-  // すべて洗い出し、月度ごとに取得・解析して(fetchCsvSheet→parseGunmaShiftSheet)
-  // cacheにメモ化する（8日間が月度をまたぐ場合は必要な月度のシートをすべて取得する）
+  // 群馬の勤務表（収穫班・出荷場で共通）の月度ごとのシートを取得する。表示する8日間に
+  // 必要な月度をすべて洗い出し、月度ごとに取得・解析して(fetchCsvSheet→parseGunmaShiftSheet)
+  // cacheにメモ化する（8日間が月度をまたぐ場合は必要な月度のシートをすべて取得する）。
+  // src(省略時は栽培のFORECAST_SHIFT_SOURCES['群馬'])・excludedNames(省略可)を引数で渡す
+  // ことで出荷(FORECAST_SHIPPING_SHIFT_SOURCES['群馬'])と読み込みを共通化している。
+  // キャッシュはgid単位(月度のラベルが同じでも栽培・出荷でgidが異なるため混ざらない)
   var gunmaShiftCache = {};
-  async function fetchGunmaShiftPeriodData(basisDate){
-    var src = FORECAST_SHIFT_SOURCES['群馬'];
+  async function fetchGunmaShiftPeriodData(basisDate, src, excludedNames){
+    src = src || FORECAST_SHIFT_SOURCES['群馬'];
     var periodKeys = [];
     for (var o = 0; o < DAY_COUNT; o++) {
       var pk = gunmaPeriodKey(addDays(basisDate, o));
@@ -2879,20 +2924,20 @@
     var perPeriod = {};
     for (var i = 0; i < periodKeys.length; i++) {
       var key = periodKeys[i];
-      if (gunmaShiftCache[key] === undefined) {
-        var gid = src.gids[key];
-        if (!gid) {
-          gunmaShiftCache[key] = { status: 'no_gid' };
-        } else {
-          try {
-            var json = await fetchCsvSheet(src.id, gid);
-            gunmaShiftCache[key] = { status: 'ok', parsed: parseGunmaShiftSheet(json.table.rows, key) };
-          } catch (e) {
-            gunmaShiftCache[key] = { status: 'error' };
-          }
+      var gid = src.gids[key];
+      if (!gid) {
+        perPeriod[key] = { status: 'no_gid' };
+        continue;
+      }
+      if (gunmaShiftCache[gid] === undefined) {
+        try {
+          var json = await fetchCsvSheet(src.id, gid);
+          gunmaShiftCache[gid] = { status: 'ok', parsed: parseGunmaShiftSheet(json.table.rows, key, excludedNames) };
+        } catch (e) {
+          gunmaShiftCache[gid] = { status: 'error' };
         }
       }
-      perPeriod[key] = gunmaShiftCache[key];
+      perPeriod[key] = gunmaShiftCache[gid];
     }
     return { periodKeys: periodKeys, perPeriod: perPeriod };
   }
@@ -2922,7 +2967,7 @@
     document.getElementById('supportedPanels').style.display = showCult ? '' : 'none';
     document.getElementById('shippingPanels').style.display = showShip ? '' : 'none';
     var site = currentSite;
-    document.getElementById('shippingSampleBanner').style.display = (showShip && site !== 'いなべ') ? '' : 'none';
+    document.getElementById('shippingSampleBanner').style.display = (showShip && site !== 'いなべ' && site !== '群馬') ? '' : 'none';
     if (!supported) return;
 
     var basisDate = fromISO(basisInput.value);
@@ -3062,6 +3107,8 @@
     getShippingLaborSample: getShippingLaborSample,
     SHIPPING_LABOR_DEPTS: SHIPPING_LABOR_DEPTS,
     fetchShippingLaborInabe: fetchShippingLaborInabe,
+    FORECAST_SHIPPING_SHIFT_SOURCES: FORECAST_SHIPPING_SHIFT_SOURCES,
+    fetchShippingLaborGunma: fetchShippingLaborGunma,
     extractShippingSheetIdGidFromUrl: extractShippingSheetIdGidFromUrl,
     parseShippingSalesUrlSheet: parseShippingSalesUrlSheet,
     SHIPPING_PRODUCT_CLASSIFICATION_RULES: SHIPPING_PRODUCT_CLASSIFICATION_RULES,

@@ -383,7 +383,7 @@ async function shipLaborWarnings(page) {
     await page.close();
   }
 
-  console.log('\n=== ⑧群馬・南丹の出荷パネル3は、今までどおりサンプルであること ===');
+  console.log('\n=== ⑧南丹の出荷パネル3は、今までどおりサンプルであること(群馬は別PR#494で実データ接続) ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
@@ -394,7 +394,7 @@ async function shipLaborWarnings(page) {
     await page.waitForTimeout(500);
     await page.click('[data-business="出荷"]');
     await page.waitForTimeout(800);
-    for (const site of ['群馬', '南丹']) {
+    for (const site of ['南丹']) {
       await page.click(`[data-site="${site}"]`);
       await page.waitForTimeout(800);
       const rows = await shippingLaborDetailRows(page);

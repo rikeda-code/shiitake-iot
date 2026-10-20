@@ -238,15 +238,21 @@ function allSalesHandlers(site, dates) {
     check('いなべでは付帯作業の行が表示されない', !inabeTaifu);
     await page.click('[data-site="群馬"]');
     await page.waitForTimeout(800);
-    const bannerTextGunma = await page.evaluate(() => document.getElementById('shippingSampleBanner').textContent.trim());
-    check('群馬では、パネル3用のサンプルデータの帯が引き続き表示される', bannerTextGunma.includes('パネル3（標準労働時間）はサンプルデータです'));
+    const bannerDisplayGunma = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
+    check('群馬の出荷パネル3も実データ接続のため、サンプルデータの帯が表示されない(PR #494)', bannerDisplayGunma === 'none');
     const gunmaTaifu = await page.evaluate(() => {
       const tr = Array.from(document.querySelectorAll('#table2shipBody tr')).find(tr => tr.querySelector('th').textContent.trim() === '付帯作業');
       return tr ? tr.querySelector('td').textContent.trim() : null;
     });
     check('群馬では付帯作業の行が「－」付きで表示される', gunmaTaifu && gunmaTaifu.startsWith('－'));
-    const laborTotal0 = await page.evaluate(() => document.querySelector('[data-shiplabor-total-offset="0"]').textContent.trim());
-    check('群馬の出荷パネル3(標準労働時間)がサンプル値で表示される(「－」のまま止まっていない)', laborTotal0 !== '－');
+    const gunmaLaborError = await page.evaluate(() => document.getElementById('shipLaborError').classList.contains('show'));
+    check('群馬の出荷パネル3(標準労働時間)はシート未モックでもエラー表示にならない(未設定期間の補足のみ)', !gunmaLaborError);
+    await page.click('[data-site="南丹"]');
+    await page.waitForTimeout(800);
+    const bannerTextNantan = await page.evaluate(() => document.getElementById('shippingSampleBanner').textContent.trim());
+    check('南丹では、パネル3用のサンプルデータの帯が引き続き表示される', bannerTextNantan.includes('パネル3（標準労働時間）はサンプルデータです'));
+    const laborTotalNantan = await page.evaluate(() => document.querySelector('[data-shiplabor-total-offset="0"]').textContent.trim());
+    check('南丹の出荷パネル3(標準労働時間)がサンプル値で表示される(「－」のまま止まっていない)', laborTotalNantan !== '－');
     await page.close();
   }
 
