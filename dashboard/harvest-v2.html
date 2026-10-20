@@ -342,7 +342,7 @@ const SITES = [
   { name: 'いなべ', id: '1TWOwAAFlV4ufYwaicbWGZ_Agv3ZF-rbDXZQDxYqHAiQ', color: '#38bdf8', indexSheet: '号機別サマリー' },
   { name: '群馬',   id: '1oNBFKF2_mRCqs3uxHXwjCQP3ymLY42nyzTYtpRzXM0A', color: '#f97316', indexSheet: '号機別サマリー' },
   { name: '南丹',   id: '1bAdmTLPGtwn6JH6C16m2nzr3RJhZpgAuSMaVtIL1aRc', color: '#34d399', indexSheet: '号機別サマリー' },
-  { name: '鹿沼',   id: '18it-bRqgO_kcC828X8QRJy_ox9KzZxKr7Ze2DCheZpk', color: '#fb7185', indexSheet: '' },
+  { name: '鹿沼',   id: '18it-bRqgO_kcC828X8QRJy_ox9KzZxKr7Ze2DCheZpk', color: '#a855f7', indexSheet: '号機別サマリー' },
 ];
 
 // サイズ区分の定義は SIZE_MODE_DEFS（分析タブの近く）に集約した。
@@ -363,6 +363,8 @@ const NORM = {
   台帳ID: '1QH_E1CAFH3KByLp5h7Nad8G1fBU0jan5OaQizF7xEjk',     // _正規化_工程表（固定名）
 
   台帳シート: 'コンテナ台帳',
+  作業シート: '作業履歴',      // 工程表の作業（注水・散水・芽かき等）。注水日のデータポイントに使う
+  当日シート: '_取込_明細',    // 担当号機側。正規化テーブルの更新（毎朝）より後の収穫を読み足す
 };
 
 // 8区分。旧4区分(m/l/xl/bg)は「秀+優」を合算した互換ビューとして併記する。
@@ -387,6 +389,8 @@ const normStore = {
   cycles: [],          // コンテナ台帳の1サイクル
   rowsBySite: {},      // 拠点 → 収穫明細の行
   personByKey: {},     // "拠点|コンテナ名" → 担当者
+  lotByKey: {},        // "拠点|コンテナ名" → 自社ロット（6A, 5O などの記号。号機別サマリーH列）
+  todayAdded: {},      // 拠点 → 当日分として担当号機から読み足した行数
   builtBySite: {},     // 拠点 → {active, ended, containers, data, sizeRows}
 };
 
@@ -481,6 +485,8 @@ async function loadNormalized(force = false) {
     normStore.cycles = [];
     normStore.rowsBySite = {};
     normStore.personByKey = {};
+    normStore.lotByKey = {};
+    normStore.todayAdded = {};
     normStore.builtBySite = {};
 
     // 1) コンテナ台帳（栽培開始日・終了日・ロット・菌床数）
@@ -563,22 +569,78 @@ async function loadNormalized(force = false) {
       }
     }));
 
-    // 3) 担当者名（担当号機の 号機別サマリー から補う。取れなくても動く）
+    // 2b) 当日分。正規化テーブルは毎朝1回の更新なので、それより後に入力された収穫は
+    // 担当号機の _取込_明細（収穫管理表と即時連動する当月ブロック、O列=「自動」）から読み足す。
+    // 正規化テーブルの最終日以降は明細側で置き換える（最終日が途中までしか入っていないことがあるため）。
+    await Promise.all(SITES.map(async site => {
+      const all = normStore.rowsBySite[site.name] || [];
+      const last = all.length ? all[all.length - 1].date : null;
+      const base = last ? all.filter(r => r.date < last) : all;
+      try {
+        // A日付 C号機 D回次 E作業者 F〜M 8区分 N合計 P「号機|日付」キー
+        const t = await fetchSheetCsv(site.id, NORM.当日シート,
+          "select A,C,D,E,F,G,H,I,J,K,L,M,N,P where O = '自動' and N > 0");
+        const add = [];
+        (t.rows || []).forEach(row => {
+          const c = row.c || [];
+          const d = normDateCell(c[0]);
+          if (!d || (last && d < last)) return;
+          // 号機列は数値と文字列が混在し、CSV でも少数派が空になることがあるのでキー列から補う
+          const no = normContainerNo(c[1]) || String(c[13]?.v || '').split('|')[0].trim();
+          if (!no) return;
+          const v = {};
+          ALL8_KEYS.forEach((k, i) => { v[k] = normCellNum(c[4 + i]); });
+          const total = normCellNum(c[12]) || ALL8_KEYS.reduce((s, k) => s + v[k], 0);
+          if (!(total > 0)) return;
+          add.push({ date: d, no, round: normCellStr(c[2]), person: normCellStr(c[3]), v, total, _today: true });
+        });
+        // 明細側に最終日の行が1件も無い（読めなかった等）ときは、正規化テーブルのまま使う
+        if (add.length) {
+          add.sort((a, b) => a.date - b.date);
+          normStore.rowsBySite[site.name] = base.concat(add);
+          normStore.todayAdded[site.name] = add.length;
+        }
+      } catch (e) {
+        normErr(`当日分(${site.name})`, e);
+      }
+    }));
+
+    // 3) 担当者名・自社ロット（担当号機の 号機別サマリー から補う。取れなくても動く）
+    // 自社ロット(H列)は旧版の lot と同じ値。七河／自社の色分け・ロット別グループの元になる。
     // F列の表示名は「36(10/8)自社菌床」とロット名がフルなので、こちらの命名
     // 「36(10/8)自社」と一致しない。U列(号機)・C列(投入日)・V列(ロット名)から組み立て直す。
     // 号機列は数値と文字列が混在し、gviz JSON だと少数派の型が null になるため CSV で読む。
+    // 工程表（台帳）が無い拠点（鹿沼）は、手入力の号機別サマリーの行をそのままサイクルとして使う。
+    // でないと菌床数・投入日が無く、週別グラフ等に線が出ない。
+    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
     await Promise.all(SITES.map(async site => {
       if (!site.indexSheet) return;
+      const noLedger = !normStore.cycles.some(x => x.site === site.name);
       try {
         const t = await fetchSheetCsv(site.id, site.indexSheet);
         (t.rows || []).forEach(row => {
           const c = row.c || [];
           const person = normCellStr(c[1]);
+          const lotCode = normCellStr(c[7]);
           const no = normCellStr(c[20]);
           const m = normCellStr(c[2]).match(/^\d{4}[\/-](\d{1,2})[\/-](\d{1,2})/);
-          if (!person || person === '担当者名' || !no || !m) return;
+          if (!no || !m) return;
           const name = `${no}(${+m[1]}/${+m[2]})${normLotSuffix(normCellStr(c[21]), '')}`;
-          normStore.personByKey[`${site.name}|${name}`] = person;
+          if (person && person !== '担当者名') normStore.personByKey[`${site.name}|${name}`] = person;
+          if (lotCode && lotCode !== '自社ロット') normStore.lotByKey[`${site.name}|${name}`] = lotCode;
+          if (noLedger) {
+            const start = normDateCell(c[2]);
+            let end = normDateCell(c[3]);
+            if (end && end >= today0) end = null;          // 終了日欄が =NOW() の行は栽培中
+            if (!start) return;
+            normStore.cycles.push({
+              site: site.name, no, lotCode: '', lotName: normCellStr(c[21]),
+              start, end,
+              bedCount: parseFloat(normCellStr(c[8]).replace(/,/g, '')) || null,   // "1,000" をそのまま parseFloat すると 1 になる
+              state: end ? '終了' : '栽培中', abnormal: '', watering: 0, spray: 0, mekaki: 0,
+              _fromSummary: true,
+            });
+          }
         });
       } catch (e) { normErr(`担当者名(${site.name})`, e); }
     }));
@@ -682,7 +744,11 @@ function normBuildSite(siteName) {
       harvest:   (c.bedCount && b.sum > 0) ? Math.round(b.sum * 1000 / c.bedCount) : null,
       packRate:  b.sum > 0 ? Math.round(packSum / b.sum * 100) : null,
       person:    normStore.personByKey[`${siteName}|${name}`] || '',
-      lot:       c.lotName || c.lotCode || '',
+      // 旧版と同じく自社ロット(6A等)を優先。無ければ台帳のロット名（七河L3／自社菌床）
+      lot:       normStore.lotByKey[`${siteName}|${name}`] || c.lotName || c.lotCode || '',
+      lotName:   c.lotName || '',
+      // 七河／自社の色分け用。自社ロットが付いている（旧集計表で志摩=自社）か、台帳が自社菌床なら自社
+      isJisha:   !!normStore.lotByKey[`${siteName}|${name}`] || /自社/.test(c.lotName || ''),
       summaryBedCount: c.bedCount,
       totals8:   b.totals,
       totalKg:   b.sum,
@@ -690,7 +756,10 @@ function normBuildSite(siteName) {
     };
     data[name] = { bedCount: c.bedCount, rows: b.rows, lot: rec.lot };
     sizeRows[name] = b.sizeRows;
-    if (c._end && c._end < today) ended.push(rec); else active.push(rec);
+    // 「(台帳なし)」の受け皿は複数サイクル分が1枚にまとまるので栽培中には出さない（旧版と同じ見え方）。
+    // 工程表そのものが無い拠点（鹿沼）は受け皿しか無いので、従来どおり栽培中に出す。
+    if (c._orphan && cycles.length) ended.push(rec);
+    else if (c._end && c._end < today) ended.push(rec); else active.push(rec);
   });
 
   // 台帳に当てはまらなかった収穫は「(台帳なし)」コンテナとして表示しつつ、理由を出す。
@@ -844,8 +913,10 @@ function parseCsv(text) {
 }
 
 // 既存コードが扱うgviz形式({rows:[{c:[{v}]}]})に合わせて返す
-async function fetchSheetCsv(sheetId, sheetName) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(sheetName)}`;
+// tq を渡すと gviz のクエリで行・列を絞ってから受け取る（大きいシートの一部だけ欲しいとき用）
+async function fetchSheetCsv(sheetId, sheetName, tq = '') {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(sheetName)}` +
+    (tq ? `&tq=${encodeURIComponent(tq)}` : '');
   const cached = gvizCacheGet(url);
   if (cached) return cached;
   const controller = new AbortController();
@@ -1385,7 +1456,10 @@ function renderWeeklySection(section, state, groupMode, sortOrder, xAxisMaxDayOv
   // 気づけるよう警告を表示する。色分けの見た目だけでは「特定拠点が全く出ていない」ことに
   // 気づきにくいため明示する。
   const sitesWithData = new Set(valid.map(c => c.siteName));
-  const missingSites = SITES.map(s => s.name).filter(name => !sitesWithData.has(name));
+  // 工程表（台帳）が無い拠点（鹿沼）は菌床数が無く週別に出せないので、取得失敗の警告から外す
+  const missingSites = SITES.map(s => s.name)
+    .filter(name => normStore.cycles.some(c => c.site === name))
+    .filter(name => !sitesWithData.has(name));
   const weeklyWarningHtml = missingSites.length ? `
     <div style="background:#3f1d1d;border:1px solid #7f1d1d;color:#fca5a5;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.85rem">
       ⚠️ ${missingSites.join('・')}のデータを取得できませんでした${siteFetchErrors?.length ? '(シートの取得に失敗しています)' : ''}。ブラウザの開発者ツール(F12)のコンソールにエラー詳細を出力しています。更新ボタンで直らない場合、対象拠点のスプレッドシートの共有設定・シート名をご確認ください。
@@ -1402,7 +1476,7 @@ function renderWeeklySection(section, state, groupMode, sortOrder, xAxisMaxDayOv
   const groups = {};
   let groupKeys = [];
   if (groupMode === 'lot') {
-    const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
+    const LOT_EXCLUDE = ANALYSIS_LOT_EXCLUDE;
     valid.forEach(c => {
       const key = c.lot || '未設定';
       if (LOT_EXCLUDE.has(key) || /^Date\(/.test(key)) return;
@@ -1574,7 +1648,7 @@ function weeklyZoomRender() {
   }
 
   // サイズ別: コンテナごとに縦並び
-  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7' };
 
   const validContainers = containers.filter(c => (c.sizeRows || []).length > 0);
   if (!validContainers.length) {
@@ -1714,10 +1788,10 @@ async function weeklyZoomRenderWeight() {
     }));
   }
 
-  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7', '自社菌床': '#f59e0b' };
 
   // 自社菌床ロット判定: "6A", "5O" のように 数字+アルファベット
-  const isJishaLot = lot => lot && /^\d+[A-Z]+$/.test(lot.trim());
+  const isJishaLot = lot => lot && /^\d+[A-Z]+$/i.test(lot.trim());   // いなべの「6l」のような小文字も自社ロット
   const jishaEntry = weightData.find(w => w.site.name === '自社菌床');
 
   // 自社菌床ロットの場合は同一ロットの全菌床エントリをまとめて表示（重複除去）
@@ -1915,7 +1989,7 @@ async function weeklyZoomRenderMekaki() {
     }
   }
 
-  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7', '自社菌床': '#f59e0b' };
   const rows = containers.map(c => {
     const no = c.no;
     const startD = c.startDate ? parseDateStr(c.startDate) : null;
@@ -2121,7 +2195,7 @@ function renderWeeklySizeSection(section, state, groupMode, sortOrder) {
     },
   };
 
-  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+  const siteColors = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7' };
 
   const sortBtns = `
     <div class="weekly-sort-bar" style="flex-wrap:wrap;gap:6px">
@@ -2221,7 +2295,7 @@ function renderDrillSection(section, valid, targetData) {
   weeklyCharts = [];
 
   const SITES_ORDER = ['いなべ', '群馬', '南丹'];
-  const SITE_COLORS = { 'いなべ': '#3b82f6', '群馬': '#f59e0b', '南丹': '#10b981' };
+  const SITE_COLORS = { 'いなべ': '#3b82f6', '群馬': '#f59e0b', '南丹': '#10b981', '鹿沼': '#a855f7' };
 
   const backBtn = (label, onclick) =>
     `<button class="sort-btn active" style="margin-bottom:12px" onclick="${onclick}">← ${label}</button>`;
@@ -2923,7 +2997,7 @@ async function renderScatterTab() {
 
 function renderScatterChart() {
   const section = document.getElementById('scatter-section');
-  const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+  const SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7' };
   const MONTH_COLORS = ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#38bdf8','#60a5fa','#a78bfa','#e879f9','#f472b6','#94a3b8','#fbbf24'];
 
   const modeLabels = { 'all': '全コンテナ', 'month-all': '月別(全拠点)', 'avg': '平均' };
@@ -3119,9 +3193,9 @@ function renderLotTab() {
     section.innerHTML = '<div class="loading">データ読み込み中...</div>';
     return;
   }
-  const LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
+  const LOT_EXCLUDE = ANALYSIS_LOT_EXCLUDE;
   const isExcludedLot = lot => LOT_EXCLUDE.has(lot) || /^Date\(/.test(lot) || lot.includes('自動的に収穫量');
-  const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399' };
+  const SITE_COLORS_LOT = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7' };
 
   // Group by lot
   const groups = {};
@@ -3952,7 +4026,7 @@ async function buildBedCountMap() {
   return map;
 }
 
-const MEKAKI_SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '自社菌床': '#f59e0b' };
+const MEKAKI_SITE_COLORS = { 'いなべ': '#38bdf8', '群馬': '#f97316', '南丹': '#34d399', '鹿沼': '#a855f7', '自社菌床': '#f59e0b' };
 let mekakiRows = null; // parsed row objects
 let mekakiFilters = { site: '', hozon: '', lot: '' };
 
@@ -4406,7 +4480,40 @@ function parseWateringRows(table) {
   return result;
 }
 
+// v2: 注水日は工程表（_正規化_工程表 の 作業履歴）の「注水」を使う。
+// 注水は2日続けて書かれることがあるので、連続している日は最後の日だけを残す。
+// 今日より後は予定なので除く（予定を除いてから連続を判定する）。
 async function ensureWateringData() {
+  if (wateringData) return wateringData;
+  const result = {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const t = await fetchSheetCsv(NORM.台帳ID, NORM.作業シート);
+  const raw = {};   // site → 号機 → Date[]
+  (t.rows || []).forEach(row => {
+    const c = row.c || [];
+    if (normCellStr(c[5]) !== '注水') return;
+    const site = normCellStr(c[1]);
+    const no = normContainerNo(c[2]);
+    const d = normDateCell(c[0]);
+    if (!site || !no || !d || d > today) return;
+    ((raw[site] ||= {})[no] ||= []).push(d);
+  });
+  Object.entries(raw).forEach(([site, byNo]) => {
+    result[site] = {};
+    Object.entries(byNo).forEach(([no, dates]) => {
+      const uniq = [...new Set(dates.map(d => d.getTime()))].sort((a, b) => a - b).map(x => new Date(x));
+      result[site][no] = uniq.filter((d, i) => {
+        const next = uniq[i + 1];
+        return !(next && Math.round((next - d) / 86400000) === 1);   // 翌日も注水なら、この日は捨てる
+      });
+    });
+  });
+  wateringData = result;
+  return wateringData;
+}
+
+// 旧版：菌床重量シートの「{拠点} 注水」から読む（工程表ベースに切り替えたため未使用。比較用に残す）
+async function ensureWateringDataFromWeightSheet() {
   if (wateringData) return wateringData;
   const result = {};
   await Promise.all(Object.entries(WATERING_SHEET_NAME_CANDIDATES).map(async ([siteName, candidates]) => {
@@ -4948,7 +5055,7 @@ function buildAnalysisDataset() {
         key: `${c.siteName}|${c.no}|${c.startDate}`,
         siteName: c.siteName, no: c.no, name: c.name,
         startDate: c.startDate, endDate: c.endDate, days: c.days, bedCount,
-        harvest: c.harvest, packRate: c.packRate, lot: c.lot,
+        harvest: c.harvest, packRate: c.packRate, lot: c.lot, isJisha: c.isJisha,
         sizeTotals, sizeRatio, weightBefore, weightAbsorb, mekaki,
         sizeRows: sizeRows, // 日別(day=栽培N日目)のサイズ内訳。日付タブで実際の日付に変換して使う(栽培終了日より後の残存データは除外済み)
       };
@@ -4964,7 +5071,7 @@ function analysisFilteredCandidates() {
   return (analysisDataset || []).filter(c => {
     // 「自社菌床」は拠点ではなく菌床ロットを持つコンテナ(全拠点横断)を表す疑似拠点
     const siteMatch = analysisFilters.sites.has(c.siteName) ||
-      (analysisFilters.sites.has('自社菌床') && analysisFormatLot(c.lot) !== '—');
+      (analysisFilters.sites.has('自社菌床') && (typeof c.isJisha === 'boolean' ? c.isJisha : analysisFormatLot(c.lot) !== '—'));
     if (!siteMatch) return false;
     if (minD != null && (c.days == null || c.days < minD)) return false;
     if (maxD != null && (c.days == null || c.days > maxD)) return false;
@@ -5212,7 +5319,8 @@ function renderAnalysisCorrelationView(items) {
     </div>`;
 }
 
-const ANALYSIS_LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '']);
+// v2: 台帳のロット名（七河L1/L3、記号の無い自社菌床）もロット記号ではないので除外する
+const ANALYSIS_LOT_EXCLUDE = new Set(['未設定', '日本産L1', '日本産(L1)', '日本産(L3)', '日本産L3', '志摩産(L3)', '志摩産L3', '志摩産(L1)', '志摩産L1', '七河L1', '七河L3', 'L1', 'L3', '自社菌床', '']);
 
 // 菌床ロットは自社菌床のみ記載されている(数字+アルファベット表記。例: 6A, 5O)。
 // 日本産・志摩産などの外部仕入れは対象外として「—」を返す。
@@ -6147,11 +6255,13 @@ const ANALYSIS_PACK_CATEGORY_COLORS = {
   '南丹':       { dark: '#22c55e', light: '#86efac' }, // 緑 / 薄緑
   'いなべ自社菌床': { dark: '#06b6d4', light: '#67e8f9' }, // 水色 / 薄水色
   '南丹自社菌床':   { dark: '#84cc16', light: '#bef264' }, // 黄緑 / 薄黄緑
+  '鹿沼':       { dark: '#a855f7', light: '#d8b4fe' }, // 紫 / 薄紫
 };
 const ANALYSIS_PACK_DEFAULT_COLOR = { dark: '#94a3b8', light: '#cbd5e1' };
 
 function analysisPackCategoryFor(c) {
-  const hasLot = analysisFormatLot(c.lot) !== '—';
+  // v2: 台帳由来の isJisha（自社ロットあり or ロット名が自社菌床）で判定。旧データ由来で無い場合は従来どおり lot の有無
+  const hasLot = typeof c.isJisha === 'boolean' ? c.isJisha : analysisFormatLot(c.lot) !== '—';
   if (c.siteName === 'いなべ' || c.siteName === '南丹') return hasLot ? `${c.siteName}自社菌床` : c.siteName;
   return c.siteName;
 }
