@@ -163,7 +163,11 @@
   }
   tbody th{ text-align:left; font-weight:700; background:#fbf7ee; color:var(--brown-deep); }
   tbody tr:last-child td, tbody tr:last-child th{ border-bottom:none; background:#f3ead4; font-weight:700; }
-  .sticky-1{ position:sticky; left:0; z-index:2; }
+  /* 固定するのは1列目(人別内訳の「氏名」幅)だけ。長い行見出しは省略せず折り返す */
+  .sticky-1{ position:sticky; left:0; z-index:2; white-space:normal; }
+  /* 2列目(単位)。固定せず、日付の列と一緒に横スクロールする。右寄せ表示 */
+  .unit-col{ text-align:right; }
+  tbody .unit-col{ font-weight:400; color:var(--ink-soft); font-size:12.5px; }
 
   .cult td.today-col, .cult th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
   .work td.today-col, .work th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
@@ -304,12 +308,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">工程</th>
+            <th class="sticky-1">工程</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -342,12 +346,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">作業区分</th>
+            <th class="sticky-1">作業区分</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -375,12 +379,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">項目</th>
+            <th class="sticky-1">項目</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -388,19 +392,19 @@
         </thead>
         <tbody>
           <tr>
-            <th class="sticky-1" colspan="2">標準労働時間合計</th>
+            <th class="sticky-1">標準労働時間合計</th><th class="unit-col">h</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-labor-total-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-labor-total-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-labor-total-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-labor-total-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-labor-total-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-labor-total-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-labor-total-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-labor-total-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">出勤人数</th>
+            <th class="sticky-1">出勤人数</th><th class="unit-col">人</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="人" data-numfmt="int" data-attendance-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="人" data-numfmt="int" data-attendance-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="人" data-numfmt="int" data-attendance-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="人" data-numfmt="int" data-attendance-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="人" data-numfmt="int" data-attendance-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="人" data-numfmt="int" data-attendance-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="人" data-numfmt="int" data-attendance-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="人" data-numfmt="int" data-attendance-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
+            <th class="sticky-1">過不足（標準労働時間－標準工数）</th><th class="unit-col">h</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shortfall-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shortfall-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shortfall-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shortfall-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-shortfall-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-shortfall-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-shortfall-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-shortfall-offset="total">－</td>
@@ -450,18 +454,18 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">項目</th>
+            <th class="sticky-1">項目</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2"></th>
+            <th class="sticky-1"></th><th class="unit-col"></th>
             <th class="dcol-kind today-col" data-kind-offset="0"></th>
             <th class="dcol-kind" data-kind-offset="1"></th><th class="dcol-kind" data-kind-offset="2"></th><th class="dcol-kind" data-kind-offset="3"></th>
             <th class="dcol-kind" data-kind-offset="4"></th><th class="dcol-kind" data-kind-offset="5"></th><th class="dcol-kind" data-kind-offset="6"></th><th class="total-col"></th>
@@ -495,12 +499,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">作業区分</th>
+            <th class="sticky-1">作業区分</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -524,12 +528,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">項目</th>
+            <th class="sticky-1">項目</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -537,19 +541,19 @@
         </thead>
         <tbody>
           <tr>
-            <th class="sticky-1" colspan="2">標準労働時間合計</th>
+            <th class="sticky-1">標準労働時間合計</th><th class="unit-col">h</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">出勤人数</th>
+            <th class="sticky-1">出勤人数</th><th class="unit-col">人</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="人" data-numfmt="int" data-shipattendance-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="人" data-numfmt="int" data-shipattendance-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="人" data-numfmt="int" data-shipattendance-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="人" data-numfmt="int" data-shipattendance-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="人" data-numfmt="int" data-shipattendance-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="人" data-numfmt="int" data-shipattendance-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="人" data-numfmt="int" data-shipattendance-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="人" data-numfmt="int" data-shipattendance-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
+            <th class="sticky-1">過不足（標準労働時間－標準工数）</th><th class="unit-col">h</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="total">－</td>
@@ -2521,7 +2525,7 @@
     }
     tds += '<td class="total-col selectable-cell" data-sel-col="' + offsetCount + '"' + attrsCommon +
       ' data-' + attr + '="' + key + '" data-' + attr + '-offset="total">' + DASH + '</td>';
-    return '<tr' + (trClass ? ' class="' + trClass + '"' : '') + '><th class="sticky-1" colspan="2">' + label + '</th>' + tds + '</tr>';
+    return '<tr' + (trClass ? ' class="' + trClass + '"' : '') + '><th class="sticky-1">' + label + '</th><th class="unit-col">' + (unit || '') + '</th>' + tds + '</tr>';
   }
 
   // buildRowHtml()とは別に、キー名を持たない「合計行」(小計等)のtdを組み立てる共通関数。
@@ -2584,7 +2588,7 @@
     var body = document.getElementById('table2workBody');
     var html = '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT, null, 'h', 'dec1'); });
-    html += '<tr><th class="sticky-1" colspan="2">小計（栽培 標準工数合計）</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
+    html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
 
     var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
@@ -3116,7 +3120,7 @@
     var body = document.getElementById('table2shipBody');
     var html = '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'shipwork', DAY_COUNT, null, 'h', 'dec1'); });
-    html += '<tr><th class="sticky-1" colspan="2">小計（出荷 標準工数合計）</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
+    html += '<tr><th class="sticky-1">小計（出荷 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
 
     if (!perDay) return;
