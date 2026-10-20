@@ -163,7 +163,11 @@
   }
   tbody th{ text-align:left; font-weight:700; background:#fbf7ee; color:var(--brown-deep); }
   tbody tr:last-child td, tbody tr:last-child th{ border-bottom:none; background:#f3ead4; font-weight:700; }
-  .sticky-1{ position:sticky; left:0; z-index:2; }
+  /* 固定するのは1列目(人別内訳の「氏名」幅)だけ。長い行見出しは省略せず折り返す */
+  .sticky-1{ position:sticky; left:0; z-index:2; white-space:normal; }
+  /* 2列目(単位)。固定せず、日付の列と一緒に横スクロールする。右寄せ表示 */
+  .unit-col{ text-align:right; }
+  tbody .unit-col{ font-weight:400; color:var(--ink-soft); font-size:12.5px; }
 
   .cult td.today-col, .cult th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
   .work td.today-col, .work th.today-col{ background:var(--amber-soft) !important; font-weight:700; }
@@ -211,6 +215,48 @@
     header{ align-items:flex-start; }
     .day-nav{ width:100%; justify-content:space-between; }
     .toggle-cluster{ width:100%; }
+  }
+
+  /* ===================== セル範囲選択・集計帯 ===================== */
+  /* 選べるセル：ドラッグ中にブラウザ既定の文字選択（青い反転）が起きないようにする。
+     today-col/total-colの背景と見分けがつく専用の背景色(.cell-selected)を重ねる */
+  .selectable-cell{ cursor:cell; -webkit-user-select:none; user-select:none; }
+  .selectable-cell.cell-selected{
+    background:#bfe0fb !important;
+    box-shadow:inset 0 0 0 1px #2f6fa8;
+  }
+
+  /* 下の集計帯の分だけ、ページ下端に余白を確保する（上部固定ヘッダーはposition:stickyの
+     ままなので影響を受けない）。帯の高さ(文字1行+最小限の余白)に合わせた値とし、
+     iPhone等のホームインジケータ分はenv(safe-area-inset-bottom)で追加確保する */
+  body.has-agg-bar{ padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
+
+  .agg-bar{
+    display:none;
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    background:var(--brown-deep); color:#fff;
+    padding:3px 18px calc(3px + env(safe-area-inset-bottom));
+    gap:4px 16px; align-items:center; flex-wrap:wrap;
+    box-shadow:0 -2px 10px rgba(0,0,0,.2);
+    font-size:13.5px; line-height:1.3;
+  }
+  .agg-bar.show{ display:flex; }
+  .agg-bar .agg-item{ display:flex; gap:4px; align-items:baseline; white-space:nowrap; }
+  .agg-bar .agg-item .k{ opacity:.8; font-size:11.5px; }
+  .agg-bar .agg-item .v{ font-weight:700; font-variant-numeric:tabular-nums; }
+  .agg-bar .agg-warn{ color:#ffd479; font-weight:600; white-space:nowrap; font-size:12px; }
+  .agg-bar .agg-clear{
+    margin-left:auto; padding:2px 10px; border-radius:6px;
+    border:1px solid rgba(255,255,255,.45); background:transparent; color:#fff;
+    font-size:11.5px; line-height:1.3; cursor:pointer;
+  }
+  .agg-bar .agg-clear:hover{ background:rgba(255,255,255,.12); }
+
+  @media (max-width:640px){
+    /* 1行に収まらずボタン・注意表示が折り返して2行になる場合があるため、
+       帯本体より少し広めに確保する */
+    body.has-agg-bar{ padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+    .agg-bar{ font-size:12px; padding:3px 12px calc(3px + env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
@@ -265,12 +311,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">工程</th>
+            <th class="sticky-1">工程</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -303,12 +349,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">作業区分</th>
+            <th class="sticky-1">作業区分</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -336,12 +382,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">項目</th>
+            <th class="sticky-1">項目</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -349,22 +395,22 @@
         </thead>
         <tbody>
           <tr>
-            <th class="sticky-1" colspan="2">標準労働時間合計</th>
-            <td class="today-col" data-labor-total-offset="0">－</td>
-            <td data-labor-total-offset="1">－</td><td data-labor-total-offset="2">－</td><td data-labor-total-offset="3">－</td>
-            <td data-labor-total-offset="4">－</td><td data-labor-total-offset="5">－</td><td data-labor-total-offset="6">－</td><td class="total-col" data-labor-total-offset="total">－</td>
+            <th class="sticky-1">標準労働時間合計</th><th class="unit-col">h</th>
+            <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-labor-total-offset="0">－</td>
+            <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-labor-total-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-labor-total-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-labor-total-offset="3">－</td>
+            <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-labor-total-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-labor-total-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-labor-total-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-labor-total-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">出勤人数</th>
-            <td class="today-col" data-attendance-offset="0">－</td>
-            <td data-attendance-offset="1">－</td><td data-attendance-offset="2">－</td><td data-attendance-offset="3">－</td>
-            <td data-attendance-offset="4">－</td><td data-attendance-offset="5">－</td><td data-attendance-offset="6">－</td><td class="total-col" data-attendance-offset="total">－</td>
+            <th class="sticky-1">出勤人数</th><th class="unit-col">人</th>
+            <td class="selectable-cell today-col" data-sel-col="0" data-unit="人" data-numfmt="int" data-attendance-offset="0">－</td>
+            <td class="selectable-cell" data-sel-col="1" data-unit="人" data-numfmt="int" data-attendance-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="人" data-numfmt="int" data-attendance-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="人" data-numfmt="int" data-attendance-offset="3">－</td>
+            <td class="selectable-cell" data-sel-col="4" data-unit="人" data-numfmt="int" data-attendance-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="人" data-numfmt="int" data-attendance-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="人" data-numfmt="int" data-attendance-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="人" data-numfmt="int" data-attendance-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
-            <td class="today-col" data-shortfall-offset="0">－</td>
-            <td data-shortfall-offset="1">－</td><td data-shortfall-offset="2">－</td><td data-shortfall-offset="3">－</td>
-            <td data-shortfall-offset="4">－</td><td data-shortfall-offset="5">－</td><td data-shortfall-offset="6">－</td><td class="total-col" data-shortfall-offset="total">－</td>
+            <th class="sticky-1">過不足（標準労働時間－標準工数）</th><th class="unit-col">h</th>
+            <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shortfall-offset="0">－</td>
+            <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shortfall-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shortfall-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shortfall-offset="3">－</td>
+            <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-shortfall-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-shortfall-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-shortfall-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-shortfall-offset="total">－</td>
           </tr>
         </tbody>
       </table>
@@ -411,18 +457,18 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">項目</th>
+            <th class="sticky-1">項目</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2"></th>
+            <th class="sticky-1"></th><th class="unit-col"></th>
             <th class="dcol-kind today-col" data-kind-offset="0"></th>
             <th class="dcol-kind" data-kind-offset="1"></th><th class="dcol-kind" data-kind-offset="2"></th><th class="dcol-kind" data-kind-offset="3"></th>
             <th class="dcol-kind" data-kind-offset="4"></th><th class="dcol-kind" data-kind-offset="5"></th><th class="dcol-kind" data-kind-offset="6"></th><th class="total-col"></th>
@@ -456,12 +502,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">作業区分</th>
+            <th class="sticky-1">作業区分</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -485,12 +531,12 @@
         <colgroup></colgroup>
         <thead>
           <tr>
-            <th class="sticky-1" colspan="2">項目</th>
+            <th class="sticky-1">項目</th><th class="unit-col">単位</th>
             <th class="today-col basis-label-0">当日</th>
             <th class="basis-label-1">翌日</th><th>2日後</th><th>3日後</th><th>4日後</th><th>5日後</th><th>6日後</th><th class="total-col">合計</th>
           </tr>
           <tr class="weekday">
-            <th class="sticky-1" colspan="2">日付／曜日</th>
+            <th class="sticky-1">日付／曜日</th><th class="unit-col"></th>
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
@@ -498,22 +544,22 @@
         </thead>
         <tbody>
           <tr>
-            <th class="sticky-1" colspan="2">標準労働時間合計</th>
-            <td class="today-col" data-shiplabor-total-offset="0">－</td>
-            <td data-shiplabor-total-offset="1">－</td><td data-shiplabor-total-offset="2">－</td><td data-shiplabor-total-offset="3">－</td>
-            <td data-shiplabor-total-offset="4">－</td><td data-shiplabor-total-offset="5">－</td><td data-shiplabor-total-offset="6">－</td><td class="total-col" data-shiplabor-total-offset="total">－</td>
+            <th class="sticky-1">標準労働時間合計</th><th class="unit-col">h</th>
+            <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="0">－</td>
+            <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="3">－</td>
+            <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-shiplabor-total-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">出勤人数</th>
-            <td class="today-col" data-shipattendance-offset="0">－</td>
-            <td data-shipattendance-offset="1">－</td><td data-shipattendance-offset="2">－</td><td data-shipattendance-offset="3">－</td>
-            <td data-shipattendance-offset="4">－</td><td data-shipattendance-offset="5">－</td><td data-shipattendance-offset="6">－</td><td class="total-col" data-shipattendance-offset="total">－</td>
+            <th class="sticky-1">出勤人数</th><th class="unit-col">人</th>
+            <td class="selectable-cell today-col" data-sel-col="0" data-unit="人" data-numfmt="int" data-shipattendance-offset="0">－</td>
+            <td class="selectable-cell" data-sel-col="1" data-unit="人" data-numfmt="int" data-shipattendance-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="人" data-numfmt="int" data-shipattendance-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="人" data-numfmt="int" data-shipattendance-offset="3">－</td>
+            <td class="selectable-cell" data-sel-col="4" data-unit="人" data-numfmt="int" data-shipattendance-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="人" data-numfmt="int" data-shipattendance-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="人" data-numfmt="int" data-shipattendance-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="人" data-numfmt="int" data-shipattendance-offset="total">－</td>
           </tr>
           <tr>
-            <th class="sticky-1" colspan="2">過不足（標準労働時間－標準工数）</th>
-            <td class="today-col" data-shipshortfall-offset="0">－</td>
-            <td data-shipshortfall-offset="1">－</td><td data-shipshortfall-offset="2">－</td><td data-shipshortfall-offset="3">－</td>
-            <td data-shipshortfall-offset="4">－</td><td data-shipshortfall-offset="5">－</td><td data-shipshortfall-offset="6">－</td><td class="total-col" data-shipshortfall-offset="total">－</td>
+            <th class="sticky-1">過不足（標準労働時間－標準工数）</th><th class="unit-col">h</th>
+            <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="0">－</td>
+            <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="3">－</td>
+            <td class="selectable-cell" data-sel-col="4" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="total">－</td>
           </tr>
         </tbody>
       </table>
@@ -544,6 +590,17 @@
 
   </div>
 
+</div>
+
+<div id="aggBar" class="agg-bar" role="status">
+  <span class="agg-item"><span class="k">合計</span><span class="v" id="aggSum">－</span></span>
+  <span class="agg-item"><span class="k">平均</span><span class="v" id="aggAvg">－</span></span>
+  <span class="agg-item"><span class="k">個数</span><span class="v" id="aggCount">0</span></span>
+  <span class="agg-item"><span class="k">最小</span><span class="v" id="aggMin">－</span></span>
+  <span class="agg-item"><span class="k">最大</span><span class="v" id="aggMax">－</span></span>
+  <span class="agg-warn" id="aggWarnUnit" style="display:none;">単位が混在しています</span>
+  <span class="agg-warn" id="aggWarnDouble" style="display:none;">合計の列を含むため、二重に数えている可能性があります</span>
+  <button type="button" class="agg-clear" id="aggClearBtn">選択を解除</button>
 </div>
 
 <script>
@@ -768,11 +825,44 @@
   // 全日「－」(totalInfo.value===null)の場合はいずれの注記も出さない
   function renderTotalCell(cell, totalInfo, fmtFn, extraLabel){
     if (!cell) return;
-    if (!totalInfo || totalInfo.value === null) { cell.innerHTML = DASH; return; }
+    if (!totalInfo || totalInfo.value === null) { cell.innerHTML = DASH; cell.removeAttribute('data-raw'); return; }
     var html = fmtFn(totalInfo.value);
     if (totalInfo.count < DAY_COUNT) html += '<div class="sub-note">（' + totalInfo.count + '日分）</div>';
     if (extraLabel) html += '<div class="sub-note">' + extraLabel + '</div>';
     cell.innerHTML = html;
+    cell.setAttribute('data-raw', String(totalInfo.value));
+  }
+
+  // セルの表示文字列と、セル範囲選択・集計用の丸める前の値(data-raw)をまとめて設定する。
+  // rawValueが数値(NaNでない)ならdata-raw属性を持たせて集計・個数の対象にし、
+  // そうでない(「－」「計算方法未定」等)場合はdata-raw属性を外して対象外にする
+  // （セル自体は選択できるが、集計には入らない）。
+  function setCellValue(cell, text, rawValue){
+    if (!cell) return;
+    cell.textContent = text;
+    if (typeof rawValue === 'number' && !isNaN(rawValue)) cell.setAttribute('data-raw', String(rawValue));
+    else cell.removeAttribute('data-raw');
+  }
+
+  // 人別内訳テーブル(table3laborDetail/table3shipDetail)の1行分のHTMLを組み立てる共通関数。
+  // 栽培・出荷どちらの標準労働時間パネルでも同じ形(氏名・部門・日ごとの時間・合計)のため共通化。
+  // 単位は常に'h'（人別の労働時間のため）
+  function buildPersonDetailRowHtml(p){
+    var tds = p.dayHours.map(function(h, o){
+      var rawAttr = (typeof h === 'number' && !isNaN(h)) ? ' data-raw="' + h + '"' : '';
+      return '<td class="selectable-cell' + (o === 0 ? ' today-col' : '') + '" data-sel-col="' + o + '" data-unit="h" data-numfmt="dec1"' + rawAttr + '>' + fmtNum(h) + '</td>';
+    }).join('');
+    var rawDaily = (p.rawDayHours || p.dayHours).slice(0, DAY_COUNT);
+    var totalHtml = fmtNum(null);
+    var personTotalInfo = computeRowTotal(rawDaily);
+    var totalRawAttr = '';
+    if (personTotalInfo.value !== null) {
+      totalHtml = fmtNum(personTotalInfo.value);
+      totalRawAttr = ' data-raw="' + personTotalInfo.value + '"';
+      if (personTotalInfo.count < DAY_COUNT) totalHtml += '<div class="sub-note">（' + personTotalInfo.count + '日分）</div>';
+    }
+    return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds +
+      '<td class="total-col selectable-cell" data-sel-col="' + DAY_COUNT + '" data-unit="h" data-numfmt="dec1"' + totalRawAttr + '>' + totalHtml + '</td></tr>';
   }
 
   // alignWithと同じ「その日が判断できたか」のパターン(null=判断できない)で、別の配列
@@ -2424,23 +2514,33 @@
     document.querySelectorAll('.basis-range-note').forEach(function(el){ el.textContent = rangeNote; });
   }
 
-  function buildRowHtml(label, key, attr, offsetCount, trClass){
+  // unit/numFmt（省略可）は、セル範囲選択・集計機能向けの分類：unitは単位混在チェック用
+  // （'件'/'台'/'h'/'個'/'cs'/'kg'/'人'等）、numFmtは集計の合計・最小・最大の丸め方
+  // （'int'=整数・3桁区切り、'dec1'=小数1桁・3桁区切り。省略時は'dec1'扱い）。
+  // 日ごとの列・合計列のいずれのセルにも選択可能クラス(selectable-cell)とdata-sel-col
+  // （0〜offsetCount-1＝日ごとの列、offsetCount＝合計列）を付与する
+  function buildRowHtml(label, key, attr, offsetCount, trClass, unit, numFmt){
     var tds = '';
+    var attrsCommon = ' data-unit="' + (unit || '') + '" data-numfmt="' + (numFmt || 'dec1') + '"';
     for (var o = 0; o < offsetCount; o++) {
-      tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attr + '="' + key + '" data-' + attr + '-offset="' + o + '">' + DASH + '</td>';
+      tds += '<td class="selectable-cell' + (o === 0 ? ' today-col' : '') + '" data-sel-col="' + o + '"' + attrsCommon +
+        ' data-' + attr + '="' + key + '" data-' + attr + '-offset="' + o + '">' + DASH + '</td>';
     }
-    tds += '<td class="total-col" data-' + attr + '="' + key + '" data-' + attr + '-offset="total">' + DASH + '</td>';
-    return '<tr' + (trClass ? ' class="' + trClass + '"' : '') + '><th class="sticky-1" colspan="2">' + label + '</th>' + tds + '</tr>';
+    tds += '<td class="total-col selectable-cell" data-sel-col="' + offsetCount + '"' + attrsCommon +
+      ' data-' + attr + '="' + key + '" data-' + attr + '-offset="total">' + DASH + '</td>';
+    return '<tr' + (trClass ? ' class="' + trClass + '"' : '') + '><th class="sticky-1">' + label + '</th><th class="unit-col">' + (unit || '') + '</th>' + tds + '</tr>';
   }
 
   // buildRowHtml()とは別に、キー名を持たない「合計行」(小計等)のtdを組み立てる共通関数。
-  // attrNameは例えば'work-subtotal'（data-work-subtotal-offset="0"等になる）
-  function buildOffsetOnlyTds(attrName, dayCount){
+  // attrNameは例えば'work-subtotal'（data-work-subtotal-offset="0"等になる）。
+  // unit/numFmtの意味はbuildRowHtml()と同じ
+  function buildOffsetOnlyTds(attrName, dayCount, unit, numFmt){
     var tds = '';
+    var attrsCommon = ' data-unit="' + (unit || '') + '" data-numfmt="' + (numFmt || 'dec1') + '"';
     for (var o = 0; o < dayCount; o++) {
-      tds += '<td' + (o === 0 ? ' class="today-col"' : '') + ' data-' + attrName + '-offset="' + o + '">' + DASH + '</td>';
+      tds += '<td class="selectable-cell' + (o === 0 ? ' today-col' : '') + '" data-sel-col="' + o + '"' + attrsCommon + ' data-' + attrName + '-offset="' + o + '">' + DASH + '</td>';
     }
-    tds += '<td class="total-col" data-' + attrName + '-offset="total">' + DASH + '</td>';
+    tds += '<td class="total-col selectable-cell" data-sel-col="' + dayCount + '"' + attrsCommon + ' data-' + attrName + '-offset="total">' + DASH + '</td>';
     return tds;
   }
 
@@ -2448,12 +2548,15 @@
     var bodyMain = document.getElementById('table1cultBody');
     var bodyDetail = document.getElementById('table1cultDetailBody');
     var mainHtml = '';
-    DISPLAY_PROCESSES.forEach(function(name){ mainHtml += buildRowHtml(name, name, 'cult', DAY_COUNT); });
-    mainHtml += buildRowHtml('稼働コンテナ数', '稼働コンテナ数', 'cult', DAY_COUNT);
+    DISPLAY_PROCESSES.forEach(function(name){ mainHtml += buildRowHtml(name, name, 'cult', DAY_COUNT, null, '件', 'dec1'); });
+    mainHtml += buildRowHtml('稼働コンテナ数', '稼働コンテナ数', 'cult', DAY_COUNT, null, '台', 'dec1');
     bodyMain.innerHTML = mainHtml;
 
     var detailHtml = '';
-    DETAIL_PROCESSES.forEach(function(name){ detailHtml += buildRowHtml(name, name, 'cult', DAY_COUNT); });
+    DETAIL_PROCESSES.forEach(function(name){
+      var unit = CULT_STATE_PROCESSES.indexOf(name) !== -1 ? '台' : '件';
+      detailHtml += buildRowHtml(name, name, 'cult', DAY_COUNT, null, unit, 'dec1');
+    });
     bodyDetail.innerHTML = detailHtml;
 
     if (!result) return;
@@ -2461,10 +2564,10 @@
       DISPLAY_PROCESSES.concat(DETAIL_PROCESSES).forEach(function(name){
         var v = result.processCounts[o][name];
         var cell = document.querySelector('[data-cult="' + name + '"][data-cult-offset="' + o + '"]');
-        if (cell) cell.textContent = (v === undefined) ? DASH : fmtNum(v);
+        if (cell) setCellValue(cell, (v === undefined) ? DASH : fmtNum(v), v);
       });
       var contCell = document.querySelector('[data-cult="稼働コンテナ数"][data-cult-offset="' + o + '"]');
-      if (contCell) contCell.textContent = fmtNum(result.containerCounts[o]);
+      if (contCell) setCellValue(contCell, fmtNum(result.containerCounts[o]), result.containerCounts[o]);
     }
 
     // 合計列：件数はどの日も必ず判断できる値（該当する工程が無い日は0件）なので、
@@ -2487,8 +2590,8 @@
   function renderWorkHoursTable(rows, perDay){
     var body = document.getElementById('table2workBody');
     var html = '';
-    (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT); });
-    html += '<tr><th class="sticky-1" colspan="2">小計（栽培 標準工数合計）</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT) + '</tr>';
+    (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT, null, 'h', 'dec1'); });
+    html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
 
     var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
@@ -2499,7 +2602,7 @@
       for (var o = 0; o < DAY_COUNT; o++) {
         var v = perDay[o].items[row.waku];
         var cell = document.querySelector('[data-work="' + row.waku + '"][data-work-offset="' + o + '"]');
-        if (cell) cell.textContent = fmtNum(v);
+        if (cell) setCellValue(cell, fmtNum(v), v);
       }
       var dailyRaw = [];
       for (var oi = 0; oi < DAY_COUNT; oi++) dailyRaw.push(perDay[oi].items[row.waku]);
@@ -2508,13 +2611,16 @@
     });
     for (var o2 = 0; o2 < DAY_COUNT; o2++) {
       var subCell = document.querySelector('[data-work-subtotal-offset="' + o2 + '"]');
-      if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal) + (perDay[o2].harvestMissing ? '*' : '');
+      if (subCell) setCellValue(subCell, fmtNum(perDay[o2].subtotal) + (perDay[o2].harvestMissing ? '*' : ''), perDay[o2].subtotal);
     }
     // 小計の合計列：各日の小計は必ず数値（丸める前の値rawSubtotal）になるため、
-    // 常に7日分の合計になる（「（◯日分）」の表示は出ない）
+    // 常に7日分の合計になる（「（◯日分）」の表示は出ない）。日ごとの小計に「*」
+    // （収穫計画のkgが未入力のため収穫を含まない値）が1日でも付いている場合は、
+    // 合計列の小計にも同じ「*」を付ける（data-rawは数値のままで集計には影響しない）
     var rawSubtotals = perDay.map(function(d){ return d.rawSubtotal; });
     var subTotalCell = document.querySelector('[data-work-subtotal-offset="total"]');
     renderTotalCell(subTotalCell, computeRowTotal(rawSubtotals), fmtNum);
+    if (subTotalCell && anyHarvestMissing) subTotalCell.innerHTML += '*';
   }
 
   function renderLaborTable(laborResult, workSubtotals){
@@ -2526,22 +2632,22 @@
       // 0として計算せず「－」のままにする
       var total = laborResult ? laborResult.perDayTotal[o] : null;
       if (!laborResult || total === null || total === undefined) {
-        if (totalCell) totalCell.textContent = DASH;
-        if (attendCell) attendCell.textContent = DASH;
-        if (shortfallCell) { shortfallCell.textContent = DASH; shortfallCell.classList.remove('neg', 'pos'); }
+        setCellValue(totalCell, DASH, null);
+        setCellValue(attendCell, DASH, null);
+        if (shortfallCell) { setCellValue(shortfallCell, DASH, null); shortfallCell.classList.remove('neg', 'pos'); }
         continue;
       }
-      if (totalCell) totalCell.textContent = fmtNum(total);
-      if (attendCell) attendCell.textContent = String(laborResult.perDayAttendance[o]);
+      setCellValue(totalCell, fmtNum(total), total);
+      setCellValue(attendCell, String(laborResult.perDayAttendance[o]), laborResult.perDayAttendance[o]);
       if (shortfallCell) {
         var sub = workSubtotals && workSubtotals[o] ? workSubtotals[o].subtotal : null;
         if (sub === null || sub === undefined) {
-          shortfallCell.textContent = DASH;
+          setCellValue(shortfallCell, DASH, null);
           shortfallCell.classList.remove('neg', 'pos');
         } else {
           var shortfall = Math.round((total - sub) * 10) / 10;
           var harvestMissing = workSubtotals[o].harvestMissing;
-          shortfallCell.textContent = fmtNum(shortfall) + (harvestMissing ? '*' : '');
+          setCellValue(shortfallCell, fmtNum(shortfall) + (harvestMissing ? '*' : ''), shortfall);
           shortfallCell.classList.toggle('neg', shortfall < 0);
           shortfallCell.classList.toggle('pos', shortfall >= 0);
         }
@@ -2591,11 +2697,11 @@
     var shortfallTotalCell = document.querySelector('[data-shortfall-offset="total"]');
     if (shortfallTotalCell) {
       if (laborTotalInfo.value === null || workSubtotalTotalInfo.value === null) {
-        shortfallTotalCell.textContent = DASH;
+        setCellValue(shortfallTotalCell, DASH, null);
         shortfallTotalCell.classList.remove('neg', 'pos');
       } else {
         var shortfallTotal = Math.round((laborTotalInfo.value - workSubtotalTotalInfo.value) * 10) / 10;
-        shortfallTotalCell.textContent = fmtNum(shortfallTotal);
+        setCellValue(shortfallTotalCell, fmtNum(shortfallTotal), shortfallTotal);
         shortfallTotalCell.classList.toggle('neg', shortfallTotal < 0);
         shortfallTotalCell.classList.toggle('pos', shortfallTotal >= 0);
       }
@@ -2603,19 +2709,7 @@
 
     var detailBody = document.getElementById('table3laborDetailBody');
     if (laborResult && laborResult.personBreakdown.length) {
-      detailBody.innerHTML = laborResult.personBreakdown.map(function(p){
-        var tds = p.dayHours.map(function(h, o){
-          return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
-        }).join('');
-        var rawDaily = (p.rawDayHours || p.dayHours).slice(0, DAY_COUNT);
-        var totalHtml = fmtNum(null);
-        var personTotalInfo = computeRowTotal(rawDaily);
-        if (personTotalInfo.value !== null) {
-          totalHtml = fmtNum(personTotalInfo.value);
-          if (personTotalInfo.count < DAY_COUNT) totalHtml += '<div class="sub-note">（' + personTotalInfo.count + '日分）</div>';
-        }
-        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '<td class="total-col">' + totalHtml + '</td></tr>';
-      }).join('');
+      detailBody.innerHTML = laborResult.personBreakdown.map(buildPersonDetailRowHtml).join('');
     } else {
       detailBody.innerHTML = '';
     }
@@ -2936,17 +3030,17 @@
   function renderShippingQuantityTable(qtyByOffset, missingDates){
     var bodyMain = document.getElementById('table1shipBody');
     var html = '';
-    html += buildRowHtml('パック数', 'パック数', 'shipqty', DAY_COUNT);
-    html += buildRowHtml('袋数', '袋数', 'shipqty', DAY_COUNT);
-    html += buildRowHtml('バラ数', 'バラ数', 'shipqty', DAY_COUNT);
-    html += buildRowHtml('合計点数', '合計点数', 'shipqty', DAY_COUNT, 'agg-row');
-    html += buildRowHtml('cs数', 'cs数', 'shipqty', DAY_COUNT, 'agg-row');
+    html += buildRowHtml('パック数', 'パック数', 'shipqty', DAY_COUNT, null, '個', 'int');
+    html += buildRowHtml('袋数', '袋数', 'shipqty', DAY_COUNT, null, '個', 'int');
+    html += buildRowHtml('バラ数', 'バラ数', 'shipqty', DAY_COUNT, null, '個', 'int');
+    html += buildRowHtml('合計点数', '合計点数', 'shipqty', DAY_COUNT, 'agg-row', '個', 'int');
+    html += buildRowHtml('cs数', 'cs数', 'shipqty', DAY_COUNT, 'agg-row', 'cs', 'dec1');
     bodyMain.innerHTML = html;
 
     var detailBody = document.getElementById('table1shipDetailBody');
     var detailHtml = '';
-    ['パック', '袋', 'バラ'].forEach(function(label){ detailHtml += buildRowHtml(label, label, 'shipqtykg', DAY_COUNT); });
-    detailHtml += buildRowHtml('合計', '合計', 'shipqtykg', DAY_COUNT, 'agg-row');
+    ['パック', '袋', 'バラ'].forEach(function(label){ detailHtml += buildRowHtml(label, label, 'shipqtykg', DAY_COUNT, null, 'kg', 'dec1'); });
+    detailHtml += buildRowHtml('合計', '合計', 'shipqtykg', DAY_COUNT, 'agg-row', 'kg', 'dec1');
     detailBody.innerHTML = detailHtml;
 
     var KG_KEY_BY_LABEL = { 'パック': 'pack', '袋': 'bag', 'バラ': 'bara', '合計': 'total' };
@@ -2959,14 +3053,15 @@
       setShipQtyCell('cs数', o, q ? q.cs : null);
       ['パック', '袋', 'バラ', '合計'].forEach(function(label){
         var cell = document.querySelector('[data-shipqtykg="' + label + '"][data-shipqtykg-offset="' + o + '"]');
-        if (cell) cell.textContent = (q && q.kg) ? fmtShipDecimal1(q.kg[KG_KEY_BY_LABEL[label]]) : DASH;
+        var kgVal = (q && q.kg) ? q.kg[KG_KEY_BY_LABEL[label]] : null;
+        if (cell) setCellValue(cell, (kgVal === null || kgVal === undefined) ? DASH : fmtShipDecimal1(kgVal), kgVal);
       });
       var kindCell = document.querySelector('[data-kind-offset="' + o + '"]');
       if (kindCell) kindCell.textContent = (q && q.source) ? q.source : '';
     }
     function setShipQtyCell(key, o2, v){
       var cell = document.querySelector('[data-shipqty="' + key + '"][data-shipqty-offset="' + o2 + '"]');
-      if (cell) cell.textContent = (key === 'cs数') ? fmtShipDecimal1(v) : fmtShipInt(v);
+      if (cell) setCellValue(cell, (key === 'cs数') ? fmtShipDecimal1(v) : fmtShipInt(v), v);
     }
 
     // 合計列：実績・受注シートにその日の列が無かった(q===null)日は計上せず「（◯日分）」を
@@ -3027,8 +3122,8 @@
   function renderShippingWorkTable(rows, perDay){
     var body = document.getElementById('table2shipBody');
     var html = '';
-    (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'shipwork', DAY_COUNT); });
-    html += '<tr><th class="sticky-1" colspan="2">小計（出荷 標準工数合計）</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT) + '</tr>';
+    (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'shipwork', DAY_COUNT, null, 'h', 'dec1'); });
+    html += '<tr><th class="sticky-1">小計（出荷 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
 
     if (!perDay) return;
@@ -3038,13 +3133,14 @@
         if (!cell) continue;
         if (row.waku === '付帯作業') {
           cell.innerHTML = DASH + '<div class="sub-note">計算方法未定</div>';
+          cell.removeAttribute('data-raw');
         } else {
-          cell.textContent = fmtNum(perDay[o].items[row.waku]);
+          setCellValue(cell, fmtNum(perDay[o].items[row.waku]), perDay[o].items[row.waku]);
         }
       }
       var totalCell = document.querySelector('[data-shipwork="' + row.waku + '"][data-shipwork-offset="total"]');
       if (row.waku === '付帯作業') {
-        if (totalCell) totalCell.textContent = DASH;
+        if (totalCell) { totalCell.textContent = DASH; totalCell.removeAttribute('data-raw'); }
       } else {
         var dailyRaw = [];
         for (var oi = 0; oi < DAY_COUNT; oi++) dailyRaw.push(perDay[oi].items[row.waku]);
@@ -3053,7 +3149,7 @@
     });
     for (var o2 = 0; o2 < DAY_COUNT; o2++) {
       var subCell = document.querySelector('[data-shipwork-subtotal-offset="' + o2 + '"]');
-      if (subCell) subCell.textContent = fmtNum(perDay[o2].subtotal);
+      if (subCell) setCellValue(subCell, fmtNum(perDay[o2].subtotal), perDay[o2].subtotal);
     }
     // 小計の合計列：各日の小計は必ず数値(rawSubtotal)のため常に7日分の合計になる
     var rawSubtotals = perDay.map(function(d){ return d.rawSubtotal; });
@@ -3123,21 +3219,21 @@
       var shortfallCell = document.querySelector('[data-shipshortfall-offset="' + o + '"]');
       var total = laborResult ? laborResult.perDayTotal[o] : null;
       if (!laborResult || total === null || total === undefined) {
-        if (totalCell) totalCell.textContent = DASH;
-        if (attendCell) attendCell.textContent = DASH;
-        if (shortfallCell) { shortfallCell.textContent = DASH; shortfallCell.classList.remove('neg', 'pos'); }
+        setCellValue(totalCell, DASH, null);
+        setCellValue(attendCell, DASH, null);
+        if (shortfallCell) { setCellValue(shortfallCell, DASH, null); shortfallCell.classList.remove('neg', 'pos'); }
         continue;
       }
-      if (totalCell) totalCell.textContent = fmtNum(total);
-      if (attendCell) attendCell.textContent = String(laborResult.perDayAttendance[o]);
+      setCellValue(totalCell, fmtNum(total), total);
+      setCellValue(attendCell, String(laborResult.perDayAttendance[o]), laborResult.perDayAttendance[o]);
       if (shortfallCell) {
         var sub = workSubtotals && workSubtotals[o] ? workSubtotals[o].subtotal : null;
         if (sub === null || sub === undefined) {
-          shortfallCell.textContent = DASH;
+          setCellValue(shortfallCell, DASH, null);
           shortfallCell.classList.remove('neg', 'pos');
         } else {
           var shortfall = Math.round((total - sub) * 10) / 10;
-          shortfallCell.textContent = fmtNum(shortfall);
+          setCellValue(shortfallCell, fmtNum(shortfall), shortfall);
           shortfallCell.classList.toggle('neg', shortfall < 0);
           shortfallCell.classList.toggle('pos', shortfall >= 0);
         }
@@ -3185,11 +3281,11 @@
     var shipShortfallTotalCell = document.querySelector('[data-shipshortfall-offset="total"]');
     if (shipShortfallTotalCell) {
       if (shipLaborTotalInfo.value === null || shipWorkSubtotalTotalInfo.value === null) {
-        shipShortfallTotalCell.textContent = DASH;
+        setCellValue(shipShortfallTotalCell, DASH, null);
         shipShortfallTotalCell.classList.remove('neg', 'pos');
       } else {
         var shipShortfallTotal = Math.round((shipLaborTotalInfo.value - shipWorkSubtotalTotalInfo.value) * 10) / 10;
-        shipShortfallTotalCell.textContent = fmtNum(shipShortfallTotal);
+        setCellValue(shipShortfallTotalCell, fmtNum(shipShortfallTotal), shipShortfallTotal);
         shipShortfallTotalCell.classList.toggle('neg', shipShortfallTotal < 0);
         shipShortfallTotalCell.classList.toggle('pos', shipShortfallTotal >= 0);
       }
@@ -3197,19 +3293,7 @@
 
     var detailBody = document.getElementById('table3shipDetailBody');
     if (laborResult && laborResult.personBreakdown.length) {
-      detailBody.innerHTML = laborResult.personBreakdown.map(function(p){
-        var tds = p.dayHours.map(function(h, o){
-          return '<td' + (o === 0 ? ' class="today-col"' : '') + '>' + fmtNum(h) + '</td>';
-        }).join('');
-        var rawDaily = (p.rawDayHours || p.dayHours).slice(0, DAY_COUNT);
-        var totalHtml = DASH;
-        var personTotalInfo = computeRowTotal(rawDaily);
-        if (personTotalInfo.value !== null) {
-          totalHtml = fmtNum(personTotalInfo.value);
-          if (personTotalInfo.count < DAY_COUNT) totalHtml += '<div class="sub-note">（' + personTotalInfo.count + '日分）</div>';
-        }
-        return '<tr><th class="sticky-1">' + p.name + '</th><td class="dept-col">' + p.dept + '</td>' + tds + '<td class="total-col">' + totalHtml + '</td></tr>';
-      }).join('');
+      detailBody.innerHTML = laborResult.personBreakdown.map(buildPersonDetailRowHtml).join('');
     } else {
       detailBody.innerHTML = '';
     }
@@ -3425,8 +3509,206 @@
     }
   }
 
+  /* ===================== セル範囲選択・集計（操作） ===================== */
+  // Googleスプレッドシートのように、表の数値セル(.selectable-cell)を範囲選択すると
+  // 画面下に合計・平均・個数・最小・最大を表示する。複数の表（別パネルの表も含む）に
+  // またがる選択をCtrl(⌘)で積み上げられるほか、スマートフォンではタップのたびに
+  // 選択に加える/外す形にする。render()が呼ばれるたび（基準日・拠点・区分の切替）に
+  // 選択を解除する（clearCellSelection()。下のwindow.renderラッパーから呼ぶ）。
+
+  var cellSelection = new Set(); // 現在選択中の<td>要素の集合
+  var lastAnchorCell = null; // Shift+クリックで範囲の起点にする最後の単独選択セル
+  var dragState = null; // ドラッグ中だけ使う一時状態
+
+  function cellRowCol(cell){
+    var tr = cell.closest('tr');
+    var tbody = tr ? tr.parentElement : null;
+    var table = cell.closest('table');
+    if (!tr || !tbody || !table) return null;
+    var row = Array.prototype.indexOf.call(tbody.children, tr);
+    var col = Number(cell.getAttribute('data-sel-col'));
+    if (row < 0 || isNaN(col)) return null;
+    return { table: table, tbody: tbody, row: row, col: col };
+  }
+
+  // anchorCellからcurrentCellまでの四角い範囲に含まれる選択可能セルを返す（同じ表の中のみ。
+  // 表が違う場合はanchorCell単体のみを返す）
+  function cellsInRect(anchorCell, currentCell){
+    var a = cellRowCol(anchorCell);
+    var b = cellRowCol(currentCell);
+    if (!a) return [];
+    if (!b || a.table !== b.table) return [anchorCell];
+    var r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
+    var c0 = Math.min(a.col, b.col), c1 = Math.max(a.col, b.col);
+    var out = [];
+    for (var r = r0; r <= r1; r++) {
+      var tr = a.tbody.children[r];
+      if (!tr) continue;
+      for (var c = c0; c <= c1; c++) {
+        var cell = tr.querySelector('.selectable-cell[data-sel-col="' + c + '"]');
+        if (cell) out.push(cell);
+      }
+    }
+    return out;
+  }
+
+  function clearCellSelection(){
+    if (!cellSelection.size && !lastAnchorCell) { updateSelectionVisuals(); return; }
+    cellSelection = new Set();
+    lastAnchorCell = null;
+    dragState = null;
+    updateSelectionVisuals();
+  }
+
+  function toggleCellInSelection(cell){
+    if (cellSelection.has(cell)) cellSelection.delete(cell);
+    else cellSelection.add(cell);
+    lastAnchorCell = cell;
+    updateSelectionVisuals();
+  }
+
+  // 個数（パック数・袋数・バラ数・合計点数・人数）だけを選んだときは整数・3桁区切り、
+  // それ以外は小数1桁・3桁区切り。平均は常に小数1桁（丸める前の値を集計してから1回だけ丸める）
+  function fmtAggValue(v, allInt){
+    if (v === null || v === undefined || isNaN(v)) return DASH;
+    return allInt
+      ? Math.round(v).toLocaleString('ja-JP')
+      : Number(v).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+  function fmtAggAverage(v){
+    if (v === null || v === undefined || isNaN(v)) return DASH;
+    return Number(v).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+
+  // 選択中のセル集合から集計値を算出する。純粋関数（テストから直接呼べる）。
+  // data-rawを持たないセル（「－」「計算方法未定」や、注記のみでdata-rawが外されている
+  // セル）は計算にも個数にも入れない。data-unitが複数種類混在していればmixedUnit:true、
+  // 合計列(.total-col)と日ごとの列を両方含んでいればdoubleCount:trueを返す
+  function computeSelectionAggregation(cells){
+    var nums = [];
+    var units = {};
+    var allInt = true;
+    var hasTotalCol = false, hasDayCol = false;
+    cells.forEach(function(cell){
+      if (cell.classList.contains('total-col')) hasTotalCol = true; else hasDayCol = true;
+      var rawAttr = cell.getAttribute('data-raw');
+      if (rawAttr === null || rawAttr === '') return;
+      var n = Number(rawAttr);
+      if (isNaN(n)) return;
+      nums.push(n);
+      var unit = cell.getAttribute('data-unit');
+      if (unit) units[unit] = true;
+      if (cell.getAttribute('data-numfmt') !== 'int') allInt = false;
+    });
+    var count = nums.length;
+    var sum = count ? nums.reduce(function(a, b){ return a + b; }, 0) : null;
+    var avg = count ? sum / count : null;
+    var min = count ? Math.min.apply(null, nums) : null;
+    var max = count ? Math.max.apply(null, nums) : null;
+    return {
+      count: count, sum: sum, avg: avg, min: min, max: max,
+      allInt: allInt, mixedUnit: Object.keys(units).length > 1,
+      doubleCount: hasTotalCol && hasDayCol,
+    };
+  }
+
+  function updateAggBar(){
+    var bar = document.getElementById('aggBar');
+    if (!bar) return;
+    var cells = Array.from(cellSelection);
+    if (!cells.length) {
+      bar.classList.remove('show');
+      document.body.classList.remove('has-agg-bar');
+      return;
+    }
+    var agg = computeSelectionAggregation(cells);
+    document.getElementById('aggSum').textContent = fmtAggValue(agg.sum, agg.allInt);
+    document.getElementById('aggAvg').textContent = fmtAggAverage(agg.avg);
+    document.getElementById('aggCount').textContent = String(agg.count);
+    document.getElementById('aggMin').textContent = fmtAggValue(agg.min, agg.allInt);
+    document.getElementById('aggMax').textContent = fmtAggValue(agg.max, agg.allInt);
+    document.getElementById('aggWarnUnit').style.display = agg.mixedUnit ? '' : 'none';
+    document.getElementById('aggWarnDouble').style.display = agg.doubleCount ? '' : 'none';
+    bar.classList.add('show');
+    document.body.classList.add('has-agg-bar');
+  }
+
+  function updateSelectionVisuals(){
+    document.querySelectorAll('.cell-selected').forEach(function(c){
+      if (!cellSelection.has(c)) c.classList.remove('cell-selected');
+    });
+    cellSelection.forEach(function(c){ c.classList.add('cell-selected'); });
+    updateAggBar();
+  }
+
+  // タッチ操作の後、ブラウザが互換性のため送る合成マウスイベント(mousedown等)を
+  // 誤って「新しいクリック」として扱わないよう、直前のtouchendから短い間はmousedownを無視する
+  var lastTouchEndAt = 0;
+  document.addEventListener('mousedown', function(e){
+    if (e.button !== 0) return; // 左クリックのみ
+    if (Date.now() - lastTouchEndAt < 800) return; // タッチ操作に続く合成イベントは無視する
+    var cell = e.target.closest && e.target.closest('.selectable-cell');
+    if (!cell) {
+      if (!e.target.closest('.agg-bar')) clearCellSelection();
+      return;
+    }
+    e.preventDefault(); // ドラッグ中に文字列選択（青い反転）が起きないようにする
+    var additive = e.ctrlKey || e.metaKey;
+    var extendFromAnchor = e.shiftKey && lastAnchorCell;
+    var anchor = extendFromAnchor ? lastAnchorCell : cell;
+    var base = additive ? new Set(cellSelection) : new Set();
+    if (e.shiftKey && !additive) base = new Set(); // Shift単独は選択を置き換える
+    dragState = { anchor: anchor, base: base, keepAnchor: !!extendFromAnchor };
+    cellSelection = new Set(base);
+    cellsInRect(anchor, cell).forEach(function(c){ cellSelection.add(c); });
+    if (!extendFromAnchor) lastAnchorCell = cell;
+    updateSelectionVisuals();
+  });
+
+  document.addEventListener('mousemove', function(e){
+    if (!dragState) return;
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    var cell = el && el.closest && el.closest('.selectable-cell');
+    if (!cell) return;
+    cellSelection = new Set(dragState.base);
+    cellsInRect(dragState.anchor, cell).forEach(function(c){ cellSelection.add(c); });
+    updateSelectionVisuals();
+  });
+
+  document.addEventListener('mouseup', function(){ dragState = null; });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') clearCellSelection();
+  });
+
+  // スマートフォン・タブレット：ドラッグの代わりに、タップのたびに選択に加える/外す。
+  // 表のスクロール（指でなぞる操作）と区別するため、タッチ開始〜終了の移動量が小さい
+  // 場合だけタップ（セル選択）として扱う
+  var touchStartCell = null, touchStartPos = null;
+  document.addEventListener('touchstart', function(e){
+    var t = e.touches[0];
+    if (!t) return;
+    var el = document.elementFromPoint(t.clientX, t.clientY);
+    var cell = el && el.closest && el.closest('.selectable-cell');
+    touchStartCell = cell || null;
+    touchStartPos = cell ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', function(e){
+    lastTouchEndAt = Date.now();
+    if (!touchStartCell || !touchStartPos) { touchStartCell = null; touchStartPos = null; return; }
+    var t = e.changedTouches[0];
+    if (t) {
+      var dx = Math.abs(t.clientX - touchStartPos.x), dy = Math.abs(t.clientY - touchStartPos.y);
+      if (dx < 10 && dy < 10) toggleCellInSelection(touchStartCell);
+    }
+    touchStartCell = null; touchStartPos = null;
+  }, { passive: true });
+
+  document.getElementById('aggClearBtn').addEventListener('click', clearCellSelection);
+
   window.render = async function(){
     var gen = ++renderGeneration; // この呼び出し自身の世代番号を確定する
+    clearCellSelection(); // 基準日・拠点・区分の切替で表が描き直されるため選択を解除する
 
     var supported = isSupported();
     var showCult = supported && currentBusiness === '栽培';
@@ -3507,6 +3789,10 @@
     TOTAL_COL_COUNT: TOTAL_COL_COUNT,
     computeRowTotal: computeRowTotal,
     computeAlignedRowTotal: computeAlignedRowTotal,
+    computeSelectionAggregation: computeSelectionAggregation,
+    clearCellSelection: clearCellSelection,
+    toggleCellInSelection: toggleCellInSelection,
+    getCellSelection: function(){ return Array.from(cellSelection); },
     fmtNum: fmtNum,
     fmtMDPadded: fmtMDPadded,
     fmtTotalRangeLabel: fmtTotalRangeLabel,
