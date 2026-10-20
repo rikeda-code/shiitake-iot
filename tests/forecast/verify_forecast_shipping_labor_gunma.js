@@ -27,7 +27,7 @@ const GUNMA_SHIFT_SHEET_ID = '1eqN5kfymPPvOOi9UbTg7ZxLn04YE7YnjrJw-jADySUM';
 const CULT_GUNMA_GID_202610 = '2074687161'; // 栽培(収穫班)の既存gid
 const SHIP_GUNMA_GID_202609 = '305870764';  // 26.9/11~10/10 出荷場
 const SHIP_GUNMA_GID_202610 = '1087258434'; // 26.10/11~11/10 出荷場
-const SHIP_GUNMA_GID_REF_202608 = '999000111'; // テスト用の仮gid(2026.8、referenceGids検証用)
+const SHIP_GUNMA_GID_FAKE_202611 = '888777666'; // テスト用の仮gid(2026.11、次の月度の検証用)
 const STD_LABOR_HOURS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1404355975' };
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const STD_WORK_HOURS_GID = '264266810';
@@ -128,6 +128,12 @@ function staticHandler(idGidPairs, body) {
     handle: async (route) => { await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body }); },
   };
 }
+function countingHandler(idGidPairs, body, counter) {
+  return {
+    match: (url) => idGidPairs.some(([id, gid]) => url.includes(id) && (gid === null || url.includes(`gid=${gid}`))),
+    handle: async (route) => { counter.count++; await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body }); },
+  };
+}
 
 async function gotoGunmaShipping(page) {
   await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
@@ -156,90 +162,135 @@ async function shipLaborTotals(page) {
 async function shipLaborNotices(page) {
   return page.evaluate(() => document.getElementById('shipLaborNotices').textContent.trim());
 }
+async function setFakeNextPeriodGid(page, periodKey, gid) {
+  await page.evaluate(([periodKey, gid]) => {
+    window.__test.FORECAST_SHIPPING_SHIFT_SOURCES['群馬'].gids[periodKey] = gid;
+  }, [periodKey, gid]);
+}
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--disable-features=OverlayScrollbar'] });
   let allOk = true;
   function check(name, cond) { console.log(`  ${name}: ${cond ? 'OK' : 'NG'}`); if (!cond) allOk = false; }
 
-  console.log('=== ①基準日9月・10月をまたぐ場合に、両方の出荷場シートから値が読まれること ===');
+  console.log('=== ①休と休の間の空欄が出勤になること（「休, 空欄, 空欄, 休」） ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19); // 今日=2026/10/19
-    const cellsFor = (dates) => { const o = {}; dates.forEach((d, i) => { o[isoKey(d)] = (i === 0) ? '09:00-17:00' : ''; }); return o; };
-    const sepDates = datesForPeriod('2026.9');
     const octDates = datesForPeriod('2026.10');
-    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: cellsFor(sepDates) }]);
-    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: cellsFor(octDates) }]);
+    // 3日周期で「休」を繰り返す(index0,3,6,9,...が休、その他は空欄)。先頭が休のため
+    // 先頭の空欄の判断(前の月度にいるか)は関係ない
+    const cells = Object.fromEntries(octDates.map((d, i) => [isoKey(d), (i % 3 === 0) ? '休' : '']));
+    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: cells }]);
     const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
     await setupRoutes(page, [
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
       staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
       staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
     await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-09-25');
-    const totalsSep = await shipLaborTotals(page);
-    console.log('基準日9/25〜:', JSON.stringify(totalsSep));
-    check('9月度の出荷場シートから値が読まれる(「－」のまま止まらない)', totalsSep.every(v => v !== '－'));
-
-    await setBasisDate(page, '2026-10-07'); // offset0-7=10/7〜10/14(9月度と10月度をまたぐ)
-    const totalsCross = await shipLaborTotals(page);
-    console.log('基準日10/7〜(9月/10月をまたぐ):', JSON.stringify(totalsCross));
-    check('9月度側(10/7〜10/10)も値が読まれる', totalsCross.slice(0, 4).every(v => v !== '－'));
-    check('10月度側(10/11〜10/14)も値が読まれる', totalsCross.slice(4).every(v => v !== '－'));
-    await page.close();
-  }
-
-  console.log('\n=== ②10月度の高山(先頭3日空欄、9月度にいる)が既存の人と判断され、10/11〜10/13が出勤になること ===');
-  {
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-    await fixTodayTo(page, 2026, 9, 19);
-    const sepDates = datesForPeriod('2026.9');
-    const octDates = datesForPeriod('2026.10');
-    const sepCellsByIso = {}; sepDates.forEach((d, i) => { sepCellsByIso[isoKey(d)] = (i === 0) ? '09:00-17:00' : ''; });
-    const octCellsByIso = {}; octDates.forEach((d, i) => { octCellsByIso[isoKey(d)] = (i < 3) ? '' : '休'; }); // 先頭3日(10/11-10/13)空欄
-    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: sepCellsByIso }]);
-    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: octCellsByIso }]);
-    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
-    await setupRoutes(page, [
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
-      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
-      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
-    ]);
-    await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-10-11'); // offset0-7=10/11〜10/18
+    await setBasisDate(page, '2026-10-11'); // offset0-7 = index0-7
     const rows = await shippingLaborDetailRows(page);
     const takayama = rows.find(r => r.name === '高山');
-    console.log('高山(10/11〜):', JSON.stringify(takayama && takayama.cells));
-    check('10/11〜10/13(先頭の空欄)が既存の人として出勤(標準労働時間8.5h)になる', takayama && takayama.cells.slice(0, 3).every(v => v === '8.5'));
+    console.log('高山(休,空欄,空欄,休,...):', JSON.stringify(takayama && takayama.cells));
+    check('index0(休)=0.0h', takayama && takayama.cells[0] === '0.0');
+    check('index1(休と休の間の空欄)=出勤(8.5h)', takayama && takayama.cells[1] === '8.5');
+    check('index2(休と休の間の空欄)=出勤(8.5h)', takayama && takayama.cells[2] === '8.5');
+    check('index3(休)=0.0h', takayama && takayama.cells[3] === '0.0');
     const notices = await shipLaborNotices(page);
-    check('既存の人として判断できたのでアラートは出ない', !notices.includes('高山'));
+    check('休みの印の間の空欄にはアラートが出ない', !notices.includes('高山'));
     await page.close();
   }
 
-  console.log('\n=== ③10月度にだけいて先頭空欄・途中から記入の人は新しい人と判断。「入社」の人は入社日以前が計上されない ===');
+  console.log('\n=== ②月度の最後の休みの印の後の空欄が、次の月度に休みの印があれば出勤になること ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
     const sepDates = datesForPeriod('2026.9');
     const octDates = datesForPeriod('2026.10');
-    // 9月度には「新人花子」も「入社太郎」もいない(10月度にだけ新規でいる想定)
-    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: Object.fromEntries(sepDates.map((d, i) => [isoKey(d), i === 0 ? '09:00-17:00' : ''])) }]);
-    const shinninCells = {}; octDates.forEach((d, i) => { shinninCells[isoKey(d)] = (i < 4) ? '' : (i === 4 ? '09:00-17:00' : ''); }); // 先頭4日空欄→5日目(index4)に記入、以降空欄
-    const nyushaCells = {}; octDates.forEach((d, i) => { nyushaCells[isoKey(d)] = (i === 2) ? '入社' : ''; }); // 3日目(index2)が入社
+    const novPeriodDates = datesForPeriod('2026.11'); // 2026.11期間=11/11〜12/10
+    // 9月度に高山がいる(先頭の空欄は既存の人として出勤になる)
+    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: Object.fromEntries(sepDates.map(d => [isoKey(d), ''])) }]);
+    // 10月度：序盤に1回だけ休(10/15)、それ以降(10/16〜11/10)は全部空欄
+    const octCells = Object.fromEntries(octDates.map(d => [isoKey(d), (d.getMonth() === 9 && d.getDate() === 15) ? '休' : '']));
+    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: octCells }]);
+    // 11月度(仮のgid)：高山がいて休みの印がある(どこでもよい。期間内の最初の日=11/11に設定)
+    const novCsv = buildGunmaShiftCsv('2026.11', [{ name: '高山', cellsByIso: { [isoKey(novPeriodDates[0])]: '休' } }]);
+    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
+    await setupRoutes(page, [
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_FAKE_202611]], novCsv),
+      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+    ]);
+    await gotoGunmaShipping(page);
+    await setFakeNextPeriodGid(page, '2026.11', SHIP_GUNMA_GID_FAKE_202611);
+    await setBasisDate(page, '2026-11-03'); // offset0-7 = 11/3〜11/10(すべて2026.10期間、最後の休(10/15)より後)
+    const rows = await shippingLaborDetailRows(page);
+    const takayama = rows.find(r => r.name === '高山');
+    console.log('高山(11/3〜11/10、次月度に休みあり):', JSON.stringify(takayama && takayama.cells));
+    check('最後の休み(10/15)より後の空欄(11/3〜11/10)が、次の月度に休みの印があるため出勤(8.5h)になる', takayama && takayama.cells.every(v => v === '8.5'));
+    const notices = await shipLaborNotices(page);
+    check('出勤と判断できたのでアラートは出ない', !notices.includes('高山'));
+    await page.close();
+  }
+
+  console.log('\n=== ③次の月度を読めたが休みの印がない場合、休み扱い(計上しない)+アラートになること ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19);
+    const sepDates = datesForPeriod('2026.9');
+    const octDates = datesForPeriod('2026.10');
+    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: Object.fromEntries(sepDates.map(d => [isoKey(d), ''])) }]);
+    const octCells = Object.fromEntries(octDates.map(d => [isoKey(d), (d.getMonth() === 9 && d.getDate() === 15) ? '休' : '']));
+    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: octCells }]);
+    // 11月度(仮のgid)：高山はいるが休みの印が一つもない
+    const novCsv = buildGunmaShiftCsv('2026.11', [{ name: '高山', cellsByIso: {} }]);
+    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
+    await setupRoutes(page, [
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_FAKE_202611]], novCsv),
+      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+    ]);
+    await gotoGunmaShipping(page);
+    await setFakeNextPeriodGid(page, '2026.11', SHIP_GUNMA_GID_FAKE_202611);
+    await setBasisDate(page, '2026-11-03');
+    const rows = await shippingLaborDetailRows(page);
+    const takayama = rows.find(r => r.name === '高山');
+    console.log('高山(次月度に休みなし):', JSON.stringify(takayama && takayama.cells));
+    check('次の月度に休みの印が無いため、休み扱い(0.0h)になる', takayama && takayama.cells.every(v => v === '0.0'));
+    const notices = await shipLaborNotices(page);
+    console.log('補足:', notices);
+    check('「次の月度まで休みの記載がない」旨のアラートが出る(名前・日付範囲入り)', notices.includes('高山') && notices.includes('次の月度まで休みの記載がない') && notices.includes('11/3') && notices.includes('11/10'));
+    await page.close();
+  }
+
+  console.log('\n=== ④次の月度が未設定の場合、最後の休みの印の後の空欄が計上されずアラートになること(実際の10月度構成のモック) ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19);
+    const sepDates = datesForPeriod('2026.9');
+    const octDates = datesForPeriod('2026.10');
+    const sepCsv = buildGunmaShiftCsv('2026.9', [
+      { name: '高山', cellsByIso: Object.fromEntries(sepDates.map(d => [isoKey(d), ''])) },
+      { name: '平本', cellsByIso: Object.fromEntries(sepDates.map(d => [isoKey(d), ''])) },
+    ]);
+    // 高山：最後の休みが11/7。それ以降(11/8〜11/10)は空欄
+    const takayamaCells = Object.fromEntries(octDates.map(d => [isoKey(d), (d.getMonth() === 10 && d.getDate() === 7) ? '休' : '']));
+    // 平本：最後の休みが11/9。それ以降(11/10)は空欄
+    const hiramotoCells = Object.fromEntries(octDates.map(d => [isoKey(d), (d.getMonth() === 10 && d.getDate() === 9) ? '休' : '']));
     const octCsv = buildGunmaShiftCsv('2026.10', [
-      { name: '高山', cellsByIso: Object.fromEntries(octDates.map((d, i) => [isoKey(d), i === 0 ? '09:00-17:00' : ''])) },
-      { name: '新人花子', cellsByIso: shinninCells },
-      { name: '入社太郎', cellsByIso: nyushaCells },
+      { name: '高山', cellsByIso: takayamaCells },
+      { name: '平本', cellsByIso: hiramotoCells },
     ]);
     const laborRows = [
       { flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' },
-      { flag: '1', site: '群馬', dept: '出荷場', name: '新人花子', hoursPerDay: 7, shiftName: '新人花子' },
-      { flag: '1', site: '群馬', dept: '出荷場', name: '入社太郎', hoursPerDay: 6, shiftName: '入社太郎' },
+      { flag: '1', site: '群馬', dept: '出荷場', name: '平本', hoursPerDay: 8, shiftName: '平本' },
     ];
+    // 2026.11は設定しない(実際の構成どおり未設定)
     await setupRoutes(page, [
       staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
       staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
@@ -247,76 +298,38 @@ async function shipLaborNotices(page) {
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
     await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-10-11'); // offset0-7=10/11(index0)〜10/18(index7)
+    await setBasisDate(page, '2026-11-03'); // offset0-7 = 11/3〜11/10
     const rows = await shippingLaborDetailRows(page);
-    const shinnin = rows.find(r => r.name === '新人花子');
-    const nyusha = rows.find(r => r.name === '入社太郎');
-    console.log('新人花子:', JSON.stringify(shinnin && shinnin.cells));
-    console.log('入社太郎:', JSON.stringify(nyusha && nyusha.cells));
-    check('新人花子：最初の記入(5日目)より前(1〜4日目)の空欄は計上されない(0.0h)', shinnin && shinnin.cells.slice(0, 4).every(v => v === '0.0'));
-    check('新人花子：最初の記入(5日目)は時刻どおり(拘束8h-休憩0.75h=7.25h→7.3h)', shinnin && shinnin.cells[4] === '7.3');
-    check('新人花子：最初の記入より後(6日目以降)の空欄は出勤(標準労働時間7.0h)になる', shinnin && shinnin.cells.slice(5).every(v => v === '7.0'));
-    check('入社太郎：入社日(3日目)以前(1〜2日目)の空欄は計上されない(0.0h)', nyusha && nyusha.cells.slice(0, 2).every(v => v === '0.0'));
-    check('入社太郎：入社日より後(4日目以降)の空欄は出勤(標準労働時間6.0h)になる', nyusha && nyusha.cells.slice(3).every(v => v === '6.0'));
+    const takayama = rows.find(r => r.name === '高山');
+    const hiramoto = rows.find(r => r.name === '平本');
+    console.log('高山(11/3〜11/10):', JSON.stringify(takayama && takayama.cells));
+    console.log('平本(11/3〜11/10):', JSON.stringify(hiramoto && hiramoto.cells));
+    // 11/3〜11/7はoffset0-4、11/8がoffset5、11/9がoffset6、11/10がoffset7
+    check('高山：11/3〜11/6(休み(11/7)より前)は出勤(8.5h)', takayama && takayama.cells.slice(0, 4).every(v => v === '8.5'));
+    check('高山：11/7(休み)は0.0h', takayama && takayama.cells[4] === '0.0');
+    check('高山：11/8〜11/10(次の月度未設定)は計上されない(0.0h)', takayama && takayama.cells.slice(5).every(v => v === '0.0'));
+    check('平本：11/3〜11/8(休み(11/9)より前)は出勤(8.0h)', hiramoto && hiramoto.cells.slice(0, 6).every(v => v === '8.0'));
+    check('平本：11/9(休み)は0.0h', hiramoto && hiramoto.cells[6] === '0.0');
+    check('平本：11/10(次の月度未設定)は計上されない(0.0h)', hiramoto && hiramoto.cells[7] === '0.0');
     const notices = await shipLaborNotices(page);
-    check('新しい人・入社の判断ができたのでアラートは出ない', !notices.includes('判断できない'));
+    console.log('補足:', notices);
+    check('高山に「次の月度の勤務表がない」旨のアラートが出る(11/8〜11/10)', notices.includes('高山') && notices.includes('次の月度の勤務表がないため') && notices.includes('11/8') && notices.includes('11/10'));
+    check('平本に「次の月度の勤務表がない」旨のアラートが出る(11/10)', notices.includes('平本') && notices.includes('11/10'));
+    check('「次の月度のシートを設定すると判断できます」の案内が出る', notices.includes('次の月度のシートを設定すると判断できます'));
     await page.close();
   }
 
-  console.log('\n=== ④9月度(前の月度=2026.8が未設定)で先頭空欄の高山がアラートになる。referenceGidsを設定するとアラートが消える ===');
+  console.log('\n=== ⑤前の月度にいる人で、行が全部空欄の場合、出勤にならず計上しない+アラートになること ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
     const sepDates = datesForPeriod('2026.9');
-    const sepCellsByIso = {}; sepDates.forEach((d, i) => { sepCellsByIso[isoKey(d)] = (i < 3) ? '' : (i === 3 ? '09:00-17:00' : ''); }); // 先頭3日空欄→4日目に記入
-    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: sepCellsByIso }]);
-    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
-    await setupRoutes(page, [
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
-      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
-      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
-    ]);
-    await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-09-11'); // offset0-7=9/11〜9/18
-    const rows1 = await shippingLaborDetailRows(page);
-    const takayama1 = rows1.find(r => r.name === '高山');
-    const notices1 = await shipLaborNotices(page);
-    console.log('referenceGids未設定:', JSON.stringify(takayama1 && takayama1.cells), '補足:', notices1);
-    check('前の月度(2026.8)が未設定のため、先頭3日(9/11-9/13)は計上されない(0.0h)', takayama1 && takayama1.cells.slice(0, 3).every(v => v === '0.0'));
-    check('判断できない旨のアラートが出る(名前・日付範囲入り)', notices1.includes('高山') && notices1.includes('9/11') && notices1.includes('9/13'));
-    check('「前の月度のシートを設定すると判断できます」の案内が出る', notices1.includes('前の月度のシートを設定すると判断できます'));
-
-    // referenceGids['2026.8']にモックを設定(2026.8のシートに高山がいる=既存と判断できるようになる)
-    const refCsv = buildGunmaShiftCsv('2026.8', [{ name: '高山', cellsByIso: {} }]);
-    await setupRoutes(page, [
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_REF_202608]], refCsv),
-      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
-      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
-    ]);
-    await page.evaluate((gid) => {
-      window.__test.FORECAST_SHIPPING_SHIFT_SOURCES['群馬'].referenceGids['2026.8'] = gid;
-    }, SHIP_GUNMA_GID_REF_202608);
-    await setBasisDate(page, '2026-09-12'); // 基準日を変えて再描画をトリガ
-    await setBasisDate(page, '2026-09-11');
-    const rows2 = await shippingLaborDetailRows(page);
-    const takayama2 = rows2.find(r => r.name === '高山');
-    const notices2 = await shipLaborNotices(page);
-    console.log('referenceGids設定後:', JSON.stringify(takayama2 && takayama2.cells), '補足:', notices2);
-    check('referenceGidsを設定すると、既存の人と判断され先頭3日も出勤(8.5h)になる', takayama2 && takayama2.cells.slice(0, 3).every(v => v === '8.5'));
-    check('アラートが消える', !notices2.includes('高山'));
-    await page.close();
-  }
-
-  console.log('\n=== ⑤行が全部空欄の人(「(仮)」以外)が計上されずアラートになること ===');
-  {
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-    await fixTodayTo(page, 2026, 9, 19);
     const octDates = datesForPeriod('2026.10');
-    const allBlankCells = Object.fromEntries(octDates.map(d => [isoKey(d), '']));
-    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '全部空欄太郎', cellsByIso: allBlankCells }]);
+    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '全部空欄太郎', cellsByIso: Object.fromEntries(sepDates.map(d => [isoKey(d), ''])) }]);
+    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '全部空欄太郎', cellsByIso: Object.fromEntries(octDates.map(d => [isoKey(d), ''])) }]);
     const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '全部空欄太郎', hoursPerDay: 8, shiftName: '全部空欄太郎' }];
     await setupRoutes(page, [
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
       staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
       staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
@@ -326,70 +339,22 @@ async function shipLaborNotices(page) {
     const rows = await shippingLaborDetailRows(page);
     const zenbu = rows.find(r => r.name === '全部空欄太郎');
     const notices = await shipLaborNotices(page);
-    console.log('全部空欄太郎:', JSON.stringify(zenbu && zenbu.cells), '補足:', notices);
-    check('行が全部空欄の人は計上されない(すべて0.0h)', zenbu && zenbu.cells.every(v => v === '0.0'));
-    check('判断できない旨のアラートが出る', notices.includes('全部空欄太郎'));
+    console.log('全部空欄太郎(前月度にいるが今月は全部空欄):', JSON.stringify(zenbu && zenbu.cells), '補足:', notices);
+    check('前の月度にいても、行が全部空欄なら出勤にならない(すべて0.0h)', zenbu && zenbu.cells.every(v => v === '0.0'));
+    check('「行がすべて空欄」のアラートが出る(日付範囲なし)', notices.includes('勤務表の行がすべて空欄のため計上していません：全部空欄太郎'));
     await page.close();
   }
 
-  console.log('\n=== ⑥空欄が出勤で標準労働時間シートにない人が8h+補足。時刻と休だけの人には補足が出ない。パートも同じルール(空行なしモック) ===');
-  {
-    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-    await fixTodayTo(page, 2026, 9, 19);
-    const octDates = datesForPeriod('2026.10');
-    // 未登録太郎：1日目に時刻(先頭に空欄なし)、以降空欄→出勤扱い、未登録なので8h+補足が出るべき
-    const mitoroku = Object.fromEntries(octDates.map((d, i) => [isoKey(d), i === 0 ? '09:00-17:00' : '']));
-    // 時刻休だけ花子：時刻と休のみで空欄が一切無い→未登録でも補足は出ないはず
-    const jikokuYasumi = Object.fromEntries(octDates.map((d, i) => [isoKey(d), i % 2 === 0 ? '09:00-17:00' : '休']));
-    // パート一郎：社員・パートの区分(空行)が無いモックでも、同じルールで空欄が扱われることを確認
-    const partIchiro = Object.fromEntries(octDates.map((d, i) => [isoKey(d), i === 0 ? '13:00-17:00' : '']));
-    const octCsv = buildGunmaShiftCsv('2026.10', [
-      { name: '未登録太郎', cellsByIso: mitoroku },
-      { name: '時刻休だけ花子', cellsByIso: jikokuYasumi },
-      { name: 'パート一郎', cellsByIso: partIchiro },
-    ]); // opts省略=空行なし
-    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: 'パート一郎', hoursPerDay: 5, shiftName: 'パート一郎' }];
-    await setupRoutes(page, [
-      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
-      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
-      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
-    ]);
-    await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-10-11');
-    const rows = await shippingLaborDetailRows(page);
-    const mitorokuRow = rows.find(r => r.name === '未登録太郎');
-    const jikokuRow = rows.find(r => r.name === '時刻休だけ花子');
-    const partRow = rows.find(r => r.name === 'パート一郎');
-    const notices = await shipLaborNotices(page);
-    console.log('未登録太郎:', JSON.stringify(mitorokuRow && mitorokuRow.cells));
-    console.log('時刻休だけ花子:', JSON.stringify(jikokuRow && jikokuRow.cells));
-    console.log('パート一郎:', JSON.stringify(partRow && partRow.cells));
-    console.log('補足:', notices);
-    check('未登録太郎：空欄(出勤)が標準労働時間シート未登録のため8.0hになる', mitorokuRow && mitorokuRow.cells.slice(1).every(v => v === '8.0'));
-    check('未登録太郎の補足が出る(空欄を実際に8hとして使ったため)', notices.includes('未登録太郎'));
-    check('時刻休だけ花子：未登録でも補足が出ない(空欄が一つも無いため)', !notices.includes('時刻休だけ花子'));
-    check('時刻休だけ花子：時刻の日は7.25h、休の日は0.0h', jikokuRow && jikokuRow.cells[0] === '7.3' && jikokuRow.cells[1] === '0.0');
-    check('パート(空行なしモック)の空欄も同じルールで標準労働時間(5.0h)になる', partRow && partRow.cells.slice(1).every(v => v === '5.0'));
-    await page.close();
-  }
-
-  console.log('\n=== ⑦吉村(出)・高橋(出)が9月度・10月度とも集計されないこと ===');
+  console.log('\n=== ⑥先頭の空欄の扱いが今までどおりであること(例：10月度の高山の10/11〜10/13が出勤) ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
     const sepDates = datesForPeriod('2026.9');
     const octDates = datesForPeriod('2026.10');
-    const cellsFor = (dates) => Object.fromEntries(dates.map((d, i) => [isoKey(d), i === 0 ? '09:00-17:00' : '']));
-    const sepCsv = buildGunmaShiftCsv('2026.9', [
-      { name: '高山', cellsByIso: cellsFor(sepDates) },
-      { name: '吉村(出)', cellsByIso: cellsFor(sepDates) },
-      { name: '高橋(出)', cellsByIso: cellsFor(sepDates) },
-    ]);
-    const octCsv = buildGunmaShiftCsv('2026.10', [
-      { name: '高山', cellsByIso: cellsFor(octDates) },
-      { name: '吉村(出)', cellsByIso: cellsFor(octDates) },
-      { name: '高橋(出)', cellsByIso: cellsFor(octDates) },
-    ]);
+    const sepCsv = buildGunmaShiftCsv('2026.9', [{ name: '高山', cellsByIso: Object.fromEntries(sepDates.map(d => [isoKey(d), ''])) }]);
+    // 先頭3日(10/11-10/13)空欄、以降は3日周期で休を挟む(中間の空欄が自己完結するように)
+    const octCells = Object.fromEntries(octDates.map((d, i) => [isoKey(d), (i < 3) ? '' : (i % 3 === 0 ? '休' : '')]));
+    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: octCells }]);
     const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
     await setupRoutes(page, [
       staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202609]], sepCsv),
@@ -398,23 +363,97 @@ async function shipLaborNotices(page) {
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
     await gotoGunmaShipping(page);
-    await setBasisDate(page, '2026-09-20');
-    const namesSep = (await shippingLaborDetailRows(page)).map(r => r.name);
-    console.log('9月度:', JSON.stringify(namesSep));
-    check('9月度で吉村(出)・高橋(出)が集計されない', !namesSep.includes('吉村(出)') && !namesSep.includes('高橋(出)'));
-    await setBasisDate(page, '2026-10-15');
-    const namesOct = (await shippingLaborDetailRows(page)).map(r => r.name);
-    console.log('10月度:', JSON.stringify(namesOct));
-    check('10月度で吉村(出)・高橋(出)が集計されない', !namesOct.includes('吉村(出)') && !namesOct.includes('高橋(出)'));
+    await setBasisDate(page, '2026-10-11');
+    const rows = await shippingLaborDetailRows(page);
+    const takayama = rows.find(r => r.name === '高山');
+    console.log('高山(10/11〜、前月度にいる):', JSON.stringify(takayama && takayama.cells));
+    check('先頭(10/11〜10/13)が既存の人として出勤(8.5h)になる', takayama && takayama.cells.slice(0, 3).every(v => v === '8.5'));
+    const notices = await shipLaborNotices(page);
+    check('既存の人として判断できたのでアラートは出ない', !notices.includes('高山'));
     await page.close();
   }
 
-  console.log('\n=== ⑧栽培の収穫班シートでは今までどおり空行の後の空欄が計上されないこと。いなべ・南丹が今までどおりであること ===');
+  console.log('\n=== ⑦有休・夏・振休など休以外の休みの印も休みの印として扱われ、「入社」は休みの印でないこと ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19);
+    await setupRoutes(page, [staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv())]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(500);
+    const types = await page.evaluate(() => {
+      const t = window.__test;
+      return {
+        yasumi: t.classifyGunmaShiftCell('休').type,
+        yukyu: t.classifyGunmaShiftCell('有休').type,
+        natsu: t.classifyGunmaShiftCell('夏').type,
+        furikyu: t.classifyGunmaShiftCell('振休').type,
+        ki: t.classifyGunmaShiftCell('季').type,
+        daikyu: t.classifyGunmaShiftCell('代休').type,
+        ketsu: t.classifyGunmaShiftCell('欠').type,
+        shi: t.classifyGunmaShiftCell('シ').type,
+        ki2: t.classifyGunmaShiftCell('忌').type,
+        nyusha: t.classifyGunmaShiftCell('入社').type,
+        jikoku: t.classifyGunmaShiftCell('9:00-17:00').type,
+      };
+    });
+    console.log(JSON.stringify(types));
+    ['yasumi', 'yukyu', 'natsu', 'furikyu', 'ki', 'daikyu', 'ketsu', 'shi', 'ki2'].forEach(k => {
+      check(`「${k}」は休みの印(other)として分類される`, types[k] === 'other');
+    });
+    check('「入社」は休みの印でなくnyushaとして分類される', types.nyusha === 'nyusha');
+    check('時刻は出勤の印(time)として分類される', types.jikoku === 'time');
+
+    // classifyGunmaMiddleBlankPolicy()を直接呼び、「夏」のような休以外の印でも
+    // 同じ月度の残りの判断に使えることを確認する
+    const middleResult = await page.evaluate(() => {
+      const t = window.__test;
+      // 先頭=時刻、以降「」「夏」「」で、index1の空欄を判定する(index2の「夏」が後ろにある)
+      const p = { firstEntryIdx: 0, lastRestIdx: 2 };
+      return t.classifyGunmaMiddleBlankPolicy(p, 1, undefined);
+    });
+    check('「夏」のような休以外の印も、同じ月度の残りの休みの印として扱われ出勤と判定される', middleResult.counted === true);
+    await page.close();
+  }
+
+  console.log('\n=== ⑧表示8日間に「次の月度が必要な空欄」が無いときは、次の月度のシートを読まないこと ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
     const octDates = datesForPeriod('2026.10');
-    // 収穫班(栽培)のモック：野呂(社員、空行の前)、助っ人(パート、空行の後。全日空欄)
+    // 3日周期で休を繰り返す(①と同じ、全ての空欄が同じ月度内で自己完結する)
+    const cells = Object.fromEntries(octDates.map((d, i) => [isoKey(d), (i % 3 === 0) ? '休' : '']));
+    const octCsv = buildGunmaShiftCsv('2026.10', [{ name: '高山', cellsByIso: cells }]);
+    const novCsv = buildGunmaShiftCsv('2026.11', [{ name: '高山', cellsByIso: {} }]);
+    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
+    const novCounter = { count: 0 };
+    await setupRoutes(page, [
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
+      countingHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_FAKE_202611]], novCsv, novCounter),
+      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows)),
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+    ]);
+    await gotoGunmaShipping(page);
+    await setFakeNextPeriodGid(page, '2026.11', SHIP_GUNMA_GID_FAKE_202611);
+    await setBasisDate(page, '2026-10-11'); // 表示する8日間はすべて同じ月度内の休みの印で解決できる
+    await page.waitForTimeout(500);
+    console.log('2026.11(仮)への読み込み回数:', novCounter.count);
+    check('次の月度のシートが読まれない(不要な読み込みをしない)', novCounter.count === 0);
+    await page.close();
+  }
+
+  console.log('\n=== ⑨吉村(出)・高橋(出)が集計されない。栽培(収穫班)が変更前と同じ。いなべ・南丹が今までどおり ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19);
+    const octDates = datesForPeriod('2026.10');
+    const cellsFor = () => Object.fromEntries(octDates.map((d, i) => [isoKey(d), (i % 3 === 0) ? '休' : '']));
+    const octCsv = buildGunmaShiftCsv('2026.10', [
+      { name: '高山', cellsByIso: cellsFor() },
+      { name: '吉村(出)', cellsByIso: cellsFor() },
+      { name: '高橋(出)', cellsByIso: cellsFor() },
+    ]);
+    const laborRows = [{ flag: '1', site: '群馬', dept: '出荷場', name: '高山', hoursPerDay: 8.5, shiftName: '高山' }];
+    // 栽培(収穫班)のモック：野呂(社員、空行前)、助っ人(パート、空行後、全日空欄)
     const cultCsv = buildGunmaShiftCsv('2026.10', [
       { name: '野呂', cellsByIso: Object.fromEntries(octDates.map(d => [isoKey(d), ''])) },
       { name: '助っ人', cellsByIso: Object.fromEntries(octDates.map(d => [isoKey(d), ''])) },
@@ -424,10 +463,12 @@ async function shipLaborNotices(page) {
       { flag: '1', site: '群馬', dept: '収穫', name: '助っ人', hoursPerDay: 6, shiftName: '助っ人' },
     ];
     await setupRoutes(page, [
+      staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
       staticHandler([[GUNMA_SHIFT_SHEET_ID, CULT_GUNMA_GID_202610]], cultCsv),
-      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(cultLaborRows)),
+      staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows.concat(cultLaborRows))),
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
+    // 栽培側をまず確認
     await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(500);
     await page.click('[data-site="群馬"]');
@@ -440,16 +481,23 @@ async function shipLaborNotices(page) {
     const sukedachi = cultRows.find(r => r.name === '助っ人');
     console.log('野呂(社員・空行前):', JSON.stringify(noro && noro.cells));
     console.log('助っ人(パート・空行後):', JSON.stringify(sukedachi && sukedachi.cells));
-    check('栽培(収穫班)：社員(空行の前)の空欄は今までどおり出勤(標準労働時間8.0h)になる', noro && noro.cells.every(v => v === '8.0'));
-    check('栽培(収穫班)：パート(空行の後)の空欄は今までどおり計上されない(0.0h)。perPersonルールの影響を受けない', sukedachi && sukedachi.cells.every(v => v === '0.0'));
+    check('栽培(収穫班)：社員(空行の前)の空欄は今までどおり出勤(標準労働時間8.0h)になる(休みの印ルールの影響を受けない)', noro && noro.cells.every(v => v === '8.0'));
+    check('栽培(収穫班)：パート(空行の後)の空欄は今までどおり計上されない(0.0h)', sukedachi && sukedachi.cells.every(v => v === '0.0'));
 
-    const bannerInabe = await page.evaluate(() => { document.querySelector('[data-business="出荷"]').click(); return null; });
-    await page.waitForTimeout(800);
-    const bannerDisplayInabe = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
+    // 出荷側(群馬)
+    await page.click('[data-business="出荷"]');
+    await page.waitForTimeout(1200);
+    const shipRows = await shippingLaborDetailRows(page);
+    const shipNames = shipRows.map(r => r.name);
+    console.log('出荷(群馬)の人別内訳:', JSON.stringify(shipNames));
+    check('吉村(出)が集計されない', !shipNames.includes('吉村(出)'));
+    check('高橋(出)が集計されない', !shipNames.includes('高橋(出)'));
+
+    // いなべ・南丹
     await page.click('[data-site="いなべ"]');
     await page.waitForTimeout(800);
-    const bannerDisplayInabe2 = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
-    check('いなべの出荷パネル3は今までどおり実データ接続(サンプル帯が出ない)', bannerDisplayInabe2 === 'none');
+    const bannerInabe = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
+    check('いなべの出荷パネル3は今までどおり実データ接続(サンプル帯が出ない)', bannerInabe === 'none');
     await page.click('[data-site="南丹"]');
     await page.waitForTimeout(800);
     const bannerTextNantan = await page.evaluate(() => document.getElementById('shippingSampleBanner').textContent.trim());
