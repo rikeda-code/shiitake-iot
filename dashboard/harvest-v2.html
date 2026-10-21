@@ -6490,12 +6490,23 @@ async function ensureTempDataset() {
   const perSite = await Promise.all(SITES.map(site =>
     fetchTempSheetForSite(site).then(list => ({ site, list })).catch(() => ({ site, list: [] }))));
 
+  // 温度集計表の列名は旧コンテナタブの名前（例 47(9/4)志摩L3）のままで、v2 の命名
+  // （47(9/4)L3、36(10/8)自社）と接尾辞が違う。号機と投入日「号機(月/日)」で突き合わせる。
+  const cycleKey = name => {
+    const m = String(name).match(/^(.+?)\((\d{1,2})\/(\d{1,2})\)/);
+    return m ? `${m[1].trim()}(${+m[2]}/${+m[3]})` : null;
+  };
   const items = [];
   perSite.forEach(({ site, list }) => {
     list.forEach(bc => {
       const no = extractContainerNo(bc.name);
       // 号機の栽培開始日・菌床ロットは収穫実績側のコンテナ一覧から突き合わせる
-      const match = (weeklyState?.containerData || []).find(c => c.siteName === site.name && c.name === bc.name);
+      const siteRows = (weeklyState?.containerData || []).filter(c => c.siteName === site.name);
+      const key = cycleKey(bc.name);
+      // 同じ号機(月/日)が別の年にもある場合は投入日の新しい方
+      const match = siteRows.find(c => c.name === bc.name) ||
+        siteRows.filter(c => key && cycleKey(c.name) === key)
+          .sort((a, b) => (parseDateStr(b.startDate) || 0) - (parseDateStr(a.startDate) || 0))[0];
       const startDate = match?.startDate || '';
       const startD = parseDateStr(startDate);
       const points = bc.points.map(p => {
@@ -6507,9 +6518,11 @@ async function ensureTempDataset() {
         }
         return { ...p, x: +(p.day + p.hour / 24).toFixed(4), dateObj };
       }).sort((a, b) => a.x - b.x);
+      // 表示名は他のタブと揃えて v2 の命名にする（突き合わせできなかった列は元の列名のまま）
+      const name = match?.name || bc.name;
       items.push({
-        key: `${site.name}|${no}|${bc.name}`, siteName: site.name, no, name: bc.name,
-        startDate, lot: match?.lot || '', points,
+        key: `${site.name}|${no}|${name}`, siteName: site.name, no, name,
+        startDate, lot: match?.lot || '', isJisha: match?.isJisha, points,
       });
     });
   });
