@@ -297,7 +297,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
     <span class="leave-btns edit-only touch-hide" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
-    <button id="legacyBtn" class="edit-only" title="旧シフト表の内容でこの期間を置き換えます（いなべ・群馬）">旧シフト表から取り込む</button>
+    <button id="legacyBtn" class="edit-only" title="旧シフト表の内容でこの期間を置き換えます（いなべ・群馬。南丹は南丹勤務表から）">旧シフト表から取り込む</button>
     <button id="reloadBtn" title="整理済み_Mからメンバーを読み直します">メンバー更新</button>
     <span class="who" id="who"></span>
     <button id="logoutBtn">ログアウト</button>
@@ -1004,20 +1004,81 @@ $('site').onchange = () => load();
 $('reloadBtn').onclick = () => refreshMembers(true);
 // 旧シフト表（いなべ・群馬の期間ごとのシート）の内容で、今の期間を置き換える。
 // 旧シフト表に載っている人だけが対象で、その人の期間内の日は旧シフト表と同じ内容になる（空欄は消す）
-const LEGACY_SITES = ['いなべ', '群馬']; // 旧シフト表があり、取り込みに対応している拠点
+const LEGACY_SITES = ['いなべ', '群馬', '南丹']; // 旧シフト表があり、取り込みに対応している拠点
+
+// 南丹は、現場の印刷の勤務表を読み取ったスプレッドシート（1行目＝日付、A列＝名前、値は「8H」「休」など）から
+// ブラウザで直接読む。実働時間しか書かれていないので8時始まりとみなし、休憩（拘束5時間以上で1時間）を足して終わりの時刻にする。
+// 次の期間のシートができたら、ここに足す
+const NANTAN_SHEETS = [
+  { id: '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8', gid: '716401757', label: '南丹勤務表（10/11〜10/31）' },
+];
+const NANTAN_LEAVE = { '休': '休', '-/公': '休', '-/法': '休', '有': '有休' };
+function nantanVal(raw) {
+  if (NANTAN_LEAVE[raw]) return NANTAN_LEAVE[raw];
+  const m = raw.match(/^(\d+(?:\.5)?)H$/i); if (!m) return '';
+  const h = +m[1], end = 8 + h + (h >= 5 ? 1 : 0);
+  return `8:00-${Math.floor(end)}:${end % 1 ? '30' : '00'}`;
+}
+function parseCsv(text) {
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(f); f = ''; }
+    else if (ch === '\n') { row.push(f.replace(/\r$/, '')); rows.push(row); row = []; f = ''; }
+    else f += ch;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+// 戻り値は GAS の legacy と同じ形。dates＝勤務表に載っている日（それ以外の日は触らない）
+async function readNantanSheets(from, to) {
+  const keyOf = s => String(s).normalize('NFKC').replace(/\s/g, '');
+  const byName = {}; members.forEach(m => { byName[keyOf(m.name)] = m.key; byName[keyOf(m.key)] = m.key; });
+  const out = { cells: [], keys: [], unmatched: [], skipped: [], sheets: [], dates: new Set() };
+  for (const s of NANTAN_SHEETS) {
+    const res = await fetch(`https://docs.google.com/spreadsheets/d/${s.id}/export?format=csv&gid=${s.gid}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${s.label}を読めませんでした（${res.status}）`);
+    const rows = parseCsv(await res.text());
+    const dates = (rows[0] || []).map(v => { const m = String(v).match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/); return m && `${m[1]}-${pad(m[2])}-${pad(m[3])}`; })
+      .map(d => d && d >= from && d <= to ? d : null);
+    if (!dates.some(Boolean)) continue;
+    out.sheets.push(s.label);
+    dates.forEach(d => d && out.dates.add(d));
+    rows.slice(1).forEach(r => {
+      const name = String(r[0] || '').trim(); if (!name || name === '曜日') return;
+      const key = byName[keyOf(name)];
+      if (!key) { if (!out.unmatched.includes(name)) out.unmatched.push(name); return; }
+      if (!out.keys.includes(key)) out.keys.push(key);
+      dates.forEach((d, j) => {
+        const raw = String(r[j] || '').normalize('NFKC').trim(); if (!d || !raw) return;
+        const v = nantanVal(raw);
+        if (v) out.cells.push({ key, date: d, value: v }); else out.skipped.push(`${name} ${+d.slice(5, 7)}/${+d.slice(8)}「${raw}」`);
+      });
+    });
+  }
+  return out;
+}
+
 function updateLegacyBtn() { $('legacyBtn').hidden = !LEGACY_SITES.includes(curSite()); }
 $('legacyBtn').onclick = async () => {
   const from = allCols[0].iso, to = allCols[allCols.length - 1].iso;
-  const ok = await ask(`旧シフト表から ${periodLabel()} を取り込みます。旧シフト表に載っている人は、この期間のシフトが旧シフト表と同じ内容に置き換わります。`, '取り込む');
+  const nantan = curSite() === '南丹';
+  const ok = await ask(nantan
+    ? `南丹勤務表から ${periodLabel()} を取り込みます。勤務表に載っている人は、勤務表にある日のシフトが置き換わります（勤務表にない日はそのまま）。時間は8時始まりとして入れます（8H→8:00-17:00）。`
+    : `旧シフト表から ${periodLabel()} を取り込みます。旧シフト表に載っている人は、この期間のシフトが旧シフト表と同じ内容に置き換わります。`, '取り込む');
   if (!ok) return;
   const btn = $('legacyBtn'); btn.disabled = true;
   setStatus('旧シフト表を読み込み中…');
   try {
-    const res = await api('GET', { action: 'legacy', site: curSite(), from, to });
+    const res = nantan ? await readNantanSheets(from, to) : await api('GET', { action: 'legacy', site: curSite(), from, to });
+    if (nantan && !res.sheets.length) throw new Error(`${periodLabel()} の勤務表がありません`);
     const incoming = {};
     res.cells.forEach(c => { (incoming[c.key] ||= {})[c.date] = normVal(c.value); });
     let n = 0;
-    res.keys.forEach(key => allCols.forEach(c => {
+    const days = res.dates ? allCols.filter(c => res.dates.has(c.iso)) : allCols;
+    res.keys.forEach(key => days.forEach(c => {
       const v = incoming[key]?.[c.iso] || '';
       if ((data[key]?.[c.iso] || '') === v) return;
       if (v) (data[key] ||= {})[c.iso] = v; else if (data[key]) delete data[key][c.iso];
@@ -1028,7 +1089,7 @@ $('legacyBtn').onclick = async () => {
     if (res.sheets?.length) notes.push(`読んだタブ：${res.sheets.join('、')}`);
     if (res.unmatched?.length) notes.push(`整理済み_Mで見つからず取り込まなかった人：${res.unmatched.join('、')}`);
     if (res.skipped?.length) notes.push(`時間として読めず取り込まなかったセル：${res.skipped.join('、')}`);
-    $('dialogSlot').innerHTML = `<div class="dialog"><span>旧シフト表から${res.keys.length}人分を取り込み、${n}セルを更新しました。${notes.length ? '<br>' + notes.map(esc).join('<br>') : ''}</span><button id="dlgClose">閉じる</button></div>`;
+    $('dialogSlot').innerHTML = `<div class="dialog"><span>${nantan ? '南丹勤務表' : '旧シフト表'}から${res.keys.length}人分を取り込み、${n}セルを更新しました。${notes.length ? '<br>' + notes.map(esc).join('<br>') : ''}</span><button id="dlgClose">閉じる</button></div>`;
     $('dlgClose').onclick = () => $('dialogSlot').innerHTML = '';
   } catch (err) {
     toast('取り込めませんでした：' + err.message);
