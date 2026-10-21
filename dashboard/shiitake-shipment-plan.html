@@ -930,11 +930,48 @@
     return -1;
   }
 
+  // 「収獲目標値」シートのサイズ列の見出し。2026年10月分から秀/優の8区分
+  // （秀M・優M・秀L・優L・秀2L・優2L・袋1・袋2）に変わり、旧形式（M・L・2L・袋の
+  // 4列がI:L）と列位置がずれたため、列番号ではなく見出し名で探して合算する
+  var HARVEST_SIZE_HEADERS = {
+    'M':  ['M', '秀M', '優M'],
+    'L':  ['L', '秀L', '優L'],
+    '2L': ['2L', '秀2L', '優2L'],
+    '袋': ['袋', '袋1', '袋2'],
+  };
+
+  // A列が「日付」の行を見出し行とみなし、サイズごとに該当する列番号の配列を返す
+  function findHarvestSizeCols(json){
+    var rows = (json.table && json.table.rows) || [];
+    var cols = { 'M': [], 'L': [], '2L': [], '袋': [] };
+    for (var i = 0; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      if (!c || !c[0] || String(c[0].v).trim() !== '日付') continue;
+      for (var j = 1; j < c.length; j++) {
+        var h = c[j] && c[j].v ? String(c[j].v).trim() : '';
+        Object.keys(HARVEST_SIZE_HEADERS).forEach(function(size){
+          if (HARVEST_SIZE_HEADERS[size].indexOf(h) !== -1) cols[size].push(j);
+        });
+      }
+      break;
+    }
+    return cols;
+  }
+
+  function sumHarvestCols(json, rowIdx, colList){
+    var sum = 0, any = false;
+    colList.forEach(function(colIdx){
+      var v = readCellNumber(json, rowIdx, colIdx);
+      if (v !== null) { sum += v; any = true; }
+    });
+    return any ? sum : null;
+  }
+
   // 実績日1日分のM/L/2L/袋の収穫実績を取得する。「DB共有」ファイルの「URL_収穫管理表」
   // タブ（1行目＝見出し：A1「収穫管理表」・B1「いなべ」・C1「群馬」・D1「南丹」）から、
   // 見出しが「いなべ」の列（列位置は固定しない）で、実績日の年月に対応する外部
   // スプレッドシートIDを引き、その「収獲目標値」シートからA列が実績日と一致する
-  // 行のI:L列を読む
+  // 行のサイズ列（findHarvestSizeCols()で見出しから特定）を読む
   async function fetchHarvestActual(date){
     try {
       var urlJson = await fetchCsvSheet(DB_SHARE_SHEET_ID, HARVEST_URL_SHEET_GID);
@@ -969,11 +1006,12 @@
       var targetJson = await fetchCsvSheet(targetSheetId, targetGid);
       var rowIdx = findRowIndexByDate(targetJson, date);
       if (rowIdx < 0) return null;
+      var sizeCols = findHarvestSizeCols(targetJson);
       return {
-        'M': readCellNumber(targetJson, rowIdx, 8),
-        'L': readCellNumber(targetJson, rowIdx, 9),
-        '2L': readCellNumber(targetJson, rowIdx, 10),
-        '袋': readCellNumber(targetJson, rowIdx, 11),
+        'M': sumHarvestCols(targetJson, rowIdx, sizeCols['M']),
+        'L': sumHarvestCols(targetJson, rowIdx, sizeCols['L']),
+        '2L': sumHarvestCols(targetJson, rowIdx, sizeCols['2L']),
+        '袋': sumHarvestCols(targetJson, rowIdx, sizeCols['袋']),
       };
     } catch (e) {
       return null;
