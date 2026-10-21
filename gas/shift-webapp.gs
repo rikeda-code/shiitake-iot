@@ -35,6 +35,7 @@
  *   { action:'addMember',  site, name, dept, empType, joinDate }
  *   { action:'retire',     key, date, flag }   // flag: 9=退職 / 3=退職・異動
  *   { action:'undoRetire', key }
+ *   { action:'changeDept', key, site, dept }   // 部門（所属）を変える。整理済み_Mの部門列を書き換える
  */
 
 const MASTER_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
@@ -111,12 +112,13 @@ function doPost(e) {
       case 'addMember':  clearMemberCache_(); return json_(addMember_(req));
       case 'retire':     clearMemberCache_(); return json_(setRetire_(req.key, req.date, req.flag || 9));
       case 'undoRetire': clearMemberCache_(); return json_(undoRetire_(req.key));
+      case 'changeDept': clearMemberCache_(); return json_(changeDept_(req));
       default: return json_({ status: 'error', message: '不明なactionです' });
     }
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
   } finally {
-    if (['addMember', 'retire', 'undoRetire'].indexOf(req.action) >= 0) clearMemberCache_();
+    if (['addMember', 'retire', 'undoRetire', 'changeDept'].indexOf(req.action) >= 0) clearMemberCache_();
     lock.releaseLock();
   }
 }
@@ -279,6 +281,18 @@ function setRetire_(key, date, flag) {
   sh.getRange(m.row, cols.flag).setValue(flag === 3 ? 3 : 9);
   if (cols.date > 0) sh.getRange(m.row, cols.date).setValue(new Date(date + 'T00:00:00+09:00'));
   return {};
+}
+
+// 部門（所属）を変える。同じ氏名が別の拠点にもいるときに取り違えないよう、拠点でも絞る
+function changeDept_(req) {
+  if (!req.key || !req.dept) throw new Error('人と新しい部門を指定してください');
+  const m = readMembers_(true).find(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag !== 9);
+  if (!m) throw new Error('整理済み_Mに該当する人が見つかりません');
+  const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
+  const cols = masterCols_(sh);
+  const before = String(sh.getRange(m.row, cols.dept).getValue()).trim();
+  sh.getRange(m.row, cols.dept).setValue(req.dept);
+  return { before, after: req.dept };
 }
 
 function undoRetire_(key) {

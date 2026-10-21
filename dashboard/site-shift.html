@@ -373,7 +373,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
     </section>
     <section class="panel">
       <h2>メンバー</h2>
-      <p>整理済み_Mの内容です。ここで登録・退職を行うと整理済み_Mに直接書き込みます（新人はB列=2、退職はB列=9、異動は3）。</p>
+      <p>整理済み_Mの内容です。ここで登録・部門変更・退職を行うと整理済み_Mに直接書き込みます（新人はB列=2、退職はB列=9、異動は3）。部門変更は「部門変更」→新しい部門を選んで「変更」。部門別の時間は、過去の期間も含めて今の部門で数えます（たまに配送に行くだけなら、部門は変えずにシフトの「配送」「半日配送」を使ってください）。</p>
       <div class="scroll-x"><table class="mem-table" id="memTable"></table></div>
       <form class="add-form" id="addForm">
         <label>氏名<input id="newName" required placeholder="例：中村 陽子"></label>
@@ -1256,7 +1256,9 @@ $('fxSave').onclick = async () => {
 };
 
 /* ── メンバー ── */
-let retiring = null;
+let retiring = null, moving = null; // 退職・異動の入力中の人／部門変更の入力中の人
+// 部門変更で選べる部門（整理済み_Mの部門列に書く値）
+const DEPT_CHOICES = ['栽培', '出荷', '配送', '配送・栽培', '配送・出荷'];
 const md = s => s ? `${s.slice(0, 4)}/${+s.slice(5, 7)}/${+s.slice(8)}` : '—';
 const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職/異動', 9: '退職' };
 function renderMembers() {
@@ -1266,7 +1268,9 @@ function renderMembers() {
     const gone = false;
     const acts = retiring === m.key
       ? `<input type="date" id="leaveDate" aria-label="退職日" value="${allCols[allCols.length - 1]?.iso || ''}"><select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select><button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button>`
-      : [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="leave">退職・異動</button>`;
+      : moving === m.key
+      ? `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select><button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button>`
+      : [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="dept">部門変更</button><button data-act="leave">退職・異動</button>`;
     h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${md(m.join)}</td><td>${md(m.leave)}</td><td><div class="acts">${acts}</div></td></tr>`;
   });
   $('memTable').innerHTML = h;
@@ -1276,18 +1280,27 @@ $('memTable').addEventListener('click', async ev => {
   const key = b.closest('tr').dataset.key;
   const m = members.find(x => x.key === key);
   const act = b.dataset.act;
-  if (act === 'leave') { retiring = key; renderMembers(); return; }
-  if (act === 'cancel') { retiring = null; renderMembers(); return; }
+  if (act === 'leave') { retiring = key; moving = null; renderMembers(); return; }
+  if (act === 'dept') { moving = key; retiring = null; renderMembers(); return; }
+  if (act === 'cancel') { retiring = moving = null; renderMembers(); return; }
   try {
-    if (act === 'ok') {
+    let done = ''; // 読み直しの知らせに上書きされないよう、最後に出す
+    if (act === 'deptOk') {
+      const dept = $('newDept').value;
+      if (dept === m.dept) { moving = null; renderMembers(); return; }
+      b.disabled = true;
+      await api('POST', { action: 'changeDept', key, site: curSite(), dept });
+      done = `${m.name}さんの部門を「${dept}」に変えました`;
+    } else if (act === 'ok') {
       await api('POST', { action: 'retire', key, date: $('leaveDate').value, flag: +$('leaveFlag').value });
-      toast(`${m.name}さんの退職日を整理済み_Mに書き込みました`);
+      done = `${m.name}さんの退職日を整理済み_Mに書き込みました`;
     } else if (act === 'undo') {
       await api('POST', { action: 'undoRetire', key });
-      toast('在職中に戻しました');
+      done = '在職中に戻しました';
     }
-    retiring = null; await refreshMembers(true);
-  } catch (err) { toast('書き込めませんでした：' + err.message); }
+    retiring = moving = null; await refreshMembers(true);
+    if (done) toast(done);
+  } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
 });
 $('addForm').addEventListener('submit', async ev => {
   ev.preventDefault();
