@@ -221,6 +221,17 @@
   /* 選べるセル：ドラッグ中にブラウザ既定の文字選択（青い反転）が起きないようにする。
      today-col/total-colの背景と見分けがつく専用の背景色(.cell-selected)を重ねる */
   .selectable-cell{ cursor:cell; -webkit-user-select:none; user-select:none; }
+  /* 標準工数：収穫見込の手入力欄と、見込kgで計算した収穫工数の表示 */
+  .harvest-input{
+    width:100%; min-width:56px; box-sizing:border-box; padding:2px 4px;
+    font:inherit; text-align:right; border:1px solid #c9b994; border-radius:4px; background:#fff;
+  }
+  .harvest-input:disabled{ background:#f1ede4; color:var(--ink-soft); }
+  .harvest-input.save-error{ border-color:var(--red); background:#fdecea; }
+  .harvest-manual{ color:#2f6fa8; font-weight:700; }
+  .harvest-input-note{ padding:6px 18px 0; font-size:12.5px; color:var(--ink-soft); }
+  #workHarvestSaveStatus{ margin-left:8px; }
+  #workHarvestSaveStatus.error{ color:var(--red); }
   .selectable-cell.cell-selected{
     background:#bfe0fb !important;
     box-shadow:inset 0 0 0 1px #2f6fa8;
@@ -364,7 +375,8 @@
         </tbody>
       </table>
     </div>
-    <div class="note" id="workHarvestNote" style="display:none; padding:4px 18px 8px;">* 収穫計画のkgが未入力のため、収穫を含まない値</div>
+    <div class="note harvest-input-note" id="workHarvestInputNote">収穫：収穫見込を入力した日は見込kg、空欄の日は収穫計画kgで計算（<span class="harvest-manual">青字</span>＝見込で計算）<span id="workHarvestSaveStatus"></span></div>
+    <div class="note" id="workHarvestNote" style="display:none; padding:4px 18px 8px;">* 収穫計画・収穫見込のkgがどちらも未入力のため、収穫を含まない値</div>
     <div class="warnings" id="workHarvestWarnings" style="display:none;">
       <ul id="workHarvestWarningsList"></ul>
     </div>
@@ -626,6 +638,9 @@
   // 拠点シフト表（site-shift.html）のGAS WebアプリURL。設定されていればこちらから実働時間を読み、
   // 空のときだけ上の旧シフト表（期間ごとのシート）を読む
   var SHIFT_GAS_URL = ''; // 反映は保留中。拠点シフト表のGAS URL: https://script.google.com/macros/s/AKfycbzVm0SzILDzMTPabtrxeYxJz5__APrMgb8Vt4Ga_VFLItC9QAVWooPcRjrlPuBGutgWvg/exec
+  // 収穫見込（手入力）の保存先GAS WebアプリURL（gas/harvest-forecast-webapp.gs）。
+  // 空のあいだは入力欄を使えず、収穫工数は従来どおり収穫計画kgだけで計算する
+  var HARVEST_FORECAST_GAS_URL = 'https://script.google.com/macros/s/AKfycbwZ3RlwF2Gh3aMLesUl6AOq5y5p7rbLF5OILYSmkGQ_2d-XExCoPTknJdBm7bOX7B8bNg/exec';
   // 日別収穫kgの取得先（拠点ごと）。typeで取得方式を切り替える：
   // 'yearMonthColumns'=いなべ・群馬(1シートの年月列×日番号行。群馬は転写シートに
   // 年月の列を追加すれば自動で反映)、
@@ -1539,14 +1554,56 @@
     }
   }
 
+  // 収穫見込（手入力）を保存先GASから読む。当日〜6日後の長さDAY_COUNTの配列
+  // （未入力の日はnull）を返す。保存先が未設定の場合は全日nullを返す
+  async function fetchManualHarvestKg(basisDate, site){
+    var out = new Array(DAY_COUNT).fill(null);
+    if (!HARVEST_FORECAST_GAS_URL) return out;
+    var url = HARVEST_FORECAST_GAS_URL + '?action=load&site=' + encodeURIComponent(site) +
+      '&from=' + toISO(basisDate) + '&to=' + toISO(addDays(basisDate, DAY_COUNT - 1));
+    var res = await fetch(url, { cache: 'no-store' });
+    var json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || '収穫見込を取得できませんでした');
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var v = json.values[toISO(addDays(basisDate, o))];
+      if (typeof v === 'number' && !isNaN(v)) out[o] = v;
+    }
+    return out;
+  }
+
+  // 収穫見込（手入力）を1日分保存する。kgがnullならその日の見込を削除する
+  async function saveManualHarvestKg(site, iso, kg){
+    var res = await fetch(HARVEST_FORECAST_GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // CORSプリフライト回避のためtext/plain
+      body: JSON.stringify({ action: 'save', site: site, date: iso, kg: kg }),
+    });
+    var json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || '保存できませんでした');
+  }
+
+  // 収穫見込の入力欄の文字列を読む。空欄はnull、数値として読めない・負の値はundefined（不正）
+  function parseManualHarvestInput(raw){
+    var s = String(raw == null ? '' : raw).normalize('NFKC').replace(/,/g, '').replace(/kg$/i, '').trim();
+    if (s === '') return null;
+    var v = Number(s);
+    return (isNaN(v) || v < 0) ? undefined : v;
+  }
+
   // 標準工数設定の行群 x ①の集計結果 x 日別収穫kgから、当日〜7日後の標準工数を算出する。
+  // manualKgByDay（省略可）は手入力の収穫見込kg：入っている日は収穫計画kg(harvestKgByDay)
+  // より優先して収穫工数を計算する。各日のharvestSourceに使った方（'manual'/'plan'/null）を残す。
   // 純粋関数(テストから直接呼べる)
-  function computeStandardWorkHours(rows, cultResult, harvestKgByDay, basisDate){
+  function computeStandardWorkHours(rows, cultResult, harvestKgByDay, basisDate, manualKgByDay){
     var perDay = [];
     for (var o = 0; o < DAY_COUNT; o++) {
       var items = {};
       var subtotal = 0;
       var harvestMissing = false;
+      var manualKg = manualKgByDay ? manualKgByDay[o] : null;
+      var useManual = typeof manualKg === 'number' && !isNaN(manualKg);
+      var effectiveKg = useManual ? manualKg : harvestKgByDay[o];
+      var harvestSource = useManual ? 'manual' : ((effectiveKg === null || effectiveKg === undefined) ? null : 'plan');
       rows.forEach(function(row){
         var v = null;
         if (COUNT_BASED_ITEMS.hasOwnProperty(row.waku)) {
@@ -1563,7 +1620,7 @@
             if (row.unit === '分') v = v / 60;
           }
         } else if (row.waku === '収穫') {
-          var kg = harvestKgByDay[o];
+          var kg = effectiveKg;
           if (kg === null || kg === undefined || row.factor === null || row.factor === 0) {
             v = null;
             harvestMissing = true;
@@ -1579,7 +1636,7 @@
         items[row.waku] = v;
         if (v !== null && !isNaN(v)) subtotal += v;
       });
-      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10, rawSubtotal: subtotal, harvestMissing: harvestMissing });
+      perDay.push({ items: items, subtotal: Math.round(subtotal * 10) / 10, rawSubtotal: subtotal, harvestMissing: harvestMissing, harvestSource: harvestSource });
     }
     return perDay;
   }
@@ -2587,22 +2644,58 @@
     renderTotalCell(contTotalCell, computeRowTotal(result.rawContainerCounts), fmtNum, '延べ');
   }
 
-  function renderWorkHoursTable(rows, perDay){
+  // 標準工数の表の先頭2行（収穫計画kg・収穫見込kgの入力欄）のHTML。入力欄のセルは
+  // セル範囲選択の対象外にする（mousedownで選択が始まると入力欄にフォーカスできないため）
+  function buildHarvestRowsHtml(harvest){
+    var html = buildRowHtml('収穫計画', '収穫計画', 'harvest', DAY_COUNT, null, 'kg', 'dec1');
+    var tds = '';
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var v = harvest ? harvest.manualKg[o] : null;
+      tds += '<td' + (o === 0 ? ' class="today-col"' : '') + '><input class="harvest-input" type="text" inputmode="decimal"' +
+        ' data-harvest-input-offset="' + o + '" value="' + (v === null || v === undefined ? '' : v) + '"' +
+        (harvest && harvest.editable ? '' : harvest && harvest.loading ? ' disabled title="収穫見込を読み込み中です"' :
+          ' disabled title="収穫見込の保存先（GAS）が未設定のため入力できません"') + '></td>';
+    }
+    tds += '<td class="total-col selectable-cell" data-sel-col="' + DAY_COUNT + '" data-unit="kg" data-numfmt="dec1" data-harvest="収穫見込" data-harvest-offset="total">' + DASH + '</td>';
+    html += '<tr><th class="sticky-1">収穫見込（入力）</th><th class="unit-col">kg</th>' + tds + '</tr>';
+    return html;
+  }
+
+  // harvest（省略可）は { planKg, manualKg, editable }：渡すと表の先頭に収穫計画・収穫見込の行を出す
+  function renderWorkHoursTable(rows, perDay, harvest){
     var body = document.getElementById('table2workBody');
-    var html = '';
+    var html = harvest ? buildHarvestRowsHtml(harvest) : '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT, null, 'h', 'dec1'); });
     html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
+    document.getElementById('workHarvestInputNote').style.display = harvest ? '' : 'none';
+    fillWorkHoursValues(rows, perDay, harvest);
+  }
 
+  // 表の組み立て済みのセルに値を書き込む。収穫見込を入力し直したときは、入力欄を
+  // 作り直さずに（フォーカスを失わないよう）この関数だけで再計算結果を反映する
+  function fillWorkHoursValues(rows, perDay, harvest){
     var anyHarvestMissing = (perDay || []).some(function(d){ return d.harvestMissing; });
     document.getElementById('workHarvestNote').style.display = anyHarvestMissing ? '' : 'none';
+
+    if (harvest) {
+      for (var oh = 0; oh < DAY_COUNT; oh++) {
+        var planCell = document.querySelector('[data-harvest="収穫計画"][data-harvest-offset="' + oh + '"]');
+        setCellValue(planCell, fmtNum(harvest.planKg[oh]), harvest.planKg[oh]);
+      }
+      renderTotalCell(document.querySelector('[data-harvest="収穫計画"][data-harvest-offset="total"]'), computeRowTotal(harvest.planKg), fmtNum);
+      renderTotalCell(document.querySelector('[data-harvest="収穫見込"][data-harvest-offset="total"]'), computeRowTotal(harvest.manualKg), fmtNum);
+    }
 
     if (!perDay) return;
     (rows || []).forEach(function(row){
       for (var o = 0; o < DAY_COUNT; o++) {
         var v = perDay[o].items[row.waku];
         var cell = document.querySelector('[data-work="' + row.waku + '"][data-work-offset="' + o + '"]');
-        if (cell) setCellValue(cell, fmtNum(v), v);
+        if (cell) {
+          setCellValue(cell, fmtNum(v), v);
+          cell.classList.toggle('harvest-manual', row.waku === '収穫' && perDay[o].harvestSource === 'manual');
+        }
       }
       var dailyRaw = [];
       for (var oi = 0; oi < DAY_COUNT; oi++) dailyRaw.push(perDay[oi].items[row.waku]);
@@ -3327,9 +3420,26 @@
     }
   }
 
+  // 栽培の標準工数パネルを最後に描画したときの材料。収穫見込を入力し直したときに、
+  // シートを取り直さずに再計算するために持っておく（genが最新のrender()のものだけ使う）
+  var workState = null;
+  // 同じく、標準労働時間の結果（過不足の再計算用）。render()の最後に入れる
+  var lastCultLaborResult = null;
+
+  function setHarvestSaveStatus(text, isError){
+    var el = document.getElementById('workHarvestSaveStatus');
+    el.textContent = text ? '　' + text : '';
+    el.classList.toggle('error', !!isError);
+  }
+
   async function renderWork(basisDate, cultResult, site, gen){
     showPanelError('workError', null);
+    setHarvestSaveStatus('');
     try {
+      // 収穫見込（手入力）はGASから読むため時間がかかる。シートの読み込みと並行して取りに行き、
+      // 表は先に収穫計画kgだけで描画して、見込が届いた時点で入力欄に入れて再計算する
+      var manualPromise = fetchManualHarvestKg(basisDate, site);
+      manualPromise.catch(function(){}); // 失敗は下のapplyManualHarvestで扱う（未処理のrejectを出さない）
       var rows = await fetchStdWorkHoursRows();
       var harvestKgByDay = [];
       var harvestCache = {}; // render()呼び出しごとにローカル(他のrender()と共有しない)
@@ -3339,17 +3449,98 @@
       var fallbackCult = cultResult || { processCounts: new Array(DAY_COUNT).fill({}), containerCounts: new Array(DAY_COUNT).fill(0) };
       var perDay = computeStandardWorkHours(rows, fallbackCult, harvestKgByDay, basisDate);
       if (gen !== renderGeneration) return perDay; // 追い越されていたら描画しない
-      renderHarvestMonthlyWarnings(harvestCache.warnings || []);
-      renderWorkHoursTable(rows, perDay);
+      var harvest = { planKg: harvestKgByDay, manualKg: new Array(DAY_COUNT).fill(null), editable: false, loading: !!HARVEST_FORECAST_GAS_URL };
+      var state = { gen: gen, basisDate: basisDate, site: site, rows: rows, cult: fallbackCult, harvest: harvest, perDay: perDay, warnings: (harvestCache.warnings || []).slice() };
+      workState = state;
+      renderHarvestMonthlyWarnings(state.warnings);
+      renderWorkHoursTable(rows, perDay, harvest);
+      if (HARVEST_FORECAST_GAS_URL) applyManualHarvest(state, manualPromise);
       return perDay;
     } catch (err) {
       console.error('[標準工数] 取得エラー:', err);
       if (gen !== renderGeneration) return null;
+      workState = null;
       showPanelError('workError', err.message || String(err));
       renderWorkHoursTable([], null);
       return null;
     }
   }
+
+  // GASから届いた収穫見込を入力欄に入れ、見込優先で再計算する。過不足もrender()が
+  // 描画済みならここで描き直す（未描画ならrender()の最後にworkState.perDayが使われる）
+  async function applyManualHarvest(state, manualPromise){
+    var manualKg, warning = null;
+    try {
+      manualKg = await manualPromise;
+    } catch (e) {
+      console.error('[収穫見込] 取得エラー:', e);
+      warning = state.site + 'の収穫見込（手入力）を取得できませんでした（' + (e.message || e) + '）';
+    }
+    if (workState !== state) return; // 基準日・拠点が切り替わっていたら捨てる
+    state.harvest.loading = false;
+    document.querySelectorAll('.harvest-input').forEach(function(input){
+      var o = parseInt(input.getAttribute('data-harvest-input-offset'), 10);
+      if (warning) { input.title = '収穫見込を読み込めなかったため入力できません'; return; }
+      var v = manualKg[o];
+      state.harvest.manualKg[o] = v;
+      input.value = (v === null || v === undefined) ? '' : v;
+      input.disabled = false;
+      input.removeAttribute('title');
+    });
+    if (warning) {
+      state.warnings.push(warning);
+      renderHarvestMonthlyWarnings(state.warnings);
+      return;
+    }
+    state.harvest.editable = true;
+    state.perDay = computeStandardWorkHours(state.rows, state.cult, state.harvest.planKg, state.basisDate, state.harvest.manualKg);
+    fillWorkHoursValues(state.rows, state.perDay, state.harvest);
+    if (lastCultLaborResult && lastCultLaborResult.gen === state.gen) renderLaborTable(lastCultLaborResult.result, state.perDay);
+  }
+
+  // 収穫見込の入力欄を確定したとき（Enter・フォーカス移動）：画面をすぐ再計算してから保存する
+  async function commitHarvestInput(input){
+    if (!workState || workState.gen !== renderGeneration) return;
+    var state = workState;
+    var o = parseInt(input.getAttribute('data-harvest-input-offset'), 10);
+    var kg = parseManualHarvestInput(input.value);
+    if (kg === undefined) {
+      setHarvestSaveStatus('数値（kg）を入力してください', true);
+      var prev = state.harvest.manualKg[o];
+      input.value = (prev === null || prev === undefined) ? '' : prev;
+      return;
+    }
+    input.value = kg === null ? '' : kg;
+    // 前回の保存に失敗した欄は、同じ値でも保存し直す
+    if (state.harvest.manualKg[o] === kg && !input.classList.contains('save-error')) return;
+    state.harvest.manualKg[o] = kg;
+    state.perDay = computeStandardWorkHours(state.rows, state.cult, state.harvest.planKg, state.basisDate, state.harvest.manualKg);
+    fillWorkHoursValues(state.rows, state.perDay, state.harvest);
+    if (lastCultLaborResult && lastCultLaborResult.gen === state.gen) renderLaborTable(lastCultLaborResult.result, state.perDay);
+
+    input.classList.remove('save-error');
+    setHarvestSaveStatus('保存中…');
+    try {
+      await saveManualHarvestKg(state.site, toISO(addDays(state.basisDate, o)), kg);
+      if (workState === state) setHarvestSaveStatus('保存しました');
+    } catch (err) {
+      console.error('[収穫見込] 保存エラー:', err);
+      if (workState !== state) return;
+      input.classList.add('save-error');
+      setHarvestSaveStatus('保存できませんでした（' + (err.message || err) + '）。もう一度Enterで保存し直してください', true);
+    }
+  }
+  document.getElementById('table2workBody').addEventListener('change', function(e){
+    if (e.target.classList.contains('harvest-input')) commitHarvestInput(e.target);
+  });
+  // Enterでも確定する（値を変えずにEnterした場合はchangeが起きないため、保存に失敗した欄の
+  // 保存し直しはここで行う）。直後のblurで起きるchangeは、値が同じなので何もしない
+  document.getElementById('table2workBody').addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' || !e.target.classList.contains('harvest-input')) return;
+    e.preventDefault();
+    commitHarvestInput(e.target);
+    e.target.blur();
+  });
 
   async function renderLabor(basisDate, gen){
     showPanelError('laborError', null);
@@ -3749,7 +3940,10 @@
     var results = await Promise.allSettled([workPromise, laborPromise]);
     if (gen !== renderGeneration) return; // 追い越されていたら、過不足の合成も描画しない
     var workSubtotals = results[0].status === 'fulfilled' ? results[0].value : null;
+    // 読み込み中に収穫見込が入力されていたら、再計算後の値で過不足を出す
+    if (workState && workState.gen === gen) workSubtotals = workState.perDay;
     var laborResult = results[1].status === 'fulfilled' ? results[1].value : null;
+    lastCultLaborResult = { gen: gen, result: laborResult };
     renderLaborTable(laborResult, workSubtotals);
   };
 
@@ -3820,6 +4014,8 @@
     buildCultivationDatesWithYearInference: buildCultivationDatesWithYearInference,
     parseStdWorkHoursRows: parseStdWorkHoursRows,
     computeStandardWorkHours: computeStandardWorkHours,
+    parseManualHarvestInput: parseManualHarvestInput,
+    fetchManualHarvestKg: fetchManualHarvestKg,
     normalizeName: normalizeName,
     applyBreakDeduction: applyBreakDeduction,
     classifyCell: classifyCell,

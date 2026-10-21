@@ -192,6 +192,7 @@ async function center(page, selector) {
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--disable-features=OverlayScrollbar'] });
+// 収穫見込（手入力）の保存先GAS（HARVEST_FORECAST_GAS_URL）に本番でアクセスしないよう、空の応答に差し替える  const origNewPage = browser.newPage.bind(browser);  browser.newPage = async (...args) => { const p = await origNewPage(...args); await p.route('https://script.google.com/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok', values: {} }) })); return p; };
   let allOk = true;
   function check(name, cond) { console.log(`  ${name}: ${cond ? 'OK' : 'NG'}`); if (!cond) allOk = false; }
 
@@ -502,7 +503,7 @@ async function center(page, selector) {
 
   console.log('=== ⑫集計帯の高さ：文字1行+最小限の余白になっていること ===');
   {
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.evaluate(() => window.__test.clearCellSelection());
     const c0 = await center(page, '[data-cult="芽かき"][data-cult-offset="0"]');
     await page.mouse.click(c0.x, c0.y);
