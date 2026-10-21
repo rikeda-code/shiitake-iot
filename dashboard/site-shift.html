@@ -115,6 +115,7 @@ kbd { font-family: var(--font-code); font-size: .72rem; border:1px solid var(--l
 
 /* 固定シフト編集 */
 .fx-head { display:flex; gap:8px; align-items:center; margin-bottom: 10px; flex-wrap: wrap; }
+.fx-head select { max-width: 100%; min-width: 0; }
 .fx-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 .fx-table td, .fx-table th { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .fx-table th { font-size: .72rem; color: var(--muted); font-weight: 400; }
@@ -350,6 +351,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
       <div class="fx-head">
         <select id="fxPerson" aria-label="固定シフトを編集する人"></select>
         <button id="fxCopyMon">月曜の設定を平日にコピー</button>
+        <select id="fxLike" aria-label="登録済みのシフトからコピー"></select>
         <button class="primary" id="fxSave">固定シフトを保存</button>
       </div>
       <div class="scroll-x"><table class="fx-table" id="fxTable"></table></div>
@@ -1053,17 +1055,42 @@ document.querySelector('#editFilter .quick').addEventListener('click', ev => {
 });
 
 /* ── 固定シフト（30分単位） ── */
-let fxKey = null, fxDraft = null;
+let fxKey = null, fxDraft = null, fxPatterns = [], fxPicked = false;
 const W = (s, e) => `${s}-${e}`;
 function hmSelects(id, t) {
   const [h, m] = t.split(':');
   return `<select id="${id}-h" aria-label="時">${HOURS.map(x => `<option${+h === x ? ' selected' : ''}>${x}</option>`).join('')}</select><span class="colon">:</span>` +
          `<select id="${id}-m" aria-label="分">${MINS.map(x => `<option${m === x ? ' selected' : ''}>${x}</option>`).join('')}</select>`;
 }
+// 曜日ごとの設定を短く書く：'月〜金 8-17・土日 休'
+function fxSummary(pat) {
+  const parts = [];
+  for (let i = 0; i < 7;) {
+    let j = i; while (j + 1 < 7 && pat[j + 1] === pat[i]) j++;
+    const a = WD[FX_ORDER[i]], b = WD[FX_ORDER[j]];
+    parts.push(`${i === j ? a : j === i + 1 ? a + b : a + '〜' + b} ${shortVal(pat[i] || '休')}`);
+    i = j + 1;
+  }
+  return parts.join('・');
+}
 function renderFixed() {
   const list = visibleMembers(); // 絞り込みに関係なく全員から選べる
-  if (!list.some(m => m.key === fxKey)) { fxKey = list[0]?.key || null; fxDraft = null; }
-  $('fxPerson').innerHTML = list.map(m => `<option value="${esc(m.key)}"${m.key === fxKey ? ' selected' : ''}>${esc(m.name)}（${esc(m.dept)}）${fixed[m.key] ? '' : '・未登録'}</option>`).join('');
+  const todo = list.filter(m => !fixed[m.key]), done = list.filter(m => fixed[m.key]);
+  // 自分で選ぶまでは、未登録の人を上から順に出す
+  if (!fxPicked || !list.some(m => m.key === fxKey)) {
+    const next = (todo[0] || list[0])?.key || null;
+    if (next !== fxKey) { fxKey = next; fxDraft = null; }
+  }
+  const opt = m => `<option value="${esc(m.key)}"${m.key === fxKey ? ' selected' : ''}>${esc(m.name)}（${esc(m.dept)}）${fixed[m.key] ? '' : '・未登録'}</option>`;
+  $('fxPerson').innerHTML = (todo.length ? `<optgroup label="未登録（${todo.length}人）">${todo.map(opt).join('')}</optgroup>` : '')
+    + (done.length ? `<optgroup label="登録済み（${done.length}人）">${done.map(opt).join('')}</optgroup>` : '');
+  // 登録済みのシフト例：同じ組み合わせはまとめ、使っている人の多い順に並べる
+  const groups = {};
+  done.forEach(m => { const k = JSON.stringify(fixed[m.key]); (groups[k] ||= { pat: fixed[m.key], names: [] }).names.push(m.name); });
+  fxPatterns = Object.values(groups).sort((a, b) => b.names.length - a.names.length);
+  $('fxLike').innerHTML = `<option value="">登録済みのシフトからコピー（${fxPatterns.length}種類）</option>`
+    + fxPatterns.map((g, k) => `<option value="${k}">${esc(fxSummary(g.pat))}（${esc(g.names[0])}${g.names.length > 1 ? `ほか${g.names.length - 1}人` : ''}）</option>`).join('');
+  $('fxLike').disabled = !fxPatterns.length;
   if (!fxKey) { $('fxTable').innerHTML = ''; return; }
   if (!fxDraft) fxDraft = (fixed[fxKey] || Array(7).fill('8:00-17:00').map((v, i) => i >= 5 ? '休' : v)).slice();
   let h = '<tr><th></th><th>出勤</th><th>開始</th><th></th><th>終了</th><th>休憩</th><th>実働</th></tr>';
@@ -1082,7 +1109,7 @@ function renderFixed() {
   $('fxTable').innerHTML = h;
 }
 function toSpan(v) { const m = String(v).match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/); return m ? (+m[3] + m[4] / 60) - (+m[1] + m[2] / 60) : null; }
-$('fxPerson').onchange = ev => { fxKey = ev.target.value; fxDraft = null; renderFixed(); };
+$('fxPerson').onchange = ev => { fxKey = ev.target.value; fxDraft = null; fxPicked = true; renderFixed(); };
 $('fxTable').addEventListener('change', ev => {
   const i = +ev.target.closest('tr').dataset.i;
   const get = p => `${$(`fx-${p}-${i}-h`).value}:${$(`fx-${p}-${i}-m`).value}`;
@@ -1090,13 +1117,23 @@ $('fxTable').addEventListener('change', ev => {
   renderFixed();
 });
 $('fxCopyMon').onclick = () => { for (let i = 1; i < 5; i++) fxDraft[i] = fxDraft[0]; renderFixed(); toast('月曜の設定を火〜金にコピーしました'); };
+// 似た働き方の人のシフトを下書きに写す（保存を押すまで確定しない）
+$('fxLike').onchange = ev => {
+  const g = fxPatterns[ev.target.value]; if (!g || !fxKey) return;
+  fxDraft = g.pat.slice(); renderFixed();
+  toast(`${g.names[0]}さんと同じシフトを入れました。「固定シフトを保存」で確定します`);
+};
 $('fxSave').onclick = async () => {
   const m = visibleMembers().find(x => x.key === fxKey); if (!m) return;
   if (fxDraft.some(v => cellHours(v) === null)) { toast('終了が開始より前の曜日があります'); return; }
   try {
+    const wasNew = !fixed[m.key];
     await metaRef(curSite(), 'fixed').set({ [m.key]: fxDraft.slice() }, { merge: true });
-    fixed[m.key] = fxDraft.slice(); renderFixed();
-    toast(`${m.name}さんの固定シフトを保存しました`);
+    fixed[m.key] = fxDraft.slice();
+    // 未登録だった人を保存したら、次の未登録の人へ進む
+    if (wasNew) fxPicked = false;
+    renderFixed();
+    toast(`${m.name}さんの固定シフトを保存しました${wasNew && fxKey !== m.key ? `。次は${members.find(x => x.key === fxKey)?.name}さんです` : ''}`);
   } catch (err) { toast('保存できませんでした：' + err.message); }
 };
 
