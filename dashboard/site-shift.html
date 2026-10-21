@@ -269,7 +269,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
 </style>
 </head>
 <body>
-<div class="login" id="login">
+<div class="login" id="login" hidden><!-- ログイン済みか確かめ終わってから出す（ログイン済みの人に一瞬映らないように） -->
   <div class="login-card">
     <h1>拠点シフト表</h1>
     <p>Googleアカウントでログインしてください（会社のアカウント・個人のGmailどちらでも使えます）。</p>
