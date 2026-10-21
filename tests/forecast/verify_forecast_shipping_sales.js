@@ -134,6 +134,7 @@ async function shippingWorkRows(page) {
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--disable-features=OverlayScrollbar'] });
+// 収穫見込（手入力）の保存先GAS（HARVEST_FORECAST_GAS_URL）に本番でアクセスしないよう、空の応答に差し替える  const origNewPage = browser.newPage.bind(browser);  browser.newPage = async (...args) => { const p = await origNewPage(...args); await p.route('https://script.google.com/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok', values: {} }) })); return p; };
   let allOk = true;
   function check(name, cond) { console.log(`  ${name}: ${cond ? 'OK' : 'NG'}`); if (!cond) allOk = false; }
 
