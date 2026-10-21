@@ -213,6 +213,49 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table tfoot tr:first-child > * { border-top: .6mm double #111; }
 .pp-foot { margin-top: auto; padding-top: 1mm; font-size: 2.4mm; color: #555; display: flex; justify-content: space-between; }
 
+/* スマホ・タブレット：セルをタップすると画面下の入力パネルから入れる */
+.mbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.12); padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; }
+.mbar[hidden] { display: none; }
+.mbar-head { display: flex; align-items: center; gap: 8px; font-size: .85rem; min-width: 0; }
+.mbar-head b { font-size: .95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbar-head .now { color: var(--muted); margin-left: auto; white-space: nowrap; }
+.mbar-head button { padding: 4px 10px; }
+.mbar-row { display: flex; gap: 6px; }
+.mbar-row input { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.mbar-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.mbar-chips button { flex: none; font-family: var(--font-code); }
+.mbar-chips button, .mbar-nav button, .mbar-row button { min-height: 40px; padding: 6px 12px; }
+.mbar-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mbar-nav label { display: inline-flex; gap: 6px; align-items: center; font-size: .85rem; margin-left: auto; }
+.mbar-nav input { width: 18px; height: 18px; }
+body.mbar-open { padding-bottom: 240px; }
+body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); z-index: 45; }
+.touch-only { display: none; }
+@media (pointer: coarse) {
+  .touch-only { display: revert; }
+  .mouse-only, .touch-hide, .fill-handle { display: none; }
+  .grid-box { touch-action: manipulation; }
+}
+@media (max-width: 720px) {
+  body { padding: 12px 12px 32px; font-size: 13px; }
+  h1 { font-size: 1.15rem; }
+  .sub { font-size: .78rem; }
+  .toolbar #month { flex: 1 1 60%; min-width: 0; }
+  .toolbar .spacer { display: none; }
+  .toolbar .status { flex-basis: 100%; }
+  .tabs button { flex: 1; padding: 8px 10px; }
+  .grid .name { min-width: 92px; max-width: 92px; padding: 0 6px; font-size: .8rem; }
+  .grid td.name.d-栽培 { box-shadow: inset 4px 0 0 var(--saibai); }
+  .grid td.name.d-出荷 { box-shadow: inset 4px 0 0 var(--shukka); }
+  .grid td.name.d-配送 { box-shadow: inset 4px 0 0 var(--haiso); }
+  td.cell { min-width: 46px; }
+  .grid .tot { min-width: 54px; padding: 0 4px; font-size: .78rem; }
+  .panels.two { grid-template-columns: 1fr; }
+  .panel { padding: 12px; }
+  .print-controls { padding: 12px; }
+  .print-controls .go { margin-left: 0; }
+}
+
 @page { size: A4 landscape; margin: 10mm; }
 @media print {
   html, body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
@@ -229,7 +272,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 <div class="login" id="login">
   <div class="login-card">
     <h1>拠点シフト表</h1>
-    <p>会社のGoogleアカウント（@10-ff.com）でログインしてください。</p>
+    <p>Googleアカウントでログインしてください（会社のアカウント・個人のGmailどちらでも使えます）。</p>
     <p class="err" id="loginErr" hidden></p>
     <div class="guide" id="loginGuide" hidden>
       <p id="guideText"></p>
@@ -249,8 +292,8 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     <select id="site" aria-label="拠点"><option>いなべ</option><option>群馬</option><option>南丹</option></select>
     <select id="month" aria-label="対象期間"></select>
     <button id="applyFixed" class="edit-only">固定シフトを反映</button>
-    <button id="clearSel" class="edit-only">選択範囲をクリア</button>
-    <span class="leave-btns edit-only" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
+    <button id="clearSel" class="edit-only touch-hide">選択範囲をクリア</button>
+    <span class="leave-btns edit-only touch-hide" id="leaveBtns" aria-label="選んだセルに休みを入れる"></span>
     <span class="spacer"></span>
     <span class="status" id="status"></span>
     <button id="legacyBtn" class="edit-only" title="旧シフト表の内容でこの期間を置き換えます（いなべ・群馬）">旧シフト表から取り込む</button>
@@ -296,7 +339,8 @@ body:not([data-view="print"]) .print-only { display: none !important; }
   </div>
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
+    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
+    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -324,6 +368,12 @@ body:not([data-view="print"]) .print-only { display: none !important; }
     </section>
   </div>
 </div>
+<div class="mbar" id="mbar" hidden>
+  <div class="mbar-head"><b id="mbWho"></b><span id="mbDay"></span><span class="now" id="mbNow"></span><button type="button" id="mbClose" aria-label="入力パネルを閉じる">×</button></div>
+  <div class="mbar-row"><input id="mbInput" placeholder="時間（例 8-17、8:30-15）" autocomplete="off" enterkeyhint="done" aria-label="入れる内容"><button type="button" class="primary" id="mbOk">入れる</button></div>
+  <div class="mbar-chips" id="mbChips"></div>
+  <div class="mbar-nav"><button type="button" data-mv="0,-1">◀ 前日</button><button type="button" data-mv="0,1">翌日 ▶</button><button type="button" data-mv="1,0">次の人 ▼</button><label><input type="checkbox" id="mbRange">範囲選択</label></div>
+</div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -336,6 +386,11 @@ const FX_ORDER = [1,2,3,4,5,6,0]; // 月〜日
 const HOURS = Array.from({ length: 20 }, (_, i) => i + 4); // 4〜23時
 const MINS = ['00', '30'];
 const $ = id => document.getElementById(id);
+const narrowMQ = matchMedia('(max-width: 720px)'); // スマホの幅
+// 最後に画面にふれたのが指かマウスか（指のときはドラッグ・ダブルクリックの代わりに入力パネルを使う）
+let lastPointer = 'mouse';
+document.addEventListener('pointerdown', ev => { lastPointer = ev.pointerType; }, true);
+const touching = () => lastPointer === 'touch' || lastPointer === 'pen';
 
 // シフトは「11日〜翌月10日」を1期間として入力する（例：10/11〜11/10）。year・monthは期間の始まりの月
 let year, month;
@@ -453,7 +508,6 @@ firebase.initializeApp(firebaseConfig);
 const fs = firebase.firestore();
 fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* 使えないブラウザではオフライン保存なしで動く */ });
 const auth = firebase.auth();
-const ALLOWED_DOMAIN = '10-ff.com';
 const MEMBERS_STALE_MS = 30 * 60 * 1000; // メンバーは30分たったら整理済み_Mから読み直す
 const siteRef = site => fs.collection('shiftSites').doc(site);
 const monthRef = (site, ym) => siteRef(site).collection('months').doc(ym);
@@ -599,13 +653,14 @@ function checkReady() {
   else onDataChanged();
 }
 function showLoadError(err) {
-  $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}${/permission/i.test(err.message) ? '（会社のアカウントでログインしているか確認してください）' : ''}</div>`;
+  $('gridBox').innerHTML = `<div class="notice error">読み込めませんでした：${esc(err.message)}${/permission/i.test(err.message) ? '（Firestoreのルールで、ログインした人の読み書きが許可されているか確認してください）' : ''}</div>`;
 }
 async function load() {
   updateLegacyBtn();
   if (Object.keys(pending).length) await flush(); // 切り替え前に送る
   allCols = periodCols();
   cols = allCols;
+  sel = cursor = anchor = null; // 拠点・期間が変わると同じ位置でも別の人・別の日になる
   $('edFrom').value = ''; $('edTo').value = '';
   loadedSite = curSite(); loadedMonth = monthKey();
   $('gridBox').innerHTML = '<div class="loading">読み込み中…</div>';
@@ -653,7 +708,9 @@ function render() {
   const n = cols.length;
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
   const divs = DIVS.filter(v => edDeptSel.has(v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
-  let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th><th class="role">部門</th>';
+  // 幅の狭い画面では部門の列を省き、氏名の左の色で部門を示す
+  const compact = narrowMQ.matches, lead = compact ? 1 : 2;
+  let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th>' + (compact ? '' : '<th class="role">部門</th>');
   cols.forEach((c, i) => {
     const mo = i === 0 || c.d === 1 ? `<span class="mo">${c.m}月</span>` : '';
     h += `<th class="${c.wd === 0 ? 'sun' : c.wd === 6 ? 'sat' : ''}${c.d === 1 ? ' mstart' : ''}">${mo}<span class="d">${c.d}</span>${WD[c.wd]}</th>`;
@@ -666,7 +723,7 @@ function render() {
     let sum = 0;
     const div = divOf(m.dept);
     const badge = m.flag === 2 ? '<span class="badge new">入社</span>' : '';
-    h += `<tr><td class="name" title="${esc(m.name)}">${esc(m.name)}${badge}</td><td class="role"><span class="chip ${div}">${esc(m.dept)}</span></td>`;
+    h += `<tr><td class="name d-${div}" title="${esc(m.name)}（${esc(m.dept)}）">${esc(m.name)}${badge}</td>` + (compact ? '' : `<td class="role"><span class="chip ${div}">${esc(m.dept)}</span></td>`);
     cols.forEach((c, i) => {
       const v = data[m.key]?.[c.iso] || '';
       const hr = cellHours(v);
@@ -680,18 +737,18 @@ function render() {
     if (tallied(m)) siteTot[div] += sum;
     h += `<td class="tot">${fmt(sum)}</td></tr>`;
   });
-  if (!rows.length) h += `<tr><td class="name" colspan="${n + 3}">表示する人がいません（部門の選び方を確認してください）</td></tr>`;
+  if (!rows.length) h += `<tr><td class="name" colspan="${n + lead + 1}">表示する人がいません（部門の選び方を確認してください）</td></tr>`;
   const num = x => x ? (Math.round(x * 10) / 10).toLocaleString('ja-JP') : '–';
   h += '</tbody><tfoot>';
   divs.forEach((v, k) => {
-    h += `<tr class="${k === 0 ? 'first' : ''}"><th class="name" colspan="2"><span class="chip ${v}">${v}</span> 時間</th>`;
+    h += `<tr class="${k === 0 ? 'first' : ''}"><th class="name" colspan="${lead}"><span class="chip ${v}">${v}</span> 時間</th>`;
     cols.forEach((c, i) => { h += `<td class="day ${v}${dayTot[v][i] ? '' : ' zero'}">${num(dayTot[v][i])}</td>`; });
     h += `<td class="tot">${fmt(siteTot[v])}</td></tr>`;
   });
   const all = divs.reduce((t, v) => t + siteTot[v], 0);
-  h += '<tr class="total"><th class="name" colspan="2">合計 時間</th>';
+  h += `<tr class="total"><th class="name" colspan="${lead}">合計 時間</th>`;
   cols.forEach((c, i) => { h += `<td class="day">${num(divs.reduce((t, v) => t + dayTot[v][i], 0))}</td>`; });
-  h += `<td class="tot">${fmt(all)}</td></tr><tr><th class="name" colspan="2">出勤人数</th>`;
+  h += `<td class="tot">${fmt(all)}</td></tr><tr><th class="name" colspan="${lead}">出勤人数</th>`;
   cols.forEach((c, i) => { h += `<td class="day">${dayCnt[i] || '–'}</td>`; });
   h += '<td class="tot"></td></tr></tfoot></table>';
   $('gridBox').innerHTML = h;
@@ -720,6 +777,7 @@ function paintSel() {
   // 選んだ範囲の右下にフィルハンドルを付ける
   document.querySelectorAll('.fill-handle').forEach(x => x.remove());
   if (s && !editing && !filling) document.querySelector(`td.cell[data-r="${s.r1}"][data-c="${s.c1}"]`)?.insertAdjacentHTML('beforeend', '<span class="fill-handle" title="ドラッグして同じ内容を広げる"></span>');
+  updateMbar();
 }
 const inRect = (q, r, c) => r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1;
 function setCursor(r, c, extend) {
@@ -806,6 +864,7 @@ document.addEventListener('mouseup', () => {
   render();
 });
 gridBox.addEventListener('mousedown', ev => {
+  if (touching()) return; // 指のタップは下の click で受ける（指で動かすと表がスクロールする）
   const td = ev.target.closest('td.cell'); if (!td || ev.target.tagName === 'INPUT') return;
   if (editing) commit();
   // ボタンや日付欄に残った選択を外し、キー入力が表に届くようにする
@@ -817,7 +876,69 @@ gridBox.addEventListener('mouseover', ev => {
   sel = { r0: anchor.r, c0: anchor.c, r1: +td.dataset.r, c1: +td.dataset.c }; cursor = { r: +td.dataset.r, c: +td.dataset.c }; paintSel();
 });
 document.addEventListener('mouseup', () => { dragging = false; if (needRender && !filling && !editing) render(); });
-gridBox.addEventListener('dblclick', ev => { if (ev.target.closest('td.cell')) startEdit(); });
+gridBox.addEventListener('dblclick', ev => { if (!touching() && ev.target.closest('td.cell')) startEdit(); });
+
+/* ── スマホ・タブレットの入力パネル ── */
+let mbOpen = false;
+gridBox.addEventListener('click', ev => {
+  if (!touching()) return;
+  const td = ev.target.closest('td.cell'); if (!td) return;
+  if (editing) commit();
+  setCursor(+td.dataset.r, +td.dataset.c, $('mbRange').checked && !!anchor);
+  mbOpen = true; updateMbar(); revealCursor();
+});
+// 選んだセルが入力パネルの裏に隠れないよう、画面を上にずらす
+function revealCursor() {
+  const td = document.querySelector('td.cell.cursor'); if (!td || $('mbar').hidden) return;
+  const over = td.getBoundingClientRect().bottom - $('mbar').getBoundingClientRect().top + 8;
+  if (over > 0) window.scrollBy({ top: over });
+}
+function updateMbar() {
+  const show = mbOpen && !!cursor && !!rows[cursor.r] && !!cols[cursor.c] && document.body.dataset.view !== 'print';
+  $('mbar').hidden = !show;
+  document.body.classList.toggle('mbar-open', show);
+  if (!show) return;
+  const s = norm(sel), m = rows[cursor.r], c = cols[cursor.c];
+  const multi = s && (s.r0 !== s.r1 || s.c0 !== s.c1);
+  const v = data[m.key]?.[c.iso] || '';
+  $('mbWho').textContent = multi ? `${s.r1 - s.r0 + 1}人 × ${s.c1 - s.c0 + 1}日を選択中` : m.name;
+  $('mbDay').textContent = multi ? '' : `${c.m}/${c.d}（${WD[c.wd]}）`;
+  $('mbNow').textContent = multi ? '' : !canEdit(cursor.r, cursor.c) ? '入社前・退職後の日' : `今：${v ? shortVal(v) : '空欄'}`;
+  // ボタン：その曜日の固定シフト → この人がよく使う時間 → 休みの種類 → 消す
+  const freq = {};
+  Object.values(data[m.key] || {}).forEach(x => { if (cellHours(x)) freq[x] = (freq[x] || 0) + 1; });
+  const fx = fixed[m.key]?.[FX_ORDER.indexOf(c.wd)];
+  const times = [...new Set([fx, ...Object.keys(freq).sort((a, b) => freq[b] - freq[a])])].filter(x => x && cellHours(x)).slice(0, 4);
+  $('mbChips').innerHTML = times.map(t => `<button type="button" data-v="${esc(t)}">${esc(shortVal(t))}</button>`).join('')
+    + LEAVE_TYPES.map(t => `<button type="button" data-v="${t}">${t}</button>`).join('')
+    + '<button type="button" data-v="" class="danger">消す</button>';
+}
+// 選んだセル（範囲）に入れる。1マスだけのときは翌日へ進む
+function mbApply(v) {
+  const s = norm(sel); if (!s) return;
+  for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) setVal(r, c, v);
+  $('mbInput').value = ''; $('mbRange').checked = false;
+  render();
+  if (s.r0 === s.r1 && s.c0 === s.c1 && s.c1 < cols.length - 1) setCursor(s.r0, s.c1 + 1);
+}
+function mbSubmit() {
+  const v = normVal($('mbInput').value);
+  if (!v) { toast('時間を入れてください（消すときは「消す」を押します）'); return; }
+  if (!isLeave(v) && cellHours(v) === null) { toast('時間は 8-17 や 8:30-15 のように入れてください'); return; }
+  mbApply(v);
+}
+$('mbChips').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) mbApply(b.dataset.v); });
+$('mbOk').onclick = mbSubmit;
+$('mbInput').addEventListener('keydown', ev => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); mbSubmit(); $('mbInput').blur(); } });
+document.querySelector('.mbar-nav').addEventListener('click', ev => {
+  const mv = ev.target.closest('button')?.dataset.mv; if (!mv || !cursor) return;
+  const [dr, dc] = mv.split(',').map(Number);
+  $('mbRange').checked = false;
+  setCursor(cursor.r + dr, cursor.c + dc); revealCursor();
+});
+$('mbRange').addEventListener('change', ev => { if (ev.target.checked) toast('範囲の終わりのセルをタップしてください'); });
+$('mbClose').onclick = () => { mbOpen = false; $('mbRange').checked = false; sel = cursor = anchor = null; paintSel(); };
+narrowMQ.addEventListener('change', () => { if (ready && !editing) render(); });
 document.addEventListener('keydown', ev => {
   if (editing || !cursor || ev.target.closest('select, button, input, form')) return;
   const k = ev.key, sh = ev.shiftKey;
@@ -1033,6 +1154,7 @@ function setView(v) {
   $('tabEdit').setAttribute('aria-selected', v === 'edit');
   $('tabPrint').setAttribute('aria-selected', v === 'print');
   if (v === 'print') { if (editing) commit(); renderPrint(); }
+  updateMbar();
 }
 $('tabEdit').onclick = () => setView('edit');
 $('tabPrint').onclick = () => setView('print');
@@ -1181,7 +1303,7 @@ function fitPreview() {
   [year, month] = mo.value.split('-').map(Number);
   $('newJoin').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 
-  // ログイン：会社のGoogleアカウント（@10-ff.com）だけ通す
+  // ログイン：Googleアカウントなら誰でも通す（会社のアカウントに限らない）
   let started = false;
   const loginErr = msg => { $('loginErr').textContent = msg || ''; $('loginErr').hidden = !msg; };
 
@@ -1221,7 +1343,7 @@ function fitPreview() {
   if (problem) showGuide(problem);
   $('loginBtn').onclick = () => {
     const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ hd: ALLOWED_DOMAIN, prompt: 'select_account' });
+    provider.setCustomParameters({ prompt: 'select_account' });
     auth.signInWithPopup(provider).catch(err => {
       if (/operation-not-supported|web-storage-unsupported/i.test(err.code || '')) { loginErr(''); showGuide(envProblem() || 'inapp'); }
       else if (/popup/i.test(err.code || '')) auth.signInWithRedirect(provider); // ポップアップが使えないときは画面ごと移動
@@ -1230,10 +1352,6 @@ function fitPreview() {
   };
   auth.onAuthStateChanged(user => {
     if (!user) { $('login').hidden = false; return; }
-    if (!String(user.email || '').toLowerCase().endsWith('@' + ALLOWED_DOMAIN)) {
-      loginErr(`${user.email} は使えません。会社のアカウント（@${ALLOWED_DOMAIN}）でログインしてください`);
-      auth.signOut(); $('login').hidden = false; return;
-    }
     loginErr(''); $('login').hidden = true;
     $('who').textContent = user.email;
     if (!started) { started = true; load(); }
