@@ -161,9 +161,12 @@ function normalizeName_(raw) {
 const LEAVE_TYPES = ['休', '代休', '有休', '季節休', '欠勤'];
 const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
 
+// 配送に行く日の印（時間の後ろに付く。例 '8:00-17:00配送'）。実働時間の計算では外して読む
+const DELIVERY_ALIASES = { '配送': '配送', '配': '配送', '半日配送': '半日配送', '半配': '半日配送' };
+
 // '8:00-17:00' 等 → 実働時間。休みの種類・空欄は0、形式不正はnull
 function workHours_(value) {
-  const s = String(value || '').normalize('NFKC').trim();
+  const s = String(value || '').normalize('NFKC').trim().replace(/(半日配送|配送)$/, '');
   if (!s || LEAVE_TYPES.indexOf(s) >= 0) return 0;
   const m = s.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
   if (!m) return null;
@@ -172,13 +175,16 @@ function workHours_(value) {
   return Math.round((span >= 5 ? span - 1 : span) * 100) / 100;
 }
 
-// 表記をそろえる：8:00〜17:00 → 8:00-17:00
+// 表記をそろえる：8:00〜17:00 → 8:00-17:00、8-17配 → 8:00-17:00配送
 function normalizeShift_(value) {
   let s = String(value || '').normalize('NFKC').trim().replace(/[〜~ー―−]/g, '-').replace(/\s/g, '');
   if (LEAVE_ALIASES[s]) s = LEAVE_ALIASES[s];
+  const t = s.match(/^(.+?)(半日配送|半配|配送|配)$/);
+  const tag = t ? DELIVERY_ALIASES[t[2]] : '';
+  if (tag) s = t[1];
   const m = s.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
   if (m) s = `${+m[1]}:${m[2] || '00'}-${+m[3]}:${m[4] || '00'}`;
-  return s;
+  return s + tag;
 }
 
 /* ===================== 整理済み_M ===================== */

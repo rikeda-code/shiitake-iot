@@ -77,6 +77,13 @@ td.cell { min-width: 52px; height: 38px; line-height: 1.15; font-family: var(--f
 td.cell.off { color: var(--muted); background: var(--off-soft); font-family: var(--font-body); font-weight: 700; }
 td.cell.absent { color: var(--sun); }
 td.cell.custom { font-size: .68rem; color: var(--accent); }
+/* 配送に行く日：青い地（半日配送は斜めに半分）と左上の「配」「半配」 */
+td.cell.deliv { background: var(--haiso-soft); }
+td.cell.deliv-half { background: linear-gradient(135deg, var(--haiso-soft) 50%, transparent 50%); }
+td.cell.deliv::before, td.cell.deliv-half::before { content: '配'; position: absolute; top: 1px; left: 2px; font: 700 .56rem/1 var(--font-body); color: var(--haiso); letter-spacing: 0; }
+td.cell.deliv-half::before { content: '半配'; }
+td.cell.deliv .t2, td.cell.deliv-half .t2 { padding-top: 8px; }
+.leave-btns .deliv-btn, .mbar-chips .deliv-btn { color: var(--haiso); border-color: var(--haiso); }
 td.cell.weekend { background-image: linear-gradient(var(--sel-soft), var(--sel-soft)); background-size: 0 0; }
 td.cell.in-sel { background: var(--sel-soft); }
 td.cell.cursor { box-shadow: inset 0 0 0 2px var(--sel); }
@@ -207,6 +214,14 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table td.dp { font-size: .85em; color: #333; }
 .pp-table td.off { color: #333; font-weight: 700; }
 .pp-table td.absent { color: #b91c1c; }
+/* 配送の日：青い地と左上の「配」「半」 */
+.pp-table td.dv, .pp-table td.dvh { position: relative; }
+.pp-table td.dv { background: #dbe8f6; }
+.pp-table td.dvh { background: linear-gradient(135deg, #dbe8f6 50%, #fff 50%); }
+.pp-table td.dv::before, .pp-table td.dvh::before { content: '配'; position: absolute; top: .2mm; left: .3mm; font-size: 1.9mm; font-weight: 700; color: #1d4f8a; line-height: 1; }
+.pp-table td.dvh::before { content: '半'; }
+.pp-head .dv-key { display: inline-block; background: #dbe8f6; color: #1d4f8a; font-weight: 700; padding: 0 .8mm; }
+.pp-head .dv-key.half { background: linear-gradient(135deg, #dbe8f6 50%, #fff 50%); border: .2mm solid #dbe8f6; }
 .pp-table .t2 { display: block; line-height: 1.05; letter-spacing: -.02em; }
 .pp-table td.tt, .pp-table th.tt { text-align: right; font-weight: 700; border-left: .5mm solid #111; font-size: .85em; }
 .pp-table tr.grp td { border-top: .45mm solid #111; }
@@ -340,8 +355,8 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
   </div>
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
-    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
+    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。栽培・出荷の人が配送に行く日は「配送」「半日配送」ボタンで印を付けます（配送は実働すべて、半日配送は半分を「配送 時間」に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
+    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。栽培・出荷の人が配送に行く日は、セルを選んで「配送」「半日配送」ボタンを押すか、<code>8-17配</code>・<code>8-17半配</code> のように打ちます。配送は実働すべて、半日配送は実働の半分を「配送 時間」に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -439,26 +454,35 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '
 const LEAVE_TYPES = ['休', '代休', '有休', '季節休', '欠勤'];
 const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
 const isLeave = v => LEAVE_TYPES.includes(v);
+// 栽培・出荷の人が配送に行く日の印。時間の後ろに付ける（'8:00-17:00配送'）。
+// 配送は実働の全部、半日配送は実働の半分を「配送 時間」に数え、残りは本来の部門に数える
+const DELIVERY_SHARE = { '配送': 1, '半日配送': 0.5 };
+const DELIVERY_ALIASES = { '配送': '配送', '配': '配送', '半日配送': '半日配送', '半配': '半日配送' };
+const splitVal = v => { const m = String(v || '').match(/^(.+?)(半日配送|配送)$/); return m ? { time: m[1], tag: m[2] } : { time: String(v || ''), tag: '' }; };
+const deliveryShare = v => DELIVERY_SHARE[splitVal(v).tag] || 0;
 // 「拠点名＋パ／正」で始まる名前は、名前の決まっていない新規要員の枠とみなす
 const isPlaceholder = name => /^(いなべ|群馬|安中|南丹)(パ|正)/.test(String(name).normalize('NFKC').replace(/\s/g, ''));
-// 入力をそろえる：全角・〜・時だけ → '8:00-17:00'
+// 入力をそろえる：全角・〜・時だけ → '8:00-17:00'。配送の印（配・半配）は '配送'・'半日配送' にそろえて後ろに付ける
 function normVal(v) {
   let s = String(v || '').normalize('NFKC').trim().replace(/[〜~ー―−]/g, '-').replace(/\s/g, '');
   if (LEAVE_ALIASES[s]) s = LEAVE_ALIASES[s];
+  const t = s.match(/^(.+?)(半日配送|半配|配送|配)$/);
+  const tag = t ? DELIVERY_ALIASES[t[2]] : '';
+  if (tag) s = t[1];
   const m = s.match(/^(\d{1,2})(?::(\d{2}))?-(\d{1,2})(?::(\d{2}))?$/);
-  return m ? `${+m[1]}:${m[2] || '00'}-${+m[3]}:${m[4] || '00'}` : s;
+  return (m ? `${+m[1]}:${m[2] || '00'}-${+m[3]}:${m[4] || '00'}` : s) + tag;
 }
 // 表示用に短くする：'8:00-17:00' → '8-17'
 const shortVal = v => String(v || '').replace(/:00/g, '');
-// セルの表示：時間は「8:00-」「17:00」の2段（印刷と同じ）
+// セルの表示：時間は「8:00-」「17:00」の2段（印刷と同じ）。配送の印はセルの色と左上の文字で示す
 function cellHtml(v) {
-  const tm = normVal(v).match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+  const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
   return tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
 }
 // 実働時間：拘束5時間以上は1時間休憩。不正はnull
 function cellHours(v) {
   if (!v || isLeave(v)) return 0;
-  const m = String(v).match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+  const m = splitVal(v).time.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
   if (!m) return null;
   const span = (+m[3] + m[4] / 60) - (+m[1] + m[2] / 60);
   if (span <= 0) return null;
@@ -709,7 +733,7 @@ function render() {
   cols = allCols.filter(c => c.iso >= $('edFrom').value && c.iso <= $('edTo').value);
   const n = cols.length;
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
-  const divs = DIVS.filter(v => edDeptSel.has(v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
+  let divs = DIVS.filter(v => edDeptSel.has(v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
   // 幅の狭い画面では部門の列を省き、氏名の左の色で部門を示す
   const compact = narrowMQ.matches, lead = compact ? 1 : 2;
   let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th>' + (compact ? '' : '<th class="role">部門</th>');
@@ -721,6 +745,8 @@ function render() {
   const dayTot = {}; divs.forEach(v => dayTot[v] = Array(n).fill(0));
   const dayCnt = Array(n).fill(0);
   const siteTot = {}; divs.forEach(v => siteTot[v] = 0);
+  // 部門ごとに時間を足す（配送の印がある日は、その分を配送に回す）
+  const addTo = (dv, i, x) => { if (!x) return; (dayTot[dv] ||= Array(n).fill(0))[i] += x; siteTot[dv] = (siteTot[dv] || 0) + x; };
   rows.forEach((m, r) => {
     let sum = 0;
     const div = divOf(m.dept);
@@ -731,14 +757,17 @@ function render() {
       const hr = cellHours(v);
       const cls = ['cell'];
       if (c.d === 1) cls.push('mstart');
+      const share = deliveryShare(v);
       if (isLeave(v)) cls.push('off', v === '欠勤' ? 'absent' : 'leave');
       else if (hr === null) cls.push('bad');
-      if (hr) { sum += hr; if (tallied(m)) { dayTot[div][i] += hr; dayCnt[i]++; } }
-      h += `<td class="${cls.join(' ')}" data-r="${r}" data-c="${i}"${hr === null ? ' title="時間の形式を確認してください"' : ''}>${cellHtml(v)}</td>`;
+      if (share) cls.push(share < 1 ? 'deliv-half' : 'deliv');
+      if (hr) { sum += hr; if (tallied(m)) { addTo(div, i, hr * (1 - share)); addTo('配送', i, hr * share); dayCnt[i]++; } }
+      h += `<td class="${cls.join(' ')}" data-r="${r}" data-c="${i}"${hr === null ? ' title="時間の形式を確認してください"' : share ? ` title="${share < 1 ? '半日配送（実働の半分を配送に数える）' : '配送（実働をすべて配送に数える）'}"` : ''}>${cellHtml(v)}</td>`;
     });
-    if (tallied(m)) siteTot[div] += sum;
     h += `<td class="tot">${fmt(sum)}</td></tr>`;
   });
+  // 配送に行った人がいれば、配送の部門を表示していなくても「配送 時間」の行を出す
+  divs = ['栽培', '出荷', '配送', 'その他'].filter(v => dayTot[v]);
   if (!rows.length) h += `<tr><td class="name" colspan="${n + lead + 1}">表示する人がいません（部門の選び方を確認してください）</td></tr>`;
   const num = x => x ? (Math.round(x * 10) / 10).toLocaleString('ja-JP') : '–';
   h += '</tbody><tfoot>';
@@ -908,10 +937,11 @@ function updateMbar() {
   $('mbNow').textContent = multi ? '' : !canEdit(cursor.r, cursor.c) ? '入社前・退職後の日' : `今：${v ? shortVal(v) : '空欄'}`;
   // ボタン：その曜日の固定シフト → この人がよく使う時間 → 休みの種類 → 消す
   const freq = {};
-  Object.values(data[m.key] || {}).forEach(x => { if (cellHours(x)) freq[x] = (freq[x] || 0) + 1; });
+  Object.values(data[m.key] || {}).forEach(x => { const t = splitVal(x).time; if (cellHours(t)) freq[t] = (freq[t] || 0) + 1; }); // 配送の印は除いた時間で数える
   const fx = fixed[m.key]?.[FX_ORDER.indexOf(c.wd)];
   const times = [...new Set([fx, ...Object.keys(freq).sort((a, b) => freq[b] - freq[a])])].filter(x => x && cellHours(x)).slice(0, 4);
   $('mbChips').innerHTML = times.map(t => `<button type="button" data-v="${esc(t)}">${esc(shortVal(t))}</button>`).join('')
+    + Object.keys(DELIVERY_SHARE).map(t => `<button type="button" class="deliv-btn" data-deliv="${t}">${t}</button>`).join('')
     + LEAVE_TYPES.map(t => `<button type="button" data-v="${t}">${t}</button>`).join('')
     + '<button type="button" data-v="" class="danger">消す</button>';
 }
@@ -929,7 +959,14 @@ function mbSubmit() {
   if (!isLeave(v) && cellHours(v) === null) { toast('時間は 8-17 や 8:30-15 のように入れてください'); return; }
   mbApply(v);
 }
-$('mbChips').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) mbApply(b.dataset.v); });
+$('mbChips').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (!b.dataset.deliv) { mbApply(b.dataset.v); return; }
+  // 配送：印を付けて（外して）、1マスだけのときは翌日へ進む
+  const s = norm(sel); if (!s) return;
+  applyDelivery(b.dataset.deliv); $('mbRange').checked = false;
+  if (s.r0 === s.r1 && s.c0 === s.c1 && s.c1 < cols.length - 1) setCursor(s.r0, s.c1 + 1);
+});
 $('mbOk').onclick = mbSubmit;
 $('mbInput').addEventListener('keydown', ev => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); mbSubmit(); $('mbInput').blur(); } });
 document.querySelector('.mbar-nav').addEventListener('click', ev => {
@@ -993,13 +1030,33 @@ $('applyFixed').onclick = async () => {
 };
 $('clearSel').onclick = clearSelection;
 // 選んだセルに休みを入れるボタン
-$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button" data-leave="${t}">${t}</button>`).join('');
+$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button" data-leave="${t}">${t}</button>`).join('')
+  + Object.keys(DELIVERY_SHARE).map(t => `<button type="button" class="deliv-btn" data-deliv="${t}">${t}</button>`).join('');
 $('leaveBtns').addEventListener('mousedown', ev => ev.preventDefault()); // 選択範囲を保つ
 $('leaveBtns').addEventListener('click', ev => {
+  if (ev.target.dataset.deliv) { applyDelivery(ev.target.dataset.deliv); return; }
   const t = ev.target.dataset.leave; const s = norm(sel); if (!t || !s) return;
   for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) setVal(r, c, t);
   render();
 });
+// 選んだセルに配送の印を付ける。時間はそのまま（空欄・休みの日は、その曜日の固定シフトか 8:00-17:00）。
+// 選んだセルがすべて同じ印のときは、印を外す
+function applyDelivery(tag) {
+  const s = norm(sel); if (!s) return;
+  const cells = [];
+  for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) if (canEdit(r, c)) cells.push([r, c]);
+  if (!cells.length) return;
+  const valOf = (r, c) => data[rows[r].key]?.[cols[c].iso] || '';
+  const off = cells.every(([r, c]) => splitVal(valOf(r, c)).tag === tag);
+  cells.forEach(([r, c]) => {
+    const { time } = splitVal(valOf(r, c));
+    if (off) { setVal(r, c, time); return; }
+    const fx = splitVal(fixed[rows[r].key]?.[FX_ORDER.indexOf(cols[c].wd)]).time;
+    setVal(r, c, (cellHours(time) ? time : cellHours(fx) ? fx : '8:00-17:00') + tag);
+  });
+  render();
+  toast(off ? `${tag}の印を外しました` : `${tag}を入れました（配送 時間に${tag === '配送' ? '実働をすべて' : '実働の半分を'}数えます）`);
+}
 $('site').onchange = () => load();
 $('reloadBtn').onclick = () => refreshMembers(true);
 // 旧シフト表（いなべ・群馬の期間ごとのシート）の内容で、今の期間を置き換える。
@@ -1347,7 +1404,8 @@ function renderPrint(shrink = 1) {
     return Math.min(baseFont, (nameW - 2) / Math.max(len, 1));
   };
   const yr = first.iso.slice(0, 4);
-  let h = `<div class="pp-head"><h2>${esc($('site').value)}　シフト表　${yr}年${first.m}月${first.d}日〜${last.m}月${last.d}日</h2></div>`;
+  let h = `<div class="pp-head"><h2>${esc($('site').value)}　シフト表　${yr}年${first.m}月${first.d}日〜${last.m}月${last.d}日</h2><!--deliv--></div>`;
+  let anyDeliv = false;
   h += `<table class="pp-table" style="font-size:${baseFont.toFixed(2)}mm"><colgroup><col style="width:${nameW}mm"><col style="width:${deptW}mm">${days.map(() => `<col style="width:${dayW.toFixed(2)}mm">`).join('')}</colgroup>`;
   h += `<thead><tr style="height:${(rowH * headH).toFixed(2)}mm"><th>氏名</th><th>部門</th>${days.map(d => `<th class="${headCls(d)}">${d.d === 1 || d === first ? `<span class="mo">${d.m}月</span>` : ''}${d.d}<span class="wd">${WD[d.wd]}</span></th>`).join('')}</tr></thead><tbody>`;
   const cnt = {};
@@ -1358,11 +1416,12 @@ function renderPrint(shrink = 1) {
     days.forEach(d => {
       const v = valueOn(m, d);
       if (cellHours(v) && tallied(m)) cnt[d.iso] = (cnt[d.iso] || 0) + 1;
-      const tm = normVal(v).match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+      const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
       const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
       const off = isLeave(v);
+      const share = deliveryShare(v); if (share) anyDeliv = true;
       const fs = tm ? timeFont : off ? Math.min(offFont, (dayW - 1) / v.length) : timeFont;
-      h += `<td class="${off ? 'off' : ''}${v === '欠勤' ? ' absent' : ''}${weCls(d)}" style="font-size:${fs.toFixed(2)}mm">${body}</td>`;
+      h += `<td class="${off ? 'off' : ''}${v === '欠勤' ? ' absent' : ''}${share ? (share < 1 ? ' dvh' : ' dv') : ''}${weCls(d)}" style="font-size:${fs.toFixed(2)}mm">${body}</td>`;
     });
     h += '</tr>';
     prevDiv = div;
@@ -1372,6 +1431,7 @@ function renderPrint(shrink = 1) {
     h += `<tfoot><tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d.iso] || ''}</td>`).join('')}</tr></tfoot>`;
   }
   h += '</table>';
+  if (anyDeliv) h = h.replace('<!--deliv-->', '<span class="meta">　<span class="dv-key">配</span>＝配送　<span class="dv-key half">半</span>＝半日配送</span>');
   $('printPage').innerHTML = h;
   // 実際に描いた高さが1枚を超えたら、行の高さを縮めて描き直す
   const page = $('printPage'), table = page.querySelector('.pp-table');
