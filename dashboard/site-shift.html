@@ -1308,12 +1308,14 @@ function fitPreview() {
   const loginErr = msg => { $('loginErr').textContent = msg || ''; $('loginErr').hidden = !msg; };
 
   // Googleログインが使えない開き方（アプリ内ブラウザ・ファイル・データ保存オフ）を見つけて、直し方を出す
-  const APP_URL = 'https://rikeda-code.github.io/shiitake-iot/site-shift.html';
+  const APP_URL = 'https://shiitake-iot.web.app/site-shift.html';
   function envProblem() {
     if (!/^https?:$/.test(location.protocol)) return 'file';
     const ua = navigator.userAgent;
     if (/\bLine\//i.test(ua)) return 'line';
     if (/FBAN|FBAV|Instagram|MicroMessenger|KAKAOTALK|Teams\/|GSA\/|; wv\)/i.test(ua)) return 'inapp';
+    // iPhoneのアプリ内ブラウザ（Gmail・Googleチャットなど）は「Safari/」を名乗らない。ホーム画面から開いたときは除く
+    if (/iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua) && !navigator.standalone) return 'inapp';
     try {
       localStorage.setItem('__t', '1'); localStorage.removeItem('__t');
       sessionStorage.setItem('__t', '1'); sessionStorage.removeItem('__t');
@@ -1323,7 +1325,7 @@ function fitPreview() {
   const GUIDE = {
     file: 'このページはファイルとして開かれているため、ログインできません。下のURLを Chrome・Safari・Edge で開いてください。',
     line: 'LINEの中のブラウザではGoogleログインが使えません。右上のメニューから「ブラウザで開く」を選ぶか、下のURLをコピーして Chrome・Safari で開いてください。',
-    inapp: 'アプリの中のブラウザ（Gmail・Teams・Googleアプリなど）ではGoogleログインが使えないことがあります。メニューの「ブラウザで開く」を選ぶか、下のURLをコピーして Chrome・Safari・Edge で開いてください。',
+    inapp: 'アプリの中のブラウザ（Gmail・Googleチャット・Teams・Googleアプリなど）ではGoogleログインが使えません。メニューの「Safariで開く」「ブラウザで開く」を選ぶか、下のURLをコピーして Safari・Chrome で開いてください。',
     storage: 'ブラウザのCookie（サイトのデータ保存）がオフになっているため、ログインできません。ブラウザの設定で許可するか、プライベート（シークレット）モードをやめて開き直してください。',
   };
   function showGuide(kind) {
@@ -1341,6 +1343,8 @@ function fitPreview() {
     location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);
   }
   if (problem) showGuide(problem);
+  // アプリ内ブラウザでは、ログインボタンより先に「ブラウザで開き直す」案内を目立たせる
+  if (problem === 'inapp') { $('loginBtn').textContent = 'このままログインを試す（失敗することがあります）'; $('loginBtn').classList.remove('primary'); }
   $('loginBtn').onclick = () => {
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
