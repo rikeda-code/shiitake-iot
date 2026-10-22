@@ -1271,7 +1271,7 @@ function renderMembers() {
       : moving === m.key
       ? `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select><button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button>`
       : [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="dept">部門変更</button><button data-act="leave">退職・異動</button>`;
-    h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${md(m.join)}</td><td>${md(m.leave)}</td><td><div class="acts">${acts}</div></td></tr>`;
+    h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${m.flag === 2 ? `<input type="date" class="join-input" value="${esc(m.join || '')}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">` : md(m.join)}</td><td>${md(m.leave)}</td><td><div class="acts">${acts}</div></td></tr>`;
   });
   $('memTable').innerHTML = h;
 }
@@ -1301,6 +1301,19 @@ $('memTable').addEventListener('click', async ev => {
     retiring = moving = null; await refreshMembers(true);
     if (done) toast(done);
   } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
+});
+// 入社日の変更（入社＝B列2の人だけ。在職中の人は整理済み_Mの入退社列が空のため対象外）
+$('memTable').addEventListener('change', async ev => {
+  const inp = ev.target.closest('.join-input'); if (!inp) return;
+  const key = inp.closest('tr').dataset.key, m = members.find(x => x.key === key);
+  if (!m || !inp.value || inp.value === m.join) { if (!inp.value) inp.value = m?.join || ''; return; }
+  inp.disabled = true;
+  try {
+    await api('POST', { action: 'setJoinDate', key, site: curSite(), date: inp.value });
+    const done = `${m.name}さんの入社日を ${md(inp.value)} に変えました`;
+    await refreshMembers(true);
+    toast(done);
+  } catch (err) { toast('書き込めませんでした：' + err.message); inp.value = m.join || ''; inp.disabled = false; }
 });
 $('addForm').addEventListener('submit', async ev => {
   ev.preventDefault();
