@@ -305,6 +305,22 @@
 
   .ratio-col{ color:var(--ink-soft); font-size:13px; }
 
+  /* ---------- 収穫予測・在庫予測パネルの「詳細」（収穫見込の手入力） ---------- */
+  details.detail-rows{ padding:6px 0 10px; }
+  details.detail-rows summary{ cursor:pointer; font-size:13px; color:var(--ink-soft); padding:0 18px; }
+  details.detail-rows .table-scroll{ margin-top:6px; }
+  .harvest-input{
+    width:100%; min-width:56px; box-sizing:border-box; padding:2px 4px;
+    font:inherit; text-align:right; border:1px solid #c9b994; border-radius:4px; background:#fff;
+  }
+  .harvest-input::placeholder{ color:#c9bfa8; }
+  .harvest-input:disabled{ background:#f1ede4; color:var(--ink-soft); }
+  .harvest-input.save-error{ border-color:var(--red); background:#fdecea; }
+  .harvest-manual{ color:#2f6fa8; font-weight:700; }
+  .harvest-input-note{ padding:6px 18px 0; font-size:12.5px; color:var(--ink-soft); }
+  #harvestDetailSaveStatus{ margin-left:8px; }
+  #harvestDetailSaveStatus.error{ color:var(--red); }
+
   footer{
     margin-top:6px;
     padding-top:6px;
@@ -517,6 +533,73 @@
         </tbody>
       </table>
     </div>
+    <details class="detail-rows" id="harvestDetailSection">
+      <summary>詳細（収穫見込：手入力）</summary>
+      <div class="table-scroll">
+        <table id="table2detail">
+          <colgroup>
+            <col class="size-col">
+            <col style="width:78px;">
+            <col style="width:64px;">
+            <col span="9" style="width:74px;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="sticky-1">サイズ</th>
+              <th class="actual-col">収穫実績</th>
+              <th class="ratio-col">収穫比率</th>
+              <th class="dcol today-col" data-offset="0"></th>
+              <th class="dcol" data-offset="1"></th>
+              <th class="dcol" data-offset="2"></th>
+              <th class="dcol" data-offset="3"></th>
+              <th class="dcol" data-offset="4"></th>
+              <th class="dcol" data-offset="5"></th>
+              <th class="dcol" data-offset="6"></th>
+              <th class="dcol" data-offset="7"></th>
+              <th class="dcol" data-offset="8"></th>
+            </tr>
+          </thead>
+          <tbody id="table2detailBody">
+            <tr>
+              <th class="sticky-1">M</th>
+              <td class="actual-col" data-harvest-detail-actual="M">－</td><td class="ratio-col" data-harvest-detail-ratio="M">－</td>
+              <td class="today-col" data-harvest-detail="M" data-harvest-detail-offset="0">－</td><td data-harvest-detail="M" data-harvest-detail-offset="1">－</td><td data-harvest-detail="M" data-harvest-detail-offset="2">－</td><td data-harvest-detail="M" data-harvest-detail-offset="3">－</td><td data-harvest-detail="M" data-harvest-detail-offset="4">－</td><td data-harvest-detail="M" data-harvest-detail-offset="5">－</td><td data-harvest-detail="M" data-harvest-detail-offset="6">－</td><td data-harvest-detail="M" data-harvest-detail-offset="7">－</td><td data-harvest-detail="M" data-harvest-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">L</th>
+              <td class="actual-col" data-harvest-detail-actual="L">－</td><td class="ratio-col" data-harvest-detail-ratio="L">－</td>
+              <td class="today-col" data-harvest-detail="L" data-harvest-detail-offset="0">－</td><td data-harvest-detail="L" data-harvest-detail-offset="1">－</td><td data-harvest-detail="L" data-harvest-detail-offset="2">－</td><td data-harvest-detail="L" data-harvest-detail-offset="3">－</td><td data-harvest-detail="L" data-harvest-detail-offset="4">－</td><td data-harvest-detail="L" data-harvest-detail-offset="5">－</td><td data-harvest-detail="L" data-harvest-detail-offset="6">－</td><td data-harvest-detail="L" data-harvest-detail-offset="7">－</td><td data-harvest-detail="L" data-harvest-detail-offset="8">－</td>
+            </tr>
+            <tr class="grade-row">
+              <th class="sticky-1">秀</th>
+              <td class="actual-col" data-harvest-detail-actual="秀">－</td><td class="ratio-col">－</td>
+              <td class="today-col" data-harvest-detail="秀" data-harvest-detail-offset="0">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="1">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="2">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="3">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="4">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="5">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="6">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="7">－</td><td data-harvest-detail="秀" data-harvest-detail-offset="8">－</td>
+            </tr>
+            <tr class="grade-row">
+              <th class="sticky-1">優</th>
+              <td class="actual-col" data-harvest-detail-actual="優">－</td><td class="ratio-col">－</td>
+              <td class="today-col" data-harvest-detail="優" data-harvest-detail-offset="0">－</td><td data-harvest-detail="優" data-harvest-detail-offset="1">－</td><td data-harvest-detail="優" data-harvest-detail-offset="2">－</td><td data-harvest-detail="優" data-harvest-detail-offset="3">－</td><td data-harvest-detail="優" data-harvest-detail-offset="4">－</td><td data-harvest-detail="優" data-harvest-detail-offset="5">－</td><td data-harvest-detail="優" data-harvest-detail-offset="6">－</td><td data-harvest-detail="優" data-harvest-detail-offset="7">－</td><td data-harvest-detail="優" data-harvest-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">2L</th>
+              <td class="actual-col" data-harvest-detail-actual="2L">－</td><td class="ratio-col" data-harvest-detail-ratio="2L">－</td>
+              <td class="today-col" data-harvest-detail="2L" data-harvest-detail-offset="0">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="1">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="2">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="3">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="4">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="5">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="6">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="7">－</td><td data-harvest-detail="2L" data-harvest-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">袋</th>
+              <td class="actual-col" data-harvest-detail-actual="袋">－</td><td class="ratio-col" data-harvest-detail-ratio="袋">－</td>
+              <td class="today-col" data-harvest-detail="袋" data-harvest-detail-offset="0">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="1">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="2">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="3">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="4">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="5">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="6">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="7">－</td><td data-harvest-detail="袋" data-harvest-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">合計</th>
+              <td class="actual-col" data-harvest-detail-actual="合計">－</td><td class="ratio-col" data-harvest-detail-ratio="合計">－</td>
+              <td class="today-col"><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="0" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="1" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="2" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="3" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="4" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="5" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="6" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="7" value=""></td><td><input class="harvest-input" type="text" inputmode="decimal" data-harvest-input-offset="8" value=""></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note harvest-input-note" id="harvestDetailNote">収穫見込は直近工数計画の収穫見込と共通です。他の画面で変更した場合は再読み込みで反映されます。／<span class="harvest-manual">青字</span>＝手入力の見込で計算<span id="harvestDetailSaveStatus"></span></div>
+    </details>
   </section>
 
   <!-- ============ 在庫予測 ============ -->
@@ -588,6 +671,72 @@
         </tbody>
       </table>
     </div>
+    <details class="detail-rows" id="stockDetailSection">
+      <summary>詳細（収穫見込で計算）</summary>
+      <div class="table-scroll">
+        <table id="table3detail">
+          <colgroup>
+            <col class="size-col">
+            <col style="width:78px;">
+            <col style="width:64px;">
+            <col span="9" style="width:74px;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="sticky-1">サイズ</th>
+              <th>在庫実績</th>
+              <th class="ratio-col">在庫比率</th>
+              <th class="dcol today-col" data-offset="0"></th>
+              <th class="dcol" data-offset="1"></th>
+              <th class="dcol" data-offset="2"></th>
+              <th class="dcol" data-offset="3"></th>
+              <th class="dcol" data-offset="4"></th>
+              <th class="dcol" data-offset="5"></th>
+              <th class="dcol" data-offset="6"></th>
+              <th class="dcol" data-offset="7"></th>
+              <th class="dcol" data-offset="8"></th>
+            </tr>
+          </thead>
+          <tbody id="table3detailBody">
+            <tr>
+              <th class="sticky-1">M</th>
+              <td data-stock-detail-actual="M">－</td><td class="ratio-col" data-stock-detail-ratio="M">－</td>
+              <td class="today-col" data-stock-detail="M" data-stock-detail-offset="0">－</td><td data-stock-detail="M" data-stock-detail-offset="1">－</td><td data-stock-detail="M" data-stock-detail-offset="2">－</td><td data-stock-detail="M" data-stock-detail-offset="3">－</td><td data-stock-detail="M" data-stock-detail-offset="4">－</td><td data-stock-detail="M" data-stock-detail-offset="5">－</td><td data-stock-detail="M" data-stock-detail-offset="6">－</td><td data-stock-detail="M" data-stock-detail-offset="7">－</td><td data-stock-detail="M" data-stock-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">L</th>
+              <td data-stock-detail-actual="L">－</td><td class="ratio-col" data-stock-detail-ratio="L">－</td>
+              <td class="today-col" data-stock-detail="L" data-stock-detail-offset="0">－</td><td data-stock-detail="L" data-stock-detail-offset="1">－</td><td data-stock-detail="L" data-stock-detail-offset="2">－</td><td data-stock-detail="L" data-stock-detail-offset="3">－</td><td data-stock-detail="L" data-stock-detail-offset="4">－</td><td data-stock-detail="L" data-stock-detail-offset="5">－</td><td data-stock-detail="L" data-stock-detail-offset="6">－</td><td data-stock-detail="L" data-stock-detail-offset="7">－</td><td data-stock-detail="L" data-stock-detail-offset="8">－</td>
+            </tr>
+            <tr class="grade-row">
+              <th class="sticky-1">秀</th>
+              <td data-stock-detail-actual="秀">－</td><td class="ratio-col">－</td>
+              <td class="today-col" data-stock-detail="秀" data-stock-detail-offset="0">－</td><td data-stock-detail="秀" data-stock-detail-offset="1">－</td><td data-stock-detail="秀" data-stock-detail-offset="2">－</td><td data-stock-detail="秀" data-stock-detail-offset="3">－</td><td data-stock-detail="秀" data-stock-detail-offset="4">－</td><td data-stock-detail="秀" data-stock-detail-offset="5">－</td><td data-stock-detail="秀" data-stock-detail-offset="6">－</td><td data-stock-detail="秀" data-stock-detail-offset="7">－</td><td data-stock-detail="秀" data-stock-detail-offset="8">－</td>
+            </tr>
+            <tr class="grade-row">
+              <th class="sticky-1">優</th>
+              <td data-stock-detail-actual="優">－</td><td class="ratio-col">－</td>
+              <td class="today-col" data-stock-detail="優" data-stock-detail-offset="0">－</td><td data-stock-detail="優" data-stock-detail-offset="1">－</td><td data-stock-detail="優" data-stock-detail-offset="2">－</td><td data-stock-detail="優" data-stock-detail-offset="3">－</td><td data-stock-detail="優" data-stock-detail-offset="4">－</td><td data-stock-detail="優" data-stock-detail-offset="5">－</td><td data-stock-detail="優" data-stock-detail-offset="6">－</td><td data-stock-detail="優" data-stock-detail-offset="7">－</td><td data-stock-detail="優" data-stock-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">2L</th>
+              <td data-stock-detail-actual="2L">－</td><td class="ratio-col" data-stock-detail-ratio="2L">－</td>
+              <td class="today-col" data-stock-detail="2L" data-stock-detail-offset="0">－</td><td data-stock-detail="2L" data-stock-detail-offset="1">－</td><td data-stock-detail="2L" data-stock-detail-offset="2">－</td><td data-stock-detail="2L" data-stock-detail-offset="3">－</td><td data-stock-detail="2L" data-stock-detail-offset="4">－</td><td data-stock-detail="2L" data-stock-detail-offset="5">－</td><td data-stock-detail="2L" data-stock-detail-offset="6">－</td><td data-stock-detail="2L" data-stock-detail-offset="7">－</td><td data-stock-detail="2L" data-stock-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">袋</th>
+              <td data-stock-detail-actual="袋">－</td><td class="ratio-col" data-stock-detail-ratio="袋">－</td>
+              <td class="today-col" data-stock-detail="袋" data-stock-detail-offset="0">－</td><td data-stock-detail="袋" data-stock-detail-offset="1">－</td><td data-stock-detail="袋" data-stock-detail-offset="2">－</td><td data-stock-detail="袋" data-stock-detail-offset="3">－</td><td data-stock-detail="袋" data-stock-detail-offset="4">－</td><td data-stock-detail="袋" data-stock-detail-offset="5">－</td><td data-stock-detail="袋" data-stock-detail-offset="6">－</td><td data-stock-detail="袋" data-stock-detail-offset="7">－</td><td data-stock-detail="袋" data-stock-detail-offset="8">－</td>
+            </tr>
+            <tr>
+              <th class="sticky-1">合計</th>
+              <td data-stock-detail-actual="合計">－</td><td class="ratio-col" data-stock-detail-ratio="合計">－</td>
+              <td class="today-col" data-stock-detail="合計" data-stock-detail-offset="0">－</td><td data-stock-detail="合計" data-stock-detail-offset="1">－</td><td data-stock-detail="合計" data-stock-detail-offset="2">－</td><td data-stock-detail="合計" data-stock-detail-offset="3">－</td><td data-stock-detail="合計" data-stock-detail-offset="4">－</td><td data-stock-detail="合計" data-stock-detail-offset="5">－</td><td data-stock-detail="合計" data-stock-detail-offset="6">－</td><td data-stock-detail="合計" data-stock-detail-offset="7">－</td><td data-stock-detail="合計" data-stock-detail-offset="8">－</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
   </section>
 
 </div>
@@ -1585,7 +1734,17 @@
     Promise.all([stockPromise, shipmentPromise, harvestPromise]).catch(function(err){
       console.error('[在庫・出荷・収穫データ取得] 一部の更新でエラーが発生しました:', err);
     }).finally(function(){
-      if (typeof updateStockForecast === 'function') updateStockForecast();
+      // 収穫予測・在庫予測の本体の計算がすべて終わった後に、収穫見込（手入力）の
+      // 詳細パネル（table2detail・table3detail）を再計算する
+      var stockForecastResult = (typeof updateStockForecast === 'function') ? updateStockForecast() : null;
+      var afterStockForecast = function(){
+        if (typeof updateHarvestStockDetail === 'function') updateHarvestStockDetail();
+      };
+      if (stockForecastResult && typeof stockForecastResult.finally === 'function') {
+        stockForecastResult.finally(afterStockForecast);
+      } else {
+        afterStockForecast();
+      }
     });
   }
 
@@ -1694,6 +1853,501 @@
   input.addEventListener('change', clamp);
 
   clamp();
+})();
+</script>
+
+<!-- ── 収穫予測・在庫予測パネルの「詳細」（収穫見込の手入力）。直近工数計画
+     （work-hours-forecast.html・PR #503）と同じ保存先GAS（gas/harvest-forecast-webapp.gs）を
+     共有するが、JS自体は別ファイルとして独立して持つ（このダッシュボードの他の部分と
+     同じく1ファイル完結の方針のため） ── -->
+<script>
+(function(){
+  'use strict';
+
+  // 収穫見込（手入力）の保存先GAS WebアプリURL。直近工数計画
+  // （work-hours-forecast.htmlのHARVEST_FORECAST_GAS_URL）と同一のURL
+  var HARVEST_FORECAST_GAS_URL = 'https://script.google.com/macros/s/AKfycbwZ3RlwF2Gh3aMLesUl6AOq5y5p7rbLF5OILYSmkGQ_2d-XExCoPTknJdBm7bOX7B8bNg/exec';
+  var DETAIL_DAY_COUNT = 9; // 基準日（当日）〜8日後
+  var DETAIL_DASH = '－';
+  var DETAIL_SIZES = ['M', 'L', '秀', '優', '2L', '袋'];
+
+  /* ===================== 日付のユーティリティ（このIIFE専用） ===================== */
+  function addDaysIso(iso, n){
+    var parts = iso.split('-').map(Number);
+    var d = new Date(parts[0], parts[1] - 1, parts[2] + n);
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  /* ===================== 純粋関数（window.__testから直接呼べる） ===================== */
+
+  function fmtDetail1(v){
+    return (v === null || v === undefined || isNaN(v)) ? DETAIL_DASH : (Math.round(v * 10) / 10).toFixed(1);
+  }
+
+  // 収穫見込の入力欄の文字列を読む。空欄はnull、数値として読めない・負の値はundefined（不正）。
+  // 直近工数計画（work-hours-forecast.html）のparseManualHarvestInput()と同じ仕様
+  function parseManualHarvestInput(raw){
+    var s = String(raw == null ? '' : raw).normalize('NFKC').replace(/,/g, '').replace(/kg$/i, '').trim();
+    if (s === '') return null;
+    var v = Number(s);
+    return (isNaN(v) || v < 0) ? undefined : v;
+  }
+
+  // 表示文字列（"123.4"・"－"・空欄・"%"付き等）を数値に戻す。読めなければnull
+  function parseDetailCellNumber(text){
+    if (text == null) return null;
+    var t = String(text).trim();
+    if (t === '' || t === DETAIL_DASH || t === '-') return null;
+    var cleaned = t.replace(/,/g, '').replace(/kg$/i, '').replace(/%$/, '');
+    var v = parseFloat(cleaned);
+    return isNaN(v) ? null : v;
+  }
+
+  // 見込kg1日分を、サイズ別の収穫比率（0〜1の小数。M/L/2L/袋）と、Lに掛ける秀/優の比率から
+  // サイズ別に按分する。比率が無い（null）サイズはnullを返す
+  function computeHarvestDetailDayValues(manualKg, sizeRatios, gradeRatios){
+    var out = {};
+    ['M', 'L', '2L', '袋'].forEach(function(size){
+      var r = sizeRatios[size];
+      out[size] = (manualKg !== null && r !== null && r !== undefined) ? Math.round(manualKg * r * 10) / 10 : null;
+    });
+    var lVal = (manualKg !== null && sizeRatios['L'] !== null && sizeRatios['L'] !== undefined) ? manualKg * sizeRatios['L'] : null;
+    ['秀', '優'].forEach(function(grade){
+      var gr = gradeRatios[grade];
+      out[grade] = (lVal !== null && gr !== null && gr !== undefined) ? Math.round(lVal * gr * 10) / 10 : null;
+    });
+    return out;
+  }
+
+  // 収穫予測の詳細、当日〜8日後×サイズ別の1行分をまとめて計算する。
+  // manualKgByDay[o]が入っている日は見込×比率（manual:true）、無い日は
+  // mainTextBySize[size][o]（本体の表示文字列）をそのまま使う（manual:false）
+  function computeHarvestDetailRow(manualKgByDay, sizeRatios, gradeRatios, mainTextBySize){
+    var perDay = [];
+    for (var o = 0; o < manualKgByDay.length; o++) {
+      var manualKg = manualKgByDay[o];
+      var hasManual = manualKg !== null && manualKg !== undefined;
+      var computed = hasManual ? computeHarvestDetailDayValues(manualKg, sizeRatios, gradeRatios) : null;
+      var row = {};
+      DETAIL_SIZES.forEach(function(size){
+        if (hasManual) {
+          var v = computed[size];
+          row[size] = { value: v, text: fmtDetail1(v), manual: true };
+        } else {
+          var t = (mainTextBySize[size] && mainTextBySize[size][o] !== undefined) ? mainTextBySize[size][o] : DETAIL_DASH;
+          row[size] = { value: parseDetailCellNumber(t), text: t, manual: false };
+        }
+      });
+      perDay.push(row);
+    }
+    return perDay;
+  }
+
+  // 在庫予測の詳細、1サイズ分の当日〜8日後の積み上げ計算（前日の結果＋その日の収穫
+  // −その日の出荷予定）。harvestTexts[o]は収穫予測の詳細の表示文字列で、本体と違い
+  // 「－」の日は0として扱い、最後まで計算を続ける（本体はnullを引きずって以降も
+  // 「－」になるが、詳細ではそうしない）。shipmentValues[o]は出荷予定の数値
+  // （未入力は呼び出し側で0に正規化済み）
+  function computeStockDetailSeries(startActual, harvestTexts, shipmentValues){
+    var out = [];
+    var prev = (startActual === undefined) ? null : startActual;
+    for (var o = 0; o < harvestTexts.length; o++) {
+      if (prev === null) { out.push(null); continue; }
+      var hv = parseDetailCellNumber(harvestTexts[o]);
+      var h = (hv === null) ? 0 : hv;
+      var s = shipmentValues[o] || 0;
+      var v = Math.round((prev + h - s) * 10) / 10;
+      out.push(v);
+      prev = v;
+    }
+    return out;
+  }
+
+  /* ===================== GAS読み込み・保存 ===================== */
+
+  async function fetchManualHarvestKgDetail(refIso, site){
+    var out = new Array(DETAIL_DAY_COUNT).fill(null);
+    if (!HARVEST_FORECAST_GAS_URL) return out;
+    var url = HARVEST_FORECAST_GAS_URL + '?action=load&site=' + encodeURIComponent(site) +
+      '&from=' + refIso + '&to=' + addDaysIso(refIso, DETAIL_DAY_COUNT - 1);
+    var res = await fetch(url, { cache: 'no-store' });
+    var json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || '収穫見込を取得できませんでした');
+    for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+      var v = json.values[addDaysIso(refIso, o)];
+      if (typeof v === 'number' && !isNaN(v)) out[o] = v;
+    }
+    return out;
+  }
+
+  async function saveManualHarvestKgDetail(site, iso, kg){
+    var res = await fetch(HARVEST_FORECAST_GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'save', site: site, date: iso, kg: kg }),
+    });
+    var json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || '保存できませんでした');
+  }
+
+  /* ===================== 本体（table1〜3）のDOMから材料を読む ===================== */
+
+  function activeSite(){
+    var b = document.querySelector('#siteToggle button.active');
+    return b ? b.getAttribute('data-site') : 'いなべ';
+  }
+
+  function readMainHarvestTexts(size){
+    var out = [];
+    for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+      var cell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + o + '"]');
+      out.push(cell ? cell.textContent.trim() : DETAIL_DASH);
+    }
+    return out;
+  }
+
+  function readTable2TotalPlaceholders(){
+    var out = [];
+    for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+      var cell = document.querySelector('[data-harvest-total-offset="' + o + '"]');
+      var t = cell ? cell.textContent.trim() : DETAIL_DASH;
+      out.push(t === DETAIL_DASH ? '' : t);
+    }
+    return out;
+  }
+
+  // サイズ別の収穫比率（M/L/2L/袋。本体の「収穫比率」列、"XX.XX%"形式）を0〜1の小数にして返す
+  function readSizeRatios(){
+    var out = {};
+    ['M', 'L', '2L', '袋'].forEach(function(size){
+      var cell = document.querySelector('[data-harvest-ratio="' + size + '"]');
+      var t = cell ? cell.textContent.trim() : '';
+      var v = (t === '' || t === DETAIL_DASH) ? null : parseFloat(t.replace('%', ''));
+      out[size] = (v === null || isNaN(v)) ? null : v / 100;
+    });
+    return out;
+  }
+
+  // Lに掛ける秀/優の比率を、本体が見出し行に書き込んだ「秀_NN」「優_NN」の表記から読む
+  // （「収穫_秀優比率」シートの値そのもの。本体のupdateHarvestForecast()が描画済みの前提）
+  function readGradeRatios(){
+    var out = {};
+    ['秀', '優'].forEach(function(grade){
+      var cell = document.querySelector('[data-harvest-grade-label="' + grade + '"]');
+      var t = cell ? cell.textContent.trim() : '';
+      var m = t.match(/_(-?[\d.]+)$/);
+      out[grade] = m ? parseFloat(m[1]) / 100 : null;
+    });
+    return out;
+  }
+
+  function readTable2TotalActualRatio(){
+    var cells = document.querySelectorAll('#table2 tbody tr:last-child td');
+    return {
+      actual: cells[0] ? cells[0].textContent.trim() : DETAIL_DASH,
+      ratio: cells[1] ? cells[1].textContent.trim() : DETAIL_DASH,
+    };
+  }
+
+  function readTable3ActualRatio(size){
+    if (size === '合計') {
+      var cells = document.querySelectorAll('#table3 tbody tr:last-child td');
+      return {
+        actualText: cells[0] ? cells[0].textContent.trim() : DETAIL_DASH,
+        ratioText: cells[1] ? cells[1].textContent.trim() : DETAIL_DASH,
+      };
+    }
+    var actualCell = document.querySelector('[data-stock-forecast-actual="' + size + '"]');
+    var ratioCell = document.querySelector('[data-stock-forecast-ratio="' + size + '"]');
+    return {
+      actualText: actualCell ? actualCell.textContent.trim() : DETAIL_DASH,
+      ratioText: ratioCell ? ratioCell.textContent.trim() : DETAIL_DASH,
+    };
+  }
+
+  // 出荷予定の数値を読む（未入力「－」・空欄は0として呼び出し側で扱えるよう、ここではnullを返す）
+  function readShipmentValues(size){
+    var out = [];
+    for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+      var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + o + '"]');
+      var t = cell ? cell.textContent.trim() : '';
+      out.push(parseDetailCellNumber(t) || 0);
+    }
+    return out;
+  }
+
+  /* ===================== 描画 ===================== */
+
+  function setDetailSaveStatus(text, isError){
+    var el = document.getElementById('harvestDetailSaveStatus');
+    if (!el) return;
+    el.textContent = text ? '　' + text : '';
+    el.classList.toggle('error', !!isError);
+  }
+
+  // 実績・比率列（M/L/秀/優/2L/袋/合計）を本体からコピーする。入力欄（合計行の日別セル）は対象外
+  function renderTable2DetailActualRatio(state){
+    DETAIL_SIZES.forEach(function(size){
+      var actualCell = document.querySelector('[data-harvest-detail-actual="' + size + '"]');
+      var ratioCell = document.querySelector('[data-harvest-detail-ratio="' + size + '"]');
+      var mainActual = document.querySelector('[data-harvest-actual="' + size + '"]');
+      var mainRatio = document.querySelector('[data-harvest-ratio="' + size + '"]');
+      if (actualCell) actualCell.textContent = mainActual ? mainActual.textContent.trim() : DETAIL_DASH;
+      if (ratioCell && mainRatio) ratioCell.textContent = mainRatio.textContent.trim();
+    });
+    var totalActualCell = document.querySelector('[data-harvest-detail-actual="合計"]');
+    var totalRatioCell = document.querySelector('[data-harvest-detail-ratio="合計"]');
+    if (totalActualCell) totalActualCell.textContent = state.table2Total.actual;
+    if (totalRatioCell) totalRatioCell.textContent = state.table2Total.ratio;
+  }
+
+  // 合計行の入力欄（placeholder・disabled状態）を更新する。値そのもの（value）は
+  // GASから読み込んだ直後・入力確定時にだけ書き換える（再描画のたびに打鍵中の値を失わないため）
+  function renderTable2DetailInputState(state){
+    for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+      var input = document.querySelector('[data-harvest-input-offset="' + o + '"]');
+      if (!input) continue;
+      input.placeholder = state.totalPlaceholders[o] || '';
+      if (state.editable) {
+        input.disabled = false;
+        input.removeAttribute('title');
+      } else if (state.loading) {
+        input.disabled = true;
+        input.title = '収穫見込を読み込み中です';
+      } else {
+        input.disabled = true;
+        input.title = '収穫見込の保存先（GAS）が未設定、または読み込めなかったため入力できません';
+      }
+    }
+  }
+
+  function renderTable2DetailValues(rows){
+    DETAIL_SIZES.forEach(function(size){
+      for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+        var cell = document.querySelector('[data-harvest-detail="' + size + '"][data-harvest-detail-offset="' + o + '"]');
+        if (!cell) continue;
+        var d = rows[o][size];
+        cell.textContent = d.text;
+        cell.classList.toggle('harvest-manual', d.manual);
+      }
+    });
+  }
+
+  // 合計行(M+L+2L+袋。秀/優は内訳の再掲のため除外)の集計。本体のrecomputeTotalRow()と
+  // 同じ考え方だが、別IIFE内の関数のため参照できず、ここに同等の処理を複製している
+  function recomputeDetailTotalRow(table, colIndexes){
+    if (!table) return;
+    var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+    if (!rows.length) return;
+    var totalRow = rows[rows.length - 1];
+    var dataRows = rows.slice(0, -1).filter(function(r){ return !r.classList.contains('grade-row'); });
+    var totalCells = totalRow.querySelectorAll('td');
+    colIndexes.forEach(function(colIdx){
+      var sum = 0, any = false;
+      dataRows.forEach(function(r){
+        var cells = r.querySelectorAll('td');
+        var v = parseDetailCellNumber(cells[colIdx] && cells[colIdx].textContent);
+        if (v !== null) { sum += v; any = true; }
+      });
+      var cell = totalCells[colIdx];
+      if (!cell) return;
+      if (!any) { cell.textContent = DETAIL_DASH; return; }
+      var rounded = Math.round(sum * 100) / 100;
+      var display = Math.abs(rounded) >= 1000
+        ? rounded.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+        : (Math.round(rounded * 10) / 10).toFixed(1);
+      cell.textContent = display;
+    });
+  }
+
+  function renderTable3Detail(state, seriesBySize){
+    DETAIL_SIZES.concat(['合計']).forEach(function(size){
+      var actualCell = document.querySelector('[data-stock-detail-actual="' + size + '"]');
+      var ratioCell = document.querySelector('[data-stock-detail-ratio="' + size + '"]');
+      var info = readTable3ActualRatio(size);
+      if (actualCell) actualCell.textContent = info.actualText;
+      if (ratioCell) ratioCell.textContent = info.ratioText;
+    });
+    DETAIL_SIZES.forEach(function(size){
+      var series = seriesBySize[size];
+      for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+        var cell = document.querySelector('[data-stock-detail="' + size + '"][data-stock-detail-offset="' + o + '"]');
+        if (!cell) continue;
+        var v = series[o];
+        cell.textContent = v === null || v === undefined ? DETAIL_DASH : v.toFixed(1);
+        cell.classList.remove('pos', 'neg');
+        if (v !== null && v !== undefined) cell.classList.add(v >= 0 ? 'pos' : 'neg');
+      }
+    });
+    // 合計行（M+L+2L+袋。秀/優は内訳の再掲のため除外）は、本体のrecomputeTotalRow()と
+    // 同じ考え方の集計を行う
+    recomputeDetailTotalRow(document.getElementById('table3detail'), [2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    var totalRow = document.querySelector('#table3detail tbody tr:last-child');
+    if (totalRow) {
+      var cells = totalRow.querySelectorAll('td');
+      for (var i = 2; i < cells.length; i++) {
+        var tv = parseFloat(String(cells[i].textContent).replace(/,/g, ''));
+        cells[i].classList.remove('pos', 'neg');
+        if (!isNaN(tv)) cells[i].classList.add(tv >= 0 ? 'pos' : 'neg');
+      }
+    }
+  }
+
+  function recomputeAndRenderBoth(state){
+    var rows = computeHarvestDetailRow(state.manualKgByDay, state.sizeRatios, state.gradeRatios, state.mainTextBySize);
+    renderTable2DetailValues(rows);
+
+    var seriesBySize = {};
+    DETAIL_SIZES.forEach(function(size){
+      var info = readTable3ActualRatio(size);
+      var startActual = parseDetailCellNumber(info.actualText);
+      var harvestTexts = rows.map(function(r){ return r[size].text; });
+      seriesBySize[size] = computeStockDetailSeries(startActual, harvestTexts, state.shipmentBySize[size]);
+    });
+    renderTable3Detail(state, seriesBySize);
+  }
+
+  /* ===================== 状態管理（基準日・拠点の切替で古い読み込みを破棄する） ===================== */
+
+  var detailState = null;
+  var detailToken = 0;
+
+  window.updateHarvestStockDetail = async function(){
+    var myToken = ++detailToken;
+    function stale(){ return myToken !== detailToken; }
+
+    var refInput = document.getElementById('refDateInput');
+    if (!refInput || !refInput.value) return;
+    var refIso = refInput.value;
+    var site = activeSite();
+
+    var mainTextBySize = {};
+    DETAIL_SIZES.forEach(function(size){ mainTextBySize[size] = readMainHarvestTexts(size); });
+    var shipmentBySize = {};
+    DETAIL_SIZES.forEach(function(size){ shipmentBySize[size] = readShipmentValues(size); });
+
+    var state = {
+      gen: myToken,
+      refIso: refIso,
+      site: site,
+      manualKgByDay: new Array(DETAIL_DAY_COUNT).fill(null),
+      sizeRatios: readSizeRatios(),
+      gradeRatios: readGradeRatios(),
+      mainTextBySize: mainTextBySize,
+      shipmentBySize: shipmentBySize,
+      totalPlaceholders: readTable2TotalPlaceholders(),
+      table2Total: readTable2TotalActualRatio(),
+      editable: false,
+      loading: !!HARVEST_FORECAST_GAS_URL,
+    };
+    detailState = state;
+
+    renderTable2DetailActualRatio(state);
+    renderTable2DetailInputState(state);
+    recomputeAndRenderBoth(state); // GASが未設定・読み込み中でも、まず本体の値だけで詳細を表示する
+    setDetailSaveStatus('');
+
+    if (!HARVEST_FORECAST_GAS_URL) return;
+
+    try {
+      var manualKg = await fetchManualHarvestKgDetail(refIso, site);
+      if (stale()) return;
+      state.manualKgByDay = manualKg;
+      state.editable = true;
+      state.loading = false;
+      document.querySelectorAll('.harvest-input').forEach(function(input){
+        var o = parseInt(input.getAttribute('data-harvest-input-offset'), 10);
+        var v = manualKg[o];
+        input.value = (v === null || v === undefined) ? '' : v;
+      });
+      renderTable2DetailInputState(state);
+      recomputeAndRenderBoth(state);
+    } catch (e) {
+      console.error('[収穫見込（詳細）] 取得エラー:', e);
+      if (stale()) return;
+      state.loading = false;
+      renderTable2DetailInputState(state);
+      setDetailSaveStatus(site + 'の収穫見込を取得できませんでした（' + (e.message || e) + '）', true);
+    }
+  };
+
+  async function commitDetailInput(input){
+    if (!detailState || detailState.gen !== detailToken) return;
+    var state = detailState;
+    var o = parseInt(input.getAttribute('data-harvest-input-offset'), 10);
+    var kg = parseManualHarvestInput(input.value);
+    if (kg === undefined) {
+      setDetailSaveStatus('数値（kg）を入力してください', true);
+      var prev = state.manualKgByDay[o];
+      input.value = (prev === null || prev === undefined) ? '' : prev;
+      return;
+    }
+    input.value = kg === null ? '' : kg;
+    if (state.manualKgByDay[o] === kg && !input.classList.contains('save-error')) return;
+    state.manualKgByDay[o] = kg;
+    recomputeAndRenderBoth(state);
+
+    input.classList.remove('save-error');
+    setDetailSaveStatus('保存中…');
+    try {
+      await saveManualHarvestKgDetail(state.site, addDaysIso(state.refIso, o), kg);
+      if (detailState === state) setDetailSaveStatus('保存しました');
+    } catch (err) {
+      console.error('[収穫見込（詳細）] 保存エラー:', err);
+      if (detailState !== state) return;
+      input.classList.add('save-error');
+      setDetailSaveStatus('保存できませんでした（' + (err.message || err) + '）。もう一度Enterで保存し直してください', true);
+    }
+  }
+
+  var table2detailBody = document.getElementById('table2detailBody');
+  table2detailBody.addEventListener('change', function(e){
+    if (e.target.classList.contains('harvest-input')) commitDetailInput(e.target);
+  });
+  // Enterでも確定する（値を変えずにEnterした場合はchangeが起きないため、保存に失敗した欄の
+  // 保存し直しはここで行う）。直後のblurで起きるchangeは、値が同じなので何もしない
+  table2detailBody.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' || !e.target.classList.contains('harvest-input')) return;
+    e.preventDefault();
+    commitDetailInput(e.target);
+    e.target.blur();
+  });
+
+  // 拠点トグル：既存のクリック処理（見た目の切替）には触れず、別のリスナーとして
+  // 追加する（拠点が変わったら、収穫見込（手入力）の詳細だけ読み直す）
+  document.querySelectorAll('#siteToggle button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if (typeof updateHarvestStockDetail === 'function') updateHarvestStockDetail();
+    });
+  });
+
+  // 実績日（収穫予測パネル）：基準日のrender()を経由しないため、こちらも既存の
+  // 操作を変えずに別リスナーとして追加し、収穫実績・収穫比率が読み込まれた後に
+  // 詳細を再計算する
+  function afterHarvestRefChange(){
+    var p = (typeof triggerHarvestForecastUpdate === 'function') ? triggerHarvestForecastUpdate() : Promise.resolve();
+    Promise.resolve(p).finally(function(){
+      if (typeof updateHarvestStockDetail === 'function') updateHarvestStockDetail();
+    });
+  }
+  ['harvestPrevDay', 'harvestNextDay', 'harvestPrevMonth', 'harvestNextMonth', 'harvestTodayBtn'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('click', afterHarvestRefChange);
+  });
+  var harvestInput = document.getElementById('harvestRefDateInput');
+  if (harvestInput) harvestInput.addEventListener('change', afterHarvestRefChange);
+
+  window.__test = window.__test || {};
+  Object.assign(window.__test, {
+    parseManualHarvestInput: parseManualHarvestInput,
+    parseDetailCellNumber: parseDetailCellNumber,
+    computeHarvestDetailDayValues: computeHarvestDetailDayValues,
+    computeHarvestDetailRow: computeHarvestDetailRow,
+    computeStockDetailSeries: computeStockDetailSeries,
+  });
 })();
 </script>
 </body>
