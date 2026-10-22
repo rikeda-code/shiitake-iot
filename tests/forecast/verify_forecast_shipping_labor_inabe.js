@@ -29,6 +29,18 @@ const STD_LABOR_HOURS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const STD_WORK_HOURS_GID = '264266810';
 const SALES_URL_SHEET_GID = '1130067935';
+const NANTAN_SHIFT_SHEET_ID = '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8';
+const SHIP_NANTAN_GID = '1439827078'; // 「勤務用_出荷」（26.10/11〜11/10）
+
+// 南丹の勤務表(datedHoursSheet)相当のCSV。1行目=名前+日付("2026/10/11"形式)、
+// 2行目=曜日、3行目以降=人(A列が空になった行で終端)
+function buildNantanDatedHoursCsv(dates, people) {
+  const header = ['名前'].concat(dates.map(d => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`));
+  const weekdayRow = ['曜日'].concat(dates.map(d => WD[d.getDay()]));
+  const rows = [header, weekdayRow];
+  people.forEach(p => rows.push([p.name].concat(dates.map(d => { const v = p.cellsByIso ? p.cellsByIso[isoKey(d)] : undefined; return v === undefined ? '' : v; }))));
+  return toCsvText(rows);
+}
 
 // シフト表(いなべ栽培出荷シフト表)相当のCSV。1行目=日付、2行目=曜日、3〜13行目=空欄(ヘッダ等)、
 // 14行目以降(0-based index13〜)=人。people: [{name, dept, cellsByIso: {iso: raw}}]
@@ -398,12 +410,17 @@ async function shipLaborWarnings(page) {
     await page.close();
   }
 
-  console.log('\n=== ⑧南丹の出荷パネル3は、今までどおりサンプルであること(群馬は別PR#494で実データ接続) ===');
+  console.log('\n=== ⑧南丹の出荷パネル3は、勤務用_出荷シートの実データに接続されていること(PR#509) ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
+    const nantanDates = dateRange(new Date(2026, 9, 11), new Date(2026, 10, 10));
+    const nantanCsv = buildNantanDatedHoursCsv(nantanDates, [
+      { name: '南丹 出荷担当', cellsByIso: Object.fromEntries(nantanDates.map((d, i) => [isoKey(d), (i % 7 === 0) ? '休' : '8H'])) },
+    ]);
     await setupRoutes(page, [
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+      staticHandler([[NANTAN_SHIFT_SHEET_ID, SHIP_NANTAN_GID]], nantanCsv),
     ]);
     await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(500);
@@ -415,8 +432,8 @@ async function shipLaborWarnings(page) {
       const rows = await shippingLaborDetailRows(page);
       const bannerDisplay = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
       console.log(site, 'names:', JSON.stringify(rows.map(r => r.name)), 'bannerDisplay:', bannerDisplay);
-      check(`${site}の出荷パネル3は引き続きサンプル名(「出荷 サンプル」)で表示される`, rows.every(r => r.name.startsWith('出荷 サンプル')));
-      check(`${site}ではサンプルデータの帯が表示される`, bannerDisplay !== 'none');
+      check(`${site}の出荷パネル3は実データ(シートの実名)で表示される(サンプル名ではない)`, rows.length > 0 && rows.every(r => !r.name.startsWith('出荷 サンプル')));
+      check(`${site}ではサンプルデータの帯が表示されない`, bannerDisplay === 'none');
     }
     await page.close();
   }

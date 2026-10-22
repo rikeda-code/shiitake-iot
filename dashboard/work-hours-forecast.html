@@ -692,6 +692,11 @@
              },
              excludedNames: ['吉村(出)', '高橋(出)'], // 配送の担当のため出荷には含めない
              blankRule: 'perPerson' },
+    // 出荷(南丹)の勤務表取得先。栽培の南丹と同じファイル(id)の「勤務用_出荷」シートを
+    // 読む(栽培のFORECAST_SHIFT_SOURCES['南丹']とは別のgid・別のキャッシュキーのため、
+    // 栽培側の読み込みには影響しない)。16人全員が出荷担当のため除外する名前はない
+    '南丹': { type: 'datedHoursSheet', id: '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8',
+             gids: ['1439827078'] }, // 南丹「勤務用_出荷」（2026/10/11〜11/10）
   };
 
   var DASH = '－';
@@ -2326,18 +2331,20 @@
   }
 
   // 南丹の勤務表（複数シートに分かれる場合に備え配列で持つ）をすべて取得・解析する。
-  // 取得結果は保持（メモ化）し、失敗時はキャッシュに残さず再取得できるようにする
-  var nantanShiftSheetsPromise = null;
-  async function fetchNantanShiftSheets(){
-    if (!nantanShiftSheetsPromise) {
-      var src = FORECAST_SHIFT_SOURCES['南丹'];
-      var p = Promise.all(src.gids.map(function(gid){
-        return fetchCsvSheet(src.id, gid).then(function(json){ return parseNantanDatedHoursSheet(json.table.rows); });
-      }));
-      p.catch(function(){ if (nantanShiftSheetsPromise === p) nantanShiftSheetsPromise = null; });
-      nantanShiftSheetsPromise = p;
-    }
-    return nantanShiftSheetsPromise;
+  // src省略時は栽培のFORECAST_SHIFT_SOURCES['南丹']を使う（栽培の呼び出しは従来どおり）。
+  // キャッシュはgid単位（栽培・出荷で別のgidを使うため混同しない。群馬のgunmaShiftCacheと
+  // 同じ考え方）。取得結果は保持（メモ化）し、失敗時はキャッシュに残さず再取得できるようにする
+  var nantanShiftSheetsCache = {};
+  async function fetchNantanShiftSheets(src){
+    src = src || FORECAST_SHIFT_SOURCES['南丹'];
+    return Promise.all(src.gids.map(function(gid){
+      if (!nantanShiftSheetsCache[gid]) {
+        var p = fetchCsvSheet(src.id, gid).then(function(json){ return parseNantanDatedHoursSheet(json.table.rows); });
+        p.catch(function(){ if (nantanShiftSheetsCache[gid] === p) delete nantanShiftSheetsCache[gid]; });
+        nantanShiftSheetsCache[gid] = p;
+      }
+      return nantanShiftSheetsCache[gid];
+    }));
   }
 
   // 南丹の勤務表(複数シート) x 基準日から、当日〜7日後の標準労働時間合計・出勤人数・
@@ -2818,9 +2825,8 @@
 
   /* ===================== 出荷（パネル1：販売抽出シート(商品別)の実績・受注） ===================== */
   // パネル1(出荷数量)は、販売抽出シート(商品別)の実績・受注の実データを読む。
-  // パネル3(標準労働時間)は引き続きサンプルデータ(getShippingLaborSample())。
-  // 実データに差し替えるときは、この関数(またはrenderShippingLabor()内の呼び出し箇所)を
-  // 実際の勤務表を読む非同期関数に置き換えるだけでよい
+  // パネル3(標準労働時間)は、いなべ・群馬・南丹とも実データに接続済み
+  // (getShippingLaborSample()は、未対応の拠点が増えたときのためのフォールバックとして残す)
 
   // URLセルからスプレッドシートID・gidを取り出す(work-hours.htmlの
   // extractSheetIdGidFromUrl()と同じ処理)。URLが空欄・IDまたはgidが取り出せない
@@ -3288,6 +3294,16 @@
     return computeGunmaStandardLaborHours(periodsData, basisDate, laborRows, blankOpts);
   }
 
+  // 南丹×出荷の標準労働時間。読み込み・計算は栽培の南丹(renderLaborNantan())と同じ関数
+  // (fetchNantanShiftSheets/computeNantanStandardLaborHours)を使い、読むシート
+  // (FORECAST_SHIPPING_SHIFT_SOURCES['南丹']のgid)だけを変えている。標準労働時間シートとの
+  // 照合・部門の絞り込みは栽培の南丹と同じく行わない（シートに載っている全員が対象）
+  async function fetchShippingLaborNantan(basisDate){
+    var src = FORECAST_SHIPPING_SHIFT_SOURCES['南丹'];
+    var sheets = await fetchNantanShiftSheets(src);
+    return computeNantanStandardLaborHours(sheets, basisDate);
+  }
+
   async function renderShippingLabor(basisDate, site, gen){
     showPanelError('shipLaborError', null);
     try {
@@ -3295,6 +3311,7 @@
       for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
       var result = (site === 'いなべ') ? await fetchShippingLaborInabe(basisDate)
         : (site === '群馬') ? await fetchShippingLaborGunma(basisDate)
+        : (site === '南丹') ? await fetchShippingLaborNantan(basisDate)
         : getShippingLaborSample(site, dates);
       return result;
     } catch (err) {
@@ -3908,7 +3925,7 @@
     document.getElementById('supportedPanels').style.display = showCult ? '' : 'none';
     document.getElementById('shippingPanels').style.display = showShip ? '' : 'none';
     var site = currentSite;
-    document.getElementById('shippingSampleBanner').style.display = (showShip && site !== 'いなべ' && site !== '群馬') ? '' : 'none';
+    document.getElementById('shippingSampleBanner').style.display = (showShip && site !== 'いなべ' && site !== '群馬' && site !== '南丹') ? '' : 'none';
     if (!supported) return;
 
     var basisDate = fromISO(basisInput.value);
@@ -4076,6 +4093,7 @@
     fetchShippingLaborInabe: fetchShippingLaborInabe,
     FORECAST_SHIPPING_SHIFT_SOURCES: FORECAST_SHIPPING_SHIFT_SOURCES,
     fetchShippingLaborGunma: fetchShippingLaborGunma,
+    fetchShippingLaborNantan: fetchShippingLaborNantan,
     extractShippingSheetIdGidFromUrl: extractShippingSheetIdGidFromUrl,
     parseShippingSalesUrlSheet: parseShippingSalesUrlSheet,
     SHIPPING_PRODUCT_CLASSIFICATION_RULES: SHIPPING_PRODUCT_CLASSIFICATION_RULES,
