@@ -35,6 +35,7 @@ npx playwright install chromium
    node tests/forecast/verify_sticky_unit_column.js
    node tests/forecast/verify_harvest_forecast_input.js
    node tests/forecast/verify_forecast_shipping_workday_shift.js
+   node tests/forecast/verify_last_row_style.js
    ```
 
    各行末に `: OK` / `: NG` が出力され、最後に `すべてOK` / `NGあり` と `DONE` が表示されれば実行完了です。
@@ -54,6 +55,8 @@ npx playwright install chromium
 
 - `verify_harvest_forecast_input.js` — 栽培の標準工数パネルに「収穫計画（kg）」の表示行と「収穫見込（入力）」の手入力欄を加え、見込kgが入っている日は収穫計画kgより優先して収穫工数を計算する変更の検証。純粋関数（`computeStandardWorkHours`の見込優先・`parseManualHarvestInput`の入力値の読み取り）、保存先GAS（`HARVEST_FORECAST_GAS_URL`）が未設定のときは入力欄が無効で計画kgだけで計算されること、GASから読んだ見込が入力欄に入り青字で計算されること、入力→即時再計算（収穫・小計・注記）とGASへの保存（拠点・日付・kg、空欄はkg:nullで削除）、数値以外は保存しないこと、保存に失敗した欄は赤くなりEnterで保存し直せることを、群馬（基準日2026/10/21）で確認する。GASのURLはページ取得時に差し替え、GETとPOSTは`page.route()`でモックする。
 - `verify_forecast_shipping_workday_shift.js` — 出荷パネル1・2を「作業日Dの列に出荷日D+1のデータを表示する」表示に変更した機能の検証（`verify_forecast_shipping_sales.js`・`verify_regression_consolidated.js`と内容が重複しない部分を中心に確認）。基準日が今日以外のときも列見出し・合計列の出荷日注記（個別・合計、パネル1・2とも）が作業日+1日で正しく計算されること、列自身の日付（作業日の見出し・合計範囲）は従来どおり変わらないこと、パネル3（標準労働時間）は列の日付（作業日自身）のまま変わらないこと（曜日ごとに異なる労働時間のモックで確認）、過不足（パネル2とパネル3の比較）が同じ列番号どうしで比較されること（列自身の日付のダミー値と出荷日の正しい値を区別できるようモックし、誤って列自身の日付を使うと異なる値になってしまう例で確認）、栽培タブの画面・計算は変更されていないことを確認する。さらに、出荷パネル1・2の実績/受注の印の行（見出し）が`ship-kind-row`クラスにより非表示（`display:none`）になりつつ、データの読み分け（出荷日基準の実績/受注タブの選択）自体は変わらず機能していること、「出荷 M/D」の行は引き続き表示されること、合計列の出荷日範囲の注記が2行に折り返されて出荷パネル1・2にデスクトップ幅（1280px）で横スクロールバーが出ないことも確認する。
+
+- `verify_last_row_style.js` — 表の最後の行が、位置（`tbody tr:last-child`）だけで合計行の見た目（太字・背景色）になってしまっていた不具合の修正の検証。合計行の見た目は、位置ではなく`class="agg-row"`を付けた本物の合計・小計行だけに付くこと（稼働コンテナ数、標準工数の小計、標準労働時間の過不足、出荷数量の合計点数・cs数・詳細kgの合計）を確認するとともに、合計行ではないのに表の最後に来てしまう行（栽培の工程件数詳細の最後の行「コンテナ点検」、人別内訳表の最後の人の行）が合計行の見た目にならず、ほかの普通の行と同じ見た目になることを、栽培・出荷×いなべ・群馬・南丹の6画面すべてで確認する。
 
 いずれのファイルも、CSVモックの組み立てや日付固定（`fixTodayTo`）などの補助関数をファイル内に直接含んでおり、他ファイルへの依存はありません。
 

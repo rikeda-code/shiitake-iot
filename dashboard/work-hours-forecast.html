@@ -162,7 +162,10 @@
     border-bottom:1px solid var(--line-soft); border-right:1px solid var(--line-soft); white-space:nowrap;
   }
   tbody th{ text-align:left; font-weight:700; background:#fbf7ee; color:var(--brown-deep); }
-  tbody tr:last-child td, tbody tr:last-child th{ border-bottom:none; background:#f3ead4; font-weight:700; }
+  /* 太字・背景色の「合計行」の見た目は、表の最後の行かどうか(:last-child)ではなく、
+     実際に合計・小計である行に付けたclass="agg-row"だけで決める（人別内訳の最後の人の
+     行など、合計ではない行がたまたま最後の行になっても合計行に見えないようにするため） */
+  tbody tr:last-child td, tbody tr:last-child th{ border-bottom:none; }
   /* 固定するのは1列目(人別内訳の「氏名」幅)だけ。長い行見出しは省略せず折り返す */
   .sticky-1{ position:sticky; left:0; z-index:2; white-space:normal; }
   /* 2列目(単位)。固定せず、日付の列と一緒に横スクロールする。右寄せ表示 */
@@ -427,7 +430,7 @@
             <td class="selectable-cell" data-sel-col="1" data-unit="人" data-numfmt="int" data-attendance-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="人" data-numfmt="int" data-attendance-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="人" data-numfmt="int" data-attendance-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="人" data-numfmt="int" data-attendance-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="人" data-numfmt="int" data-attendance-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="人" data-numfmt="int" data-attendance-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="人" data-numfmt="int" data-attendance-offset="total">－</td>
           </tr>
-          <tr>
+          <tr class="agg-row">
             <th class="sticky-1">過不足（標準労働時間－標準工数）</th><th class="unit-col">h</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shortfall-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shortfall-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shortfall-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shortfall-offset="3">－</td>
@@ -588,7 +591,7 @@
             <td class="selectable-cell" data-sel-col="1" data-unit="人" data-numfmt="int" data-shipattendance-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="人" data-numfmt="int" data-shipattendance-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="人" data-numfmt="int" data-shipattendance-offset="3">－</td>
             <td class="selectable-cell" data-sel-col="4" data-unit="人" data-numfmt="int" data-shipattendance-offset="4">－</td><td class="selectable-cell" data-sel-col="5" data-unit="人" data-numfmt="int" data-shipattendance-offset="5">－</td><td class="selectable-cell" data-sel-col="6" data-unit="人" data-numfmt="int" data-shipattendance-offset="6">－</td><td class="total-col selectable-cell" data-sel-col="7" data-unit="人" data-numfmt="int" data-shipattendance-offset="total">－</td>
           </tr>
-          <tr>
+          <tr class="agg-row">
             <th class="sticky-1">過不足（標準労働時間－標準工数）</th><th class="unit-col">h</th>
             <td class="selectable-cell today-col" data-sel-col="0" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="0">－</td>
             <td class="selectable-cell" data-sel-col="1" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="1">－</td><td class="selectable-cell" data-sel-col="2" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="2">－</td><td class="selectable-cell" data-sel-col="3" data-unit="h" data-numfmt="dec1" data-shipshortfall-offset="3">－</td>
@@ -2648,7 +2651,7 @@
     var bodyDetail = document.getElementById('table1cultDetailBody');
     var mainHtml = '';
     DISPLAY_PROCESSES.forEach(function(name){ mainHtml += buildRowHtml(name, name, 'cult', DAY_COUNT, null, '件', 'dec1'); });
-    mainHtml += buildRowHtml('稼働コンテナ数', '稼働コンテナ数', 'cult', DAY_COUNT, null, '台', 'dec1');
+    mainHtml += buildRowHtml('稼働コンテナ数', '稼働コンテナ数', 'cult', DAY_COUNT, 'agg-row', '台', 'dec1');
     bodyMain.innerHTML = mainHtml;
 
     var detailHtml = '';
@@ -2708,7 +2711,7 @@
     var body = document.getElementById('table2workBody');
     var html = harvest ? buildHarvestRowsHtml(harvest) : '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'work', DAY_COUNT, null, 'h', 'dec1'); });
-    html += '<tr><th class="sticky-1">小計（栽培 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
+    html += '<tr class="agg-row"><th class="sticky-1">小計（栽培 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('work-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
     document.getElementById('workHarvestInputNote').style.display = harvest ? '' : 'none';
     fillWorkHoursValues(rows, perDay, harvest);
@@ -3262,7 +3265,7 @@
     var body = document.getElementById('table2shipBody');
     var html = '';
     (rows || []).forEach(function(row){ html += buildRowHtml(row.waku, row.waku, 'shipwork', DAY_COUNT, null, 'h', 'dec1'); });
-    html += '<tr><th class="sticky-1">小計（出荷 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
+    html += '<tr class="agg-row"><th class="sticky-1">小計（出荷 標準工数合計）</th><th class="unit-col">h</th>' + buildOffsetOnlyTds('shipwork-subtotal', DAY_COUNT, 'h', 'dec1') + '</tr>';
     body.innerHTML = html;
 
     if (!perDay) return;
