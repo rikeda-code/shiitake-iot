@@ -209,6 +209,15 @@
   }
   .sub-note{ font-size:10.5px; font-weight:400; color:var(--ink-soft); white-space:normal; }
   .dcol-kind{ font-size:10.5px; font-style:italic; }
+  /* 出荷パネル1の実績/受注の印の行は、データの読み分け(実績/受注タブの選択)自体には
+     使うが、見出しとしては表示しない */
+  tr.ship-kind-row{ display:none; }
+  /* 出荷パネル1・2：作業日(列自身の日付)の翌日＝出荷日のデータを表示するため、
+     列見出しに小さく出荷日を添える注記行 */
+  .dcol-shipwork{ font-size:10.5px; font-weight:400; color:var(--ink-soft); }
+  /* 合計列の出荷日範囲(例：「出荷 10/22〜」+改行+「10/28」)は、列の幅に収まるよう
+     2行に折り返す(ほかの列は1行のまま、thead th既定のnowrapを個別に上書きする) */
+  .dcol-shipwork-total{ white-space:normal; line-height:1.15; }
 
   @media (max-width:640px){
     body{ padding:18px 10px 40px; }
@@ -479,11 +488,17 @@
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
-          <tr class="weekday">
+          <tr class="weekday ship-kind-row">
             <th class="sticky-1"></th><th class="unit-col"></th>
             <th class="dcol-kind today-col" data-kind-offset="0"></th>
             <th class="dcol-kind" data-kind-offset="1"></th><th class="dcol-kind" data-kind-offset="2"></th><th class="dcol-kind" data-kind-offset="3"></th>
             <th class="dcol-kind" data-kind-offset="4"></th><th class="dcol-kind" data-kind-offset="5"></th><th class="dcol-kind" data-kind-offset="6"></th><th class="total-col"></th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1"></th><th class="unit-col"></th>
+            <th class="dcol-shipwork today-col" data-offset="0"></th>
+            <th class="dcol-shipwork" data-offset="1"></th><th class="dcol-shipwork" data-offset="2"></th><th class="dcol-shipwork" data-offset="3"></th>
+            <th class="dcol-shipwork" data-offset="4"></th><th class="dcol-shipwork" data-offset="5"></th><th class="dcol-shipwork" data-offset="6"></th><th class="dcol-shipwork-total total-col"></th>
           </tr>
         </thead>
         <tbody id="table1shipBody">
@@ -523,6 +538,12 @@
             <th class="dcol today-col" data-offset="0"></th>
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
+          </tr>
+          <tr class="weekday">
+            <th class="sticky-1"></th><th class="unit-col"></th>
+            <th class="dcol-shipwork today-col" data-offset="0"></th>
+            <th class="dcol-shipwork" data-offset="1"></th><th class="dcol-shipwork" data-offset="2"></th><th class="dcol-shipwork" data-offset="3"></th>
+            <th class="dcol-shipwork" data-offset="4"></th><th class="dcol-shipwork" data-offset="5"></th><th class="dcol-shipwork" data-offset="6"></th><th class="dcol-shipwork-total total-col"></th>
           </tr>
         </thead>
         <tbody id="table2shipBody">
@@ -2565,6 +2586,20 @@
     });
   }
 
+  // 出荷パネル1・2専用：列(作業日=basisDate+offset)の小さい注記として、その列に表示する
+  // 出荷日(作業日の翌日)を添える。合計列には出荷日の範囲(作業日の翌日〜7日後の翌日)を添える。
+  // パネル3(標準労働時間)は対象外(列の日付は作業日自身のまま変えない)
+  function renderShipWorkDateCols(basisDate){
+    document.querySelectorAll('.dcol-shipwork').forEach(function(cell){
+      var offset = parseInt(cell.getAttribute('data-offset'), 10);
+      cell.textContent = '出荷 ' + fmtMDPadded(addDays(basisDate, offset + 1));
+    });
+    document.querySelectorAll('.dcol-shipwork-total').forEach(function(cell){
+      // 列の幅に収まるよう2行に折り返す(「出荷 10/22〜」+改行+「10/28」)
+      cell.innerHTML = '出荷 ' + fmtMDPadded(addDays(basisDate, 1)) + '〜<br>' + fmtMDPadded(addDays(basisDate, DAY_COUNT));
+    });
+  }
+
   // 基準日が今日かどうかで、列見出しの1列目(「当日」/「基準日」)・2列目(「翌日」/「1日後」)・
   // 各パネルの注記(「当日〜7日後」/「基準日〜7日後」)を切り替える。render()のたびに
   // 基準日を見て同期的に行うため(非同期フェッチを伴わない)、PR #487の世代チェックとは
@@ -2979,8 +3014,8 @@
     return shippingSalesSheetCache[key];
   }
 
-  // 出荷数量を販売抽出シート(商品別)から取得する。表示する日付が今日より前なら「実績」、
-  // 今日以降(今日を含む)なら「受注」のタブを使う(「今日」は基準日ではなく実際の今日)。
+  // 出荷数量を販売抽出シート(商品別)から取得する。datesに渡す日付(出荷日)が今日より前なら
+  // 「実績」、今日以降(今日を含む)なら「受注」のタブを使う(「今日」は基準日ではなく実際の今日)。
   // 必要な区分(実績・受注のどちらか、または両方)のタブだけを、1回ずつ取得する。
   // 戻り値: { byDate: { 日付ISO文字列: {pack,bag,bara,kg:{pack,bag,bara,total},source} | null },
   //           missingDates: [対象シートにその日付の列が無かったDateの配列] }
@@ -3100,14 +3135,19 @@
     return { perDayTotal: perDayTotal, rawPerDayTotal: perDayTotal.slice(), perDayAttendance: perDayAttendance, personBreakdown: personBreakdown, warnings: [], notices: [], periodNotices: [] };
   }
 
+  // 出荷の作業(パック詰め・梱包等)は出荷日の前日に行うため、列(作業日)D には出荷日D+1の
+  // 出荷数量を表示する(renderShipWorkDateCols()の注記「出荷 M/D」と対になる)。単純に
+  // 1日ずらして販売抽出シートを読むだけで、実績/受注の判定(fetchShippingQuantities内の
+  // 「今日より前か」の比較)もそのまま出荷日基準になる。パネル2(標準工数)はこの
+  // qtyByOffsetから計算されるため、同様に出荷日D+1のデータを使った値になる
   async function renderShippingQuantities(basisDate, site, gen){
     showPanelError('shipQtyError', null);
     try {
-      var dates = [];
-      for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
-      var salesResult = await fetchShippingQuantities(site, dates);
+      var shippingDates = [];
+      for (var o = 0; o < DAY_COUNT; o++) shippingDates.push(addDays(basisDate, o + 1));
+      var salesResult = await fetchShippingQuantities(site, shippingDates);
       var pcsPerCs = await fetchShippingPcsPerCs();
-      var qtyByOffset = dates.map(function(d){
+      var qtyByOffset = shippingDates.map(function(d){
         var s = salesResult.byDate[toISO(d)];
         if (!s) return null;
         var totalPieces = s.pack + s.bag + s.bara;
@@ -3933,6 +3973,7 @@
     updateBasisLabels(basisInput.value === todayISO);
 
     if (currentBusiness === '出荷') {
+      renderShipWorkDateCols(basisDate);
       var shipQtyPromise = renderShippingQuantities(basisDate, site, gen);
       var shipWorkPromise = shipQtyPromise.then(function(qty){ return renderShippingWork(basisDate, qty, site, gen); });
       var shipLaborPromise = renderShippingLabor(basisDate, site, gen);

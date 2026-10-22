@@ -138,11 +138,13 @@ async function shippingWorkRows(page) {
   let allOk = true;
   function check(name, cond) { console.log(`  ${name}: ${cond ? 'OK' : 'NG'}`); if (!cond) allOk = false; }
 
-  console.log('=== ①いなべ・群馬・南丹とも、DB共有の一覧から実績・受注のタブの場所を見つけ、パネル1に値が表示されること ===');
+  console.log('=== ①いなべ・群馬・南丹とも、DB共有の一覧から実績・受注のタブの場所を見つけ、パネル1に値が表示されること(作業日Dの列には出荷日D+1のデータが入る) ===');
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19); // 今日=2026/10/19
-    const dates = []; for (let o = 0; o < 7; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates.push(d); }
+    // 作業日(列)は10/19〜10/25(7日分)。列0の出荷日は10/20、列6の出荷日は10/26のため、
+    // モックは出荷日側の範囲(10/19〜10/26、8日分)をカバーしておく
+    const dates = []; for (let o = 0; o < 8; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates.push(d); }
     const sites = ['いなべ', '群馬', '南丹'];
     const urlEntries = [];
     const handlers = [];
@@ -160,17 +162,28 @@ async function shippingWorkRows(page) {
     await page.click('[data-business="出荷"]');
     await page.waitForTimeout(1000);
     const headerRange = await shippingTotalRangeHeader(page);
-    check('見出しが基準日〜6日後の7日分になり、合計列の見出しが期間(10/19〜10/25)になる', headerRange === '10/19〜10/25');
+    check('見出しが基準日〜6日後の7日分になり、合計列の見出しが作業日の期間(10/19〜10/25)になる(列自身の日付は作業日のまま変わらない)', headerRange === '10/19〜10/25');
+    const shipDateHeaders = await page.evaluate(() => ({
+      col0: document.querySelector('#table1ship thead .dcol-shipwork[data-offset="0"]').textContent.trim(),
+      total: document.querySelector('#table1ship thead .dcol-shipwork-total').textContent.trim(),
+      col0Work: document.querySelector('#table2ship thead .dcol-shipwork[data-offset="0"]').textContent.trim(),
+      totalWork: document.querySelector('#table2ship thead .dcol-shipwork-total').textContent.trim(),
+    }));
+    check('パネル1の列見出しに出荷日が小さく添えられる(作業日10/19の列→「出荷 10/20」)', shipDateHeaders.col0 === '出荷 10/20');
+    check('パネル1の合計列に出荷日の範囲が添えられる(「出荷 10/20〜10/26」)', shipDateHeaders.total === '出荷 10/20〜10/26');
+    check('パネル2(標準工数)にも同じ出荷日の注記が付く', shipDateHeaders.col0Work === '出荷 10/20' && shipDateHeaders.totalWork === '出荷 10/20〜10/26');
     for (let i = 0; i < sites.length; i++) {
       const site = sites[i];
       if (site !== 'いなべ') { await page.click(`[data-site="${site}"]`); await page.waitForTimeout(800); }
       const rows = await shippingQtyRows(page);
       const packRow = rows.find(r => r.label === 'パック数');
-      const expected = String(100 + i * 10);
-      check(`${site}：DB共有の一覧から受注のタブが見つかり、パネル1に値が表示される(${expected})`, packRow && packRow.cells[0] === expected);
-      // 合計列：7日分(j=0..6)の合計＝7×(100+i×10)+21。7日分そろうので「（◯日分）」は付かない
-      const expectedTotal = (7 * (100 + i * 10) + 21).toLocaleString('ja-JP');
-      check(`${site}：合計列が7日分の合計(${expectedTotal})になり、日数の注記が付かない`, packRow.totalHtml === expectedTotal);
+      // 列0(作業日10/19)は出荷日10/20(dates[1])のデータを表示する
+      const expected = String(100 + i * 10 + 1);
+      check(`${site}：DB共有の一覧から受注のタブが見つかり、作業日の列0には出荷日(10/20)のデータが表示される(${expected})`, packRow && packRow.cells[0] === expected);
+      // 合計列：作業日0〜6の出荷日はdates[1]〜dates[7] → 合計＝7×(100+i×10)+(1+2+...+7)=7×(100+i×10)+28。
+      // 8日分のモックで作業日0〜6すべての出荷日をカバーしているため「（◯日分）」は付かない
+      const expectedTotal = (7 * (100 + i * 10) + 28).toLocaleString('ja-JP');
+      check(`${site}：合計列が7日分の出荷日データの合計(${expectedTotal})になり、日数の注記が付かない`, packRow.totalHtml === expectedTotal);
       const err = await page.evaluate(() => document.getElementById('shipQtyError').classList.contains('show'));
       check(`${site}：パネル1がエラー表示にならない`, !err);
     }
@@ -199,7 +212,10 @@ async function shippingWorkRows(page) {
     await page.waitForTimeout(500);
     await page.click('[data-business="出荷"]');
     await page.waitForTimeout(800);
-    // 基準日を10/17にする(過去)。offset0-7 = 10/17〜10/24
+    // 基準日を10/17にする(過去)。作業日の列は0-6=10/17〜10/23。実績/受注の判定・値は
+    // 出荷日(作業日の翌日)基準になるため、列0(作業日10/17)の出荷日は10/18、
+    // 列1(作業日10/18)の出荷日は10/19、列2(作業日10/19)の出荷日は10/20、
+    // 列3(作業日10/20)の出荷日は10/21
     await page.fill('#basisDateInput', '2026-10-17');
     await page.dispatchEvent('#basisDateInput', 'change');
     await page.waitForTimeout(1200);
@@ -207,12 +223,49 @@ async function shippingWorkRows(page) {
     const kinds = await shippingKinds(page);
     const packRow = rows.find(r => r.label === 'パック数');
     console.log('packCells:', JSON.stringify(packRow.cells), 'kinds:', JSON.stringify(kinds));
-    check('10/17(実績)=505', packRow.cells[0] === '505');
-    check('10/18(実績)=506', packRow.cells[1] === '506');
-    check('10/19(受注、今日を含む)=700', packRow.cells[2] === '700');
-    check('10/20(受注)=701', packRow.cells[3] === '701');
-    check('10/17・10/18の印が「実績」', kinds[0] === '実績' && kinds[1] === '実績');
-    check('10/19以降の印が「受注」', kinds.slice(2).every(k => k === '受注'));
+    check('作業日10/17の列(出荷日10/18・実績)=506', packRow.cells[0] === '506');
+    check('作業日10/18の列(出荷日10/19・受注、今日を含む)=700', packRow.cells[1] === '700');
+    check('作業日10/19の列(出荷日10/20・受注)=701', packRow.cells[2] === '701');
+    check('作業日10/20の列(出荷日10/21・受注)=702', packRow.cells[3] === '702');
+    check('出荷日が今日(10/19)より前になる列(作業日10/17のみ)の印が「実績」', kinds[0] === '実績');
+    check('出荷日が今日(10/19)以降になる列(作業日10/18以降)の印が「受注」', kinds.slice(1).every(k => k === '受注'));
+    await page.close();
+  }
+
+  console.log('\n=== ②-2 ユーザー指示の例の再現：今日が10/22のとき、作業日10/21の列(出荷日10/22)は「受注」、作業日10/20の列(出荷日10/21)は「実績」 ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 22); // 今日=2026/10/22
+    const actualDates = dateRange(new Date(2026, 9, 15), new Date(2026, 9, 21)); // 10/15〜10/21(実績)
+    const orderDates = dateRange(new Date(2026, 9, 22), new Date(2026, 9, 28)); // 10/22〜10/28(受注)
+    const actualCsv = buildSalesSheetCsv(actualDates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(actualDates.map((d, i) => [isoKey(d), 800 + i])) }]);
+    const orderCsv = buildSalesSheetCsv(orderDates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(orderDates.map((d, i) => [isoKey(d), 900 + i])) }]);
+    const urlCsv = buildSalesUrlListCsv([
+      { site: 'いなべ', kind: '実績', url: salesSheetUrl('actual_y', '3101') },
+      { site: 'いなべ', kind: '受注', url: salesSheetUrl('order_y', '3102') },
+    ]);
+    await setupRoutes(page, [
+      staticHandler([[DB_SHARE_SHEET_ID, SALES_URL_SHEET_GID]], urlCsv),
+      staticHandler([['actual_y', '3101']], actualCsv),
+      staticHandler([['order_y', '3102']], orderCsv),
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(500);
+    await page.click('[data-business="出荷"]');
+    await page.waitForTimeout(800);
+    // 基準日を10/20にする。列0=作業日10/20(出荷日10/21)、列1=作業日10/21(出荷日10/22)
+    await page.fill('#basisDateInput', '2026-10-20');
+    await page.dispatchEvent('#basisDateInput', 'change');
+    await page.waitForTimeout(1200);
+    const rows = await shippingQtyRows(page);
+    const kinds = await shippingKinds(page);
+    const packRow = rows.find(r => r.label === 'パック数');
+    console.log('packCells:', JSON.stringify(packRow.cells), 'kinds:', JSON.stringify(kinds));
+    // 実績データ(10/15〜10/21)でのindex: 10/21はindex6 → 800+6=806
+    check('作業日10/20の列(出荷日10/21)は「実績」(10/21は今日10/22より前)', kinds[0] === '実績' && packRow.cells[0] === '806');
+    // 受注データ(10/22〜10/28)でのindex: 10/22はindex0 → 900
+    check('作業日10/21の列(出荷日10/22)は「受注」(10/22は今日10/22以降)', kinds[1] === '受注' && packRow.cells[1] === '900');
     await page.close();
   }
 
@@ -275,7 +328,8 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const dates = [new Date(2026, 9, 19)];
+    // 基準日は既定で今日(10/19)。列0(作業日10/19)が表示するのは出荷日10/20のデータ
+    const dates = [new Date(2026, 9, 20)];
     const csv = buildSalesSheetCsv(dates, [
       { kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(dates[0])]: 100 } },
       { kind: '重量', product: '秀L6 130g', valuesByDate: { [isoKey(dates[0])]: 9999 } }, // 点数に混ざってはいけない大きな値
@@ -301,7 +355,9 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const orderDates = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 24)); // 10/19〜10/24のみ(10/25,26は無い)
+    // 基準日は既定で今日(10/19)。作業日の列0〜6の出荷日は10/20〜10/26。
+    // モックは10/20〜10/25のみ(10/26が無い)にして、列6(作業日10/25・出荷日10/26)が「－」になることを確認する
+    const orderDates = dateRange(new Date(2026, 9, 20), new Date(2026, 9, 25));
     const orderCsv = buildSalesSheetCsv(orderDates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(orderDates.map((d, i) => [isoKey(d), 300 + i])) }]);
     const urlCsv = buildSalesUrlListCsv([{ site: 'いなべ', kind: '受注', url: salesSheetUrl('o3', '5001') }]);
     await setupRoutes(page, [
@@ -320,16 +376,16 @@ async function shippingWorkRows(page) {
       shown: document.getElementById('shipQtyPeriodNotice').style.display !== 'none',
     }));
     console.log('pack:', JSON.stringify(packRow.cells), 'notice:', JSON.stringify(notice));
-    check('10/19〜10/24は値が表示される', packRow.cells.slice(0, 6).every(v => v !== '－'));
-    check('10/25(シートに無い日付。基準日〜6日後の最後の日)は「－」になる', packRow.cells[6] === '－');
-    check('「販売抽出シートに2026/10/25以降の日付がありません」の補足が出る(表示は止まらない)', notice.shown && notice.text.includes('2026/10/25'));
-    // 合計列：10/19〜10/24の6日分(300+301+302+303+304+305=1815)の部分合計＋「（6日分）」になる
+    check('作業日10/19〜10/24の列(出荷日10/20〜10/25)は値が表示される', packRow.cells.slice(0, 6).every(v => v !== '－'));
+    check('作業日10/25の列(出荷日10/26・シートに無い日付)は「－」になる', packRow.cells[6] === '－');
+    check('「販売抽出シートに2026/10/26以降の日付がありません」の補足が出る(表示は止まらない)', notice.shown && notice.text.includes('2026/10/26'));
+    // 合計列：出荷日10/20〜10/25の6日分(300+301+302+303+304+305=1815)の部分合計＋「（6日分）」になる
     console.log('pack total:', packRow.totalHtml);
     check('合計列が部分合計(1,815)になる', packRow.totalHtml.startsWith('1,815'));
     check('合計列に「（6日分）」の注記が付く', packRow.totalHtml.includes('（6日分）'));
 
-    // モックで日付の列を右に追加する(10/25,26も含める)
-    const orderDates2 = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 26));
+    // モックで日付の列を右に追加する(出荷日10/26も含める)
+    const orderDates2 = dateRange(new Date(2026, 9, 20), new Date(2026, 9, 26));
     const orderCsv2 = buildSalesSheetCsv(orderDates2, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(orderDates2.map((d, i) => [isoKey(d), 300 + i])) }]);
     const page2 = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page2, 2026, 9, 19);
@@ -345,7 +401,7 @@ async function shippingWorkRows(page) {
     const rows2 = await shippingQtyRows(page2);
     const packRow2 = rows2.find(r => r.label === 'パック数');
     console.log('列追加後のpack:', JSON.stringify(packRow2.cells));
-    check('モックで日付の列を追加すると、10/25にも値が入る', packRow2.cells[6] !== '－');
+    check('モックで出荷日10/26の列を追加すると、作業日10/25の列にも値が入る', packRow2.cells[6] !== '－');
     check('7日分そろうと合計列に「（◯日分）」が付かない', !!packRow2.totalHtml && !packRow2.totalHtml.includes('日分'));
     await page.close();
     await page2.close();
@@ -355,7 +411,8 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const dates = [new Date(2026, 9, 19)];
+    // 基準日は既定で今日(10/19)。列0(作業日10/19)が表示するのは出荷日10/20のデータ
+    const dates = [new Date(2026, 9, 20)];
     const csv = buildSalesSheetCsv(dates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(dates[0])]: 240 } }]);
     const urlCsv = buildSalesUrlListCsv([{ site: 'いなべ', kind: '受注', url: salesSheetUrl('o4', '6001') }]);
     await setupRoutes(page, [
@@ -379,7 +436,8 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const dates = [new Date(2026, 9, 19)];
+    // 基準日は既定で今日(10/19)。列0(作業日10/19)が表示するのは出荷日10/20のデータ
+    const dates = [new Date(2026, 9, 20)];
     const delays = [3000, 1200, 50];
     const urlCsv = buildSalesUrlListCsv([
       { site: 'いなべ', kind: '受注', url: salesSheetUrl('race_inabe', '7001') },
@@ -451,7 +509,8 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const d0 = new Date(2026, 9, 19);
+    // 基準日は既定で今日(10/19)。列0(作業日10/19)が表示するのは出荷日10/20のデータ
+    const d0 = new Date(2026, 9, 20);
     const csv = buildSalesSheetCsv([d0], [
       { kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(d0)]: 2151 } },       // パック(個数)
       { kind: '重量', product: '秀L6 130g', valuesByDate: { [isoKey(d0)]: 1234.5 } },     // パック(重量kg)
@@ -497,7 +556,9 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const orderDates = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 19)); // 10/19のみ
+    // 基準日は既定で今日(10/19)。列0(作業日10/19)が表示するのは出荷日10/20のデータのため、
+    // モックは10/20のみにする(10/19ではない)
+    const orderDates = dateRange(new Date(2026, 9, 20), new Date(2026, 9, 20)); // 10/20のみ
     const orderCsv = buildSalesSheetCsv(orderDates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(orderDates[0])]: 1500 } }]);
     const urlCsv = buildSalesUrlListCsv([{ site: 'いなべ', kind: '受注', url: salesSheetUrl('fmt2', '8002') }]);
     await setupRoutes(page, [
@@ -515,10 +576,10 @@ async function shippingWorkRows(page) {
     const cs = rows.find(r => r.label === 'cs数');
     const packKg = detailRows.find(r => r.label === 'パック');
     console.log('pack:', JSON.stringify(pack.cells), 'cs:', JSON.stringify(cs.cells));
-    check('10/19は値が表示される(1,500)', pack.cells[0] === '1,500');
-    check('値がない日(10/20以降)はパック数が「－」のまま', pack.cells.slice(1).every(v => v === '－'));
-    check('値がない日(10/20以降)はcs数が「－」のまま', cs.cells.slice(1).every(v => v === '－'));
-    check('値がない日(10/20以降)はkg詳細が「－」のまま', packKg.cells.slice(1).every(v => v === '－'));
+    check('作業日10/19の列(出荷日10/20)は値が表示される(1,500)', pack.cells[0] === '1,500');
+    check('値がない日(作業日10/20以降、出荷日10/21以降)はパック数が「－」のまま', pack.cells.slice(1).every(v => v === '－'));
+    check('値がない日(作業日10/20以降)はcs数が「－」のまま', cs.cells.slice(1).every(v => v === '－'));
+    check('値がない日(作業日10/20以降)はkg詳細が「－」のまま', packKg.cells.slice(1).every(v => v === '－'));
     await page.close();
   }
 
@@ -526,7 +587,8 @@ async function shippingWorkRows(page) {
   {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19);
-    const d0 = new Date(2026, 9, 19);
+    // 基準日は既定で今日(10/19)。列0(作業日10/19)が表示するのは出荷日10/20のデータ
+    const d0 = new Date(2026, 9, 20);
     const csv = buildSalesSheetCsv([d0], [
       { kind: '個数', product: ' 25g', valuesByDate: { [isoKey(d0)]: 400 } },        // 商品名が空欄で重さだけ(群馬の例)
       { kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(d0)]: 100 } },   // 通常のパック商品

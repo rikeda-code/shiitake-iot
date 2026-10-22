@@ -338,8 +338,11 @@ function allSalesHandlers(site, dates) {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
     await fixTodayTo(page, 2026, 9, 19); // 基準日=2026-10-19(今日)。offset0-6=10/19〜10/25
     const dates7 = []; for (let o = 0; o < 7; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates7.push(d); }
-    // 出荷数量：offset3(10/22)だけ日付列が無いCSVにして、合計列が部分合計＋「（6日分）」になることを確認する
-    const partialDates = dates7.filter((_, i) => i !== 3);
+    // 出荷数量(パネル1・2)は、作業日Dの列に出荷日D+1のデータが入るため、対象の出荷日は
+    // dates7を1日ずらした10/20〜10/26。そのうちoffset3(作業日10/22・出荷日10/23)だけ
+    // 日付列が無いCSVにして、合計列が部分合計＋「（6日分）」になることを確認する
+    const shippingDates7 = dates7.map(d => { const s = new Date(d); s.setDate(s.getDate() + 1); return s; });
+    const partialDates = shippingDates7.filter((_, i) => i !== 3);
     const s1 = {
       urlEntry: { site: 'いなべ', kind: '受注', url: salesSheetUrl('sales_partial', '1') },
       handler: staticHandler([['sales_partial', '1']], buildSalesSheetCsv(partialDates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(partialDates.map(d => [isoKey(d), 10])) }])),
@@ -363,6 +366,7 @@ function allSalesHandlers(site, dates) {
 
     const r = await page.evaluate(() => ({
       rangeHeader: document.querySelector('#table1ship .dcol-total').textContent.trim(),
+      shipRangeHeader: document.querySelector('#table1ship .dcol-shipwork-total').textContent.trim(),
       packTotalHtml: document.querySelector('[data-shipqty="パック数"][data-shipqty-offset="total"]').innerHTML.trim(),
       laborTotal: document.querySelector('[data-shiplabor-total-offset="total"]').textContent.trim(),
       attendTotal: document.querySelector('[data-shipattendance-offset="total"]').textContent.trim(),
@@ -373,8 +377,9 @@ function allSalesHandlers(site, dates) {
       })(),
     }));
     console.log(JSON.stringify(r, null, 2));
-    check('合計列の見出しが基準日〜6日後の範囲になる(10/19〜10/25)', r.rangeHeader === '10/19〜10/25');
-    check('出荷数量パック数：1日(10/22)欠けている場合、部分合計(60＝10×6日)＋「（6日分）」が表示される', r.packTotalHtml.startsWith('60') && r.packTotalHtml.includes('（6日分）'));
+    check('合計列の見出しが基準日〜6日後の範囲になる(10/19〜10/25、列自身の日付は作業日のまま)', r.rangeHeader === '10/19〜10/25');
+    check('パネル1の合計列に出荷日の範囲(10/20〜10/26)が小さく添えられる', r.shipRangeHeader === '出荷 10/20〜10/26');
+    check('出荷数量パック数：出荷日1日(10/23)欠けている場合、部分合計(60＝10×6日)＋「（6日分）」が表示される', r.packTotalHtml.startsWith('60') && r.packTotalHtml.includes('（6日分）'));
     check('出荷標準労働時間合計：7日×8.0h(拘束9h－休憩1h)の合計＝56.0', r.laborTotal === '56.0');
     check('出荷出勤人数：延べ人数(7日×1人)＝7', r.attendTotal === '7');
     // 標準工数小計の合計列＝パック並べる(10個×10秒×6日=100秒×6÷3600=0.1667h、丸める前の値)。
