@@ -232,6 +232,79 @@ function staticHandler(idGidPairs, body) {
     await page.close();
   }
 
+  console.log('\n=== ⑤パネル1・2の実績/受注の印の行(見出し)を表示しない。データの読み分け(実績/受注タブの選択)自体は変わらないこと ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 22); // 今日=2026/10/22
+    // 列0(作業日10/22)の出荷日は10/23(今日以降→受注)、列-2相当として使う過去日は別テストで
+    // 確認済みのため、ここでは「行が表示されないこと」と「textContent自体は従来どおり
+    // 実績/受注が入っていること(データの読み分けは変わっていないことの確認)」に絞る
+    const dates = []; for (let o = 0; o < 8; o++) dates.push(addDays(new Date(2026, 9, 22), o));
+    const csv = buildSalesSheetCsv(dates, [{ kind: '個数', product: '秀L6 130g', valuesByDate: Object.fromEntries(dates.map(d => [isoKey(d), 10])) }]);
+    const urlCsv = buildSalesUrlListCsv([{ site: 'いなべ', kind: '受注', url: salesSheetUrl('kindrow_check', '9002') }]);
+    await setupRoutes(page, [
+      staticHandler([[DB_SHARE_SHEET_ID, SALES_URL_SHEET_GID]], urlCsv),
+      staticHandler([['kindrow_check', '9002']], csv),
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(500);
+    await page.click('[data-business="出荷"]');
+    await page.waitForTimeout(1200);
+    const r = await page.evaluate(() => {
+      const kindCell = document.querySelector('[data-kind-offset="0"]');
+      const kindRow = kindCell.closest('tr');
+      const shipworkCell = document.querySelector('#table1ship thead .dcol-shipwork[data-offset="0"]');
+      return {
+        kindRowHasClass: kindRow.classList.contains('ship-kind-row'),
+        kindRowDisplay: getComputedStyle(kindRow).display,
+        kindCellVisible: kindCell.offsetParent !== null,
+        kindText: kindCell.textContent.trim(), // 行は非表示でもデータの読み分け自体はこの値で判断している
+        shipworkVisible: shipworkCell.offsetParent !== null,
+        shipworkText: shipworkCell.textContent.trim(),
+      };
+    });
+    console.log(JSON.stringify(r));
+    check('実績/受注の行にship-kind-rowクラスが付く', r.kindRowHasClass);
+    check('実績/受注の行がdisplay:noneで非表示になる', r.kindRowDisplay === 'none');
+    check('実績/受注のセル自体も画面上は見えない(offsetParentがnull)', !r.kindCellVisible);
+    check('非表示でも、データの読み分け自体は従来どおり機能している(出荷日が今日以降のため「受注」)', r.kindText === '受注');
+    check('「出荷 M/D」の行は影響を受けず引き続き表示される', r.shipworkVisible && r.shipworkText === '出荷 10/23');
+    await page.close();
+  }
+
+  console.log('\n=== ⑥合計列の出荷日範囲の注記が2行に折り返され、出荷パネル1・2にデスクトップ幅で横スクロールバーが出ないこと ===');
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1080 } });
+    await fixTodayTo(page, 2026, 9, 19); // 今日=2026/10/19
+    await setupRoutes(page, [
+      staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+    ]);
+    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(500);
+    await page.click('[data-business="出荷"]');
+    await page.waitForTimeout(1200);
+    const r = await page.evaluate(() => {
+      const totalCell = document.querySelector('#table1ship thead .dcol-shipwork-total');
+      const scrolls = ['table1ship', 'table2ship'].map(id => {
+        const scroller = document.getElementById(id).closest('.table-scroll');
+        return { id, scrollWidth: scroller.scrollWidth, clientWidth: scroller.clientWidth };
+      });
+      return {
+        totalHtmlHasBreak: totalCell.innerHTML.indexOf('<br>') !== -1,
+        totalText: totalCell.textContent.trim(), // <br>はtextContentには影響しないため、文言自体は従来どおり
+        scrolls,
+      };
+    });
+    console.log(JSON.stringify(r));
+    check('合計列の出荷日範囲は<br>で2行に折り返される(HTML上)', r.totalHtmlHasBreak);
+    check('折り返されても文言自体は従来どおり「出荷 10/20〜10/26」のまま(textContent)', r.totalText === '出荷 10/20〜10/26');
+    r.scrolls.forEach(s => {
+      check(`${s.id}：デスクトップ幅(1280px)で横スクロールが出ない(scrollWidth ${s.scrollWidth} <= clientWidth ${s.clientWidth} + 1)`, s.scrollWidth <= s.clientWidth + 1);
+    });
+    await page.close();
+  }
+
   console.log('\n=== 総合判定 ===');
   console.log(allOk ? 'すべてOK' : 'NGあり');
 

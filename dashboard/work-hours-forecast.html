@@ -209,9 +209,15 @@
   }
   .sub-note{ font-size:10.5px; font-weight:400; color:var(--ink-soft); white-space:normal; }
   .dcol-kind{ font-size:10.5px; font-style:italic; }
+  /* 出荷パネル1の実績/受注の印の行は、データの読み分け(実績/受注タブの選択)自体には
+     使うが、見出しとしては表示しない */
+  tr.ship-kind-row{ display:none; }
   /* 出荷パネル1・2：作業日(列自身の日付)の翌日＝出荷日のデータを表示するため、
      列見出しに小さく出荷日を添える注記行 */
   .dcol-shipwork{ font-size:10.5px; font-weight:400; color:var(--ink-soft); }
+  /* 合計列の出荷日範囲(例：「出荷 10/22〜」+改行+「10/28」)は、列の幅に収まるよう
+     2行に折り返す(ほかの列は1行のまま、thead th既定のnowrapを個別に上書きする) */
+  .dcol-shipwork-total{ white-space:normal; line-height:1.15; }
 
   @media (max-width:640px){
     body{ padding:18px 10px 40px; }
@@ -482,7 +488,7 @@
             <th class="dcol" data-offset="1"></th><th class="dcol" data-offset="2"></th><th class="dcol" data-offset="3"></th>
             <th class="dcol" data-offset="4"></th><th class="dcol" data-offset="5"></th><th class="dcol" data-offset="6"></th><th class="dcol-total total-col"></th>
           </tr>
-          <tr class="weekday">
+          <tr class="weekday ship-kind-row">
             <th class="sticky-1"></th><th class="unit-col"></th>
             <th class="dcol-kind today-col" data-kind-offset="0"></th>
             <th class="dcol-kind" data-kind-offset="1"></th><th class="dcol-kind" data-kind-offset="2"></th><th class="dcol-kind" data-kind-offset="3"></th>
@@ -2589,7 +2595,8 @@
       cell.textContent = '出荷 ' + fmtMDPadded(addDays(basisDate, offset + 1));
     });
     document.querySelectorAll('.dcol-shipwork-total').forEach(function(cell){
-      cell.textContent = '出荷 ' + fmtMDPadded(addDays(basisDate, 1)) + '〜' + fmtMDPadded(addDays(basisDate, DAY_COUNT));
+      // 列の幅に収まるよう2行に折り返す(「出荷 10/22〜」+改行+「10/28」)
+      cell.innerHTML = '出荷 ' + fmtMDPadded(addDays(basisDate, 1)) + '〜<br>' + fmtMDPadded(addDays(basisDate, DAY_COUNT));
     });
   }
 
