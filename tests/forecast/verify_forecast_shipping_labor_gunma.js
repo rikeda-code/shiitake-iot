@@ -32,6 +32,18 @@ const STD_LABOR_HOURS_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const STD_WORK_HOURS_GID = '264266810';
 const SALES_URL_SHEET_GID = '1130067935';
+const NANTAN_SHIFT_SHEET_ID = '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8';
+const SHIP_NANTAN_GID = '1439827078'; // 「勤務用_出荷」（26.10/11〜11/10）
+
+// 南丹の勤務表(datedHoursSheet)相当のCSV。1行目=名前+日付("2026/10/11"形式)、
+// 2行目=曜日、3行目以降=人(A列が空になった行で終端)
+function buildNantanDatedHoursCsv(dates, people) {
+  const header = ['名前'].concat(dates.map(d => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`));
+  const weekdayRow = ['曜日'].concat(dates.map(d => WD[d.getDay()]));
+  const rows = [header, weekdayRow];
+  people.forEach(p => rows.push([p.name].concat(dates.map(d => { const v = p.cellsByIso ? p.cellsByIso[isoKey(d)] : undefined; return v === undefined ? '' : v; }))));
+  return toCsvText(rows);
+}
 
 function dayNumbersForPeriod() { const out = []; for (let d = 11; d <= 31; d++) out.push(d); for (let d = 1; d <= 10; d++) out.push(d); return out; }
 function datesForPeriod(periodKey) {
@@ -482,11 +494,16 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
       { flag: '1', site: '群馬', dept: '収穫', name: '野呂', hoursPerDay: 8, shiftName: '野呂' },
       { flag: '1', site: '群馬', dept: '収穫', name: '助っ人', hoursPerDay: 6, shiftName: '助っ人' },
     ];
+    const nantanDates = dateRange(new Date(2026, 9, 11), new Date(2026, 10, 10));
+    const nantanCsv = buildNantanDatedHoursCsv(nantanDates, [
+      { name: '田中(出)', cellsByIso: Object.fromEntries(nantanDates.map((d, i) => [isoKey(d), (i % 7 === 0) ? '休' : '8H'])) },
+    ]);
     await setupRoutes(page, [
       staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], octCsv),
       staticHandler([[GUNMA_SHIFT_SHEET_ID, CULT_GUNMA_GID_202610]], cultCsv),
       staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv(laborRows.concat(cultLaborRows))),
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+      staticHandler([[NANTAN_SHIFT_SHEET_ID, SHIP_NANTAN_GID]], nantanCsv),
     ]);
     // 栽培側をまず確認
     await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
@@ -520,10 +537,10 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
     check('いなべの出荷パネル3は今までどおり実データ接続(サンプル帯が出ない)', bannerInabe === 'none');
     await page.click('[data-site="南丹"]');
     await page.waitForTimeout(800);
-    const bannerTextNantan = await page.evaluate(() => document.getElementById('shippingSampleBanner').textContent.trim());
+    const bannerDisplayNantan = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
     const nantanRows = await shippingLaborDetailRows(page);
-    check('南丹の出荷パネル3は今までどおりサンプルデータの帯が表示される', bannerTextNantan.includes('パネル3（標準労働時間）はサンプルデータです'));
-    check('南丹の出荷パネル3は今までどおりサンプル名(「出荷 サンプル」)で表示される', nantanRows.length > 0 && nantanRows.every(r => r.name.startsWith('出荷 サンプル')));
+    check('南丹の出荷パネル3も実データ接続のため、サンプルデータの帯が表示されない', bannerDisplayNantan === 'none');
+    check('南丹の出荷パネル3は勤務用_出荷シートの実名で表示される(サンプル名ではない)', nantanRows.length > 0 && nantanRows.every(r => !r.name.startsWith('出荷 サンプル')));
     await page.close();
   }
 

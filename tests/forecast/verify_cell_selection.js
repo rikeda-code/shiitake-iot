@@ -50,6 +50,7 @@ const CULT_GUNMA_GID_202610 = '2074687161';
 const SHIP_GUNMA_GID_202610 = '1087258434';
 const NANTAN_SHIFT_SHEET_ID = '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8';
 const NANTAN_SHIFT_SHEET_GID = '716401757';
+const SHIP_NANTAN_GID = '1439827078'; // 出荷(南丹)「勤務用_出荷」（26.10/11〜11/10）
 
 // 日ごとに芽かきを行うコンテナ数が変わる(day0=3台,day1=2台,day2以降=1台)栽培管理シート。
 // 稼働コンテナ数・芽かきの合計列がドラッグ選択の集計テストで異なる値を持つようにするため
@@ -227,6 +228,8 @@ async function center(page, selector) {
     staticHandler([[GUNMA_SHIFT_SHEET_ID, SHIP_GUNMA_GID_202610]], buildGunmaShiftCsv('2026.10', [{ name: '群馬花子', cellsByIso: Object.fromEntries(DATES.map(d => [isoKey(d), '8:00-17:00'])) }])),
     // 南丹の勤務表(栽培の人別内訳の選択可能性の確認用)
     staticHandler([[NANTAN_SHIFT_SHEET_ID, NANTAN_SHIFT_SHEET_GID]], buildNantanShiftCsv(DATES, [{ name: '南丹次郎', cellsByIso: Object.fromEntries(DATES.map(d => [isoKey(d), '8:00-17:00'])) }])),
+    // 南丹の出荷勤務表(勤務用_出荷。出荷×南丹パネル3の人別内訳の選択可能性の確認用)
+    staticHandler([[NANTAN_SHIFT_SHEET_ID, SHIP_NANTAN_GID]], buildNantanShiftCsv(DATES, [{ name: '出荷南丹花子', cellsByIso: Object.fromEntries(DATES.map(d => [isoKey(d), '8H'])) }])),
   ]);
   await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(1200);

@@ -41,6 +41,18 @@ const GUNMA_TRANSFER_ID = '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y';
 const GUNMA_TRANSFER_GID = '1272257227';
 const INABE_HARVEST_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
 const INABE_HARVEST_GID = '1164843574';
+const NANTAN_SHIFT_SHEET_ID = '1Wt3yN_a1QAfxcTItL54miPEv5Gldd4J6SjUTDX8Gvq8';
+const SHIP_NANTAN_GID = '1439827078'; // 「勤務用_出荷」（26.10/11〜11/10）
+
+// 南丹の勤務表(datedHoursSheet)相当のCSV。1行目=名前+日付("2026/10/11"形式)、
+// 2行目=曜日、3行目以降=人(A列が空になった行で終端)
+function buildNantanDatedHoursCsv(dates, people) {
+  const header = ['名前'].concat(dates.map(d => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`));
+  const weekdayRow = ['曜日'].concat(dates.map(d => WD[d.getDay()]));
+  const rows = [header, weekdayRow];
+  people.forEach(p => rows.push([p.name].concat(dates.map(d => { const v = p.cellsByIso ? p.cellsByIso[isoKey(d)] : undefined; return v === undefined ? '' : v; }))));
+  return toCsvText(rows);
+}
 
 function buildCultCsv(start, end) {
   const dates = dateRange(start, end);
@@ -245,10 +257,15 @@ function allSalesHandlers(site, dates) {
     await fixTodayTo(page, 2026, 9, 19);
     const dates = []; for (let o = 0; o < 8; o++) { const d = new Date(2026, 9, 19); d.setDate(d.getDate() + o); dates.push(d); }
     const s1 = allSalesHandlers('いなべ', dates);
+    const nantanDates = dateRange(new Date(2026, 9, 11), new Date(2026, 10, 10));
+    const nantanCsv = buildNantanDatedHoursCsv(nantanDates, [
+      { name: '南丹 出荷担当', cellsByIso: Object.fromEntries(nantanDates.map((d, i) => [isoKey(d), (i % 7 === 0) ? '休' : '8H'])) },
+    ]);
     await setupRoutes(page, [
       staticHandler([[DB_SHARE_SHEET_ID, SALES_URL_SHEET_GID]], buildSalesUrlListCsv([s1.urlEntry])),
       s1.handler,
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
+      staticHandler([[NANTAN_SHIFT_SHEET_ID, SHIP_NANTAN_GID]], nantanCsv),
     ]);
     await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(500);
@@ -271,10 +288,10 @@ function allSalesHandlers(site, dates) {
     check('群馬の出荷パネル3(標準労働時間)はシート未モックでもエラー表示にならない(未設定期間の補足のみ)', !gunmaLaborError);
     await page.click('[data-site="南丹"]');
     await page.waitForTimeout(800);
-    const bannerTextNantan = await page.evaluate(() => document.getElementById('shippingSampleBanner').textContent.trim());
-    check('南丹では、パネル3用のサンプルデータの帯が引き続き表示される', bannerTextNantan.includes('パネル3（標準労働時間）はサンプルデータです'));
+    const bannerDisplayNantan = await page.evaluate(() => getComputedStyle(document.getElementById('shippingSampleBanner')).display);
+    check('南丹の出荷パネル3も実データ接続のため、サンプルデータの帯が表示されない', bannerDisplayNantan === 'none');
     const laborTotalNantan = await page.evaluate(() => document.querySelector('[data-shiplabor-total-offset="0"]').textContent.trim());
-    check('南丹の出荷パネル3(標準労働時間)がサンプル値で表示される(「－」のまま止まっていない)', laborTotalNantan !== '－');
+    check('南丹の出荷パネル3(標準労働時間)が実データ(勤務用_出荷シート)の値で表示される(「－」のまま止まっていない)', laborTotalNantan !== '－');
     await page.close();
   }
 
