@@ -355,7 +355,10 @@ async function shipLaborWarnings(page) {
     await fixTodayTo(page, 2026, 9, 19);
     const dates = dateRange(new Date(2026, 9, 19), new Date(2026, 9, 26));
     const people = [{ name: '過不足花子', dept: '出荷', cellsByIso: Object.fromEntries(dates.map((d, i) => [isoKey(d), i === 0 ? '09:00-17:00' : ''])) }];
-    const salesCsv = buildSalesSheetCsv([dates[0]], [{ kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(dates[0])]: 240 } }]);
+    // パネル1・2(出荷数量・標準工数)は作業日の列に出荷日(翌日)のデータを表示するため、
+    // 列0(作業日=dates[0]=10/19)のパネル2小計に反映させるには、出荷日(dates[1]=10/20)の
+    // 販売データを用意する
+    const salesCsv = buildSalesSheetCsv([dates[1]], [{ kind: '個数', product: '秀L6 130g', valuesByDate: { [isoKey(dates[1])]: 240 } }]);
     const urlCsv = buildSalesUrlListCsv([{ site: 'いなべ', kind: '受注', url: salesSheetUrl('shortfall1', '9001') }]);
     await setupRoutes(page, [
       staticHandler([[SHIFT_SHEET_ID, SHIFT_SHEET_GID]], buildShiftSheetCsv(dates, people)),
