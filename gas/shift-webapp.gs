@@ -36,6 +36,7 @@
  *   { action:'retire',     key, date, flag }   // flag: 9=退職 / 3=退職・異動
  *   { action:'undoRetire', key }
  *   { action:'changeDept', key, site, dept }   // 部門（所属）を変える。整理済み_Mの部門列を書き換える
+ *   { action:'setJoinDate', key, site, date }  // 入社日を変える（入社＝B列2の人だけ。dateは yyyy-MM-dd）
  */
 
 const MASTER_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
@@ -113,12 +114,13 @@ function doPost(e) {
       case 'retire':     clearMemberCache_(); return json_(setRetire_(req.key, req.date, req.flag || 9));
       case 'undoRetire': clearMemberCache_(); return json_(undoRetire_(req.key));
       case 'changeDept': clearMemberCache_(); return json_(changeDept_(req));
+      case 'setJoinDate': clearMemberCache_(); return json_(setJoinDate_(req));
       default: return json_({ status: 'error', message: '不明なactionです' });
     }
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
   } finally {
-    if (['addMember', 'retire', 'undoRetire', 'changeDept'].indexOf(req.action) >= 0) clearMemberCache_();
+    if (['addMember', 'retire', 'undoRetire', 'changeDept', 'setJoinDate'].indexOf(req.action) >= 0) clearMemberCache_();
     lock.releaseLock();
   }
 }
@@ -284,6 +286,18 @@ function setRetire_(key, date, flag) {
 }
 
 // 部門（所属）を変える。同じ氏名が別の拠点にもいるときに取り違えないよう、拠点でも絞る
+// 入社日を変える。入退社列は在職中の人には使わない（退職・異動の日も同じ列）ため、入社（B列=2）の人だけ
+function setJoinDate_(req) {
+  if (!req.key || !/^\d{4}-\d{2}-\d{2}$/.test(req.date || '')) throw new Error('人と入社日を指定してください');
+  const m = readMembers_(true).find(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag === 2);
+  if (!m) throw new Error('入社（B列=2）の人だけ入社日を変えられます');
+  const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
+  const cols = masterCols_(sh);
+  if (cols.date < 0) throw new Error('整理済み_Mに「入退社」の列が見つかりません');
+  sh.getRange(m.row, cols.date).setValue(new Date(req.date + 'T00:00:00+09:00'));
+  return { before: m.join, after: req.date };
+}
+
 function changeDept_(req) {
   if (!req.key || !req.dept) throw new Error('人と新しい部門を指定してください');
   const m = readMembers_(true).find(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag !== 9);
