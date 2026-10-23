@@ -1121,6 +1121,67 @@ function fitSegmentLabelChartHeight(chart, labelValues, axisMax) {
   chart.resize();
 }
 
+// 予実＞比較（繁忙期見込み）タブの各グラフ（拠点・業務別／拠点サマリ／3拠点サマリ／
+// 要員計画）は、mode:'index'のツールチップ（キャンバス内に描画される窓）に、表示中の
+// 月によっては業務区分の行が多数（30行程度）並ぶことがあり、グラフの高さがその窓の
+// 高さより低いと下の行が切れて見えなくなる。この関数は、表示中の各月についてツール
+// チップを強制的にアクティブにし、Chart.js自身が計算した窓の高さを実測してから非表示に
+// 戻す（setActiveElements()はツールチップ自身のupdate()を呼ぶため、chart.draw()を挟まずに
+// 高さだけ取れる＝画面がちらつかない）。update()はchart.tooltip.height自体はアニメーション
+// （既定で有効）を介して時間をかけて反映するため、代わりにアニメーション適用前に同じ
+// update()内で同期的に計算される内部の目標サイズ(chart.tooltip._size.height。Chart.js
+// 4.4.3固定のためこのバージョンでのみ有効なことを前提にしている)を読む。その最大値に
+// 余白と凡例・軸ラベル等の高さ(chrome、fitSegmentLabelChartHeightと同じ実測方法)を
+// 足した値が今の高さ（fitSegmentLabelChartHeight等で既に決まっている場合はその結果を
+// 含む）を上回る場合だけ、同じ要領でラッパー要素の高さを変えてchart.resize()する
+// （今の高さより低くすることはない。要員計画の業務区分別のように今の上限が650pxの
+// 場合でも、ツールチップの高さがそれを上回るならそちらを優先する＝maxを取るだけで
+// 自然にそうなる）
+const TOOLTIP_FIT_MARGIN_PX = 20;
+function fitChartHeightForTooltip(chart) {
+  if (!chart || !chart.tooltip) return;
+  const wrapEl = chart.canvas && chart.canvas.parentElement;
+  if (!wrapEl) return;
+  // fitSegmentLabelChartHeight()等、直前にラッパー要素の高さを変えてchart.resize()を
+  // 呼んだ処理があっても、chart.resize()自体はchart.height/chart.chartAreaを次の描画
+  // (requestAnimationFrame経由)まで更新せず、ここで読むとまだ古い値のままになっている
+  // ことがある（実際にその状態で下の判定・計算を行うと、本当の高さより大きい古い値と
+  // 比較してしまい、広げる必要があるのに広げずに返ってしまう＝ツールチップが切れる
+  // 不具合につながっていた）。chart.draw()を挟んで直前の保留中のresize()を即座に
+  // 確定させてから、以降の計算に進む
+  chart.draw();
+  const dataPointCount = chart.data.datasets.reduce((max, ds) => Math.max(max, (ds.data || []).length), 0);
+  let maxTooltipHeight = 0;
+  for (let i = 0; i < dataPointCount; i++) {
+    const activeElements = [];
+    chart.data.datasets.forEach((ds, datasetIndex) => {
+      const v = ds.data && ds.data[i];
+      if (v !== null && v !== undefined) activeElements.push({ datasetIndex, index: i });
+    });
+    if (!activeElements.length) continue;
+    chart.tooltip.setActiveElements(activeElements, { x: 0, y: 0 });
+    const size = chart.tooltip._size;
+    if (size && size.height) {
+      maxTooltipHeight = Math.max(maxTooltipHeight, size.height);
+    }
+  }
+  // 測定用に有効化したツールチップを非表示に戻す（画面に残さない）
+  chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+  if (maxTooltipHeight <= 0) return;
+  const chromeHeightPx = chart.height - chart.chartArea.height;
+  const target = Math.round(maxTooltipHeight + TOOLTIP_FIT_MARGIN_PX + chromeHeightPx);
+  if (target <= chart.height) return;
+  // setActiveElements()の呼び出しでツールチップのアニメーションが登録された状態のまま
+  // chart.resize()を呼ぶと、Chart.jsがアニメーション完了後までリサイズを遅延させてしまい
+  // 高さが反映されない。stop()でアニメーションを即座に確定させてからresizeする
+  chart.stop();
+  wrapEl.style.height = target + 'px';
+  chart.resize();
+  // ここでもdraw()で即座に確定させる（このまま呼び出し元に戻ると、以降どこかで
+  // chart.height/chart.chartAreaを読む処理があった場合に同じ遅延の影響を受けるため）
+  chart.draw();
+}
+
 // 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための
 // キャンバスラッパーHTMLを返す（列/棒の最小幅を確保し、超過分は横スクロール）
 function chartWrapHtml(canvasId, monthCount, opts) {
@@ -8550,6 +8611,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         },
       },
     });
+    fitChartHeightForTooltip(planCmpChartInstances[canvasId]);
   }
 
   // 拠点タブ(いなべ/群馬/南丹/全拠点合計)のHTML断片。固定エリア側(renderSiteTabBarFixed)から呼ぶ。
@@ -8710,6 +8772,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             },
           },
         });
+        fitChartHeightForTooltip(planCmpChartInstances[`plancmp2-all-${div}`]);
       });
     } else {
       // 単拠点: 栽培・出荷チャート
@@ -8799,6 +8862,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             },
           },
         });
+        fitChartHeightForTooltip(planCmpChartInstances[key]);
       });
     }
   }
@@ -9188,6 +9252,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       // このグラフにはセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
       // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
       fitSegmentLabelChartHeight(sumCombinedChart, [], sharedMax);
+      fitChartHeightForTooltip(sumCombinedChart);
     }
 
     // 2段目：3拠点分のcomputeSiteTotalData()をmergeSiteTotalDataAcrossSitesで合算し、
@@ -9533,6 +9598,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // このグラフにもセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
     // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
     fitSegmentLabelChartHeight(siteSumCombinedChart, [], sharedMax);
+    fitChartHeightForTooltip(siteSumCombinedChart);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
@@ -10001,6 +10067,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
     planCmpChartInstances['staffplan-combined'] = staffPlanCombinedChart;
     fitSegmentLabelChartHeight(staffPlanCombinedChart, staffGapData, sharedMax);
+    fitChartHeightForTooltip(staffPlanCombinedChart);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
