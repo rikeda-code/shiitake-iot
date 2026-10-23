@@ -4,16 +4,23 @@
 //
 // 検証は二部構成：
 //  (A) ラベルの描画自体（siteSummaryHeadcountLabelsPlugin()はトップレベル関数のため
-//      window直下から直接呼べる）を、手組みのデータセット（_segmentHeadcount /
-//      _stdHoursCombinedHeadcountを明示的に持たせたもの）に対して本物のChart.jsで
-//      描画させ、CanvasRenderingContext2D.fillText呼び出しを記録して確認する。
-//  (B) 人数の集計ルール自体（実績棒・標準労働時間棒・新規要員・増減の4つ）は
+//      window直下から直接呼べる）を、手組みのデータセット（_segmentHeadcountを
+//      明示的に持たせたもの）に対して本物のChart.jsで描画させ、
+//      CanvasRenderingContext2D.fillText呼び出しを記録して確認する。
+//      PR #520への追加修正（表示位置・標準労働時間棒の段ごとの人数・文字色）に伴い、
+//      同じ積み上げ列(stack)内で一番上(y座標最小)のセグメントは棒の上側、それ以外の
+//      セグメントは棒の右側に表示されること、標準労働時間3段(lower/fulltime/parttime)
+//      はそれぞれ個別のラベルとして描画され合計ラベルは出ないこと、新規要員(黄)・
+//      増減(緑)のセグメント内の文字は黒、それ以外は白であることを確認する。
+//  (B) 人数の集計ルール自体（実績棒・標準労働時間棒(段ごと)・新規要員・増減の4つ）は
 //      renderSiteSummaryView()内のローカル関数のため直接呼べない。
 //      verify_plancompare_tooltip_height.js のtooltipOptsLike()と同じ方針で、
 //      対象ロジックをテスト側に複製しつつ、個々の判定（isPartTimeEmployment・
 //      workTypeClass・applyEmpTypeFilter・stdHoursMergeDivForWorkType・
 //      normalizeMonth・normalizeName、いずれもトップレベル関数）とgetActiveData()
-//      自体は本物を呼び出すことで、再現の正しさを担保する。
+//      自体は本物を呼び出すことで、再現の正しさを担保する。標準労働時間棒は
+//      PR #520への追加修正で3段それぞれの人数を数えるようになったため、
+//      段ごとの人数とその合計（変更前の「3段合計」の人数と同じ考え方）の両方を検証する。
 // さらに、PR #518で対応したツールチップの高さ調整（fitChartHeightForTooltip等）が、
 // 今回追加したプラグイン（plugins配列に追加）と共存しても引き続き機能することを、
 // 同じ実マウスホバー方式で再確認する。
@@ -31,6 +38,8 @@ async function setupRoutes(page) {
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: '﻿\r\n' });
   });
 }
+
+const tierSum = c => (c ? c.lower + c.fulltime + c.parttime : 0);
 
 let okCount = 0, ngCount = 0;
 function check(name, cond, extra) {
@@ -150,52 +159,78 @@ async function hoverAndCheckFit(page, chartVar, index) {
   check('(A-1) 中央揃えで描画されている(セグメント内に収まっている)', a1.every(c => c.textAlign === 'center'), a1);
   check('(A-1) 白文字で描画されている', a1.every(c => c.fillStyle === '#ffffff'), a1);
 
-  // ========== (A-2) セグメントに収まらない小さい棒：棒の右側・薄い色、0/nullは描画しない ==========
+  // ========== (A-2) セグメントに収まらない小さい棒(実績棒stack='actual'、2系列)：
+  //            同じ積み上げ列の中で一番上(出荷=後から積み上げられる側)は棒の上側、
+  //            一番上ではない(栽培=下側)は棒の右側に表示される。0/nullは描画しない ==========
   await page.evaluate(() => {
     window.__capturedTexts.length = 0;
     window.__chartA2 = window.__makeChart({
       id: 'test-a2-outside', heightPx: 400, yMax: 100000,
       labels: ['月0', '月1', '月2'],
-      datasets: [{
-        type: 'bar', label: '栽培（実績）', stack: 'actual',
-        data: [1, 1, 1],
-        _segmentHeadcount: [3, null, 0],
-      }],
+      datasets: [
+        { type: 'bar', label: '栽培（実績）', stack: 'actual', data: [1, 1, 1], _segmentHeadcount: [3, null, 0] },
+        { type: 'bar', label: '出荷（実績）', stack: 'actual', data: [1, 1, 1], _segmentHeadcount: [5, 5, 5] },
+      ],
       plugins: [window.siteSummaryHeadcountLabelsPlugin()],
     });
   });
   const a2 = await page.evaluate(() => window.__capturedTexts.slice());
-  check('(A-2) 月0(3人)だけ描画される。月1(null)・月2(0)は非表示', a2.length === 1 && a2[0].text === '3人', a2);
-  check('(A-2) 棒に収まらないため左揃え(棒の右側)で描画されている', a2.length === 1 && a2[0].textAlign === 'left', a2);
-  check('(A-2) 収まらない場合は薄い色(#e2e8f0)で描画されている', a2.length === 1 && a2[0].fillStyle === '#e2e8f0', a2);
+  const a2_3nin = a2.find(c => c.text === '3人');
+  const a2_5nin_list = a2.filter(c => c.text === '5人');
+  check('(A-2) 月0は2件(栽培3人・出荷5人)、月1は出荷5人のみ(栽培がnullのため)、月2も出荷5人のみ(栽培が0のため)、合計4件描画される', a2.length === 4, a2);
+  check('(A-2) 積み上げの下側(栽培・一番上ではない)は棒の右側(左揃え)に薄い色で描画される', !!a2_3nin && a2_3nin.textAlign === 'left' && a2_3nin.fillStyle === '#e2e8f0', a2);
+  check('(A-2) 積み上げの一番上(出荷)は棒の上側(中央揃え)に薄い色で描画される(3ヶ月とも)', a2_5nin_list.length === 3 && a2_5nin_list.every(c => c.textAlign === 'center' && c.fillStyle === '#e2e8f0'), a2_5nin_list);
 
-  // ========== (A-3) 標準労働時間棒(3段：lower/fulltime/parttime)の合計ラベルは
-  //            lowerデータセットの位置に1つだけ描画される(3つに分かれない) ==========
+  // ========== (A-3) 標準労働時間棒(stack='stdhours')：3段(lower/fulltime/parttime)＋
+  //            新規要員(黄)＋増減(緑)。PR #520追加修正で3段合計ラベルは廃止し、各段が
+  //            個別にラベルを持つ(重複・合算なし)。同じ積み上げ列の中で一番上(増減)は
+  //            棒の上側、それ以外(lower等)は右側に表示される ==========
   await page.evaluate(() => {
     window.__capturedTexts.length = 0;
     window.__chartA3 = window.__makeChart({
-      id: 'test-a3-combined', heightPx: 400,
-      labels: ['月0', '月1'],
+      id: 'test-a3-tiers', heightPx: 400, yMax: 100000,
+      labels: ['月0'],
       datasets: [
-        {
-          type: 'bar', label: '標準労働時間（社員）', stack: 'stdhours',
-          data: [10, 10], _threeSiteMergeStdHoursTier: 'lower',
-          _stdHoursCombinedHeadcount: [7, null],
-        },
-        {
-          type: 'bar', label: '標準労働時間（契約社員）', stack: 'stdhours',
-          data: [20, 20], _threeSiteMergeStdHoursTier: 'fulltime',
-        },
-        {
-          type: 'bar', label: '標準労働時間（パート）', stack: 'stdhours',
-          data: [5, 5], _threeSiteMergeStdHoursTier: 'parttime',
-        },
+        { type: 'bar', label: '標準労働時間（社員）', stack: 'stdhours', data: [1], _threeSiteMergeStdHoursTier: 'lower', _segmentHeadcount: [9] },
+        { type: 'bar', label: '標準労働時間（契約社員）', stack: 'stdhours', data: [1], _threeSiteMergeStdHoursTier: 'fulltime', _segmentHeadcount: [4] },
+        { type: 'bar', label: '標準労働時間（パート）', stack: 'stdhours', data: [1], _threeSiteMergeStdHoursTier: 'parttime', _segmentHeadcount: [3] },
+        { type: 'bar', label: '新規要員（開始済み）', stack: 'stdhours', data: [1], _segmentHeadcount: [6] },
+        { type: 'bar', label: '増減', stack: 'stdhours', data: [1], _segmentHeadcount: [11] },
       ],
       plugins: [window.siteSummaryHeadcountLabelsPlugin()],
     });
   });
   const a3 = await page.evaluate(() => window.__capturedTexts.slice());
-  check('(A-3) 3段分の重複なしで、月0に1件だけ描画される(月1はnullのため無し)', a3.length === 1 && a3[0].text === '7人', a3);
+  check('(A-3) 3段＋新規要員＋増減の5件がそれぞれ個別に描画される(重複・合算なし)', a3.length === 5, a3);
+  check('(A-3) 3段それぞれの個別の人数(社員9人・契約社員4人・パート3人)がすべて描画されている(合計16人ではない)', ['9人', '4人', '3人'].every(t => a3.some(c => c.text === t)), a3);
+  const a3_zoka = a3.find(c => c.text === '11人'); // 増減(積み上げの一番上)
+  const a3_shain = a3.find(c => c.text === '9人'); // 社員(lower、積み上げの下側)
+  check('(A-3) 積み上げの一番上(増減)は棒の上側(中央揃え)に表示される', !!a3_zoka && a3_zoka.textAlign === 'center', a3);
+  check('(A-3) 一番上ではない(社員/lower)は棒の右側(左揃え)に表示される', !!a3_shain && a3_shain.textAlign === 'left', a3);
+
+  // ========== (A-4) 文字色：新規要員(黄)・増減(緑)のセグメント内の文字は黒(#1e2235)、
+  //            それ以外(実績棒・標準労働時間の各段)は白(#ffffff)のまま ==========
+  await page.evaluate(() => {
+    window.__capturedTexts.length = 0;
+    window.__chartA4 = window.__makeChart({
+      id: 'test-a4-colors', heightPx: 500,
+      labels: ['月0'],
+      datasets: [
+        { type: 'bar', label: '標準労働時間（社員）', stack: 'stdhours', data: [50], _threeSiteMergeStdHoursTier: 'lower', _segmentHeadcount: [12] },
+        { type: 'bar', label: '新規要員（開始済み）', stack: 'stdhours', data: [50], _segmentHeadcount: [6] },
+        { type: 'bar', label: '増減', stack: 'stdhours', data: [50], _segmentHeadcount: [3] },
+      ],
+      plugins: [window.siteSummaryHeadcountLabelsPlugin()],
+    });
+  });
+  const a4 = await page.evaluate(() => window.__capturedTexts.slice());
+  const a4_shain = a4.find(c => c.text === '12人');
+  const a4_shinki = a4.find(c => c.text === '6人');
+  const a4_zoka = a4.find(c => c.text === '3人');
+  check('(A-4) 3件ともセグメント内(中央揃え)に収まって描画されている(色の比較に意味があるセットアップになっている)', [a4_shain, a4_shinki, a4_zoka].every(c => c && c.textAlign === 'center'), a4);
+  check('(A-4) 標準労働時間(社員/lower)の中の文字は白(#ffffff)のまま', !!a4_shain && a4_shain.fillStyle === '#ffffff', a4);
+  check('(A-4) 新規要員(黄)の中の文字は黒(#1e2235)になる', !!a4_shinki && a4_shinki.fillStyle === '#1e2235', a4);
+  check('(A-4) 増減(緑)の中の文字は黒(#1e2235)になる', !!a4_zoka && a4_zoka.fillStyle === '#1e2235', a4);
 
   // ========== (B) 人数集計ルールの再現テスト ==========
   // renderSiteSummaryView()内のローカル関数（headcountByEmpForPlanMonths()・
@@ -242,38 +277,56 @@ async function hoverAndCheckFit(page, chartVar, index) {
         && isPartTimeEmployment(r.employment) === wantsPartTime) || null;
     };
 
-    // work-hours.html 9622-9652行目 stdHoursCombinedHeadcountForMi() と同じロジック
-    window.__stdHoursCombinedHeadcountForMiLike = function (mi, ctx) {
+    // dashboard/work-hours.html tierForMergeRow() と同じロジック
+    window.__tierForMergeRowLike = function (r) {
+      if (!isPartTimeEmployment(r.employment)) return 'lower';
+      if (r.fulltimeHours > 0) return 'fulltime';
+      if (r.parttimeHours > 0) return 'parttime';
+      return null;
+    };
+
+    // work-hours.html stdHoursHeadcountByTierForMi() と同じロジック(PR #520追加修正で
+    // 3段合計から段ごとの人数に変更)。戻り値は{lower, fulltime, parttime}
+    window.__stdHoursHeadcountByTierForMiLike = function (mi, ctx) {
       const { mergeData, divs, sitesToShow, planMonths, actualCutoff, allData } = ctx;
       if (!mergeData) return null;
       const ym = window.__mnum(planMonths[mi]);
+      const counts = { lower: 0, fulltime: 0, parttime: 0 };
+      const addTierFor = (e, row) => {
+        if (!row) return;
+        const tier = isPartTimeEmployment(e.employment) ? window.__tierForMergeRowLike(row) : 'lower';
+        if (tier) counts[tier]++;
+      };
       if (ym <= actualCutoff) {
         const { employees, months: activeMonths } = getActiveData();
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonths[mi]);
         if (ami < 0) return null;
-        let count = 0;
         divs.forEach(div => {
           const typeFilter = div === '栽培' ? wt => workTypeClass(wt) === 'wt-栽培'
             : div === '配送' ? wt => workTypeClass(wt) === 'wt-配送'
               : wt => workTypeClass(wt) === 'wt-出荷';
           sitesToShow.forEach(site => {
             const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
-            count += emps.filter(e => (e.hours[ami] ?? 0) > 0 && !e.isTransferVirtual
-              && window.__findStdHoursMergeRowInDivLike(mergeData.rows, div, e)).length;
+            emps.forEach(e => {
+              if (!((e.hours[ami] ?? 0) > 0) || e.isTransferVirtual) return;
+              addTierFor(e, window.__findStdHoursMergeRowInDivLike(mergeData.rows, div, e));
+            });
           });
         });
-        return count > 0 ? count : null;
-      }
-      let count = 0;
-      divs.forEach(div => {
-        sitesToShow.forEach(site => {
-          const emps = applyEmpTypeFilter(allData.employees.filter(e =>
-            stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== ''));
-          count += emps.filter(e => (e.flag === 1 || e.flag === 3)
-            && !(e.flag === 3 && e.startYm != null && e.startYm < ym)).length;
+      } else {
+        divs.forEach(div => {
+          sitesToShow.forEach(site => {
+            const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+              stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== ''));
+            emps.forEach(e => {
+              if (!(e.flag === 1 || e.flag === 3)) return;
+              if (e.flag === 3 && e.startYm != null && e.startYm < ym) return;
+              addTierFor(e, window.__findStdHoursMergeRowInDivLike(mergeData.rows, div, e));
+            });
+          });
         });
-      });
-      return count > 0 ? count : null;
+      }
+      return counts;
     };
 
     // work-hours.html 9656-9669行目 newStaffHeadcountForMi() と同じロジック
@@ -343,7 +396,10 @@ async function hoverAndCheckFit(page, chartVar, index) {
   check('(B-1) 拠点トグル(全拠点合計)に連動：いなべ+津の合算になる(月0=4人、月1=3人、月2=3人)', JSON.stringify(b1.twoSite栽培['栽培']) === JSON.stringify([4, 3, 3, null, null]), b1.twoSite栽培);
   check('(B-1) 雇用区分の絞り込みに連動：パート(田中三郎)を除外すると人数が減る(月0=2人、月1=1人、月2=1人)', JSON.stringify(b1.filteredByEmpType['栽培']) === JSON.stringify([2, 1, 1, null, null]), b1.filteredByEmpType);
 
-  // ---------- (B-2) 過去月の標準労働時間棒の人数：実績があり、かつ標準労働時間シートと照合できた人のみ ----------
+  // ---------- (B-2) 過去月の標準労働時間棒の人数(PR #520追加修正：段ごと)：
+  //            実績があり、かつ標準労働時間シートと照合できた人のみ、雇用区分(lower/
+  //            fulltime/parttime)に振り分けて数える。段ごとの合計は、変更前の
+  //            「3段合計」(照合できた人をすべて数えた人数)と一致する ----------
   const b2 = await page.evaluate(() => {
     const PAST_MONTHS = ['2026/1', '2026/2', '2026/3'];
     const PLAN_MONTHS = ['2026/1', '2026/2', '2026/3', '2026/4', '2026/5'];
@@ -354,6 +410,8 @@ async function hoverAndCheckFit(page, chartVar, index) {
         { name: '鈴木次郎', base: 'いなべ', workType: '栽培', employment: '社員', hours: [5, 0, 5], isTransferVirtual: false },
         { name: '高橋三郎', base: 'いなべ', workType: '栽培', employment: '社員', hours: [8, 8, 8], isTransferVirtual: false }, // 標準労働時間シートに対応行なし(照合不可)
         { name: '田中四郎', base: 'いなべ', workType: '栽培', employment: '社員', hours: [6, 6, 6], isTransferVirtual: true }, // 振替仮想行(除外対象)
+        { name: '渡辺五郎', base: 'いなべ', workType: '栽培', employment: 'パート', hours: [4, 4, 4], isTransferVirtual: false }, // fulltimeHours>0の行と照合→fulltime
+        { name: '伊藤六郎', base: 'いなべ', workType: '栽培', employment: 'パート', hours: [3, 3, 3], isTransferVirtual: false }, // parttimeHours>0の行と照合→parttime
       ],
     };
     transferMode = false;
@@ -365,17 +423,23 @@ async function hoverAndCheckFit(page, chartVar, index) {
         { div: '栽培', site: 'いなべ', name: '佐藤一郎', employment: '社員', stdHours: 100 },
         { div: '栽培', site: 'いなべ', name: '鈴木次郎', employment: '社員', stdHours: 80 },
         { div: '栽培', site: 'いなべ', name: '田中四郎', employment: '社員', stdHours: 60 },
+        { div: '栽培', site: 'いなべ', name: '渡辺五郎', employment: 'パート', fulltimeHours: 5, parttimeHours: 0, stdHours: 40 },
+        { div: '栽培', site: 'いなべ', name: '伊藤六郎', employment: 'パート', fulltimeHours: 0, parttimeHours: 3, stdHours: 20 },
       ],
       monthYms: [1, 2, 3],
     };
     const ctx = { mergeData, divs: ['栽培'], sitesToShow: ['いなべ'], planMonths: PLAN_MONTHS, actualCutoff: window.__mnum('2026/3'), allData: allData };
-    return [0, 1, 2].map(mi => window.__stdHoursCombinedHeadcountForMiLike(mi, ctx));
+    return [0, 1, 2].map(mi => window.__stdHoursHeadcountByTierForMiLike(mi, ctx));
   });
-  check('(B-2) 過去月：実績かつ照合できた人数のみ(月0=2人：佐藤+鈴木、高橋は照合不可で除外、田中は振替仮想で除外)', b2[0] === 2, b2);
-  check('(B-2) 過去月：実績0時間の人はカウントされない(月1=1人：鈴木が実績0のため佐藤のみ)', b2[1] === 1, b2);
-  check('(B-2) 過去月：月2も月0と同条件で2人', b2[2] === 2, b2);
+  check('(B-2) 過去月・月0：lower=2人(佐藤+鈴木、高橋は照合不可、田中は振替仮想で除外)', b2[0].lower === 2, b2);
+  check('(B-2) 過去月・月0：fulltime=1人(渡辺)、parttime=1人(伊藤)', b2[0].fulltime === 1 && b2[0].parttime === 1, b2);
+  check('(B-2) 過去月・月0：段ごとの合計(4人)が、変更前の「3段合計」の人数と一致する', tierSum(b2[0]) === 4, b2);
+  check('(B-2) 過去月・月1：実績0時間の人はカウントされない(鈴木が実績0のためlower=1人)', b2[1].lower === 1 && tierSum(b2[1]) === 3, b2);
+  check('(B-2) 過去月・月2：月0と同条件で段ごとの合計も4人', tierSum(b2[2]) === 4, b2);
 
-  // ---------- (B-3) 未来月の標準労働時間棒の人数：在籍者(flag1/3)、退職予定月以降は除く ----------
+  // ---------- (B-3) 未来月の標準労働時間棒の人数(PR #520追加修正：段ごと)：
+  //            在籍者(flag1/3、標準労働時間シートと照合できた人)、退職予定月以降は除く。
+  //            このテストの対象者は全員「社員」のためlower段に入る ----------
   const b3 = await page.evaluate(() => {
     const PLAN_MONTHS = ['2026/1', '2026/2', '2026/3', '2026/4', '2026/5'];
     allData = {
@@ -388,15 +452,21 @@ async function hoverAndCheckFit(page, chartVar, index) {
         { name: '別区分E', base: 'いなべ', workType: '出荷', employment: '社員', flag: 1, startYm: null, prj: 'A' }, // 業務区分が違う
       ],
     };
-    const mergeData = { rows: [], monthYms: [] };
+    const mergeData = {
+      rows: [
+        { div: '栽培', site: 'いなべ', name: '在籍A', employment: '社員', stdHours: 100 },
+        { div: '栽培', site: 'いなべ', name: '退職予定B', employment: '社員', stdHours: 90 },
+      ],
+      monthYms: [],
+    };
     const ctx = { mergeData, divs: ['栽培'], sitesToShow: ['いなべ'], planMonths: PLAN_MONTHS, actualCutoff: window.__mnum('2026/3'), allData: allData };
     return {
-      mi3: window.__stdHoursCombinedHeadcountForMiLike(3, ctx), // 2026/4(退職予定月そのもの、まだ除かれない)
-      mi4: window.__stdHoursCombinedHeadcountForMiLike(4, ctx), // 2026/5(退職予定月の翌月、除かれる)
+      mi3: window.__stdHoursHeadcountByTierForMiLike(3, ctx), // 2026/4(退職予定月そのもの、まだ除かれない)
+      mi4: window.__stdHoursHeadcountByTierForMiLike(4, ctx), // 2026/5(退職予定月の翌月、除かれる)
     };
   });
-  check('(B-3) 退職予定月(2026/4)自身はまだ在籍者としてカウントされる(在籍A+退職予定B=2人、threeSiteMergeAgg()のretiredByYmと同じ条件)', b3.mi3 === 2, b3);
-  check('(B-3) 退職予定月の翌月(2026/5)からは除かれる(在籍Aのみ=1人)', b3.mi4 === 1, b3);
+  check('(B-3) 退職予定月(2026/4)自身はまだ在籍者としてカウントされる(lower=2人：在籍A+退職予定B、threeSiteMergeAgg()のretiredByYmと同じ条件)', b3.mi3.lower === 2 && tierSum(b3.mi3) === 2, b3);
+  check('(B-3) 退職予定月の翌月(2026/5)からは除かれる(lower=1人：在籍Aのみ)', b3.mi4.lower === 1 && tierSum(b3.mi4) === 1, b3);
 
   // ---------- (B-4) 新規要員(黄)の人数：未来月のみ、開始月が未設定または月以前 ----------
   const b4 = await page.evaluate(() => {

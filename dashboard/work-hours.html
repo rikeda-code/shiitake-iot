@@ -1184,33 +1184,52 @@ function fitChartHeightForTooltip(chart) {
 
 // 拠点サマリ「実績工数（業務区分別）」(plansitesum2-combined)専用：棒セグメントに
 // 人数（「◯人」）ラベルを描画するafterDatasetsDrawプラグイン。対象は
-// _segmentHeadcount（実績棒・新規要員・増減、単一バー1本に1つ）・
-// _stdHoursCombinedHeadcount（標準労働時間3段、lowerティアのバーにのみ付与し
-// fulltime/parttimeのバー位置と合わせて3段分の外枠を計算してから1つだけ描く）を
-// 持つデータセットのみで、このグラフ専用のplugins配列にだけ追加するため他の
-// チャート（要員計画のplanstaffplan2-combined等）には影響しない。セグメント内に
-// 収まる高さがあれば中央に白文字、収まらなければ棒の右側に明るい色の文字で描く
-// （staffGapSegmentValuesプラグインと同じ「収まる/収まらない」の考え方を踏襲）。
-// 値が0またはnullの部分は描画しない
+// _segmentHeadcount（単一バー1本に1つ。実績棒(div別)・標準労働時間3段(ティア別、
+// 各段ごとに1つ)・新規要員・増減）を持つデータセットのみで、このグラフ専用の
+// plugins配列にだけ追加するため他のチャート（要員計画のplanstaffplan2-combined等）
+// には影響しない。
+// セグメント内に収まる高さがあれば中央に文字（新規要員・増減は読みやすさのため黒文字、
+// それ以外は白文字）、収まらない場合は、同じ積み上げ列（stack）の中でそのセグメントが
+// 一番上（y座標が最小）であれば棒の上側に、そうでなければ（途中の部分）棒の右側に、
+// 明るい色の文字で描く（staffGapSegmentValuesプラグインと同じ「収まる/収まらない」の
+// 考え方を踏襲）。値が0またはnullの部分は描画しない
 function siteSummaryHeadcountLabelsPlugin() {
   const LINE_H = 11;
-  function drawCount(ctx, bar, areaTop, count) {
+  const INSIDE_COLOR_LIGHT = '#ffffff';
+  const INSIDE_COLOR_DARK = '#1e2235'; // 新規要員(黄)・増減(緑)の背景は明るいため黒文字にする
+  const OUTSIDE_COLOR = '#e2e8f0';
+  function drawCount(ctx, bar, areaTop, count, opts) {
     if (count == null || count === 0) return;
     if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y) || !Number.isFinite(bar.height) || !Number.isFinite(bar.width)) return;
     const text = `${count}人`;
     const fitsInside = bar.height >= LINE_H + 4;
-    let y = bar.y + bar.height / 2;
-    if (y < areaTop + LINE_H / 2) y = areaTop + LINE_H / 2;
+    const insideColor = (opts && opts.insideColor) || INSIDE_COLOR_LIGHT;
+    const placement = (opts && opts.placement) || 'right';
     ctx.save();
     ctx.font = '10px sans-serif';
-    ctx.textBaseline = 'middle';
     if (fitsInside) {
-      ctx.fillStyle = '#ffffff';
+      let y = bar.y + bar.height / 2;
+      if (y < areaTop + LINE_H / 2) y = areaTop + LINE_H / 2;
+      ctx.fillStyle = insideColor;
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, bar.x, y);
+    } else if (placement === 'top') {
+      // 積み上げ列の中で一番上の部分：棒の右ではなく、上端のすぐ上に描く
+      // （グラフ上端で切れないよう、areaTop+文字の高さ分まではクランプする）
+      let y = bar.y - 2;
+      const minY = areaTop + LINE_H;
+      if (y < minY) y = minY;
+      ctx.fillStyle = OUTSIDE_COLOR;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
       ctx.fillText(text, bar.x, y);
     } else {
-      ctx.fillStyle = '#e2e8f0';
+      let y = bar.y + bar.height / 2;
+      if (y < areaTop + LINE_H / 2) y = areaTop + LINE_H / 2;
+      ctx.fillStyle = OUTSIDE_COLOR;
       ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
       ctx.fillText(text, bar.x + bar.width / 2 + 4, y);
     }
     ctx.restore();
@@ -1220,30 +1239,32 @@ function siteSummaryHeadcountLabelsPlugin() {
     afterDatasetsDraw(chart) {
       const ctx = chart.ctx;
       const areaTop = chart.chartArea.top;
-      const tierMetaIdx = {};
-      chart.data.datasets.forEach((ds, i) => { if (ds._threeSiteMergeStdHoursTier) tierMetaIdx[ds._threeSiteMergeStdHoursTier] = i; });
-      chart.data.datasets.forEach((ds, dsIndex) => {
-        const meta = chart.getDatasetMeta(dsIndex);
-        if (ds._segmentHeadcount) {
-          meta.data.forEach((bar, mi) => {
-            if (ds.data[mi] == null) return;
-            drawCount(ctx, bar, areaTop, ds._segmentHeadcount[mi]);
+      const dataPointCount = chart.data.datasets.reduce((max, ds) => Math.max(max, (ds.data || []).length), 0);
+      for (let mi = 0; mi < dataPointCount; mi++) {
+        // stack名（'actual'／'stdhours'）ごとに、この月(mi)で描画対象となるセグメントを
+        // 集め、一番上端(y座標が最小)のセグメントを「一番上の部分」として判定する
+        const groups = {};
+        chart.data.datasets.forEach((ds, dsIndex) => {
+          if (!ds._segmentHeadcount) return;
+          if (ds.data[mi] == null) return;
+          const count = ds._segmentHeadcount[mi];
+          if (count == null || count === 0) return;
+          const bar = chart.getDatasetMeta(dsIndex).data[mi];
+          if (!bar || !Number.isFinite(bar.y)) return;
+          const isNewStaffOrDelta = ds.label && (ds.label.startsWith('新規要員') || ds.label.startsWith('増減'));
+          const stackKey = ds.stack || 'default';
+          (groups[stackKey] = groups[stackKey] || []).push({
+            bar, count, insideColor: isNewStaffOrDelta ? INSIDE_COLOR_DARK : INSIDE_COLOR_LIGHT, topY: bar.y,
           });
-        } else if (ds._stdHoursCombinedHeadcount) {
-          const fullMeta = tierMetaIdx.fulltime != null ? chart.getDatasetMeta(tierMetaIdx.fulltime) : null;
-          const partMeta = tierMetaIdx.parttime != null ? chart.getDatasetMeta(tierMetaIdx.parttime) : null;
-          meta.data.forEach((lowerBar, mi) => {
-            const count = ds._stdHoursCombinedHeadcount[mi];
-            if (count == null || count === 0) return;
-            const bars = [lowerBar, fullMeta ? fullMeta.data[mi] : null, partMeta ? partMeta.data[mi] : null].filter(Boolean);
-            const valid = bars.filter(b => Number.isFinite(b.x) && Number.isFinite(b.y) && Number.isFinite(b.height) && Number.isFinite(b.width));
-            if (!valid.length) return;
-            const bottom = Math.max(...valid.map(b => b.y + b.height));
-            const top = Math.min(...valid.map(b => b.y));
-            drawCount(ctx, { x: valid[0].x, y: top, height: bottom - top, width: valid[0].width }, areaTop, count);
+        });
+        Object.values(groups).forEach(items => {
+          const minTopY = Math.min(...items.map(it => it.topY));
+          items.forEach(it => {
+            const placement = it.topY === minTopY ? 'top' : 'right';
+            drawCount(ctx, it.bar, areaTop, it.count, { insideColor: it.insideColor, placement });
           });
-        }
-      });
+        });
+      }
     },
   };
 }
@@ -9602,7 +9623,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // 栽培＝赤、出荷＝オレンジ（既存の実績棒と同じ暖色系）、配送＝シアンで、
     // 既存のROLE_TYPE_COLORS（栽培緑/出荷黄）とは衝突しない配色にしている
     const ACTUAL_BAR_COLORS = { '栽培': '#f87171', '出荷': '#fb923c', '配送': '#22d3ee' };
-    // 棒の人数ラベル用：実績棒（div別）・標準労働時間（3段合計）・新規要員・増減の
+    // 棒の人数ラベル用：実績棒（div別）・標準労働時間（3段それぞれ）・新規要員・増減の
     // それぞれについて、表示中の月（planMonths基準、後でsl()して揃える）の人数を
     // 集計する。この拠点サマリ「実績工数（業務区分別）」グラフ専用の集計のため、
     // 既存の共有関数（threeSiteMergeStdHoursDatasetsByTier()等）は変更せず、ここで
@@ -9615,42 +9636,58 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         return total > 0 ? total : null;
       }));
     });
-    // 標準労働時間棒（3段合計）：過去月は「その月に実績時間があり、かつ標準労働時間
-    // シートの行と照合できた人の数」（findStdHoursMergeRowInDiv()と同じ照合方法）、
-    // 未来月は「在籍者の数」（threeSiteMergeAgg()のmatched＝flag===1・3のうち、
-    // retiredByYmと同じ条件で退職予定月以降を除いた人数）
-    function stdHoursCombinedHeadcountForMi(mi) {
+    // 標準労働時間棒（3段：社員+実習生／アルバイト・フルタイム／アルバイト・
+    // パートタイム）の、段ごとの人数。数え方は変更前の合計（3段まとめて1つ）と
+    // 同じ考え方のまま、雇用区分で段に振り分ける：
+    // - 過去月：その月に実績時間があり、かつ標準労働時間シートの行と照合できた人
+    //   （findStdHoursMergeRowInDiv()と同じ照合方法）。段は、社員+実習生は常にlower、
+    //   アルバイトは照合できた行のM列/Q列からtierForMergeRow()で判定する
+    //   （findStdHoursMergeRowInDiv()で既に照合済みのため、ここでrowが無いことはない）
+    // - 未来月：在籍者（threeSiteMergeAgg()のmatched＝flag===1・3のうち、retiredByYmと
+    //   同じ条件で退職予定月以降を除いた人）のうち、標準労働時間シートの行と照合できた人
+    //   （段の判定に必要なため。照合できない人は変更前の合計にも実質寄与しない想定の
+    //   稀なケースとして段には数えない）
+    function stdHoursHeadcountByTierForMi(mi) {
       if (!mergeData) return null;
       const ym = mnum(planMonths[mi]);
+      const counts = { lower: 0, fulltime: 0, parttime: 0 };
+      function addTierFor(e, row) {
+        if (!row) return;
+        const tier = isPartTimeEmployment(e.employment) ? tierForMergeRow(row) : 'lower';
+        if (tier) counts[tier]++;
+      }
       if (ym <= ACTUAL_CUTOFF) {
         const { employees, months: activeMonths } = getActiveData();
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonths[mi]);
         if (ami < 0) return null;
-        let count = 0;
         divs.forEach(div => {
           const typeFilter = div === '栽培' ? wt => workTypeClass(wt) === 'wt-栽培'
             : div === '配送' ? wt => workTypeClass(wt) === 'wt-配送'
               : wt => workTypeClass(wt) === 'wt-出荷';
           sitesToShow.forEach(site => {
             const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
-            count += emps.filter(e => (e.hours[ami] ?? 0) > 0 && !e.isTransferVirtual
-              && findStdHoursMergeRowInDiv(mergeData.rows, div, e)).length;
+            emps.forEach(e => {
+              if (!((e.hours[ami] ?? 0) > 0) || e.isTransferVirtual) return;
+              addTierFor(e, findStdHoursMergeRowInDiv(mergeData.rows, div, e));
+            });
           });
         });
-        return count > 0 ? count : null;
-      }
-      let count = 0;
-      divs.forEach(div => {
-        sitesToShow.forEach(site => {
-          const emps = applyEmpTypeFilter(allData.employees.filter(e =>
-            stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== ''));
-          count += emps.filter(e => (e.flag === 1 || e.flag === 3)
-            && !(e.flag === 3 && e.startYm != null && e.startYm < ym)).length;
+      } else {
+        divs.forEach(div => {
+          sitesToShow.forEach(site => {
+            const emps = applyEmpTypeFilter(allData.employees.filter(e =>
+              stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== ''));
+            emps.forEach(e => {
+              if (!(e.flag === 1 || e.flag === 3)) return;
+              if (e.flag === 3 && e.startYm != null && e.startYm < ym) return;
+              addTierFor(e, findStdHoursMergeRowInDiv(mergeData.rows, div, e));
+            });
+          });
         });
-      });
-      return count > 0 ? count : null;
+      }
+      return counts;
     }
-    const stdHoursCombinedHeadcount = sl(planMonths.map((_, mi) => stdHoursCombinedHeadcountForMi(mi)));
+    const stdHoursHeadcountByTier = sl(planMonths.map((_, mi) => stdHoursHeadcountByTierForMi(mi)));
     // 新規要員（開始済み、黄）：未来月のみ。newStaffByYmと同じ条件（開始月が
     // 未設定、またはその月以前）の人数
     function newStaffHeadcountForMi(mi) {
@@ -9692,8 +9729,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     });
     stdHoursDs.forEach(ds => {
       const extra = {};
-      if (ds._threeSiteMergeStdHoursTier === 'lower') extra._stdHoursCombinedHeadcount = stdHoursCombinedHeadcount;
-      else if (ds.label && ds.label.startsWith('新規要員')) extra._segmentHeadcount = newStaffHeadcount;
+      if (ds._threeSiteMergeStdHoursTier) {
+        const tier = ds._threeSiteMergeStdHoursTier;
+        extra._segmentHeadcount = stdHoursHeadcountByTier.map(c => (c ? c[tier] : null));
+      } else if (ds.label && ds.label.startsWith('新規要員')) extra._segmentHeadcount = newStaffHeadcount;
       else if (ds.label && ds.label.startsWith('増減')) extra._segmentHeadcount = deltaHeadcount;
       datasets.push({ ...ds, data: sl(ds.data), ...extra });
     });
