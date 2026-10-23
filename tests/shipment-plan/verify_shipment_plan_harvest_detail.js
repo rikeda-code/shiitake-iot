@@ -390,12 +390,16 @@ const input = o => `[data-harvest-input-offset="${o}"]`;
     check('入力欄が有効になっている（古い読み込みで無効のまま止まっていない）', !(await page.evaluate(s => document.querySelector(s).disabled, input(0))));
     await page.close();
 
-    console.log('  --- 拠点を切り替えると、詳細の読み込みが新しい拠点で呼ばれる ---');
+    console.log('  --- 拠点をいなべのまま切り替え直しても、同じ拠点で読み直す ---');
+    // 群馬・南丹への拠点切替時に詳細の読み込み・保存を止める安全策
+    // （verify_shipment_plan_detail_inabe_only.js で検証）が入ったため、
+    // ここでは「拠点切替そのものが詳細の再読み込みの引き金になること」を、
+    // いなべ→いなべの切替（本体のクリック処理は拠点が変わらなくても毎回発火する）で確認する
     const { page: page3, loadQueries: loadQueries2 } = await setupPage(browser, { loadValues: {} });
     loadQueries2.length = 0;
-    await page3.click('[data-site="群馬"]');
+    await page3.click('[data-site="いなべ"]');
     await page3.waitForTimeout(500);
-    check('拠点切替で新しい拠点(群馬)を指定して読み直す', loadQueries2.some(q => q.site === '群馬'));
+    check('拠点ボタンのクリックで詳細を読み直す(いなべを指定)', loadQueries2.some(q => q.site === 'いなべ'));
     await page3.close();
   }
 

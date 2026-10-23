@@ -1870,6 +1870,12 @@
   var DETAIL_DAY_COUNT = 9; // 基準日（当日）〜8日後
   var DETAIL_DASH = '－';
   var DETAIL_SIZES = ['M', 'L', '秀', '優', '2L', '袋'];
+  // 本体（table1〜3）は拠点トグルを切り替えても常にいなべのデータを表示する作り
+  // （見た目のみのトグル）。詳細は拠点を見て収穫見込GASへ読み書きするため、
+  // いなべ以外を選んだまま入力すると、本体に表示されている値と食い違う拠点の
+  // 収穫見込（直近工数計画・PR #503が使う実データ）を書き換えてしまう。これを
+  // 防ぐため、いなべ以外のときは詳細の読み込み・保存・入力・数値表示を止める
+  var UNSUPPORTED_SITE_NOTE = 'この画面は現在いなべのみ対応です。群馬・南丹の収穫見込は直近工数計画で入力してください。';
 
   /* ===================== 日付のユーティリティ（このIIFE専用） ===================== */
   function addDaysIso(iso, n){
@@ -2210,6 +2216,43 @@
     renderTable3Detail(state, seriesBySize);
   }
 
+  // いなべ以外が選ばれているときの詳細の表示。GASへの読み込み・保存は一切行わず、
+  // 入力欄を無効化し、詳細の表の数値（実績・比率・日別・合計）をすべて「－」にする
+  function renderDetailUnsupportedSite(){
+    for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
+      var input = document.querySelector('[data-harvest-input-offset="' + o + '"]');
+      if (!input) continue;
+      input.disabled = true;
+      input.value = '';
+      input.placeholder = '';
+      input.classList.remove('save-error');
+      input.title = UNSUPPORTED_SITE_NOTE;
+    }
+    DETAIL_SIZES.concat(['合計']).forEach(function(size){
+      var actualCell = document.querySelector('[data-harvest-detail-actual="' + size + '"]');
+      var ratioCell = document.querySelector('[data-harvest-detail-ratio="' + size + '"]');
+      if (actualCell) actualCell.textContent = DETAIL_DASH;
+      if (ratioCell) ratioCell.textContent = DETAIL_DASH;
+    });
+    DETAIL_SIZES.forEach(function(size){
+      for (var o2 = 0; o2 < DETAIL_DAY_COUNT; o2++) {
+        var cell = document.querySelector('[data-harvest-detail="' + size + '"][data-harvest-detail-offset="' + o2 + '"]');
+        if (cell) { cell.textContent = DETAIL_DASH; cell.classList.remove('harvest-manual'); }
+      }
+    });
+    DETAIL_SIZES.concat(['合計']).forEach(function(size){
+      var actualCell = document.querySelector('[data-stock-detail-actual="' + size + '"]');
+      var ratioCell = document.querySelector('[data-stock-detail-ratio="' + size + '"]');
+      if (actualCell) actualCell.textContent = DETAIL_DASH;
+      if (ratioCell) ratioCell.textContent = DETAIL_DASH;
+      for (var o3 = 0; o3 < DETAIL_DAY_COUNT; o3++) {
+        var cell2 = document.querySelector('[data-stock-detail="' + size + '"][data-stock-detail-offset="' + o3 + '"]');
+        if (cell2) { cell2.textContent = DETAIL_DASH; cell2.classList.remove('pos', 'neg'); }
+      }
+    });
+    setDetailSaveStatus(UNSUPPORTED_SITE_NOTE, false);
+  }
+
   /* ===================== 状態管理（基準日・拠点の切替で古い読み込みを破棄する） ===================== */
 
   var detailState = null;
@@ -2223,6 +2266,12 @@
     if (!refInput || !refInput.value) return;
     var refIso = refInput.value;
     var site = activeSite();
+
+    if (site !== 'いなべ') {
+      detailState = null;
+      renderDetailUnsupportedSite();
+      return;
+    }
 
     var mainTextBySize = {};
     DETAIL_SIZES.forEach(function(size){ mainTextBySize[size] = readMainHarvestTexts(size); });
@@ -2276,6 +2325,7 @@
 
   async function commitDetailInput(input){
     if (!detailState || detailState.gen !== detailToken) return;
+    if (activeSite() !== 'いなべ') return;
     var state = detailState;
     var o = parseInt(input.getAttribute('data-harvest-input-offset'), 10);
     var kg = parseManualHarvestInput(input.value);
