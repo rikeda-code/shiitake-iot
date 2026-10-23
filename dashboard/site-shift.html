@@ -236,6 +236,42 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table tr.grp td { border-top: .45mm solid #111; }
 .pp-table tfoot td, .pp-table tfoot th { background: #f1f1ee; font-weight: 700; }
 .pp-table tfoot tr:first-child > * { border-top: .6mm double #111; }
+/* 印刷の形の切り替え */
+.mode-btns { display: inline-flex; }
+.mode-btns button { border-radius: 0; }
+.mode-btns button:first-child { border-radius: 6px 0 0 6px; }
+.mode-btns button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+.mode-btns button[aria-pressed="true"] { background: var(--accent); color: var(--surface); border-color: var(--accent); font-weight: 700; }
+#printView[data-mode="list"] .person-only, #printView[data-mode="person"] .list-only { display: none !important; }
+.pp-people-box { flex-direction: column; align-items: flex-start !important; flex-basis: 100%; }
+.pp-people { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.pp-people .grp { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.pp-people .grp > button { padding: 2px 8px; font-size: .78rem; }
+.pp-people label { display: inline-flex; gap: 4px; align-items: center; font-size: .85rem; cursor: pointer; user-select: none; }
+.preview-scale .print-page + .print-page { margin-top: 12mm; }
+/* 個人別（1人1枚）：月〜日のカレンダー */
+.pc-head { display: flex; align-items: baseline; gap: 4mm; height: 12mm; padding-bottom: 1.5mm; border-bottom: .6mm solid #111; margin-bottom: 2mm; }
+.pc-head .who { color: #111; font-size: 7mm; font-weight: 700; letter-spacing: .04em; }
+.pc-head .dp { font-size: 3.4mm; color: #333; }
+.pc-head .ttl { margin-left: auto; font-size: 3.6mm; color: #222; }
+.pc-cal { border-collapse: collapse; table-layout: fixed; width: 100%; font-variant-numeric: tabular-nums; color: #111; }
+.pc-cal th { height: 7mm; font-size: 3.4mm; background: #eef0ee; border: .25mm solid #9a9a9a; }
+.pc-cal th.sun, .pc-cal td.sun .dd { color: #c2410c; } .pc-cal th.sat, .pc-cal td.sat .dd { color: #1d4ed8; }
+.pc-cal td { border: .25mm solid #9a9a9a; vertical-align: top; padding: 1mm 1.4mm; position: relative; overflow: hidden; }
+.pc-cal td.out { background: #f3f3f1; }
+.pc-cal td.out .dd { color: #aaa; }
+.pc-cal .dd { font-size: 3.4mm; font-weight: 700; line-height: 1; }
+.pc-cal .dd .mo { font-size: .8em; margin-right: .5mm; }
+.pc-cal .tm { position: absolute; left: 0; right: 0; top: 48%; transform: translateY(-50%); text-align: center; font-weight: 700; letter-spacing: -.01em; line-height: 1.1; white-space: nowrap; }
+.pc-cal .hr { position: absolute; right: 1.4mm; bottom: .8mm; font-size: 2.8mm; color: #444; }
+.pc-cal td.off .tm { color: #333; }
+.pc-cal td.absent .tm { color: #b91c1c; }
+.pc-cal td.dv { background: #dbe8f6; }
+.pc-cal td.dvh { background: linear-gradient(135deg, #dbe8f6 50%, #fff 50%); }
+.pc-cal .tag { position: absolute; right: 1.4mm; top: 1mm; font-size: 2.8mm; font-weight: 700; color: #1d4f8a; }
+.pc-sum { display: flex; flex-wrap: wrap; gap: 2mm 7mm; align-items: baseline; margin-top: auto; padding-top: 2mm; border-top: .3mm solid #111; font-size: 3.6mm; }
+.pc-sum b { font-size: 4.6mm; }
+.pc-sum .note { margin-left: auto; font-size: 2.6mm; color: #555; }
 .pp-foot { margin-top: auto; padding-top: 1mm; font-size: 2.4mm; color: #555; display: flex; justify-content: space-between; }
 
 /* スマホ・タブレット：セルをタップすると画面下の入力パネルから入れる */
@@ -288,6 +324,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
   #printView, .preview-box { display: block !important; padding: 0 !important; border: 0 !important; background: #fff !important; }
   .preview-scale { transform: none !important; height: auto !important; }
   .print-page { box-shadow: none; }
+  .print-page + .print-page { margin-top: 0 !important; break-before: page; page-break-before: always; }
   .wrap { max-width: none; gap: 0; padding: 0; }
   #printView > *:not(.preview-box) { display: none !important; }
 }
@@ -332,8 +369,12 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
     <button role="tab" id="tabPrint" aria-selected="false" data-view="print">印刷・PDF</button>
   </div>
 
-  <section id="printView" class="print-only">
+  <section id="printView" class="print-only" data-mode="list">
     <div class="print-controls">
+      <fieldset>
+        <legend>印刷の形</legend>
+        <span class="mode-btns" role="radiogroup" aria-label="印刷の形"><button type="button" data-mode="list" aria-pressed="true">一覧（部門ごと）</button><button type="button" data-mode="person" aria-pressed="false">個人別（1人1枚）</button></span>
+      </fieldset>
       <fieldset>
         <legend>期間</legend>
         <label><input type="date" id="ppFrom" aria-label="開始日"></label>〜
@@ -341,15 +382,21 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
         <span class="quick"><button type="button" data-range="all">入力中の期間（11日〜10日）</button> <button type="button" data-range="h1">11日〜25日</button> <button type="button" data-range="h2">26日〜10日</button> <button type="button" data-range="month">翌月1日〜末日</button></span>
         <span class="hint" id="ppNote"></span>
       </fieldset>
-      <fieldset id="ppDepts"><legend>部門</legend></fieldset>
-      <fieldset>
+      <fieldset id="ppDepts" class="list-only"><legend>部門</legend></fieldset>
+      <fieldset class="list-only">
         <legend>表示</legend>
         <label><input type="checkbox" id="ppEmpty" checked>シフトのない人も載せる</label>
         <label><input type="checkbox" id="ppCount" checked>出勤人数の行を載せる</label>
       </fieldset>
+      <fieldset class="person-only pp-people-box">
+        <legend>印刷する人 <span id="ppPeopleCount"></span></legend>
+        <span class="quick"><button type="button" data-pick="all">全員</button> <button type="button" data-pick="none">全部外す</button> <button type="button" data-pick="grid" title="シフト入力の表で選んでいる人（範囲選択した行）">表で選んだ人</button> <button type="button" data-pick="worked">この期間にシフトがある人</button></span>
+        <div class="pp-people" id="ppPeople"></div>
+        <span class="hint">1人を押してから別の人を <kbd>Shift</kbd>+クリックすると、その間の人をまとめて選べます。部門名を押すと、その部門の全員を選ぶ（全員選ばれていれば外す）ことができます。</span>
+      </fieldset>
       <div class="go"><button class="primary" id="ppPrint">印刷・PDFに保存</button></div>
     </div>
-    <p class="hint">A4横1枚に収まるよう、文字と行の高さを自動で調整します。印刷画面で「送信先」を「PDFに保存」にするとPDFになります。用紙サイズは「A4」、倍率は「デフォルト（100%）」のままにしてください。</p>
+    <p class="hint" id="ppHint">A4横1枚に収まるよう、文字と行の高さを自動で調整します。印刷画面で「送信先」を「PDFに保存」にするとPDFになります。用紙サイズは「A4」、倍率は「デフォルト（100%）」のままにしてください。</p>
     <div class="preview-box" id="previewBox"><div class="preview-scale" id="previewScale"><div class="print-page" id="printPage"></div></div></div>
   </section>
 
@@ -710,6 +757,7 @@ async function load() {
   allCols = periodCols();
   cols = allCols;
   sel = cursor = anchor = null; // 拠点・期間が変わると同じ位置でも別の人・別の日になる
+  ppPicked = null; ppLastKey = null; // 個人別の印刷で選んだ人も選び直す
   $('edFrom').value = ''; $('edTo').value = '';
   loadedSite = curSite(); loadedMonth = monthKey();
   $('gridBox').innerHTML = '<div class="loading">読み込み中…</div>';
@@ -1571,8 +1619,13 @@ $('ppPrint').onclick = () => { renderPrint(); window.print(); };
 window.addEventListener('resize', () => { if (document.body.dataset.view === 'print') fitPreview(); });
 
 // 印刷する1枚：見出し（拠点・期間）とシフトの表だけ。時間の合計は載せない
+// プレビューを1枚だけにする（一覧の印刷用。個人別は人数分の .print-page を並べる）
+function onePage(html) {
+  if (!$('printPage') || $('previewScale').children.length !== 1) $('previewScale').innerHTML = '<div class="print-page" id="printPage"></div>';
+  if (html != null) $('printPage').innerHTML = html;
+}
 function renderPrint(shrink = 1) {
-  if (!allCols.length || (!members.length && !rows.length)) { $('printPage').innerHTML = '<div class="loading">読み込み中…</div>'; return; }
+  if (!allCols.length || (!members.length && !rows.length)) { onePage('<div class="loading">読み込み中…</div>'); return; }
   const all = visibleMembers();
   // 部門の選択肢（この拠点にいる部門だけ）
   const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
@@ -1581,6 +1634,7 @@ function renderPrint(shrink = 1) {
   if (!$('ppFrom').value) setPpRange(dateOf(allCols[0].iso), dateOf(allCols[allCols.length - 1].iso));
   const days = ppRange();
   ensureMonths([...new Set(days.map(x => x.ym))]);
+  if (ppMode === 'person') { renderPersonal(all, days); return; }
   let list = all.filter(m => ppDeptSel.has(divOf(m.dept)));
   if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => valueOn(m, d)));
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
@@ -1635,7 +1689,7 @@ function renderPrint(shrink = 1) {
   }
   h += '</table>';
   if (anyDeliv) h = h.replace('<!--deliv-->', '<span class="meta">　<span class="dv-key">配</span>＝配送　<span class="dv-key half">半</span>＝半日配送</span>');
-  $('printPage').innerHTML = h;
+  onePage(h);
   // 実際に描いた高さが1枚を超えたら、行の高さを縮めて描き直す
   const page = $('printPage'), table = page.querySelector('.pp-table');
   const room = page.clientHeight - page.querySelector('.pp-head').offsetHeight - 6;
@@ -1643,10 +1697,129 @@ function renderPrint(shrink = 1) {
   fitPreview();
 }
 function fitPreview() {
-  const box = $('previewBox'), page = $('printPage'), sc = $('previewScale');
+  const box = $('previewBox'), sc = $('previewScale'), page = sc.querySelector('.print-page');
+  if (!page) return;
   const scale = Math.min(1, (box.clientWidth - 32) / page.offsetWidth);
   sc.style.transform = `scale(${scale})`;
-  sc.style.height = (page.offsetHeight * scale) + 'px';
+  sc.style.height = 'auto'; // 個人別は何枚も並ぶので、全部の高さを測ってから縮める
+  sc.style.height = (sc.offsetHeight * scale) + 'px';
+}
+
+/* ── 個人別（1人1枚） ── */
+let ppMode = 'list';
+let ppPicked = null;            // 印刷する人の key（Set）。個人別に切り替えたときに決める
+let ppLastKey = null, ppShift = false; // Shift+クリックの範囲選択用
+// シフト入力の表で範囲選択している人
+const gridPickedKeys = () => { const s = norm(sel); return s ? rows.slice(s.r0, s.r1 + 1).map(m => m.key) : []; };
+function setPpMode(mode) {
+  ppMode = mode;
+  $('printView').dataset.mode = mode;
+  document.querySelectorAll('.mode-btns button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
+  if (mode === 'person' && !ppPicked) {
+    const g = gridPickedKeys();
+    ppPicked = new Set(g.length ? g : visibleMembers().map(m => m.key));
+  }
+  $('ppHint').textContent = mode === 'person'
+    ? '1人1枚（A4横）で、月曜始まりのカレンダーにして印刷します。期間は最大31日です。印刷画面で「送信先」を「PDFに保存」にすると、全員分が1つのPDFになります。用紙サイズは「A4」、倍率は「デフォルト（100%）」のままにしてください。'
+    : 'A4横1枚に収まるよう、文字と行の高さを自動で調整します。印刷画面で「送信先」を「PDFに保存」にするとPDFになります。用紙サイズは「A4」、倍率は「デフォルト（100%）」のままにしてください。';
+  renderPrint();
+}
+document.querySelector('.mode-btns').addEventListener('click', ev => { const m = ev.target.closest('button')?.dataset.mode; if (m && m !== ppMode) setPpMode(m); });
+// 印刷する人の一覧（部門ごと、表と同じ並び順）
+function renderPeoplePicker(all) {
+  const box = $('ppPeople'), top = box.scrollTop;
+  const groups = [];
+  all.forEach(m => { const d = divOf(m.dept); let g = groups.find(x => x.div === d); if (!g) groups.push(g = { div: d, list: [] }); g.list.push(m); });
+  box.innerHTML = groups.map(g => `<div class="grp"><button type="button" data-div="${g.div}" title="${g.div}の全員を選ぶ／外す"><span class="chip ${g.div}">${g.div}</span></button>`
+    + g.list.map(m => `<label><input type="checkbox" data-key="${esc(m.key)}"${ppPicked.has(m.key) ? ' checked' : ''}>${esc(m.name)}</label>`).join('') + '</div>').join('');
+  box.scrollTop = top;
+}
+$('ppPeople').addEventListener('pointerdown', ev => { ppShift = ev.shiftKey; });
+$('ppPeople').addEventListener('change', ev => {
+  const key = ev.target.dataset.key; if (!key) return;
+  const keys = visibleMembers().map(m => m.key);
+  const a = keys.indexOf(ppLastKey), b = keys.indexOf(key);
+  // Shift+クリック：前に押した人からこの人までを、この人と同じ状態にそろえる
+  const range = ppShift && a >= 0 ? keys.slice(Math.min(a, b), Math.max(a, b) + 1) : [key];
+  range.forEach(k => ev.target.checked ? ppPicked.add(k) : ppPicked.delete(k));
+  ppLastKey = key; ppShift = false;
+  renderPrint();
+});
+$('ppPeople').addEventListener('click', ev => {
+  const div = ev.target.closest('button[data-div]')?.dataset.div; if (!div) return;
+  const keys = visibleMembers().filter(m => divOf(m.dept) === div).map(m => m.key);
+  const on = !keys.every(k => ppPicked.has(k));
+  keys.forEach(k => on ? ppPicked.add(k) : ppPicked.delete(k));
+  renderPrint();
+});
+document.querySelector('.pp-people-box .quick').addEventListener('click', ev => {
+  const p = ev.target.dataset.pick; if (!p) return;
+  const all = visibleMembers();
+  if (p === 'all') ppPicked = new Set(all.map(m => m.key));
+  if (p === 'none') ppPicked = new Set();
+  if (p === 'grid') {
+    const g = gridPickedKeys();
+    if (!g.length) { toast('「シフト入力」の表で、印刷する人のセルか氏名を範囲選択してから押してください'); return; }
+    ppPicked = new Set(g);
+  }
+  if (p === 'worked') { const days = ppRange(); ppPicked = new Set(all.filter(m => days.some(d => cellHours(valueOn(m, d)))).map(m => m.key)); }
+  renderPrint();
+});
+// 1人分のページ：見出し（氏名・部門・期間）、月〜日のカレンダー、下に出勤日数・勤務時間・休みの内訳
+function renderPersonal(all, days) {
+  if (!ppPicked) ppPicked = new Set(all.map(m => m.key)); // 拠点を変えたときは全員から
+  renderPeoplePicker(all);
+  const list = all.filter(m => ppPicked.has(m.key));
+  $('ppPeopleCount').textContent = `（${list.length}人を選択 → ${list.length}枚）`;
+  if (!list.length) { onePage('<div class="loading">印刷する人を選んでください</div>'); fitPreview(); return; }
+  const first = days[0], last = days[days.length - 1];
+  const inRange = iso => iso >= first.iso && iso <= last.iso;
+  // 月曜始まりで、期間を含む週を並べる
+  const monIdx = wd => (wd + 6) % 7;
+  const start = dateOf(first.iso); start.setDate(start.getDate() - monIdx(first.wd));
+  const end = dateOf(last.iso); end.setDate(end.getDate() + 6 - monIdx(last.wd));
+  const weeks = [];
+  for (const dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) { if (monIdx(dt.getDay()) === 0) weeks.push([]); weeks[weeks.length - 1].push(dayInfo(dt)); }
+  // 縦 184mm から見出し・曜日・集計の分を引いて、週の行の高さを決める
+  const cellH = (184 - 14 - 7 - 14) / weeks.length;
+  // 時刻「17:00〜17:30」（半角10文字＋全角1文字 ≒ 7文字分）がマスの幅（270mm÷7）に収まる大きさまで
+  const cellW = 270 / 7;
+  const timeFont = Math.min(cellH * 0.22, (cellW - 3) / 7), offFont = Math.min(cellH * 0.3, 8);
+  const span = first.iso.slice(0, 4) === last.iso.slice(0, 4)
+    ? `${first.iso.slice(0, 4)}年${first.m}月${first.d}日〜${last.m}月${last.d}日`
+    : `${first.iso.slice(0, 4)}年${first.m}月${first.d}日〜${last.iso.slice(0, 4)}年${last.m}月${last.d}日`;
+  const pages = list.map(m => {
+    let work = 0, hours = 0, deliv = 0; const leaves = {};
+    let h = `<div class="print-page"><div class="pc-head"><span class="who">${esc(m.name)}</span><span class="dp">${esc(m.dept)}</span><span class="ttl">${esc($('site').value)}　シフト表　${span}</span></div>`;
+    h += `<table class="pc-cal"><thead><tr>${FX_ORDER.map(wd => `<th class="${wd === 0 ? 'sun' : wd === 6 ? 'sat' : ''}">${WD[wd]}</th>`).join('')}</tr></thead><tbody>`;
+    weeks.forEach(w => {
+      h += `<tr style="height:${cellH.toFixed(2)}mm">`;
+      w.forEach((d, i) => {
+        const cls = [d.wd === 0 ? 'sun' : d.wd === 6 ? 'sat' : ''];
+        // 期間の最初の日と月の1日は「月/日」で書く
+        const dd = `<div class="dd">${inRange(d.iso) && (d.iso === first.iso || d.d === 1) ? `<span class="mo">${d.m}/</span>` : ''}${d.d}</div>`;
+        if (!inRange(d.iso)) { cls.push('out'); h += `<td class="${cls.join(' ')}">${dd}</td>`; return; }
+        const v = valueOn(m, d), hr = cellHours(v), { time, tag } = splitVal(normVal(v));
+        let body = '';
+        if (isLeave(v)) { cls.push('off'); if (v === '欠勤') cls.push('absent'); leaves[v] = (leaves[v] || 0) + 1; body = `<div class="tm" style="font-size:${offFont.toFixed(2)}mm">${esc(v)}</div>`; }
+        else if (v) {
+          const tm = time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+          body = `<div class="tm" style="font-size:${timeFont.toFixed(2)}mm">${tm ? `${tm[1]}〜${tm[2]}` : esc(v)}</div>`;
+          if (hr) { work++; hours += hr; body += `<div class="hr">実働${fmt(hr)}</div>`; }
+          if (tag) { deliv++; cls.push(tag === '配送' ? 'dv' : 'dvh'); body += `<div class="tag">${tag}</div>`; }
+        }
+        h += `<td class="${cls.join(' ')}">${dd}${body}</td>`;
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    const lv = LEAVE_TYPES.filter(t => leaves[t]).map(t => `${t} ${leaves[t]}日`).join('・');
+    h += `<div class="pc-sum"><span>出勤 <b>${work}</b>日</span><span>勤務時間 <b>${fmt(hours)}</b></span>${lv ? `<span>休み ${lv}</span>` : ''}${deliv ? `<span>配送 ${deliv}日</span>` : ''}`
+      + `<span class="note">実働は拘束5時間以上のとき休憩1時間を引いた時間です</span></div></div>`;
+    return h;
+  });
+  $('previewScale').innerHTML = pages.join('');
+  fitPreview();
 }
 
 /* ── 起動 ── */
