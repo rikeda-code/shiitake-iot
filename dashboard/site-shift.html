@@ -87,6 +87,15 @@ td.cell.deliv .t2, td.cell.deliv-half .t2 { padding-top: 8px; }
 td.cell.weekend { background-image: linear-gradient(var(--sel-soft), var(--sel-soft)); background-size: 0 0; }
 td.cell.in-sel { background: var(--sel-soft); }
 td.cell.cursor { box-shadow: inset 0 0 0 2px var(--sel); }
+/* 氏名：クリックで行を選ぶ。つかんで上下にドラッグすると並び順を変える */
+.grid tbody td.name[data-r] { cursor: grab; }
+.grid tbody td.name.row-sel { background: var(--sel-soft); }
+body.row-dragging, body.row-dragging .grid tbody td { cursor: grabbing; }
+.grid tr.drop-before > td { box-shadow: inset 0 3px 0 var(--sel); }
+.grid tr.drop-after > td { box-shadow: inset 0 -3px 0 var(--sel); }
+.dialog.sort-dialog { flex-direction: column; align-items: flex-start; }
+.sort-dialog .sort-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sort-dialog .sort-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 /* フィルハンドル：選んだ範囲の右下の四角。ドラッグすると同じ内容を広げる */
 .fill-handle { position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; background: var(--sel); border: 1.5px solid var(--surface); z-index: 3; cursor: crosshair; }
 td.cell.fill-prev { box-shadow: inset 0 0 0 1px var(--sel); background-image: repeating-linear-gradient(135deg, var(--sel-soft) 0 4px, transparent 4px 8px); }
@@ -352,11 +361,15 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
       <label><input type="date" id="edTo" aria-label="表示する最後の日"></label>
       <span class="quick"><button type="button" data-ed="all">期間全体</button> <button type="button" data-ed="h1">11日〜25日</button> <button type="button" data-ed="h2">26日〜10日</button></span>
     </fieldset>
+    <fieldset id="orderBar">
+      <legend>並び順（全員の画面と印刷に共通）</legend>
+      <span class="quick"><button type="button" id="sortBtn">条件で並べ替え</button> <button type="button" id="rowUp" title="選んだ人を1つ上へ（Alt+↑）">▲ 上へ</button> <button type="button" id="rowDown" title="選んだ人を1つ下へ（Alt+↓）">▼ 下へ</button></span>
+    </fieldset>
   </div>
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。栽培・出荷の人が配送に行く日は「配送」「半日配送」ボタンで印を付けます（配送は実働すべて、半日配送は半分を「配送 時間」に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
-    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。栽培・出荷の人が配送に行く日は、セルを選んで「配送」「半日配送」ボタンを押すか、<code>8-17配</code>・<code>8-17半配</code> のように打ちます。配送は実働すべて、半日配送は実働の半分を「配送 時間」に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。</p>
+    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。並び順は上の「条件で並べ替え」か、入力パネルの「人を上へ」「人を下へ」で変えられます（全員の画面と印刷に共通）。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。栽培・出荷の人が配送に行く日は「配送」「半日配送」ボタンで印を付けます（配送は実働すべて、半日配送は半分を「配送 時間」に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
+    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。栽培・出荷の人が配送に行く日は、セルを選んで「配送」「半日配送」ボタンを押すか、<code>8-17配</code>・<code>8-17半配</code> のように打ちます。配送は実働すべて、半日配送は実働の半分を「配送 時間」に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。<br>並び順：「条件で並べ替え」で部門・勤務時間・出勤時刻などを3つまで組み合わせて並べられます。1人ずつ動かすときは、その人のセルか氏名を選んで「▲ 上へ」「▼ 下へ」か <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>、または氏名をつかんで上下にドラッグします（氏名を <kbd>Shift</kbd>+クリックすると何人かまとめて動かせます）。並び順は全員の画面と印刷に共通です。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -389,7 +402,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
   <div class="mbar-head"><b id="mbWho"></b><span id="mbDay"></span><span class="now" id="mbNow"></span><button type="button" id="mbClose" aria-label="入力パネルを閉じる">×</button></div>
   <div class="mbar-row"><input id="mbInput" placeholder="時間（例 8-17、8:30-15）" autocomplete="off" enterkeyhint="done" aria-label="入れる内容"><button type="button" class="primary" id="mbOk">入れる</button></div>
   <div class="mbar-chips" id="mbChips"></div>
-  <div class="mbar-nav"><button type="button" data-mv="0,-1">◀ 前日</button><button type="button" data-mv="0,1">翌日 ▶</button><button type="button" data-mv="1,0">次の人 ▼</button><label><input type="checkbox" id="mbRange">範囲選択</label></div>
+  <div class="mbar-nav"><button type="button" data-mv="0,-1">◀ 前日</button><button type="button" data-mv="0,1">翌日 ▶</button><button type="button" data-mv="1,0">次の人 ▼</button><button type="button" data-row="-1" title="この人を1つ上へ">人を上へ</button><button type="button" data-row="1" title="この人を1つ下へ">人を下へ</button><label><input type="checkbox" id="mbRange">範囲選択</label></div>
 </div>
 <div class="toast" id="toast" hidden></div>
 
@@ -418,6 +431,7 @@ let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
 let fixed = {};     // fixed[key] = 月〜日の7要素
+let rowOrder = { keys: [], rules: null }; // 表の並び順（拠点ごと）：keys＝人の並び、rules＝最後に使った並べ替えの条件
 let monthData = {};   // Firestoreから届いた月ごとのシフト：{ 'yyyy-MM': { key: { iso: 値 } } }
 let pending = {};     // まだFirestoreに送っていない変更：{ 'yyyy-MM': { key: { iso: 値（''は消去） } } }
 let ready = false;    // 期間の2か月分とメンバーがそろったか
@@ -520,7 +534,8 @@ async function api(method, payload) {
 /* ── Firebase（Firestore：東京） ──
    shiftSites/{拠点}/months/{yyyy-MM} … { cells: { key: { 'yyyy-MM-dd': '8:00-17:00' } } }
    shiftSites/{拠点}/meta/members     … { list: [整理済み_Mのメンバー], updatedAt }
-   shiftSites/{拠点}/meta/fixed       … { key: [月〜日の7要素] } */
+   shiftSites/{拠点}/meta/fixed       … { key: [月〜日の7要素] }
+   shiftSites/{拠点}/meta/order       … { keys: [人の並び], rules: [並べ替えの条件], updatedAt, updatedBy } */
 const firebaseConfig = {
   apiKey: 'AIzaSyDUmBcQAHCnWlv5a5Lv7nS5tRBQ-LvVtjo',
   // Firebase Hosting（shiitake-iot.web.app）で開いたときは、ログインもページと同じ場所で行う（ブラウザの設定に左右されない）
@@ -670,6 +685,14 @@ function listen() {
     fixed = snap.exists ? snap.data() : {};
     if (ready) renderFixed();
   }, err => showLoadError(err)));
+  rowOrder = { keys: [], rules: null };
+  unsubs.push(metaRef(site, 'order').onSnapshot(snap => {
+    if (orderTimer && orderSite === site) return; // 自分の並べ替えをまだ送っていないときは、届いた古い並びで戻さない
+    rowOrder = snap.exists ? { keys: snap.data().keys || [], rules: snap.data().rules || null } : { keys: [], rules: null };
+    if (!ready) return;
+    if (editing || dragging || filling || rowDrag) { needRender = true; return; }
+    render(); renderFixed();
+  }, err => showLoadError(err)));
 }
 function checkReady() {
   const was = ready;
@@ -701,17 +724,124 @@ function syncSelectors() {
 }
 
 /* ── シフト表 ── */
+// 並び順を決めていないときの順：部門 → 整理済み_Mの行の順
+const DIV_ORDER = ['栽培', '出荷', '配送', 'その他'];
+const defaultCmp = (a, b) => DIV_ORDER.indexOf(divOf(a.dept)) - DIV_ORDER.indexOf(divOf(b.dept)) || a.dept.localeCompare(b.dept, 'ja') || a.row - b.row;
+// 保存した並び順（rowOrder.keys）に従う。並び順に入っていない人（あとから入った人など）は下に、元の順で付ける
 function visibleMembers() {
+  const pos = new Map(rowOrder.keys.map((k, i) => [k, i]));
   return members.filter(m => {
     if (!ON_SHIFT_FLAGS.includes(m.flag)) return false;
     // 事務・営業の人はシフトに載せない
     if (/事務|営業/.test(m.dept + m.empType)) return false;
     // 名前の決まっていない新規要員の枠（いなべパ出A・群馬正Bなど）は載せない
     return !isPlaceholder(m.name);
-  }).sort((a, b) => {
-    const order = ['栽培', '出荷', '配送', 'その他'];
-    return order.indexOf(divOf(a.dept)) - order.indexOf(divOf(b.dept)) || a.dept.localeCompare(b.dept, 'ja') || a.row - b.row;
+  }).sort((a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity) || defaultCmp(a, b));
+}
+
+/* ── 並び順 ── */
+// 並び順を保存する（続けて動かしたときは0.3秒ためて1回で送る）
+let orderTimer = null, orderSite = null;
+function setOrder(keys, rules) {
+  const site = orderSite = curSite();
+  rowOrder = { keys, rules: rules === undefined ? rowOrder.rules : rules };
+  clearTimeout(orderTimer);
+  orderTimer = setTimeout(() => {
+    metaRef(site, 'order').set({ keys: rowOrder.keys, rules: rowOrder.rules, updatedAt: Date.now(), updatedBy: auth.currentUser?.email || '' })
+      .catch(err => toast('並び順を保存できませんでした：' + err.message))
+      .finally(() => { orderTimer = null; });
+  }, 300);
+}
+// 人のかたまり（block＝keyの配列）を、target の人の前（after=false）か後ろ（after=true）へ動かす
+function moveBlock(block, target, after) {
+  const rest = visibleMembers().map(m => m.key).filter(k => !block.includes(k));
+  const at = rest.indexOf(target); if (at < 0) return false;
+  rest.splice(at + (after ? 1 : 0), 0, ...block);
+  setOrder(rest);
+  return true;
+}
+// 選んだ行（人）を1つ上（dir=-1）か下（dir=1）へ。部門の絞り込みで隠れている人はとばす
+function moveRows(dir) {
+  const s = norm(sel);
+  if (!s) { toast('動かす人のセルか氏名を選んでください'); return; }
+  const nb = rows[dir < 0 ? s.r0 - 1 : s.r1 + 1]; if (!nb) return;
+  if (!moveBlock(rows.slice(s.r0, s.r1 + 1).map(m => m.key), nb.key, dir > 0)) return;
+  sel = { ...sel, r0: sel.r0 + dir, r1: sel.r1 + dir };
+  if (anchor) anchor = { ...anchor, r: anchor.r + dir };
+  if (cursor) cursor = { ...cursor, r: cursor.r + dir };
+  render();
+  if (cursor) document.querySelector(`td.cell[data-r="${cursor.r}"][data-c="${cursor.c}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+// 並べ替えの条件。dirs[0] の向きで小さい値が上に来る。値がない人（この期間にシフトがない等）はどちらの向きでも下に置く
+const EMP_ORDER = ['社員', 'アルバイト', '技能実習生'];
+const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+// この期間（11日〜10日の全日）の働き方：勤務時間・出勤日数・いちばん多い出勤／退勤の時刻
+function workStats(m) {
+  let hours = 0, days = 0; const st = {}, en = {};
+  allCols.forEach(c => {
+    const v = data[m.key]?.[c.iso]; const hr = cellHours(v); if (!hr) return;
+    hours += hr; days++;
+    const [s, e] = splitVal(v).time.split('-');
+    st[s] = (st[s] || 0) + 1; en[e] = (en[e] || 0) + 1;
   });
+  const mode = f => { const ks = Object.keys(f); return ks.length ? Math.min(...ks.filter(k => f[k] === Math.max(...Object.values(f))).map(toMin)) : null; };
+  return { hours, days, start: mode(st), end: mode(en) };
+}
+const SORT_KEYS = {
+  dept:  { label: '部門', dirs: ['栽培→出荷→配送', '配送→出荷→栽培'], val: (m, w) => DIV_ORDER.indexOf(divOf(m.dept)) },
+  hours: { label: '勤務時間（この期間の合計）', dirs: ['多い順', '少ない順'], val: (m, w) => w.hours ? -w.hours : null },
+  days:  { label: '出勤日数（この期間）', dirs: ['多い順', '少ない順'], val: (m, w) => w.days ? -w.days : null },
+  start: { label: '出勤時刻（いちばん多い時刻）', dirs: ['早い順', '遅い順'], val: (m, w) => w.start },
+  end:   { label: '退勤時刻（いちばん多い時刻）', dirs: ['早い順', '遅い順'], val: (m, w) => w.end },
+  emp:   { label: '雇用区分', dirs: ['社員→アルバイト→技能実習生', '技能実習生→アルバイト→社員'], val: (m, w) => { const i = EMP_ORDER.indexOf(m.empType); return i < 0 ? null : i; } },
+  join:  { label: '入社日', dirs: ['古い順', '新しい順'], val: (m, w) => m.join ? Date.parse(m.join) : null },
+};
+const DEFAULT_RULES = [{ key: 'dept', dir: 0 }, { key: 'start', dir: 0 }, { key: 'hours', dir: 0 }];
+// 条件の順に比べ、すべて同じなら今の並びのまま
+function sortByRules(rules) {
+  const list = visibleMembers();
+  const now = new Map(list.map((m, i) => [m.key, i]));
+  const w = new Map(list.map(m => [m.key, workStats(m)]));
+  const val = (r, m) => SORT_KEYS[r.key].val(m, w.get(m.key));
+  return list.slice().sort((a, b) => {
+    for (const r of rules) {
+      const va = val(r, a), vb = val(r, b);
+      if (va == null && vb == null) continue;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (va !== vb) return (va - vb) * (r.dir ? -1 : 1);
+    }
+    return now.get(a.key) - now.get(b.key);
+  }).map(m => m.key);
+}
+function openSortDialog() {
+  const rules = (rowOrder.rules || DEFAULT_RULES).slice();
+  while (rules.length < 3) rules.push({ key: '', dir: 0 });
+  const row = (r, i) => `<div class="sort-row" data-i="${i}"><span>第${i + 1}条件</span>
+    <select data-f="key" aria-label="第${i + 1}条件">${i ? '<option value="">（なし）</option>' : ''}${Object.entries(SORT_KEYS).map(([k, x]) => `<option value="${k}"${k === r.key ? ' selected' : ''}>${x.label}</option>`).join('')}</select>
+    <select data-f="dir" aria-label="第${i + 1}条件の向き"${r.key ? '' : ' disabled'}>${(SORT_KEYS[r.key]?.dirs || ['—']).map((d, j) => `<option value="${j}"${j === r.dir ? ' selected' : ''}>${d}</option>`).join('')}</select></div>`;
+  $('dialogSlot').innerHTML = `<div class="dialog sort-dialog"><b>条件で並べ替え（${esc(curSite())}・${periodLabel()}のシフトで判定）</b>
+    ${rules.slice(0, 3).map(row).join('')}
+    <span class="hint">第1条件が同じ人を第2条件で、それも同じ人を第3条件で並べます。全部同じ人は今の並びのままです。勤務時間・出勤時刻はこの期間のシフトで決めるので、シフトを入れ終えてから押すのがおすすめです（あとからシフトが変わっても自動では並び替わりません）。</span>
+    <div class="sort-acts"><button class="primary" id="srtGo">並べ替える</button><button id="srtReset">元の並び（部門→整理済み_Mの順）に戻す</button><button id="dlgNo">閉じる</button></div></div>`;
+  const read = () => [...document.querySelectorAll('.sort-row')].map(el => ({ key: el.querySelector('[data-f=key]').value, dir: +el.querySelector('[data-f=dir]').value || 0 })).filter(r => SORT_KEYS[r.key]);
+  // 条件を変えたら、向きの選択肢をその条件のものにする
+  document.querySelector('.sort-dialog').addEventListener('change', ev => {
+    if (ev.target.dataset.f !== 'key') return;
+    const k = ev.target.value, dirSel = ev.target.closest('.sort-row').querySelector('[data-f=dir]');
+    dirSel.innerHTML = (SORT_KEYS[k]?.dirs || ['—']).map((d, j) => `<option value="${j}">${d}</option>`).join('');
+    dirSel.disabled = !k;
+  });
+  $('srtGo').onclick = () => {
+    const rs = read();
+    setOrder(sortByRules(rs), rs);
+    $('dialogSlot').innerHTML = '';
+    refilter();
+    toast(`並べ替えました（${rs.map(r => `${SORT_KEYS[r.key].label.replace(/（.*）/, '')}：${SORT_KEYS[r.key].dirs[r.dir]}`).join(' → ')}）`);
+  };
+  $('srtReset').onclick = () => { setOrder([], null); $('dialogSlot').innerHTML = ''; refilter(); toast('元の並び（部門→整理済み_Mの順）に戻しました'); };
+  $('dlgNo').onclick = () => { $('dialogSlot').innerHTML = ''; };
 }
 
 // 表の上の絞り込み（部門・表示する日）
@@ -751,7 +881,7 @@ function render() {
     let sum = 0;
     const div = divOf(m.dept);
     const badge = m.flag === 2 ? '<span class="badge new">入社</span>' : '';
-    h += `<tr><td class="name d-${div}" title="${esc(m.name)}（${esc(m.dept)}）">${esc(m.name)}${badge}</td>` + (compact ? '' : `<td class="role"><span class="chip ${div}">${esc(m.dept)}</span></td>`);
+    h += `<tr><td class="name d-${div}" data-r="${r}" title="${esc(m.name)}（${esc(m.dept)}）　クリックで行を選択、ドラッグで並び順を変更">${esc(m.name)}${badge}</td>` + (compact ? '' : `<td class="role"><span class="chip ${div}">${esc(m.dept)}</span></td>`);
     cols.forEach((c, i) => {
       const v = data[m.key]?.[c.iso] || '';
       const hr = cellHours(v);
@@ -805,6 +935,7 @@ function paintSel() {
     td.classList.toggle('cursor', !!cursor && cursor.r === r && cursor.c === c);
     td.classList.toggle('fill-prev', !!filling?.dst && inRect(filling.dst, r, c) && !inRect(filling.src, r, c));
   });
+  document.querySelectorAll('tbody td.name[data-r]').forEach(td => { const r = +td.dataset.r; td.classList.toggle('row-sel', !!s && r >= s.r0 && r <= s.r1); });
   // 選んだ範囲の右下にフィルハンドルを付ける
   document.querySelectorAll('.fill-handle').forEach(x => x.remove());
   if (s && !editing && !filling) document.querySelector(`td.cell[data-r="${s.r1}"][data-c="${s.c1}"]`)?.insertAdjacentHTML('beforeend', '<span class="fill-handle" title="ドラッグして同じ内容を広げる"></span>');
@@ -906,7 +1037,45 @@ gridBox.addEventListener('mouseover', ev => {
   if (!dragging) return; const td = ev.target.closest('td.cell'); if (!td) return;
   sel = { r0: anchor.r, c0: anchor.c, r1: +td.dataset.r, c1: +td.dataset.c }; cursor = { r: +td.dataset.r, c: +td.dataset.c }; paintSel();
 });
-document.addEventListener('mouseup', () => { dragging = false; if (needRender && !filling && !editing) render(); });
+// 氏名をクリックするとその人の行を選ぶ（Shift+クリックで何人か）。つかんで上下にドラッグすると、その位置へ動かす
+let rowDrag = null; // { s: 動かす行の範囲, target: 落とす先の人のkey, after }
+gridBox.addEventListener('mousedown', ev => {
+  if (touching()) return;
+  const td = ev.target.closest('tbody td.name[data-r]'); if (!td || !cols.length) return;
+  if (editing) commit();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  const r = +td.dataset.r, s = norm(sel), last = cols.length - 1;
+  const wholeRows = s && s.c0 === 0 && s.c1 === last;
+  if (ev.shiftKey && anchor) { sel = { r0: anchor.r, c0: 0, r1: r, c1: last }; cursor = { r, c: cursor?.c ?? 0 }; }
+  else if (!(wholeRows && r >= s.r0 && r <= s.r1)) { anchor = { r, c: 0 }; cursor = { r, c: 0 }; sel = { r0: r, c0: 0, r1: r, c1: last }; }
+  paintSel();
+  rowDrag = { s: norm(sel), target: null, after: false };
+  ev.preventDefault();
+});
+gridBox.addEventListener('mouseover', ev => {
+  if (!rowDrag) return;
+  const tr = ev.target.closest('tbody tr'), r = +tr?.querySelector('td.name[data-r]')?.dataset.r;
+  document.querySelectorAll('.drop-before, .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+  if (!tr || Number.isNaN(r) || (r >= rowDrag.s.r0 && r <= rowDrag.s.r1)) { rowDrag.target = null; return; }
+  rowDrag.after = r > rowDrag.s.r1; rowDrag.target = rows[r].key;
+  tr.classList.add(rowDrag.after ? 'drop-after' : 'drop-before');
+  document.body.classList.add('row-dragging');
+});
+document.addEventListener('mouseup', () => {
+  if (!rowDrag) return;
+  const { s, target, after } = rowDrag;
+  rowDrag = null; document.body.classList.remove('row-dragging');
+  document.querySelectorAll('.drop-before, .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+  if (!target) { if (needRender) render(); return; }
+  const block = rows.slice(s.r0, s.r1 + 1).map(m => m.key);
+  if (!moveBlock(block, target, after)) return;
+  render();
+  // 動かした人を選んだままにする
+  const r0 = rows.findIndex(m => m.key === block[0]);
+  if (r0 >= 0) { anchor = { r: r0, c: 0 }; cursor = { r: r0, c: 0 }; sel = { r0, c0: 0, r1: r0 + block.length - 1, c1: cols.length - 1 }; paintSel(); }
+  toast(`${block.length > 1 ? block.length + '人' : rows[r0]?.name + 'さん'}を動かしました`);
+});
+document.addEventListener('mouseup', () => { dragging = false; if (needRender && !filling && !editing && !rowDrag) render(); });
 gridBox.addEventListener('dblclick', ev => { if (!touching() && ev.target.closest('td.cell')) startEdit(); });
 
 /* ── スマホ・タブレットの入力パネル ── */
@@ -970,6 +1139,8 @@ $('mbChips').addEventListener('click', ev => {
 $('mbOk').onclick = mbSubmit;
 $('mbInput').addEventListener('keydown', ev => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); mbSubmit(); $('mbInput').blur(); } });
 document.querySelector('.mbar-nav').addEventListener('click', ev => {
+  const rowDir = ev.target.closest('button')?.dataset.row;
+  if (rowDir && cursor) { $('mbRange').checked = false; moveRows(+rowDir); revealCursor(); return; }
   const mv = ev.target.closest('button')?.dataset.mv; if (!mv || !cursor) return;
   const [dr, dc] = mv.split(',').map(Number);
   $('mbRange').checked = false;
@@ -981,7 +1152,8 @@ narrowMQ.addEventListener('change', () => { if (ready && !editing) render(); });
 document.addEventListener('keydown', ev => {
   if (editing || !cursor || ev.target.closest('select, button, input, form')) return;
   const k = ev.key, sh = ev.shiftKey;
-  const mv = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[k];
+  if (ev.altKey && (k === 'ArrowUp' || k === 'ArrowDown')) { ev.preventDefault(); moveRows(k === 'ArrowUp' ? -1 : 1); return; }
+  const mv ={ ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[k];
   if (mv) { ev.preventDefault(); const base = sh ? { r: sel.r1, c: sel.c1 } : cursor; setCursor(base.r + mv[0], base.c + mv[1], sh); if (sh) cursor = { r: sel.r1, c: sel.c1 }; return; }
   if (k === 'Enter' || k === 'F2') { ev.preventDefault(); startEdit(); return; }
   if (k === 'Delete' || k === 'Backspace') { ev.preventDefault(); clearSelection(); return; }
@@ -1163,6 +1335,11 @@ $('edDepts').addEventListener('change', ev => {
   refilter();
 });
 ['edFrom', 'edTo'].forEach(id => $(id).addEventListener('change', refilter));
+// 並び順のボタン（押しても選んだセルが外れないようにする）
+$('orderBar').addEventListener('mousedown', ev => ev.preventDefault());
+$('sortBtn').onclick = () => { if (ready) openSortDialog(); };
+$('rowUp').onclick = () => moveRows(-1);
+$('rowDown').onclick = () => moveRows(1);
 document.querySelector('#editFilter .quick').addEventListener('click', ev => {
   const r = ev.target.dataset.ed; if (!r) return;
   const first = allCols[0].iso, last = allCols[allCols.length - 1].iso;
