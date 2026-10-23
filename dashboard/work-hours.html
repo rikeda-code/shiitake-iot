@@ -1192,16 +1192,32 @@ function fitChartHeightForTooltip(chart) {
 // それ以外は白文字）、収まらない場合は、同じ積み上げ列（stack）の中でそのセグメントが
 // 一番上（y座標が最小）であれば棒の上側に、そうでなければ（途中の部分）棒の右側に、
 // 明るい色の文字で描く（staffGapSegmentValuesプラグインと同じ「収まる/収まらない」の
-// 考え方を踏襲）。値が0またはnullの部分は描画しない
+// 考え方を踏襲）。値が0またはnullの部分は描画しない。
+// さらに、積み上げ列（棒）ごとの総合計（「計◯人」太字）を、_stackTotalHeadcount
+// （stack内のいずれか1つのデータセットが持つ、月ごとの合計人数の配列）を使って
+// 一番上のセグメントのさらに上に描く。一番上のセグメントが（収まらず）棒の上側に
+// 内訳ラベルを描いている場合は、その文字のさらに上に1行分あけて描く
+const SITE_SUMMARY_HEADCOUNT_LINE_H = 11;
+// drawTotal()が描く位置と必ず一致させること（fitChartHeightForHeadcountTotals()の
+// 事前計算で同じpx数を使うため）
+function siteSummaryTotalLabelNeededPx(hasBreakdownAbove) {
+  const LINE_H = SITE_SUMMARY_HEADCOUNT_LINE_H;
+  const base = LINE_H * 2; // 棒の上端から1行分あけて(LINE_H)、文字自体の高さ分(LINE_H)
+  return hasBreakdownAbove ? base + (2 + LINE_H) : base; // 内訳の上側ラベル(bar.y-2から上にLINE_H分)の、さらに上に1行あける
+}
+function siteSummaryFormatHeadcount(n) {
+  const rounded = Math.round(n * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+}
 function siteSummaryHeadcountLabelsPlugin() {
-  const LINE_H = 11;
+  const LINE_H = SITE_SUMMARY_HEADCOUNT_LINE_H;
   const INSIDE_COLOR_LIGHT = '#ffffff';
   const INSIDE_COLOR_DARK = '#1e2235'; // 新規要員(黄)・増減(緑)の背景は明るいため黒文字にする
   const OUTSIDE_COLOR = '#e2e8f0';
   function drawCount(ctx, bar, areaTop, count, opts) {
-    if (count == null || count === 0) return;
-    if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y) || !Number.isFinite(bar.height) || !Number.isFinite(bar.width)) return;
-    const text = `${count}人`;
+    if (count == null || count === 0) return false;
+    if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y) || !Number.isFinite(bar.height) || !Number.isFinite(bar.width)) return false;
+    const text = `${siteSummaryFormatHeadcount(count)}人`;
     const fitsInside = bar.height >= LINE_H + 4;
     const insideColor = (opts && opts.insideColor) || INSIDE_COLOR_LIGHT;
     const placement = (opts && opts.placement) || 'right';
@@ -1233,6 +1249,25 @@ function siteSummaryHeadcountLabelsPlugin() {
       ctx.fillText(text, bar.x + bar.width / 2 + 4, y);
     }
     ctx.restore();
+    return !fitsInside && placement === 'top'; // 棒の上側に内訳ラベルを描いたか
+  }
+  function drawTotal(ctx, bar, areaTop, hasBreakdownAbove, count) {
+    if (count == null || count === 0) return;
+    if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y)) return;
+    const text = `計${siteSummaryFormatHeadcount(count)}人`;
+    let y = bar.y - LINE_H; // 棒の上端から1行分あけた位置(文字の下端)
+    if (hasBreakdownAbove) y -= (2 + LINE_H); // 内訳の上側ラベルの、さらに上に1行あける
+    // fitChartHeightForHeadcountTotals()で通常は収まる高さまで広げているが、万一の
+    // 保険として、内訳の上側ラベルと同じ基準（areaTop+LINE_H）でクランプする
+    const minY = areaTop + LINE_H;
+    if (y < minY) y = minY;
+    ctx.save();
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = OUTSIDE_COLOR;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(text, bar.x, y);
+    ctx.restore();
   }
   return {
     id: 'siteSummaryHeadcountLabels',
@@ -1257,16 +1292,73 @@ function siteSummaryHeadcountLabelsPlugin() {
             bar, count, insideColor: isNewStaffOrDelta ? INSIDE_COLOR_DARK : INSIDE_COLOR_LIGHT, topY: bar.y,
           });
         });
-        Object.values(groups).forEach(items => {
+        Object.entries(groups).forEach(([stackKey, items]) => {
           const minTopY = Math.min(...items.map(it => it.topY));
+          let hasBreakdownAbove = false;
           items.forEach(it => {
             const placement = it.topY === minTopY ? 'top' : 'right';
-            drawCount(ctx, it.bar, areaTop, it.count, { insideColor: it.insideColor, placement });
+            const drewOutside = drawCount(ctx, it.bar, areaTop, it.count, { insideColor: it.insideColor, placement });
+            if (placement === 'top' && drewOutside) hasBreakdownAbove = true;
           });
+          const totalDs = chart.data.datasets.find(d => d._stackTotalHeadcount && (d.stack || 'default') === stackKey);
+          if (!totalDs) return;
+          const total = totalDs._stackTotalHeadcount[mi];
+          const topmost = items.find(it => it.topY === minTopY);
+          if (topmost) drawTotal(ctx, topmost.bar, areaTop, hasBreakdownAbove, total);
         });
       }
     },
   };
+}
+// siteSummaryHeadcountLabelsPlugin()が描く総合計ラベル（「計◯人」）が、グラフ上端で
+// 切れないよう、必要ならグラフの高さを広げる（fitSegmentLabelChartHeight/
+// fitChartHeightForTooltipと同じ「現在の高さで一度描画→実測→必要なら広げて再描画」の
+// 考え方を踏襲。既存の2関数より後に呼び、今の高さより低くすることはない）。
+// 縦軸MAXが固定のまま高さだけ広げると、積み上げ列の一番上のセグメントの上端(bar.y)が
+// chartArea.topからより遠くなり（headroom = chartArea.height×(1-値/縦軸MAX)）、
+// ラベルを描く余白が増える性質を利用している
+function fitChartHeightForHeadcountTotals(chart, axisMax) {
+  const wrapEl = chart.canvas && chart.canvas.parentElement;
+  if (!wrapEl || !(axisMax > 0)) return;
+  chart.draw();
+  const dataPointCount = chart.data.datasets.reduce((max, ds) => Math.max(max, (ds.data || []).length), 0);
+  let requiredChartAreaHeight = 0;
+  for (let mi = 0; mi < dataPointCount; mi++) {
+    const groups = {};
+    chart.data.datasets.forEach((ds, dsIndex) => {
+      if (!ds._segmentHeadcount) return;
+      if (ds.data[mi] == null) return;
+      const count = ds._segmentHeadcount[mi];
+      if (count == null || count === 0) return;
+      const bar = chart.getDatasetMeta(dsIndex).data[mi];
+      if (!bar || !Number.isFinite(bar.y) || !Number.isFinite(bar.height)) return;
+      const stackKey = ds.stack || 'default';
+      (groups[stackKey] = groups[stackKey] || []).push({ bar, topY: bar.y });
+    });
+    Object.entries(groups).forEach(([stackKey, items]) => {
+      const totalDs = chart.data.datasets.find(d => d._stackTotalHeadcount && (d.stack || 'default') === stackKey);
+      if (!totalDs) return;
+      const total = totalDs._stackTotalHeadcount[mi];
+      if (total == null || total === 0) return;
+      const minTopY = Math.min(...items.map(it => it.topY));
+      const topmost = items.find(it => it.topY === minTopY);
+      const fitsInside = topmost.bar.height >= SITE_SUMMARY_HEADCOUNT_LINE_H + 4;
+      const neededPx = siteSummaryTotalLabelNeededPx(!fitsInside);
+      const stackValue = chart.data.datasets.reduce((s, ds) =>
+        (((ds.stack || 'default') === stackKey && ds.data[mi] != null) ? s + ds.data[mi] : s), 0);
+      if (!(stackValue > 0) || !(stackValue < axisMax)) return;
+      const h = neededPx * axisMax / (axisMax - stackValue);
+      if (h > requiredChartAreaHeight) requiredChartAreaHeight = h;
+    });
+  }
+  if (requiredChartAreaHeight <= 0) return;
+  const chromeHeightPx = chart.height - chart.chartArea.height;
+  const target = Math.round(requiredChartAreaHeight + chromeHeightPx);
+  if (target <= chart.height) return;
+  chart.stop();
+  wrapEl.style.height = Math.min(target, SEGMENT_CHART_MAX_PX) + 'px';
+  chart.resize();
+  chart.draw();
 }
 
 // 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための
@@ -9636,6 +9728,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         return total > 0 ? total : null;
       }));
     });
+    // 実績棒の総合計：div別の内訳を合算すると同じ人が複数区分にまたがる場合に二重に
+    // 数えてしまうため、headcountByEmpForPlanMonths()に選択中のdivsをまとめて一度に
+    // 渡し、1人を1回だけ数える（通常は内訳の人数の縦計と一致する）
+    const actualTotalHeadcountBySite = sitesToShow.map(site => headcountByEmpForPlanMonths(site, () => true, divs));
+    const actualTotalHeadcount = sl(planMonths.map((_, mi) => {
+      const total = actualTotalHeadcountBySite.reduce((s, arr) => s + (arr[mi] || 0), 0);
+      return total > 0 ? total : null;
+    }));
     // 標準労働時間棒（3段：社員+実習生／アルバイト・フルタイム／アルバイト・
     // パートタイム）の、段ごとの人数。数え方は変更前の合計（3段まとめて1つ）と
     // 同じ考え方のまま、雇用区分で段に振り分ける：
@@ -9719,21 +9819,35 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       return count !== 0 ? count : null;
     }
     const deltaHeadcount = sl(planMonths.map((_, mi) => deltaHeadcountForMi(mi)));
-    divs.forEach(div => {
+    // 標準労働時間棒の総合計：過去月は青系3段の合計、未来月は3段＋新規要員＋増減の
+    // 合計（増減は小数を持つため、合計も小数1桁に丸める）
+    const stdHoursTotalHeadcount = vm.map((month, mi) => {
+      const tier = stdHoursHeadcountByTier[mi];
+      const tierTotal = tier ? (tier.lower + tier.fulltime + tier.parttime) : 0;
+      const ym = mnum(month);
+      const total = ym <= ACTUAL_CUTOFF
+        ? tierTotal
+        : tierTotal + (newStaffHeadcount[mi] || 0) + (deltaHeadcount[mi] || 0);
+      const rounded = Math.round(total * 10) / 10;
+      return rounded > 0 ? rounded : null;
+    });
+    divs.forEach((div, di) => {
       const color = ACTUAL_BAR_COLORS[div];
       datasets.push({
         type: 'bar', label: `${div}（実績）`, data: actualByDiv[div],
         backgroundColor: color + '99', borderColor: color, borderWidth: 1,
         stack: 'actual', order: 1, _actualGroup: true, _segmentHeadcount: actualHeadcountByDiv[div],
+        ...(di === 0 ? { _stackTotalHeadcount: actualTotalHeadcount } : {}),
       });
     });
-    stdHoursDs.forEach(ds => {
+    stdHoursDs.forEach((ds, di) => {
       const extra = {};
       if (ds._threeSiteMergeStdHoursTier) {
         const tier = ds._threeSiteMergeStdHoursTier;
         extra._segmentHeadcount = stdHoursHeadcountByTier.map(c => (c ? c[tier] : null));
       } else if (ds.label && ds.label.startsWith('新規要員')) extra._segmentHeadcount = newStaffHeadcount;
       else if (ds.label && ds.label.startsWith('増減')) extra._segmentHeadcount = deltaHeadcount;
+      if (di === 0) extra._stackTotalHeadcount = stdHoursTotalHeadcount;
       datasets.push({ ...ds, data: sl(ds.data), ...extra });
     });
     allDivRows.forEach((r, ri) => {
@@ -9793,6 +9907,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
     fitSegmentLabelChartHeight(siteSumCombinedChart, [], sharedMax);
     fitChartHeightForTooltip(siteSumCombinedChart);
+    // 棒ごとの総合計ラベル（「計◯人」）がグラフ上端で切れないよう、必要なら
+    // さらに高さを広げる（上の2つのfit呼び出しの後に実行し、今の高さより低くはしない）
+    fitChartHeightForHeadcountTotals(siteSumCombinedChart, sharedMax);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、

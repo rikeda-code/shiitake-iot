@@ -52,6 +52,10 @@ npx playwright install chromium
    node tests/work-hours/verify_sitesummary_headcount_labels.js
    ```
 
+   ```sh
+   node tests/work-hours/verify_sitesummary_headcount_total.js
+   ```
+
 ## ファイルの内容
 
 - `verify_plancompare_tooltip_height.js` — 「予実＞比較（繁忙期見込み）」タブの各グラフ
@@ -82,6 +86,20 @@ npx playwright install chromium
   します。(C) 人数ラベル用プラグインを追加した状態でも、`verify_plancompare_tooltip_height.js`
   ⑥-aと同じ再現条件・実マウスホバー方式で、PR #518のツールチップ切れ防止が引き続き
   機能することを確認します。
+- `verify_sitesummary_headcount_total.js` — 同じグラフ（`plansitesum2-combined`）の棒に
+  追加した、棒ごとの総合計人数ラベル（「計◯人」太字）の検証。(A) ラベルの描画自体
+  （`siteSummaryHeadcountLabelsPlugin()`・`fitChartHeightForHeadcountTotals()`は
+  トップレベル関数のため`window`から直接呼べる）を手組みのデータセットに対して本物の
+  Chart.jsで描画させ、積み上げ列の一番上のセグメントのさらに上に太字で描かれること、
+  そのセグメントの内訳ラベルが棒の上側に出ている場合はさらに1行分あけて描かれること、
+  0・nullは描画しないこと、小数は小数1桁・整数は整数のまま表示されること、グラフの
+  高さが足りない場合は`fitChartHeightForHeadcountTotals()`が必要な高さまで広げ、
+  グラフ上端で切れず凡例とも重ならないことを確認します。(B) 総合計の数え方自体
+  （実績棒は内訳(div別)の縦計と一致すること・絞り込みとの連動、標準労働時間棒は
+  過去月が青系3段の合計、未来月が3段＋新規要員＋増減の合計になること、増減の小数を
+  含む合算と丸め）を、`verify_sitesummary_headcount_labels.js`と同じ方針でテスト側に
+  再現して確認します。(C) 総合計ラベル用の高さ調整を追加した状態でも、PR #518の
+  ツールチップ切れ防止が引き続き機能することを実マウスホバー方式で確認します。
 
 ## vendor/ フォルダについて
 
