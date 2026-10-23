@@ -1142,6 +1142,14 @@ function fitChartHeightForTooltip(chart) {
   if (!chart || !chart.tooltip) return;
   const wrapEl = chart.canvas && chart.canvas.parentElement;
   if (!wrapEl) return;
+  // fitSegmentLabelChartHeight()等、直前にラッパー要素の高さを変えてchart.resize()を
+  // 呼んだ処理があっても、chart.resize()自体はchart.height/chart.chartAreaを次の描画
+  // (requestAnimationFrame経由)まで更新せず、ここで読むとまだ古い値のままになっている
+  // ことがある（実際にその状態で下の判定・計算を行うと、本当の高さより大きい古い値と
+  // 比較してしまい、広げる必要があるのに広げずに返ってしまう＝ツールチップが切れる
+  // 不具合につながっていた）。chart.draw()を挟んで直前の保留中のresize()を即座に
+  // 確定させてから、以降の計算に進む
+  chart.draw();
   const dataPointCount = chart.data.datasets.reduce((max, ds) => Math.max(max, (ds.data || []).length), 0);
   let maxTooltipHeight = 0;
   for (let i = 0; i < dataPointCount; i++) {
@@ -1169,6 +1177,9 @@ function fitChartHeightForTooltip(chart) {
   chart.stop();
   wrapEl.style.height = target + 'px';
   chart.resize();
+  // ここでもdraw()で即座に確定させる（このまま呼び出し元に戻ると、以降どこかで
+  // chart.height/chart.chartAreaを読む処理があった場合に同じ遅延の影響を受けるため）
+  chart.draw();
 }
 
 // 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための

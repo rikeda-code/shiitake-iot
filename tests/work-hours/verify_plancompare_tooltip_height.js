@@ -95,6 +95,15 @@ function check(name, cond, extra) {
       if (wrap) wrap.remove();
       wrap = document.createElement('div');
       wrap.id = id + '-wrap';
+      // position:fixedの専用コンテナ(__test_chart_container)の「子要素」として普通に
+      // appendすると、通常のフロー(縦積み)のため、テストが増えるほど後のチャートほど
+      // ビューポートの外へ押し出されてしまう。本物のマウス操作(page.mouse.move)で
+      // 検証するテスト用に、各ラッパー自体もposition:fixed;top:0;left:0にして、
+      // 常にビューポート原点に固定する(複数のテスト用チャートが画面上で重なっても、
+      // 自動テストでは対象のキャンバスの座標だけを見るため問題ない)
+      wrap.style.position = 'fixed';
+      wrap.style.top = '0';
+      wrap.style.left = '0';
       wrap.style.height = heightPx + 'px';
       wrap.style.width = '900px';
       const canvas = document.createElement('canvas');
@@ -306,6 +315,129 @@ function check(name, cond, extra) {
     return { heightBeforeChange, heightAfterChange };
   });
   check('⑤内容が長くなる方向に変わると、今の高さより低くならずに広がる', regrowResult.heightAfterChange >= regrowResult.heightBeforeChange && regrowResult.heightAfterChange > 320, regrowResult);
+
+  // ========== ⑥本物のマウス操作での確認（PR #518追加修正：実際にツールチップが
+  //            切れていたplansitesum2-combined/plansum2-combined相当の再現） ==========
+  // キャンバス上の該当月の位置へ実際にマウスを動かしてツールチップを表示させ、
+  // その窓の下端がキャンバスの下端を超えていないこと（chart.tooltip.setActiveElements()を
+  // 直接呼ぶ内部的な測定ではなく、ブラウザの本物のイベント経路を通す）を確認するヘルパー
+  async function hoverAndCheckFit(page, chartVar, datasetIndexForX, index) {
+    await page.evaluate(({ chartVar }) => { window.__hoverChartRef = window[chartVar]; }, { chartVar });
+    // マウスの目標座標は、Chart.js内部の要素位置(chart.getDatasetMeta().data[].x/y)には
+    // 頼らない。resize()直後でdraw()を挟んでいない（＝本来直したい不具合がまだ残っている）
+    // 状態のチャートでは、内部の要素位置も実際のキャンバスの大きさと食い違っている
+    // ことがあり、その場合に内部位置ベースで座標を計算するとキャンバスの外を指して
+    // しまい、本物のマウス操作が何にも当たらずホバー自体が成立しない（＝「ツールチップが
+    // 表示されない」という別の失敗になってしまい、本来確認したい「表示されるが
+    // 下端が切れる」ことを確認できない）。canvasのgetBoundingClientRect()（実際に
+    // ブラウザが描画している大きさそのもの）だけを基準に、X座標は月の位置の比率、
+    // Y座標はキャンバスの中央を使う（mode:'index',intersect:falseのためYはどこでもよい）
+    const target = await page.evaluate(({ index }) => {
+      const chart = window.__hoverChartRef;
+      const totalPoints = chart.data.labels.length;
+      const canvas = chart.canvas;
+      const rect = canvas.getBoundingClientRect();
+      return { x: rect.left + rect.width * ((index + 0.5) / totalPoints), y: rect.top + rect.height * 0.5 };
+    }, { index });
+    await page.mouse.move(target.x, target.y);
+    await page.mouse.move(target.x + 1, target.y); // 確実にmousemoveイベントを発火させる
+    await page.waitForTimeout(250); // ツールチップのフェードインアニメーションの完了を待つ
+    const result = await page.evaluate(() => {
+      const chart = window.__hoverChartRef;
+      const canvas = chart.canvas;
+      const rect = canvas.getBoundingClientRect();
+      const tt = chart.tooltip;
+      // tt.height自体はアニメーション経由で遅れて反映される(fitChartHeightForTooltip本体の
+      // コメントと同じ理由)ため、本物のマウス操作でも最終的な大きさはtt._size.heightを
+      // 読む。位置(tt.y)はアニメーションの影響を受けないため、そのまま使う
+      const finalHeight = (tt._size && tt._size.height) || tt.height || 0;
+      const tooltipBottom = (tt.y || 0) + finalHeight;
+      return { canvasHeight: rect.height, tooltipY: tt.y, tooltipHeight: finalHeight, tooltipBottom, opacity: tt.opacity, numLines: tt.body ? tt.body.length : 0 };
+    });
+    // 後片付け：マウスをどこか離れた位置に動かし、ツールチップを閉じておく
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(250);
+    return result;
+  }
+
+  // ⑥-a：plansitesum2-combined/plansum2-combined相当の実際のシーケンスを再現する。
+  // 初期ラッパー高さ650px（実際のchartWrapHtml('plansitesum2-combined', ..., {heightPx:650})
+  // と同じ）→ fitSegmentLabelChartHeight(chart, [], axisMax)で白いラベル用データセットが
+  // 無いため420pxへ縮小 → fitChartHeightForTooltip(chart)。ここで必要な高さが「420pxより
+  // 大きく650pxより小さい」範囲になるよう業務区分の行数を調整したデータで、本物の
+  // マウス操作でもツールチップが切れないことを確認する（この範囲でのみ、修正前は
+  // chart.resize()直後のchart.heightが古い650pxのまま読まれてしまい、必要な高さ(420px超)
+  // を正しく計算していても「420pxのままで足りている」と誤判定して広げられない不具合が
+  // あった。650pxを超えるほど長いケースは①のテストで既に確認済みのため、ここでは
+  // あえて420〜650pxの間に収まる行数にしている）
+  await page.evaluate(() => {
+    const MONTHS = 8;
+    const LONG_IDX = 5;
+    const datasets = [];
+    datasets.push({ type: 'bar', label: '栽培（実績）', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 300 : 80) });
+    datasets.push({ type: 'bar', label: '出荷（実績）', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 200 : 60) });
+    const N = 22; // 420px超・650px未満の高さが必要になる行数（実測して選定）
+    for (let i = 0; i < N; i++) {
+      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
+    }
+    const wrap = document.getElementById('test-realhover-combined-wrap');
+    if (wrap) wrap.remove();
+    const w = document.createElement('div');
+    w.id = 'test-realhover-combined-wrap';
+    w.style.position = 'fixed'; w.style.top = '0'; w.style.left = '0'; // 本物のマウス操作のため常にビューポート原点に固定
+    w.style.height = '650px'; // chartWrapHtml({heightPx:650, inlineHeight:true})と同じ初期値
+    w.style.width = '900px';
+    const canvas = document.createElement('canvas');
+    canvas.id = 'test-realhover-combined';
+    w.appendChild(canvas);
+    document.getElementById('__test_chart_container').appendChild(w);
+    const ctx = canvas.getContext('2d');
+    window.__chartRealHoverCombined = new Chart(ctx, {
+      data: { labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { font: { size: 10 } } }, tooltip: window.__tooltipOptsLike(true, true) },
+        scales: { x: { stacked: true }, y: { stacked: true, suggestedMin: 0 } },
+      },
+    });
+    // 実際の呼び出し順を再現：白いラベルが無いため常に420px固定(フォールバック)になる
+    window.fitSegmentLabelChartHeight(window.__chartRealHoverCombined, [], 300);
+    window.fitChartHeightForTooltip(window.__chartRealHoverCombined);
+  });
+  const combinedFinal = await page.evaluate(() => ({
+    height: window.__chartRealHoverCombined.height,
+    wrapStyleHeight: parseInt(document.getElementById('test-realhover-combined-wrap').style.height, 10),
+  }));
+  check('⑥-a 修正後、必要な高さ(420px超)まで正しく広がっている(420pxに留まっていない)', combinedFinal.height > 420, combinedFinal);
+  const combinedHover = await hoverAndCheckFit(page, '__chartRealHoverCombined', 0, 5);
+  check('⑥-a 本物のマウス操作でも、ツールチップの下端がキャンバスの下端を超えない', combinedHover.tooltipBottom <= combinedHover.canvasHeight, combinedHover);
+  check('⑥-a ツールチップが実際に多数行表示されている(再現条件が成立している)', combinedHover.numLines >= 20, combinedHover);
+  check('⑥-a 測定された窓の高さが十分大きい(見かけ上だけ収まっているのではない)', combinedHover.tooltipHeight > 200, combinedHover);
+
+  // ⑦ 拠点・業務別(plancmp2相当、固定320px・segment-fitの前段無し)で、項目の多い月を
+  //    含む場合でも、本物のマウス操作でツールチップが切れないこと
+  await page.evaluate(() => {
+    const MONTHS = 8;
+    const LONG_IDX = 2;
+    const datasets = [{ type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 150 : 80) }];
+    for (let i = 0; i < 25; i++) {
+      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
+    }
+    window.__chartPlancmpRealHover = window.__makeChart({
+      id: 'test-plancmp-realhover', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`),
+      datasets, tooltipOpts: window.__tooltipOptsLike(true, true),
+    });
+    window.fitChartHeightForTooltip(window.__chartPlancmpRealHover);
+  });
+  const plancmpHover = await hoverAndCheckFit(page, '__chartPlancmpRealHover', 0, 2);
+  check('⑦拠点・業務別相当：項目の多い月でも、本物のマウス操作でツールチップが切れない', plancmpHover.tooltipBottom <= plancmpHover.canvasHeight, plancmpHover);
+
+  // ⑧ 要員計画(業務区分別、planstaffplan2-combined相当)で、白いラベル基準の高さが
+  //    650px上限にクランプされツールチップの必要高さがそれを上回る状況でも、
+  //    本物のマウス操作でツールチップが切れないこと（③-aの延長、本物のマウス操作での回帰確認）
+  const staffplanHover = await hoverAndCheckFit(page, '__chartStaffplanOverCap', 0, 3);
+  check('⑧要員計画(業務区分別)相当：650px上限超のケースでも、本物のマウス操作でツールチップが切れない', staffplanHover.tooltipBottom <= staffplanHover.canvasHeight, staffplanHover);
 
   await browser.close();
 
