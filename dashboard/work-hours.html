@@ -1254,7 +1254,7 @@ function siteSummaryHeadcountLabelsPlugin() {
   function drawTotal(ctx, bar, areaTop, hasBreakdownAbove, count) {
     if (count == null || count === 0) return;
     if (!Number.isFinite(bar.x) || !Number.isFinite(bar.y)) return;
-    const text = `計${siteSummaryFormatHeadcount(count)}人`;
+    const text = `計${siteSummaryFormatHeadcount(count)}`;
     let y = bar.y - LINE_H; // 棒の上端から1行分あけた位置(文字の下端)
     if (hasBreakdownAbove) y -= (2 + LINE_H); // 内訳の上側ラベルの、さらに上に1行あける
     // fitChartHeightForHeadcountTotals()で通常は収まる高さまで広げているが、万一の

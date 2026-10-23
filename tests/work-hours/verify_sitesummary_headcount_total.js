@@ -1,6 +1,6 @@
 // dashboard/work-hours.html の「予実＞比較（繁忙期見込み）」タブ、拠点サマリ
 // 「実績工数（業務区分別）」グラフ（plansitesum2-combined）に追加した、棒ごとの
-// 総合計人数ラベル（「計◯人」）の検証。
+// 総合計人数ラベル（「計◯」。内訳の「◯人」と異なり「人」を付けない）の検証。
 //
 // 検証は三部構成：
 //  (A) ラベルの描画自体（siteSummaryHeadcountLabelsPlugin()・
@@ -129,13 +129,14 @@ async function hoverAndCheckFit(page, chartVar, index) {
       return chart;
     };
 
-    // CanvasRenderingContext2D.fillText呼び出しのうち、末尾が「人」で終わるもの
-    // （siteSummaryHeadcountLabelsPluginが描画するラベルのみに一致）を記録する。
+    // CanvasRenderingContext2D.fillText呼び出しのうち、末尾が「人」で終わるもの（内訳）
+    // または「計」で始まるもの（総合計。「人」を付けない「計◯」形式）を記録する
+    // （siteSummaryHeadcountLabelsPluginが描画するラベルのみに一致）。
     // fontも記録し、総合計（太字）と内訳（通常文字）を区別できるようにする
     window.__capturedTexts = [];
     const origFillText = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (text, x, y) {
-      if (typeof text === 'string' && /人$/.test(text)) {
+      if (typeof text === 'string' && (/人$/.test(text) || /^計/.test(text))) {
         window.__capturedTexts.push({ text, x, y, fillStyle: this.fillStyle, textAlign: this.textAlign, font: this.font });
       }
       return origFillText.apply(this, arguments);
@@ -143,7 +144,7 @@ async function hoverAndCheckFit(page, chartVar, index) {
   });
 
   // ========== (A-1) 総合計：内訳が棒の内側に収まる場合は、棒の上端から1行分あけて
-  //            太字で描画される（「計◯人」。内訳の合計と一致） ==========
+  //            太字で描画される（「計◯」。内訳の合計と一致） ==========
   await page.evaluate(() => {
     window.__capturedTexts.length = 0;
     window.__chartA1 = window.__makeChart({
@@ -157,13 +158,13 @@ async function hoverAndCheckFit(page, chartVar, index) {
     });
   });
   const a1 = await page.evaluate(() => window.__capturedTexts.slice());
-  const a1total = a1.find(c => c.text === '計8人');
+  const a1total = a1.find(c => c.text === '計8');
   const a1bar = await page.evaluate(() => {
     const meta = window.__chartA1.getDatasetMeta(1); // 出荷（栽培の後に積み上げられる側＝一番上）
     return { y: meta.data[0].y, areaTop: window.__chartA1.chartArea.top };
   });
   const a1expectedY = Math.max(a1bar.y - 11, a1bar.areaTop + 11); // drawTotal()と同じ式(areaTop+LINE_Hでクランプ)
-  check('(A-1) 内訳(5人・3人)と総合計(計8人)の両方が描画される', a1.filter(c => c.text === '5人' || c.text === '3人').length === 2 && !!a1total, a1);
+  check('(A-1) 内訳(5人・3人)と総合計(計8)の両方が描画される', a1.filter(c => c.text === '5人' || c.text === '3人').length === 2 && !!a1total, a1);
   check('(A-1) 総合計は太字(bold)で描画される', !!a1total && /bold/.test(a1total.font), a1total);
   check('(A-1) 総合計は中央揃え・薄い色(内訳の上側表示と同じ系統)で描画される', !!a1total && a1total.textAlign === 'center' && a1total.fillStyle === '#e2e8f0', a1total);
   check('(A-1) 総合計は一番上のセグメント(出荷)の上端(bar.y)から1行分(11px)あけた位置に描かれる(内訳が内側に収まるため、内訳の上側表示は無い)', !!a1total && Math.abs(a1total.y - a1expectedY) < 0.01, { a1total, a1bar, a1expectedY });
@@ -184,7 +185,7 @@ async function hoverAndCheckFit(page, chartVar, index) {
   });
   const a2 = await page.evaluate(() => window.__capturedTexts.slice());
   const a2breakdown = a2.find(c => c.text === '3人'); // 出荷(一番上)：内側に収まらず上側に描画される
-  const a2total = a2.find(c => c.text === '計12人');
+  const a2total = a2.find(c => c.text === '計12');
   const a2bar = await page.evaluate(() => {
     const meta = window.__chartA2.getDatasetMeta(1); // 出荷（一番上）
     return { y: meta.data[0].y, areaTop: window.__chartA2.chartArea.top };
@@ -192,7 +193,7 @@ async function hoverAndCheckFit(page, chartVar, index) {
   // drawTotal()と同じ式：bar.yから1行(11px)＋内訳が上側にある場合はさらに(2+11)px
   const a2expectedY = Math.max(a2bar.y - 11 - (2 + 11), a2bar.areaTop + 11);
   check('(A-2) 一番上(出荷)の内訳ラベルが棒の上側(収まらない)に描画されている(前提の成立確認)', !!a2breakdown && a2breakdown.textAlign === 'center', a2);
-  check('(A-2) 総合計(計12人)も描画されている', !!a2total, a2);
+  check('(A-2) 総合計(計12)も描画されている', !!a2total, a2);
   check('(A-2) 総合計は内訳ラベル(出荷の「3人」)より、さらに上(yが小さい)に描かれる', !!a2total && !!a2breakdown && a2total.y < a2breakdown.y, { a2total, a2breakdown });
   check('(A-2) 総合計の位置は、一番上のセグメントの上端(bar.y)から、内訳ラベルの分も含めて計算どおりの位置に描かれる', !!a2total && Math.abs(a2total.y - a2expectedY) < 0.01, { a2total, a2bar, a2expectedY });
 
@@ -234,7 +235,7 @@ async function hoverAndCheckFit(page, chartVar, index) {
     });
   });
   const a4 = await page.evaluate(() => window.__capturedTexts.slice());
-  check('(A-4) グラフ上でも小数は「計49.3人」、整数は「計34人」(「計34.0人」ではない)と表示される', a4.some(c => c.text === '計49.3人') && a4.some(c => c.text === '計34人') && !a4.some(c => c.text === '計34.0人'), a4);
+  check('(A-4) グラフ上でも小数は「計49.3」、整数は「計34」(「計34.0」ではない)と表示される', a4.some(c => c.text === '計49.3') && a4.some(c => c.text === '計34') && !a4.some(c => c.text === '計34.0'), a4);
 
   // ========== (A-5) fitChartHeightForHeadcountTotals：総合計(＋内訳)が収まる高さが
   //            足りない場合、必要な高さまでグラフを広げ、グラフ上端(キャンバス上端)で
@@ -276,7 +277,7 @@ async function hoverAndCheckFit(page, chartVar, index) {
     window.__capturedTexts.length = 0;
     window.__chartA5.draw();
     const texts = window.__capturedTexts.slice();
-    const total = texts.find(c => c.text === '計12人');
+    const total = texts.find(c => c.text === '計12');
     const breakdown = texts.find(c => c.text === '3人');
     return {
       heightBefore, heightAfter,
@@ -626,9 +627,9 @@ async function hoverAndCheckFit(page, chartVar, index) {
     window.__chartTotalRealHoverCombined.draw();
     return window.__capturedTexts.slice();
   });
-  check('(C) 総合計ラベル自体も実際に描画されている(プラグインが無効化されていない)', cTexts.some(t => t.text === '計19人'), cTexts);
+  check('(C) 総合計ラベル自体も実際に描画されている(プラグインが無効化されていない)', cTexts.some(t => t.text === '計19'), cTexts);
   const cAreaTop = await page.evaluate(() => window.__chartTotalRealHoverCombined.chartArea.top);
-  const cTotalText = cTexts.find(t => t.text === '計19人');
+  const cTotalText = cTexts.find(t => t.text === '計19');
   check('(C) 総合計ラベルの推定上端が、グラフ描画領域の上端より上に出ない(凡例と重ならない・上端で切れない)', !!cTotalText && (cTotalText.y - 11) >= cAreaTop - 1, { cTotalText, cAreaTop });
 
   await browser.close();
