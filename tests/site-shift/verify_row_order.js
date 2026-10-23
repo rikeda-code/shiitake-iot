@@ -10,6 +10,7 @@
 //  - スマホの入力パネルの「人を上へ／下へ」
 // 実行：python3 -m http.server 8811 --directory dashboard を起動してから node tests/site-shift/verify_row_order.js
 const { chromium } = require('playwright');
+const { openShiftPage } = require('./helpers');
 
 const URL = 'http://localhost:8811/site-shift.html';
 const SITE = 'いなべ';
@@ -36,54 +37,6 @@ function cells() {
   return c;
 }
 
-function fakeFirebase(seed) {
-  // ページの中で動く、最低限の Firebase compat の偽物
-  const DEL = { __del: true };
-  const db = JSON.parse(JSON.stringify(seed));
-  const subs = {};
-  window.__db = db;
-  window.__writes = [];
-  const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
-  const snapOf = path => ({ exists: path in db, data: () => clone(db[path]), metadata: { fromCache: false, hasPendingWrites: false } });
-  const notify = path => (subs[path] || []).forEach(cb => setTimeout(() => cb(snapOf(path)), 0));
-  const merge = (dst, src) => {
-    Object.entries(src).forEach(([k, v]) => {
-      if (v && v.__del) delete dst[k];
-      else if (v && typeof v === 'object' && !Array.isArray(v)) merge(dst[k] && typeof dst[k] === 'object' ? dst[k] : (dst[k] = {}), v);
-      else dst[k] = v;
-    });
-    return dst;
-  };
-  const ref = path => ({
-    path,
-    collection: n => ({ doc: id => ref(`${path}/${n}/${id}`) }),
-    onSnapshot(a, b, c) {
-      const cb = typeof a === 'function' ? a : b;
-      (subs[path] ||= []).push(cb);
-      setTimeout(() => cb(snapOf(path)), 0);
-      return () => { subs[path] = subs[path].filter(x => x !== cb); };
-    },
-    get: async () => snapOf(path),
-    async set(data, opt) {
-      window.__writes.push({ path, data: clone(data) });
-      db[path] = opt && opt.merge ? merge(db[path] || {}, data) : merge({}, data);
-      notify(path);
-    },
-  });
-  window.__remoteSet = (path, data) => { db[path] = data; notify(path); };
-  const firestore = () => ({
-    enablePersistence: async () => {},
-    collection: n => ({ doc: id => ref(`${n}/${id}`) }),
-    runTransaction: async fn => fn({ get: async r => snapOf(r.path), set: (r, d) => { db[r.path] = d; notify(r.path); } }),
-  });
-  firestore.FieldValue = { delete: () => DEL, serverTimestamp: () => Date.now() };
-  const user = { email: 'tester@example.com' };
-  const authObj = { currentUser: user, onAuthStateChanged: cb => setTimeout(() => cb(user), 0), signOut: async () => {}, signInWithPopup: async () => {} };
-  const auth = () => authObj;
-  auth.GoogleAuthProvider = class { setCustomParameters() {} };
-  window.firebase = { initializeApp() {}, firestore, auth };
-}
-
 const results = [];
 function check(name, ok, detail) { results.push({ name, ok }); console.log(`${ok ? 'OK  ' : 'NG  '} ${name}${ok ? '' : '  → ' + detail}`); }
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -91,22 +44,14 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
-  const page = await ctx.newPage();
-  page.on('pageerror', e => check('ページでエラーが出ない', false, e.message));
   const seed = {
     [`shiftSites/${SITE}/meta/members`]: { list: MEMBERS, updatedAt: 4102444800000 },
     [`shiftSites/${SITE}/months/2026-10`]: { cells: cells() },
     [`shiftSites/${SITE}/months/2026-11`]: { cells: {} },
     [`shiftSites/${SITE}/meta/fixed`]: {},
   };
-  await page.addInitScript(() => {
-    const FIXED = new Date(2026, 9, 23, 9).getTime(), D = Date;
-    window.Date = class extends D { constructor(...a) { return a.length ? new D(...a) : new D(FIXED); } static now() { return FIXED; } };
-  });
-  // 後から登録した route が優先される
-  await page.route(/gstatic\.com\/firebasejs\//, r => r.fulfill({ contentType: 'text/javascript', body: '' }));
-  await page.route(/gstatic\.com\/firebasejs\/.*app-compat\.js/, r => r.fulfill({ contentType: 'text/javascript', body: `(${fakeFirebase})(${JSON.stringify(seed)});` }));
-  await page.route(/script\.google\.com/, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', members: MEMBERS, shifts: [], fixed: {} }) }));
+  const page = await openShiftPage(ctx, { seed, members: MEMBERS });
+  page.on('pageerror', e => check('ページでエラーが出ない', false, e.message));
   await page.goto(URL);
   await page.waitForSelector('#grid tbody td.name[data-r]');
 
@@ -228,15 +173,8 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
   // 12) スマホ：入力パネルの「人を下へ」
   const mob = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true, isMobile: true });
-  const mp = await mob.newPage();
+  const mp = await openShiftPage(mob, { seed, members: MEMBERS });
   mp.on('pageerror', e => check('スマホでエラーが出ない', false, e.message));
-  await mp.addInitScript(() => {
-    const FIXED = new Date(2026, 9, 23, 9).getTime(), D = Date;
-    window.Date = class extends D { constructor(...a) { return a.length ? new D(...a) : new D(FIXED); } static now() { return FIXED; } };
-  });
-  await mp.route(/gstatic\.com\/firebasejs\//, r => r.fulfill({ contentType: 'text/javascript', body: '' }));
-  await mp.route(/gstatic\.com\/firebasejs\/.*app-compat\.js/, r => r.fulfill({ contentType: 'text/javascript', body: `(${fakeFirebase})(${JSON.stringify(seed)});` }));
-  await mp.route(/script\.google\.com/, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', members: MEMBERS, shifts: [], fixed: {} }) }));
   await mp.goto(URL);
   await mp.waitForSelector('#grid tbody td.name[data-r]');
   await mp.tap('#grid td.cell[data-r="0"][data-c="1"]');
