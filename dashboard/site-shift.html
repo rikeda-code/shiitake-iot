@@ -475,7 +475,6 @@ const touching = () => lastPointer === 'touch' || lastPointer === 'pen';
 let year, month;
 let allCols = [];   // 期間の全日：{ iso:'2026-10-11', ym:'2026-10', m, d, wd }
 let cols = [];      // 表に並べる日（「表示する日」で絞り込んだもの）
-const edDeptSel = new Set(['栽培', '出荷', '配送', 'その他']); // 表に出す部門
 let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
@@ -910,11 +909,18 @@ function openSortDialog() {
   $('dlgNo').onclick = () => { $('dialogSlot').innerHTML = ''; };
 }
 
+// 部門の絞り込み（シフト入力・印刷）。整理済み_Mの部門をそのまま1つずつ出す（配送・栽培、生産部長なども別々に選べる）。
+// 外した部門を覚えておき、あとから増えた部門は最初から表示する
+const deptOff = { ed: new Set(), pp: new Set() };
+function deptFilterHtml(all, off, idp) {
+  const rank = d => { const i = DEPT_CHOICES.indexOf(d); return i < 0 ? 99 : i; };
+  const depts = [...new Set(all.map(m => m.dept))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, 'ja'));
+  return '<legend>部門</legend>' + depts.map(d =>
+    `<label><input type="checkbox" value="${esc(d)}" id="${idp}-${esc(d)}"${off.has(d) ? '' : ' checked'}><span class="chip ${divOf(d)}">${esc(d)}</span></label>`).join('');
+}
 // 表の上の絞り込み（部門・表示する日）
 function renderEditFilter(all) {
-  const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
-  $('edDepts').innerHTML = '<legend>部門</legend>' + present.map(v =>
-    `<label><input type="checkbox" value="${v}" id="edd-${v}"${edDeptSel.has(v) ? ' checked' : ''}><span class="chip ${v}">${v === 'その他' ? 'その他（生産部長など）' : v}</span></label>`).join('');
+  $('edDepts').innerHTML = deptFilterHtml(all, deptOff.ed, 'edd');
   const first = allCols[0].iso, last = allCols[allCols.length - 1].iso;
   ['edFrom', 'edTo'].forEach(id => { $(id).min = first; $(id).max = last; });
   if (!$('edFrom').value || $('edFrom').value < first || $('edFrom').value > last) $('edFrom').value = first;
@@ -925,11 +931,12 @@ function render() {
   needRender = false;
   const everyone = visibleMembers();
   renderEditFilter(everyone);
-  rows = everyone.filter(m => edDeptSel.has(divOf(m.dept)));
+  rows = everyone.filter(m => !deptOff.ed.has(m.dept));
   cols = allCols.filter(c => c.iso >= $('edFrom').value && c.iso <= $('edTo').value);
   const n = cols.length;
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
-  let divs = DIVS.filter(v => edDeptSel.has(v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
+  // 集計の行は、表に出ている人の部門（栽培・出荷・配送と、集計するその他）
+  let divs = DIVS.filter(v => rows.some(m => divOf(m.dept) === v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
   // 幅の狭い画面では部門の列を省き、氏名の左の色で部門を示す
   const compact = narrowMQ.matches, lead = compact ? 1 : 2;
   let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th>' + (compact ? '' : '<th class="role">部門</th>');
@@ -1405,7 +1412,7 @@ $('month').onchange = () => { [year, month] = $('month').value.split('-').map(Nu
 // 絞り込みを変えたら選択を解いて描き直す
 function refilter() { if (editing) commit(); sel = cursor = anchor = null; render(); }
 $('edDepts').addEventListener('change', ev => {
-  if (ev.target.checked) edDeptSel.add(ev.target.value); else edDeptSel.delete(ev.target.value);
+  if (ev.target.checked) deptOff.ed.delete(ev.target.value); else deptOff.ed.add(ev.target.value);
   refilter();
 });
 ['edFrom', 'edTo'].forEach(id => $(id).addEventListener('change', refilter));
@@ -1582,7 +1589,6 @@ $('addForm').addEventListener('submit', async ev => {
 
 
 /* ── 印刷・PDF ── */
-const ppDeptSel = new Set(['栽培', '出荷', '配送', 'その他']);
 function setView(v) {
   document.body.dataset.view = v;
   $('tabEdit').setAttribute('aria-selected', v === 'edit');
@@ -1640,7 +1646,7 @@ function ensureMonths(yms) {
 }
 ['ppFrom', 'ppTo', 'ppEmpty', 'ppCount'].forEach(id => $(id).addEventListener('change', () => renderPrint()));
 $('ppDepts').addEventListener('change', ev => {
-  if (ev.target.checked) ppDeptSel.add(ev.target.value); else ppDeptSel.delete(ev.target.value);
+  if (ev.target.checked) deptOff.pp.delete(ev.target.value); else deptOff.pp.add(ev.target.value);
   renderPrint();
 });
 $('ppPrint').onclick = () => { renderPrint(); window.print(); };
@@ -1656,14 +1662,12 @@ function renderPrint(shrink = 1) {
   if (!allCols.length || (!members.length && !rows.length)) { onePage('<div class="loading">読み込み中…</div>'); return; }
   const all = visibleMembers();
   // 部門の選択肢（この拠点にいる部門だけ）
-  const present = ['栽培', '出荷', '配送', 'その他'].filter(v => all.some(m => divOf(m.dept) === v));
-  $('ppDepts').innerHTML = '<legend>部門</legend>' + present.map(v =>
-    `<label><input type="checkbox" value="${v}" id="ppd-${v}"${ppDeptSel.has(v) ? ' checked' : ''}><span class="chip ${v}">${v === 'その他' ? 'その他（生産部長など）' : v}</span></label>`).join('');
+  $('ppDepts').innerHTML = deptFilterHtml(all, deptOff.pp, 'ppd');
   if (!$('ppFrom').value) setPpRange(dateOf(allCols[0].iso), dateOf(allCols[allCols.length - 1].iso));
   const days = ppRange();
   ensureMonths([...new Set(days.map(x => x.ym))]);
   if (ppMode === 'person') { renderPersonal(all, days); return; }
-  let list = all.filter(m => ppDeptSel.has(divOf(m.dept)));
+  let list = all.filter(m => !deptOff.pp.has(m.dept));
   if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => valueOn(m, d)));
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
   const showCount = $('ppCount').checked;
