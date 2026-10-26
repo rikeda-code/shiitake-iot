@@ -139,6 +139,7 @@
 
     /* Transfer alerts */
     #transfer-alerts { flex-shrink: 0; }
+    #shipping-actual-alerts { flex-shrink: 0; }
     #summary-transfer-alerts { flex-shrink: 0; }
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
     #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box, #plancmp2-changeC-alerts .transfer-alert-box, #decplan-changeC-alerts .transfer-alert-box { margin: 0; }
@@ -787,6 +788,7 @@
 <div class="tabs-group-bar"></div>
 <div class="tabs" id="tabs"></div>
 <div id="transfer-alerts"></div>
+<div id="shipping-actual-alerts"></div>
 <main id="main"></main>
 
 <script>
@@ -6153,6 +6155,358 @@ async function applyShipmentDirectOverrides(merged, urlPromise) {
   return { months, records };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   出荷内訳（実績）の取得元切り替え（SHIPPING_ACTUAL_SITES対象拠点）
+   ──────────────────────────────────────────────────────────────────────
+   出荷内訳（パック数・袋数・バラ数・付帯作業・合計(点数)）の実績を、
+   「整理済み_分析」の貼り付け値ではなく、月ごとに次の取得元から組み立てる。
+     ・SHIPPING_AUTO_FROMより前の月：整理済み_計画_更新の「実数計画」の行
+     ・SHIPPING_AUTO_FROM〜境目月（getActualCutoffMonth()）：販売抽出シート(商品別)の
+       「実績」タブから自動計算（付帯作業は値なし＝null「－」）
+     ・境目月より後の月：整理済み_計画_更新の「実数計画」の行（今までどおり）
+   合計(点数)は全ての月で パック数＋袋数＋バラ数 で計算する（付帯作業は含めず、
+   シートの合計(点数)の行の値は使わない）。prodDataを作る段階で切り替えるため、
+   prodDataの出荷内訳を使う全ての画面に同じ値が反映される。
+   販売抽出シートの読み方・商品名の区分判定は、work-hours-forecast.htmlの
+   parseShippingSalesUrlSheet()・parseShippingSalesSheet()・
+   SHIPPING_PRODUCT_CLASSIFICATION_RULESと同じ考え方・同じルールにしている。
+   ═══════════════════════════════════════════════════════════════════ */
+
+// 販売抽出シートからの自動計算を始める月（"yyyy/MM"）。この月から境目月までが自動計算になる
+const SHIPPING_AUTO_FROM = '2026/09';
+const SHIPPING_ACTUAL_SITES = ['いなべ', '群馬', '南丹'];
+// 出荷内訳の指標（表示順）。合計(点数)は SHIPPING_ACTUAL_SUM_METRICS の和で計算する
+const SHIPPING_ACTUAL_METRICS = ['パック数', '袋数', 'バラ数', '付帯作業', '合計(点数)'];
+const SHIPPING_ACTUAL_SUM_METRICS = ['パック数', '袋数', 'バラ数'];
+// DB共有「販売抽出シート(商品別)」の参照先一覧（1行目の見出し「拠点／区分／URL」）
+const SHIPPING_SALES_URL_SHEET = { id: DB_SHARE_SHEET_ID, gid: '1130067935' };
+const SHIPPING_SALES_KIND = '実績';
+
+// 商品名からパック・袋・バラを判定するルール（work-hours-forecast.htmlの
+// SHIPPING_PRODUCT_CLASSIFICATION_RULESと同じ順・同じルール）。上から順に判定し、
+// 最初に当てはまったものにする。metricは出荷内訳の指標名
+const SHIPPING_PRODUCT_CLASSIFICATION_RULES = [
+  // 順1:「袋」を含む（「袋」と「バラ」の両方を含む商品名があれば袋とする）
+  { label: '袋', metric: '袋数', test: name => name.indexOf('袋') !== -1 },
+  // 順2:「バラ」を含む
+  { label: 'バラ', metric: 'バラ数', test: name => name.indexOf('バラ') !== -1 },
+  // 順3: それ以外はすべてパック（商品名が空欄の行も含む）
+  { label: 'パック', metric: 'パック数', test: () => true },
+];
+function classifyShippingProductMetric(name) {
+  const n = (name == null ? '' : String(name)).trim();
+  for (const rule of SHIPPING_PRODUCT_CLASSIFICATION_RULES) {
+    if (rule.test(n)) return rule.metric;
+  }
+  return 'パック数';
+}
+
+// 出荷内訳の月の取得元。'plan'＝整理済み_計画_更新の実数計画、'auto'＝販売抽出シートから自動計算
+function shippingActualSourceForMonth(m, cutoffMonth) {
+  const n = monthToNum(m);
+  if (n >= monthToNum(SHIPPING_AUTO_FROM) && cutoffMonth && n <= monthToNum(cutoffMonth)) return 'auto';
+  return 'plan';
+}
+
+// 「販売抽出シート(商品別)」の参照先一覧の生rows（CSV行＝文字列の配列の配列）から、
+// 拠点・区分ごとのURL（スプレッドシートID＋gid）を取得する。純粋関数（テストから直接呼べる）。
+// 1行目が見出し（拠点／区分／URL）で、列の位置は固定せず見出し文字列で探す。
+// 戻り値は bySiteKind[拠点][区分] = {id,gid} または null
+function parseShippingSalesUrlSheet(rows) {
+  rows = rows || [];
+  const header = rows[0] || [];
+  const col = { site: -1, kind: -1, url: -1 };
+  header.forEach((raw, c) => {
+    const text = raw == null ? '' : String(raw).trim();
+    if (text === '拠点' && col.site === -1) col.site = c;
+    if (text === '区分' && col.kind === -1) col.kind = c;
+    if (text === 'URL' && col.url === -1) col.url = c;
+  });
+  const bySiteKind = {};
+  if (col.site === -1 || col.kind === -1 || col.url === -1) return bySiteKind;
+  for (let r = 1; r < rows.length; r++) {
+    const cells = rows[r] || [];
+    const site = cells[col.site] == null ? '' : String(cells[col.site]).trim();
+    const kind = cells[col.kind] == null ? '' : String(cells[col.kind]).trim();
+    if (!site || !kind) continue;
+    const url = cells[col.url] == null ? '' : String(cells[col.url]).trim();
+    if (!bySiteKind[site]) bySiteKind[site] = {};
+    bySiteKind[site][kind] = extractSheetIdGidFromUrl(url);
+  }
+  return bySiteKind;
+}
+
+// 販売抽出シートの実績タブの生rows（CSV行）を、暦月ごとのパック数・袋数・バラ数に集計する。
+// 純粋関数（テストから直接呼べる）。1行目を見出しとし、列の位置は固定せず見出し文字列
+// （「個数/重量(kg)」「商品」、日付は"yyyy/MM/dd"）で探す。「個数/重量(kg)」が「個数」の
+// 行だけを使い、日付の値が空欄・数字でないセルは読み飛ばす（カンマは除いて数字にする）。
+// 戻り値: { byMonth: { "YYYY/M": {パック数,袋数,バラ数} } }。日付の列が1本でもある月は、
+// 値が1件もなくても0として入る（日付の列が無い月は入らない＝呼び出し側でnull「－」）。
+// 「個数/重量(kg)」「商品」の見出しが見つからない場合は例外を投げる
+function aggregateShippingSalesMonthly(rows) {
+  rows = rows || [];
+  const header = rows[0] || [];
+  let kindCol = -1;
+  let productCol = -1;
+  const dateCols = [];
+  header.forEach((raw, c) => {
+    const text = raw == null ? '' : String(raw).trim();
+    if (text === '個数/重量(kg)' && kindCol === -1) kindCol = c;
+    if (text === '商品' && productCol === -1) productCol = c;
+    const dm = text.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (dm) dateCols.push({ c, monthKey: `${parseInt(dm[1], 10)}/${parseInt(dm[2], 10)}` });
+  });
+  if (kindCol === -1 || productCol === -1) {
+    throw new Error('販売抽出シートの実績タブに「個数/重量(kg)」「商品」の見出しが見つかりません');
+  }
+  const byMonth = {};
+  dateCols.forEach(d => {
+    if (!byMonth[d.monthKey]) byMonth[d.monthKey] = { 'パック数': 0, '袋数': 0, 'バラ数': 0 };
+  });
+  for (let r = 1; r < rows.length; r++) {
+    const cells = rows[r] || [];
+    const kindText = cells[kindCol] == null ? '' : String(cells[kindCol]).trim();
+    if (kindText !== '個数') continue;
+    const metric = classifyShippingProductMetric(cells[productCol]);
+    dateCols.forEach(d => {
+      const raw = cells[d.c];
+      const text = raw == null ? '' : String(raw).trim();
+      if (text === '') return;
+      const n = Number(text.replace(/,/g, ''));
+      if (isNaN(n) || !isFinite(n)) return;
+      byMonth[d.monthKey][metric] += n;
+    });
+  }
+  return { byMonth };
+}
+
+// 整理済み_計画_更新（parseProductionData()結果）から、拠点の「出荷内訳／実数計画」の
+// まとまりの行を { 指標: レコード } で返す。純粋関数（テストから直接呼べる）。
+// シート上は「出荷内訳（構成比）」と「出荷内訳（実数計画）」の2つのまとまりが同じ指標名で
+// 並び、カテゴリ列の文言（「出荷内訳」「構成比」「実数計画」）は各まとまりの1・2行目に
+// 分かれて入っているため、パック数の行をまとまりの先頭とみなし、カテゴリが「実数計画」の
+// 行を含むまとまりを採用する（見つからない場合は、その拠点の最後のまとまり）
+function findPlanShippingActualRows(planRecords, site) {
+  const siteRecs = (planRecords || []).filter(r => r.site === site);
+  const metricSet = new Set(SHIPPING_ACTUAL_METRICS);
+  const blocks = [];
+  siteRecs.forEach((r, i) => {
+    if (r.metric !== 'パック数') return;
+    const block = { records: {}, hasActualCat: false };
+    for (let j = i; j < siteRecs.length; j++) {
+      const rr = siteRecs[j];
+      if (!metricSet.has(rr.metric) || block.records[rr.metric]) break;
+      block.records[rr.metric] = rr;
+      if (rr.cat === '実数計画') block.hasActualCat = true;
+    }
+    blocks.push(block);
+  });
+  const chosen = blocks.find(b => b.hasActualCat) || blocks[blocks.length - 1];
+  if (chosen) return chosen.records;
+  // パック数の行が無い場合（旧構成）は、カテゴリ「実数計画」の行だけを使う
+  const fallback = {};
+  siteRecs.forEach(r => {
+    if (metricSet.has(r.metric) && r.cat === '実数計画' && !fallback[r.metric]) fallback[r.metric] = r;
+  });
+  return fallback;
+}
+
+// 拠点・月ごとの出荷内訳の値を計算する。純粋関数（テストから直接呼べる）。
+// months: "YYYY/M"の月一覧、planData: 整理済み_計画_更新のparseProductionData()結果（nullなら
+// 計画側の月は全てnull）、salesBySite: { 拠点: {byMonth} | null }（nullの拠点は自動計算の月が
+// 全てnull）、cutoffMonth: 境目月。戻り値: { 拠点: { 指標: 値の配列(monthsと同じ並び) } }
+function computeShippingActualValues(months, planData, salesBySite, cutoffMonth) {
+  const result = {};
+  SHIPPING_ACTUAL_SITES.forEach(site => {
+    const planRows = planData ? findPlanShippingActualRows(planData.records, site) : {};
+    const planMonthIdx = {};
+    if (planData) planData.months.forEach((m, i) => { planMonthIdx[normalizeMonth(m)] = i; });
+    const planVal = (metric, m) => {
+      const r = planRows[metric];
+      const i = planMonthIdx[normalizeMonth(m)];
+      if (!r || i === undefined) return null;
+      const v = r.values[i];
+      return (v === null || v === undefined) ? null : v;
+    };
+    const sales = salesBySite ? salesBySite[site] : null;
+    const values = {};
+    SHIPPING_ACTUAL_METRICS.forEach(metric => { values[metric] = []; });
+    months.forEach(m => {
+      const parts = {};
+      if (shippingActualSourceForMonth(m, cutoffMonth) === 'auto') {
+        const mv = sales && sales.byMonth ? sales.byMonth[normalizeMonth(m)] : null;
+        SHIPPING_ACTUAL_SUM_METRICS.forEach(metric => { parts[metric] = mv ? mv[metric] : null; });
+        parts['付帯作業'] = null;
+      } else {
+        SHIPPING_ACTUAL_SUM_METRICS.forEach(metric => { parts[metric] = planVal(metric, m); });
+        parts['付帯作業'] = planVal('付帯作業', m);
+        // パック数の行が実数計画に無い（旧構成の）場合だけ、シートの合計(点数)−袋数−バラ数で補う
+        if (!planRows['パック数']) {
+          const total = planVal('合計(点数)', m);
+          if (total !== null) parts['パック数'] = total - (parts['袋数'] || 0) - (parts['バラ数'] || 0);
+        }
+      }
+      const sumParts = SHIPPING_ACTUAL_SUM_METRICS.map(metric => parts[metric]);
+      parts['合計(点数)'] = sumParts.every(v => v === null) ? null : sumParts.reduce((s, v) => s + (v || 0), 0);
+      SHIPPING_ACTUAL_METRICS.forEach(metric => { values[metric].push(parts[metric]); });
+    });
+    result[site] = values;
+  });
+  return result;
+}
+
+// 画面下の注記用の説明文（取得元の切り替えの説明）
+function shippingActualSourceNote() {
+  const autoFrom = normalizeMonth(SHIPPING_AUTO_FROM.replace(/^(\d{4})\/(\d{1,2})$/, '$1年$2月'));
+  return `出荷内訳は${autoFrom}より前は整理済み_計画_更新の実数計画、${autoFrom}〜${getActualCutoffMonth()}は販売抽出シート(商品別)の実績から自動計算（付帯作業なし）、以降は実数計画。合計(点数)＝パック数＋袋数＋バラ数`;
+}
+
+// 取得・解析失敗時の警告（画面上部の #shipping-actual-alerts に表示する）
+let shippingActualWarningMessages = [];
+
+async function fetchShippingSalesCsvRows(sheetId, gid) {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return parseCsv(text);
+}
+
+// 販売抽出シート（参照先一覧＋各拠点の実績タブ）の取得・集計をメモ化する。
+// 戻り値: { bySite: { 拠点: {byMonth} | null }, errors: [警告文] }（参照先一覧の取得に
+// 失敗した場合は例外）
+let shippingSalesDataPromise = null;
+function fetchShippingSalesActualOnce() {
+  if (!shippingSalesDataPromise) {
+    shippingSalesDataPromise = (async () => {
+      const urlRows = await fetchShippingSalesCsvRows(SHIPPING_SALES_URL_SHEET.id, SHIPPING_SALES_URL_SHEET.gid);
+      const urlData = parseShippingSalesUrlSheet(urlRows);
+      const bySite = {};
+      const errors = [];
+      await Promise.all(SHIPPING_ACTUAL_SITES.map(async site => {
+        const loc = urlData[site] && urlData[site][SHIPPING_SALES_KIND];
+        if (!loc) {
+          bySite[site] = null;
+          errors.push(`${site}の販売抽出シート（${SHIPPING_SALES_KIND}）のURLが参照先一覧に見つかりません`);
+          return;
+        }
+        try {
+          bySite[site] = aggregateShippingSalesMonthly(await fetchShippingSalesCsvRows(loc.id, loc.gid));
+        } catch (e) {
+          console.error(`[出荷内訳自動計算] ${site}の販売抽出シートの取得・集計でエラーが発生しました:`, e);
+          bySite[site] = null;
+          errors.push(`${site}の販売抽出シート（${SHIPPING_SALES_KIND}）を読み込めませんでした`);
+        }
+      }));
+      return { bySite, errors };
+    })();
+  }
+  return shippingSalesDataPromise;
+}
+
+// mergedの出荷内訳5指標（SHIPPING_ACTUAL_SITES対象拠点）の値を、月ごとの取得元
+// （computeShippingActualValues()）で全期間置き換える。整理済み_分析の値は使わない。
+// レコードは拠点名＋指標名で探し、無い指標はその拠点の最後の行の後ろに追加する。
+// 戻り値の形・レコードの形は変えない
+async function applyShippingActualOverrides(merged, planPromise, salesPromise) {
+  const months = merged.months;
+  const records = merged.records;
+  shippingActualWarningMessages = [];
+  const cutoffMonth = getActualCutoffMonth();
+  const needsAuto = months.some(m => shippingActualSourceForMonth(m, cutoffMonth) === 'auto');
+
+  let planData = null;
+  try {
+    planData = await planPromise;
+  } catch (e) {
+    console.error('[出荷内訳] 整理済み_計画_更新の取得でエラーが発生しました:', e);
+    shippingActualWarningMessages.push('出荷内訳（実績）を整理済み_計画_更新から読み込めませんでした');
+  }
+
+  let salesBySite = {};
+  if (needsAuto) {
+    try {
+      const sales = await salesPromise();
+      salesBySite = sales.bySite;
+      shippingActualWarningMessages.push(...sales.errors);
+    } catch (e) {
+      console.error('[出荷内訳自動計算] 販売抽出シートの参照先一覧の取得でエラーが発生しました:', e);
+      shippingActualWarningMessages.push('出荷内訳（実績）の自動計算に使う販売抽出シート(商品別)の参照先一覧を読み込めませんでした');
+    }
+  }
+  if (needsAuto && SHIPPING_ACTUAL_SITES.some(site => !salesBySite[site])) {
+    const autoMonths = months.filter(m => shippingActualSourceForMonth(m, cutoffMonth) === 'auto');
+    shippingActualWarningMessages.push(`自動計算の月（${autoMonths[0]}〜${autoMonths[autoMonths.length - 1]}）の出荷内訳は「－」で表示しています`);
+  }
+
+  const valuesBySite = computeShippingActualValues(months, planData, salesBySite, cutoffMonth);
+  SHIPPING_ACTUAL_SITES.forEach(site => {
+    if (!records.some(r => r.site === site)) return; // 拠点の行自体が無ければ追加しない
+    SHIPPING_ACTUAL_METRICS.forEach(metric => {
+      const values = valuesBySite[site][metric];
+      let found = false;
+      records.forEach((r, idx) => {
+        if (r.site === site && r.metric === metric) { records[idx] = { ...r, values: values.slice() }; found = true; }
+      });
+      if (found) return;
+      let lastIdx = -1;
+      records.forEach((r, idx) => { if (r.site === site) lastIdx = idx; });
+      records.splice(lastIdx + 1, 0, { site, cat: '出荷内訳', metric, values: values.slice() });
+    });
+  });
+
+  return { months, records };
+}
+
+// 出荷内訳（実績）の警告を、画面上部（#shipping-actual-alerts）に既存の工数振替アラートと
+// 同じ見た目・アコーディオン挙動で表示する
+function renderShippingActualAlerts() {
+  const target = document.getElementById('shipping-actual-alerts');
+  if (!target) return;
+  const alerts = shippingActualWarningMessages;
+  if (!alerts.length) { target.innerHTML = ''; return; }
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ 出荷内訳（実績）アラート（${alerts.length}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
+// 予実＞生産計画タブの表示用：整理済み_計画_更新の「出荷内訳／実数計画」のまとまりのうち、
+// 境目月以前の月の値を、生産実績（prodData）の出荷内訳と同じ値に置き換えた計画データを返す
+// （画面ごとに取得元の違いが出ないようにするため）。境目月より後の月はシートの値のまま。
+// 元のplanDataは変更しない
+function overlayShippingActualOnPlan(planData, prodData) {
+  if (!planData || !prodData) return planData;
+  const cutoff = monthToNum(getActualCutoffMonth());
+  const prodIdx = {};
+  prodData.months.forEach((m, i) => { prodIdx[normalizeMonth(m)] = i; });
+  const replaced = new Map();
+  SHIPPING_ACTUAL_SITES.forEach(site => {
+    const planRows = findPlanShippingActualRows(planData.records, site);
+    Object.keys(planRows).forEach(metric => {
+      const prodRec = prodData.records.find(r => r.site === site && r.metric === metric);
+      if (!prodRec) return;
+      const planRec = planRows[metric];
+      replaced.set(planRec, {
+        ...planRec,
+        values: planData.months.map((m, i) => {
+          const pi = prodIdx[normalizeMonth(m)];
+          if (monthToNum(m) > cutoff || pi === undefined) return planRec.values[i];
+          return prodRec.values[pi];
+        }),
+      });
+    });
+  });
+  return { months: planData.months, records: planData.records.map(r => replaced.get(r) || r) };
+}
+
 let productionData = null;
 // 6箇所から並行して呼ばれても実行（整理済み_分析の取得・栽培管理シートの取得/計算）が
 // 1回だけになるよう、結果そのものではなくPromiseをメモ化する
@@ -6177,11 +6531,21 @@ async function fetchProductionSheet() {
     const kinshoPromise = fetchKinshoDirectDataOnce();
     const harvestUrlPromise = fetchHarvestUrlDataOnce();
     const shipmentUrlPromise = fetchShipmentUrlDataOnce();
+    // 出荷内訳（実績）の取得元（整理済み_計画_更新・販売抽出シート）も並行して取得を始める。
+    // 販売抽出シートは自動計算の月（SHIPPING_AUTO_FROM〜境目月）がある場合だけ使う
+    const shippingPlanPromise = fetchPlanSheet();
+    shippingPlanPromise.catch(() => {});
+    const cutoffForShipping = getActualCutoffMonth();
+    const shippingSalesPromise = monthToNum(cutoffForShipping) >= monthToNum(SHIPPING_AUTO_FROM)
+      ? fetchShippingSalesActualOnce() : null;
+    if (shippingSalesPromise) shippingSalesPromise.catch(() => {});
 
     const cultMerged = await applyCultivationDirectOverrides(base, allDataForMonths);
     const kinshoMerged = await applyKinshoDirectOverrides(cultMerged, kinshoPromise);
     const harvestMerged = await applyHarvestDirectOverrides(kinshoMerged, harvestUrlPromise);
-    const merged = await applyShipmentDirectOverrides(harvestMerged, shipmentUrlPromise);
+    const shipmentMerged = await applyShipmentDirectOverrides(harvestMerged, shipmentUrlPromise);
+    const merged = await applyShippingActualOverrides(shipmentMerged, shippingPlanPromise, () => shippingSalesPromise || fetchShippingSalesActualOnce());
+    renderShippingActualAlerts();
     productionData = merged;
     return merged;
   })();
@@ -6403,8 +6767,13 @@ function renderProductionTab() {
 function renderPlanTab() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">生産計画データを読み込み中...</div>';
-  fetchPlanSheet().then(data => {
-    renderPlanTable(data);
+  // 境目月以前の出荷内訳（実数計画）は、生産実績（prodData）の出荷内訳と同じ値で表示する。
+  // 生産実績の取得に失敗した場合は、シートの値のまま表示する（計画の表示は止めない）
+  Promise.all([
+    fetchPlanSheet(),
+    fetchProductionSheet().catch(e => { console.error('[生産計画] 生産実績データ取得エラー:', e); return null; }),
+  ]).then(([data, prodData]) => {
+    renderPlanTable(overlayShippingActualOnPlan(data, prodData), !!prodData);
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">生産計画データ取得エラー: ${e.message}</div>`;
     console.error(e);
@@ -6493,7 +6862,7 @@ function groupIntoLabeledBlocks(siteRecs, labelForOccurrence, extraShippingMetri
   return merged;
 }
 
-function renderPlanTable({ months: planMonths, records }) {
+function renderPlanTable({ months: planMonths, records }, shippingOverlaid) {
   const main = document.getElementById('main');
 
   if (!records.length) {
@@ -6569,7 +6938,9 @@ function renderPlanTable({ months: planMonths, records }) {
     });
   });
 
-  html += '</tbody></table></div></div>';
+  html += `</tbody></table></div>
+    ${shippingOverlaid ? `<div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ ${shippingActualSourceNote()}（出荷内訳（計画）の〜${getActualCutoffMonth()}は生産実績と同じ値）</div>` : ''}
+    </div>`;
   main.innerHTML = html;
 }
 
@@ -6859,6 +7230,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
     <div style="font-size:0.72rem;color:var(--muted);padding:4px 0 0">※ ${CULTIVATION_DIRECT_SITES.join('・')}の栽培内訳（コンテナ数）は栽培管理シートから計算（10日締め・月度＝締め期間の開始月）</div>
     <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${KINSHO_DIRECT_SITES.join('・')}の菌床購入数は菌床納品実績（菌床数集計）から取得（末締め）</div>
     <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${HARVEST_DIRECT_SITES.join('・')}の収穫量は各拠点の収穫管理表（収獲目標値シートの収穫実績値・合計）から取得（末締め）${harvestDirectNotices.length ? '　' + harvestDirectNotices.join('　') : ''}</div>
+    <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ ${shippingActualSourceNote()}</div>
     <div style="font-size:0.72rem;color:var(--muted);padding:2px 0 0">※ 出荷量は売り上げ分析（URL_売上分析で指定した拠点・年ごとのシートの出荷量(固定)）から取得（末締め、g→kg換算）${shipmentDirectNotices.length ? '　' + shipmentDirectNotices.join('　') : ''}</div>
     </div>`;
 
@@ -7813,6 +8185,9 @@ async function loadAll() {
   shipmentSiteYearPromises = {};
   shipmentDirectWarningMessages = [];
   shipmentDirectNotices = [];
+  shippingSalesDataPromise = null;
+  shippingActualWarningMessages = [];
+  renderShippingActualAlerts();
 
   try {
     const json = await fetchSheet();
@@ -12516,6 +12891,20 @@ window.__cultTest = {
   parseShipmentUrlSheet,
   getShipmentDirectWarningMessages: () => shipmentDirectWarningMessages,
   getShipmentDirectNotices: () => shipmentDirectNotices,
+  SHIPPING_AUTO_FROM,
+  SHIPPING_ACTUAL_SITES,
+  SHIPPING_ACTUAL_METRICS,
+  SHIPPING_SALES_URL_SHEET,
+  SHIPPING_PRODUCT_CLASSIFICATION_RULES,
+  classifyShippingProductMetric,
+  shippingActualSourceForMonth,
+  parseShippingSalesUrlSheet,
+  aggregateShippingSalesMonthly,
+  findPlanShippingActualRows,
+  computeShippingActualValues,
+  applyShippingActualOverrides,
+  overlayShippingActualOnPlan,
+  getShippingActualWarningMessages: () => shippingActualWarningMessages,
   STD_SETTINGS_SHEET,
   STD_CS_DEFAULT,
   parseStdSettingsSheet,
