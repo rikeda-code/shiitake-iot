@@ -235,7 +235,13 @@ async function cellText(page, tableId, row, col) { return page.locator(cellSel(t
 async function center(page, tableId, row, col) {
   const loc = page.locator(cellSel(tableId, row, col));
   await loc.scrollIntoViewIfNeeded();
-  const b = await loc.boundingBox();
+  let b = await loc.boundingBox();
+  // タイトル部分（画面の上に固定）の下に隠れている場合は、その分だけスクロールして見える位置にする
+  const headBottom = await page.evaluate(() => document.querySelector('header').getBoundingClientRect().bottom);
+  if (b.y < headBottom + 2) {
+    await page.evaluate(dy => window.scrollBy(0, dy), b.y - headBottom - 40);
+    b = await loc.boundingBox();
+  }
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
 async function clickCell(page, tableId, row, col, modifiers) {
@@ -386,12 +392,21 @@ function sameBar(bar, exp) { return bar.sum === exp.sum && bar.avg === exp.avg &
       row.cells[6].textContent = '12.5';
     });
     await page.waitForTimeout(50);
-    // table3のMの行は、幅1280×高さ900の画面では一番下に見えている行（ドラッグを始めて帯が
+    // table3のMの行を画面の一番下に見えている行にする（ドラッグを始めて帯が
     // 出ると帯の下に隠れる位置）。そこからのドラッグでも範囲が選べることも、あわせて確認する
-    const nearBottom = await page.evaluate(() => { const r = document.querySelector('#table3 tbody tr:nth-child(1)').getBoundingClientRect(); return r.bottom > window.innerHeight - 40; });
+    // （行の高さに左右されないよう、その行が画面の一番下に来るようにスクロールしてから確かめる）
+    // （ページの一番上でもその行が画面の下端に届かない場合は、画面の高さを合わせる）
+    const rowBottom0 = await page.evaluate(() => document.querySelector('#table3 tbody tr:nth-child(1)').getBoundingClientRect().bottom + window.scrollY);
+    if (rowBottom0 + 4 < 900) await page.setViewportSize({ width: 1280, height: Math.ceil(rowBottom0) + 4 });
+    const nearBottom = await page.evaluate(() => {
+      const row = document.querySelector('#table3 tbody tr:nth-child(1)');
+      window.scrollBy(0, row.getBoundingClientRect().bottom - (window.innerHeight - 4));
+      const r = row.getBoundingClientRect();
+      return { ok: r.bottom > window.innerHeight - 40 && r.bottom <= window.innerHeight, bottom: r.bottom, innerHeight: window.innerHeight, scrollY: window.scrollY };
+    });
     await dragCells(page, 'table3', 0, 3, 0, 6);
     let bar = await barState(page);
-    check('帯の下に隠れる位置（画面の一番下の行）からのドラッグでも範囲が選べる', nearBottom && bar.sel === 4, { nearBottom, sel: bar.sel });
+    check('帯の下に隠れる位置（画面の一番下の行）からのドラッグでも範囲が選べる', nearBottom.ok && bar.sel === 4, { nearBottom, sel: bar.sel });
     check('「－」・空欄は数えず、「0.0」は0として数える（4セル選んで個数2・合計12.5・最小0.0）',
       bar.sel === 4 && bar.count === '2' && bar.sum === '12.5' && bar.min === '0.0' && bar.avg === '6.3' && bar.max === '12.5', bar);
     // 収穫比率（table2の比率の列）：M・L・2L・袋（秀・優の比率は「－」）

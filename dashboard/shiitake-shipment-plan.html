@@ -48,6 +48,14 @@
     border-bottom:2px solid var(--brown);
     margin-bottom:8px;
     flex-wrap:wrap;
+    /* タイトル・拠点ボタン・下の罫線を画面の上に固定する。下を流れる表・パネルが透けないよう
+       ページと同じ背景色で塗り、表（左端固定のサイズ名の列を含む）・パネル・集計の帯より手前に出す。
+       スマートフォンのノッチ等に重ならないよう、上の安全領域の分だけ内側に余白を取る */
+    position:sticky;
+    top:0;
+    z-index:40;
+    background:var(--paper);
+    padding-top:env(safe-area-inset-top, 0px);
   }
   .title-block .eyebrow{
     font-size:13px;
@@ -217,7 +225,8 @@
     font-weight:700;
     font-size:13.5px;
     text-align:center;
-    padding:4px 10px;
+    /* 行の高さを約10%詰めるため、上下の余白だけを詰めている（文字の大きさ・列の幅は変えない） */
+    padding:2.85px 10px;
     border-bottom:1px solid var(--line);
     border-right:1px solid var(--line-soft);
     white-space:nowrap;
@@ -227,10 +236,10 @@
     font-weight:500;
     color:var(--ink-soft);
     font-size:12.5px;
-    padding:3px 10px 4px;
+    padding:2px 10px 2.9px;
   }
   tbody td, tbody th{
-    padding:4px 10px;
+    padding:2.8px 10px;
     text-align:right;
     font-size:14.5px;
     border-bottom:1px solid var(--line-soft);
@@ -255,8 +264,8 @@
     color:var(--ink-soft);
   }
   tr.grade-row td, tr.grade-row th{
-    padding-top:3px;
-    padding-bottom:3px;
+    padding-top:1.9px;
+    padding-bottom:1.9px;
   }
   .harvest tr.grade-row td{ background:#fbf3e3; }
   .sched tr.grade-row td{ background:#fbf7ee; }
@@ -783,6 +792,99 @@
   </section>
 
 </div>
+
+<script>
+// ── 表示状態（拠点・詳細の開閉）をページのURLのクエリに保ち、リロードしても同じ状態で開く ──
+// クエリ：site＝いなべ／群馬／南丹（いなべは省略）、harvestDetail＝open（収穫予測の詳細を開く。
+// 閉じているときは省略）、stockDetail＝open（在庫予測の詳細を開く。閉じているときは省略）。
+// 拠点の切り替え・詳細の開閉のたびに history.replaceState で書き換える（履歴は増やさない）。
+// クエリが無い・値がおかしいときは今までどおり いなべ・詳細は閉じた状態。基準日・実績日は保たない。
+// htmlpreview（URLが「?https://github.com/…/shiitake-shipment-plan.html」の形）で開いた場合は、
+// 表示するファイルのURLの後ろに「?site=…」を付ける（htmlpreviewはその後ろのクエリを付けたまま
+// ファイルを取りに行くが、GitHubはクエリを無視するため表示は壊れない）。
+// 本体・詳細の最初の読み込み（下のスクリプトのrender()）より前に拠点・詳細の状態を反映するため、
+// 表の直後（他のスクリプトより前）に置いている。
+(function(){
+  var SITES = ['いなべ', '群馬', '南丹'];
+  var DEFAULT_SITE = 'いなべ';
+  var DETAILS = { harvestDetail: 'harvestDetailSection', stockDetail: 'stockDetailSection' };
+
+  // location.search を、htmlpreview用の前置き（「?https://…」の部分）と、このページの状態の
+  // クエリに分ける。純粋関数（テストから直接呼べる）
+  function splitSearch(search){
+    search = search || '';
+    if (/^\?https?:/i.test(search)) {
+      var i = search.indexOf('?', 1);
+      return { prefix: i < 0 ? search : search.slice(0, i), query: i < 0 ? '' : search.slice(i + 1) };
+    }
+    return { prefix: '', query: search.replace(/^\?/, '') };
+  }
+  function joinSearch(prefix, query){
+    if (prefix) return prefix + (query ? '?' + query : '');
+    return query ? '?' + query : '';
+  }
+
+  // クエリから表示状態を読む。おかしい値は既定（いなべ・閉じる）にする。純粋関数
+  function readStateFromSearch(search){
+    var params = new URLSearchParams(splitSearch(search).query);
+    var site = params.get('site');
+    var state = { site: SITES.indexOf(site) >= 0 ? site : DEFAULT_SITE };
+    Object.keys(DETAILS).forEach(function(key){ state[key] = params.get(key) === 'open'; });
+    return state;
+  }
+
+  function currentState(){
+    var btn = document.querySelector('#siteToggle button.active');
+    var state = { site: btn ? btn.getAttribute('data-site') : DEFAULT_SITE };
+    Object.keys(DETAILS).forEach(function(key){
+      var el = document.getElementById(DETAILS[key]);
+      state[key] = !!(el && el.open);
+    });
+    return state;
+  }
+
+  // 今の表示状態をURLのクエリに書き込む（このページの状態以外のクエリはそのまま残す）
+  function writeStateToUrl(){
+    var parts = splitSearch(location.search);
+    var params = new URLSearchParams(parts.query);
+    var state = currentState();
+    if (state.site !== DEFAULT_SITE) params.set('site', state.site); else params.delete('site');
+    Object.keys(DETAILS).forEach(function(key){
+      if (state[key]) params.set(key, 'open'); else params.delete(key);
+    });
+    var url = location.pathname + joinSearch(parts.prefix, params.toString()) + location.hash;
+    try { history.replaceState(history.state, '', url); } catch (e) { console.warn('[表示状態] URLを書き換えられませんでした:', e); }
+  }
+
+  // 開いたときの状態を反映する。拠点はボタンの見た目（active）だけを切り替える（収穫見込（詳細）の
+  // 読み込みは、本体の描画が終わった後のupdateHarvestStockDetail()が選ばれている拠点を見て行うため、
+  // いなべ以外なら読み込み・保存・入力をしない（PR #515 の安全策）がそのまま働く）
+  var initial = readStateFromSearch(location.search);
+  document.querySelectorAll('#siteToggle button').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-site') === initial.site);
+  });
+  Object.keys(DETAILS).forEach(function(key){
+    var el = document.getElementById(DETAILS[key]);
+    if (el) el.open = initial[key];
+  });
+
+  // このスクリプトは拠点ボタンの見た目を切り替える処理より前に読み込まれるため、
+  // 切り替えが終わってから書き込む
+  document.querySelectorAll('#siteToggle button').forEach(function(btn){
+    btn.addEventListener('click', function(){ setTimeout(writeStateToUrl, 0); });
+  });
+  Object.keys(DETAILS).forEach(function(key){
+    var el = document.getElementById(DETAILS[key]);
+    if (el) el.addEventListener('toggle', writeStateToUrl);
+  });
+
+  window.__test = window.__test || {};
+  Object.assign(window.__test, {
+    splitViewStateSearch: splitSearch,
+    readViewStateFromSearch: readStateFromSearch,
+  });
+})();
+</script>
 
 <!-- ── 在庫・出荷予定パネルの「製品在庫」「生在庫」列（M・L・2L・袋の本行のみ）を、
      スプレッドシート「椎茸在庫」からgvizで直接取得して実データ表示する。
