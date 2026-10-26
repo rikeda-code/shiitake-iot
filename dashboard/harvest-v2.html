@@ -618,14 +618,18 @@ async function loadNormalized(force = false) {
       const noLedger = !normStore.cycles.some(x => x.site === site.name);
       try {
         const t = await fetchSheetCsv(site.id, site.indexSheet);
+        // G列「栽培開始月」の右に列を足しても読めるよう、H列以降は「自社ロット」の見出しの位置からのずれで読む
+        // （U・V列には見出しがないため、名前では探せない）。見出しが見つからなければ従来の位置
+        const hdr = (t.rows || []).find(r => (r.c || []).some(x => normCellStr(x) === '自社ロット'));
+        const sh = hdr ? hdr.c.findIndex(x => normCellStr(x) === '自社ロット') - 7 : 0;
         (t.rows || []).forEach(row => {
           const c = row.c || [];
           const person = normCellStr(c[1]);
-          const lotCode = normCellStr(c[7]);
-          const no = normCellStr(c[20]);
+          const lotCode = normCellStr(c[7 + sh]);
+          const no = normCellStr(c[20 + sh]);
           const m = normCellStr(c[2]).match(/^\d{4}[\/-](\d{1,2})[\/-](\d{1,2})/);
           if (!no || !m) return;
-          const name = `${no}(${+m[1]}/${+m[2]})${normLotSuffix(normCellStr(c[21]), '')}`;
+          const name = `${no}(${+m[1]}/${+m[2]})${normLotSuffix(normCellStr(c[21 + sh]), '')}`;
           if (person && person !== '担当者名') normStore.personByKey[`${site.name}|${name}`] = person;
           if (lotCode && lotCode !== '自社ロット') normStore.lotByKey[`${site.name}|${name}`] = lotCode;
           if (noLedger) {
@@ -634,9 +638,9 @@ async function loadNormalized(force = false) {
             if (end && end >= today0) end = null;          // 終了日欄が =NOW() の行は栽培中
             if (!start) return;
             normStore.cycles.push({
-              site: site.name, no, lotCode: '', lotName: normCellStr(c[21]),
+              site: site.name, no, lotCode: '', lotName: normCellStr(c[21 + sh]),
               start, end,
-              bedCount: parseFloat(normCellStr(c[8]).replace(/,/g, '')) || null,   // "1,000" をそのまま parseFloat すると 1 になる
+              bedCount: parseFloat(normCellStr(c[8 + sh]).replace(/,/g, '')) || null,   // "1,000" をそのまま parseFloat すると 1 になる
               state: end ? '終了' : '栽培中', abnormal: '', watering: 0, spray: 0, mekaki: 0,
               _fromSummary: true,
             });
