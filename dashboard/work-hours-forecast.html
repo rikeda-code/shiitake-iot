@@ -3299,10 +3299,10 @@
     renderTotalCell(subTotalCell, computeRowTotal(rawSubtotals), fmtNum);
   }
 
-  // いなべ×出荷(部門='出荷'または'配送・出荷')の標準労働時間。読み込み・計算は栽培の
+  // いなべ×出荷(部門='出荷'・'出荷・配送'・'配送・出荷')の標準労働時間。読み込み・計算は栽培の
   // いなべ(renderLabor())と同じ関数(fetchShiftPersons/fetchShiftPersonsFromApp/
   // computeStandardLaborHours)を使い、対象部門の一覧だけを変えている
-  var SHIPPING_LABOR_DEPTS = ['出荷', '配送・出荷'];
+  var SHIPPING_LABOR_DEPTS = ['出荷', '出荷・配送', '配送・出荷'];
   async function fetchShippingLaborInabe(basisDate){
     var persons, laborRows;
     if (SHIFT_GAS_URL) {
@@ -3607,10 +3607,10 @@
     try {
       var persons, laborRows;
       if (SHIFT_GAS_URL) {
-        persons = await fetchShiftPersonsFromApp(basisDate, ['栽培', '配送・栽培']);
+        persons = await fetchShiftPersonsFromApp(basisDate, ['栽培', '栽培・配送', '配送・栽培']);
         laborRows = [];
       } else {
-        persons = await fetchShiftPersons(basisDate, ['栽培', '配送・栽培']);
+        persons = await fetchShiftPersons(basisDate, ['栽培', '栽培・配送', '配送・栽培']);
         laborRows = await fetchStdLaborRows();
       }
       var result = computeStandardLaborHours(persons, laborRows);
