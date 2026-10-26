@@ -1,5 +1,6 @@
 // dashboard/work-hours.html の出荷内訳（パック数・袋数・バラ数・付帯作業・合計(点数)）の
-// 実績を、整理済み_分析（PROD_GID）から次の取得元に切り替えた変更の検証。
+// 実績を、整理済み_分析（PROD_GID）から次の取得元に切り替えた変更の検証（整理済み_分析は
+// その後廃止したため、モックは用意せず、読みに行かないことを確認する）。
 //   ・〜2026/8（SHIPPING_AUTO_FROMより前）：整理済み_計画_更新（PLAN_GID）の「出荷内訳／実数計画」の行
 //   ・2026/9〜境目月（getActualCutoffMonth()）：販売抽出シート(商品別)の「実績」タブから自動計算
 //     （付帯作業は「－」、計画_更新に値があっても使わない）
@@ -10,8 +11,8 @@
 //   ・整理済み_計画_更新：A=拠点・B=カテゴリ・C=指標、D列以降の1行目が"yyyy/M"。各拠点に
 //     生産実績(3行)→栽培内訳(7行)→出荷内訳／構成比(5行)→出荷内訳／実数計画(5行)。カテゴリ列の
 //     文言は各まとまりの1・2行目に「出荷内訳」「構成比」／「出荷内訳」「実数計画」と分かれて入る
-//   ・整理済み_分析：同じ並びで、出荷内訳（実績）の5行だけ値が入っている（このテストでは
-//     「使われていないこと」を確かめるため、計画_更新とは異なる値にしてある）
+//   ・整理済み_分析：廃止済みのためモックは無い（読みに行かないことを確認する。以前は
+//     計画_更新とは異なる値のモックで「値が使われていないこと」を確かめていた）
 //   ・DB共有「販売抽出シート(商品別)」：1行目の見出し「拠点／区分／URL」、拠点ごとに
 //     月初・MRP・受注・実績の4行
 //   ・販売抽出シートの実績タブ：見出し「拠点／個数/重量(kg)／区分／商品／秀・優・袋・袋２／
@@ -116,37 +117,10 @@ function buildPlanGviz() {
   return gvizText({ cols, rows });
 }
 
-/* ===================== モック：整理済み_分析 ===================== */
-// 実シートは 2025/10〜2026/8 の列に出荷内訳の5行だけ値がある。ここでは「整理済み_分析の
-// 値が使われていないこと」を確かめるため、全て 777777（＋拠点ごとの差）にしてある。
-// 2026/10 の列は「境目月より後の月（prodDataに含まれる月）は計画_更新の値になること」を
-// 確かめるために追加した列（整理済み_Mに無い月でも整理済み_分析の見出しにあれば
-// prodDataの月一覧に入る）
-const PROD_MONTHS = ['2025/10', '2025/11', '2025/12', '2026/1', '2026/2', '2026/3', '2026/4', '2026/5', '2026/6', '2026/7', '2026/8', '2026/10'];
-function buildProdGviz() {
-  const cols = [{ id: 'A', label: '作業実績', type: 'string' }, { id: 'B', label: '', type: 'string' }, { id: 'C', label: '', type: 'string' }]
-    .concat(PROD_MONTHS.map((m, i) => ({ id: 'M' + i, label: m, type: 'number' })));
-  const rows = [];
-  SITES.forEach((site, si) => {
-    const n = PROD_MONTHS.length;
-    const junk = Array(n).fill(777777 + si);
-    const empty = Array(n).fill(null);
-    const r = [];
-    r.push([site, '生産実績', '菌床購入数(本)', ...empty]);
-    r.push(['', '', '収穫量(kg)', ...empty]);
-    r.push(['', '', '出荷量(kg)', ...empty]);
-    r.push(['', '栽培内訳', '菌床入れ', ...empty]);
-    r.push(['', '(コンテナ数）', '芽かき', ...empty]);
-    ['収穫', '注水', '散水', '廃棄', '稼働コンテナ数'].forEach(m => r.push(['', '', m, ...empty]));
-    r.push(['', '出荷内訳', 'パック数', ...junk]);
-    r.push(['', '', '袋数', ...junk]);
-    r.push(['', '', 'バラ数', ...junk]);
-    r.push(['', '', '付帯作業', ...junk]);
-    r.push(['', '', '合計(点数)', ...junk]);
-    r.forEach(x => rows.push({ c: x.map(gvizCell) }));
-  });
-  return gvizText({ cols, rows });
-}
+/* ===================== 整理済み_分析 ===================== */
+// 整理済み_分析（PROD_GID）は廃止済みのため、モックは用意しない。読みに行った場合は
+// prodSheetRequests に記録して404を返し、「読みに行かないこと」を確認する
+// （以前は 777777 の値を入れたモックで「値が使われていないこと」を確認していた）
 
 /* ===================== モック：整理済み_M（勤務時間） ===================== */
 function buildMGviz(lastMonth) {
@@ -255,7 +229,7 @@ async function setupRoutes(page, opts) {
     if (url.includes('/gviz/tq')) {
       let body;
       if (sheet === '整理済み_M') body = buildMGviz(lastMonth);
-      else if (gid === PROD_GID) body = buildProdGviz();
+      else if (gid === PROD_GID) { prodSheetRequests.push(url); return route.fulfill({ status: 404, contentType: 'text/plain', body: '' }); }
       else if (gid === PLAN_GID) body = buildPlanGviz();
       else body = gvizText({ cols: [], rows: [] });
       return route.fulfill({ status: 200, contentType: 'application/javascript; charset=utf-8', body });
@@ -281,6 +255,7 @@ async function setupRoutes(page, opts) {
   });
 }
 let salesTabRequests = [];
+let prodSheetRequests = [];
 
 /* ===================== 期待値 ===================== */
 function planIdx(m) { return PLAN_MONTHS.indexOf(m); }
@@ -310,11 +285,16 @@ function check(name, cond, extra) {
 /* ===================== ページ操作ヘルパー ===================== */
 async function openPage(browser, opts) {
   salesTabRequests = [];
+  prodSheetRequests = [];
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   page.on('pageerror', e => console.log('  [pageerror]', e.message));
   await setupRoutes(page, opts);
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => typeof allData !== 'undefined' && allData && typeof window.__cultTest === 'object', null, { timeout: 30000 });
+  // 初回の読み込み（loadAll()）が最後に既定のタブを描画するため、それが終わってから
+  // テスト側で各画面を描画する（先に描画すると、後から既定のタブで上書きされることがある）
+  await page.waitForFunction(() => (document.getElementById('last-updated').textContent || '').includes('最終更新'), null, { timeout: 30000 });
+  await page.waitForTimeout(200);
   await page.evaluate(() => loadStdSettingsSheetOnce().catch(() => null));
   // 表示期間は2025年10月から12ヵ月（境目月が2026/10になる場合も同じ範囲を見る）
   await page.evaluate(() => { periodStartMonth = '2025年10月'; periodMonthCount = 12; });
@@ -425,7 +405,8 @@ async function renderAndWait(page, fnName) {
 }
 
 function fmtProd(v) { return v === null ? '—' : v.toLocaleString('ja-JP'); }
-function fmtPlan(v) { return v === null ? '' : v.toLocaleString('ja-JP', { maximumFractionDigits: 0 }); }
+// 予実＞生産計画の表示。過去月（〜境目月）の値なしは「—」、未来月の値なしは空欄
+function fmtPlan(v, past) { return v === null ? (past ? '—' : '') : v.toLocaleString('ja-JP', { maximumFractionDigits: 0 }); }
 function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.round(h).toLocaleString('ja-JP')) + ' h'; }
 
 /* ===================== 本体 ===================== */
@@ -491,7 +472,7 @@ function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.rou
     check('境目月＝2026/9', cutoff === '2026/9', cutoff);
     prodB = await getProdValues(page);
     const metrics = ['パック数', '袋数', 'バラ数', '付帯作業', '合計(点数)'];
-    let planOk = true, autoOk = true, afterOk = true, sumOk = true, notProdOk = true;
+    let planOk = true, autoOk = true, sumOk = true;
     const bad = [];
     SITES.forEach(site => {
       prodB.months.forEach(m => {
@@ -502,9 +483,7 @@ function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.rou
           const same = v === e;
           if (!same) bad.push({ site, m, metric, v, e });
           if (m === '2026/9') { if (!same) autoOk = false; }
-          else if (m === '2026/10') { if (!same) afterOk = false; }
           else if (!same) planOk = false;
-          if (v === 777777 || v === 777778 || v === 777779) notProdOk = false;
         });
         const s = ['パック数', '袋数', 'バラ数'].map(k => prodB.values[site][k][m]);
         const tot = prodB.values[site]['合計(点数)'][m];
@@ -513,9 +492,24 @@ function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.rou
     });
     check('〜2026/8 は整理済み_計画_更新の実数計画の値（パック・袋・バラ・付帯作業）', planOk, bad.filter(b => b.m !== '2026/9' && b.m !== '2026/10').slice(0, 3));
     check('2026/9 は販売抽出シートから自動計算（計画_更新の値は使わない）・付帯作業は「－」', autoOk, bad.filter(b => b.m === '2026/9').slice(0, 3));
-    check('境目月より後（2026/10）は計画_更新の実数計画の値のまま（付帯作業含む）', afterOk, bad.filter(b => b.m === '2026/10').slice(0, 3));
+    // prodDataの月は実績月（〜境目月）だけになったため、境目月より後の月の取得元は、
+    // prodDataと同じ関数（computeShippingActualValues）に境目月より後の月を渡して確認する
+    const EXPECTED_PROD_MONTHS = ['2025/10', '2025/11', '2025/12', '2026/1', '2026/2', '2026/3', '2026/4', '2026/5', '2026/6', '2026/7', '2026/8', '2026/9'];
+    check('prodDataの月は2025/10〜2026/9（上の各月の確認が全ての実績月を対象にしている）',
+      JSON.stringify(prodB.months) === JSON.stringify(EXPECTED_PROD_MONTHS), prodB.months);
+    const after = await page.evaluate(async () => {
+      const plan = await fetchPlanSheet();
+      const sales = await fetchShippingSalesActualOnce();
+      return window.__cultTest.computeShippingActualValues(['2026/10', '2026/11'], plan, sales.bySite, getActualCutoffMonth());
+    });
+    const afterBad = [];
+    SITES.forEach(site => ['2026/10', '2026/11'].forEach((m, i) => {
+      const exp = expectedShipping(site, m, cutoff, true);
+      metrics.forEach(metric => { if (after[site][metric][i] !== exp[metric]) afterBad.push({ site, m, metric, v: after[site][metric][i], e: exp[metric] }); });
+    }));
+    check('境目月より後（2026/10・11）は計画_更新の実数計画の値のまま（付帯作業含む）', afterBad.length === 0, afterBad.slice(0, 3));
     check('合計(点数)＝パック＋袋＋バラ（全ての月、付帯作業・シートの合計は使わない）', sumOk);
-    check('整理済み_分析の出荷内訳の値は使われていない', notProdOk);
+    check('整理済み_分析（PROD_GID）を読みに行かない', prodSheetRequests.length === 0, prodSheetRequests);
     check('2026/9 の付帯作業は全拠点 null（「－」）', SITES.every(s => prodB.values[s]['付帯作業']['2026/9'] === null));
     check('出荷内訳の行は拠点ごとに1つずつ（重複・欠落なし）', JSON.stringify(prodB.counts) === JSON.stringify(SITES), prodB.counts);
     check('販売抽出シートは実績タブだけを読む（3拠点分）',
@@ -583,7 +577,7 @@ function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.rou
       const n = Number(m.split('/')[0]) * 100 + Number(m.split('/')[1]);
       if (n <= 202609) {
         const pv = prodB.values[site][metric][m];
-        const exp = fmtPlan(pv);
+        const exp = fmtPlan(pv, true);
         if (got !== exp) { planTabOk = false; ptBad.push({ site, metric, m, got, exp }); }
       } else {
         const exp = fmtPlan(PLAN_ACTUAL[site][metric][planIdx(m)]);
@@ -593,7 +587,12 @@ function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.rou
     check('予実＞生産計画：出荷内訳／実数計画の行の過去月（〜境目月）が生産実績と同じ値', planTabOk, ptBad.filter(b => !b.future).slice(0, 4));
     check('予実＞生産計画：境目月より後の月はシートの値のまま', planFutureOk, ptBad.filter(b => b.future).slice(0, 4));
     const ratioRow = await readSiteMetricTable(page, ['パック数'], 1);
-    check('予実＞生産計画：出荷内訳／構成比の行は変わらない', ratioRow['いなべ']['パック数']['2026/9'] === '0.7', ratioRow['いなべ']['パック数']['2026/9']);
+    // 構成比の行は、過去月は実績から計算した割合（小数2桁）、未来月はシートの値（小数2桁）
+    // （以前は「変わらない（シートの0.73を小数1桁で0.7）」ことを確認していたが、構成比を実績から
+    // 計算する変更に合わせて期待値を更新）
+    check('予実＞生産計画：出荷内訳／構成比の行は過去月が実績の割合（2026/9：1561÷1700＝0.92）、未来月はシートの値（0.73）',
+      ratioRow['いなべ']['パック数']['2026/9'] === '0.92' && ratioRow['いなべ']['パック数']['2026/11'] === '0.73',
+      [ratioRow['いなべ']['パック数']['2026/9'], ratioRow['いなべ']['パック数']['2026/11']]);
     await page.close();
   }
 
@@ -631,11 +630,20 @@ function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.rou
     SITES.forEach(site => {
       ['パック数', '袋数', 'バラ数', '付帯作業', '合計(点数)'].forEach(metric => {
         if (prod.values[site][metric]['2026/9'] !== null) autoNull = false;
-        ['2025/10', '2026/8', '2026/10'].forEach(m => {
+        ['2025/10', '2026/8'].forEach(m => {
           if (prod.values[site][metric][m] !== expectedShipping(site, m, cutoff, true)[metric]) othersOk = false;
         });
       });
     });
+    // 境目月より後の月（2026/10）はprodDataに含まれなくなったため、prodDataと同じ関数に
+    // 販売抽出シートが読めなかった状態（salesBySite＝{}）で渡して確認する
+    const afterD = await page.evaluate(async () => {
+      const plan = await fetchPlanSheet();
+      return window.__cultTest.computeShippingActualValues(['2026/10'], plan, {}, getActualCutoffMonth());
+    });
+    SITES.forEach(site => ['パック数', '袋数', 'バラ数', '付帯作業', '合計(点数)'].forEach(metric => {
+      if (afterD[site][metric][0] !== expectedShipping(site, '2026/10', cutoff, true)[metric]) othersOk = false;
+    }));
     check('参照先一覧の読み込み失敗：自動計算の月（2026/9）だけ「－」', autoNull);
     check('参照先一覧の読み込み失敗：他の月（計画_更新の月）は表示される', othersOk);
     await renderAndWait(page, 'renderProductionTab');
