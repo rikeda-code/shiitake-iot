@@ -26,6 +26,7 @@
   --haiso:  #2c6fb3; --haiso-soft:  #e2edf8;
   --off: #9aa39d; --off-soft: #eceeec;
   --sun: #c2410c; --sat: #2563eb;
+  --wish: #dc2626;              /* 希望休の赤 */
   --font-body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
   --font-code: "JetBrains Mono", ui-monospace, Menlo, monospace;
 }
@@ -34,13 +35,13 @@
   --accent: #d9b28c; --accent-soft: #3a2f25; --sel: #6aa1ff; --sel-soft: rgba(106,161,255,.18);
   --saibai: #6fd197; --saibai-soft: #1f3a2a; --shukka: #e8b45a; --shukka-soft: #3d3020;
   --haiso: #7fb3ea; --haiso-soft: #1d3046; --off: #7d8781; --off-soft: #262c28;
-  --sun: #fb923c; --sat: #7aa7ff; color-scheme: dark; } }
+  --sun: #fb923c; --sat: #7aa7ff; --wish: #f87171; color-scheme: dark; } }
 :root[data-theme="dark"] {
   --bg: #161a18; --surface: #1f2421; --ink: #e6ebe7; --muted: #9aa49e; --line: #333b36;
   --accent: #d9b28c; --accent-soft: #3a2f25; --sel: #6aa1ff; --sel-soft: rgba(106,161,255,.18);
   --saibai: #6fd197; --saibai-soft: #1f3a2a; --shukka: #e8b45a; --shukka-soft: #3d3020;
   --haiso: #7fb3ea; --haiso-soft: #1d3046; --off: #7d8781; --off-soft: #262c28;
-  --sun: #fb923c; --sat: #7aa7ff; color-scheme: dark; }
+  --sun: #fb923c; --sat: #7aa7ff; --wish: #f87171; color-scheme: dark; }
 
 * { box-sizing: border-box; }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; padding: 20px 16px 40px; }
@@ -76,6 +77,10 @@ table.grid { border-collapse: separate; border-spacing: 0; font-variant-numeric:
 td.cell { min-width: 52px; height: 38px; line-height: 1.15; font-family: var(--font-code); font-size: .74rem; letter-spacing: -.02em; cursor: cell; position: relative; }
 td.cell.off { color: var(--muted); background: var(--off-soft); font-family: var(--font-body); font-weight: 700; }
 td.cell.absent { color: var(--sun); }
+/* 希望休：文字は「休」のまま、赤い文字で通常の休み（黒）と見分ける */
+td.cell.off.leave { color: var(--ink); }
+td.cell.off.wish { color: var(--wish); }
+.leave-btns .wish-btn, .mbar-chips .wish-btn { color: var(--wish); border-color: var(--wish); }
 td.cell.custom { font-size: .68rem; color: var(--accent); }
 /* 応援・配送の日：行き先の部門の色の地（4h・半日配送は斜めに半分）と左上の印（配・半配・栽8・栽4・出8・出4） */
 td.cell.sup { background: var(--sup-soft); }
@@ -225,6 +230,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table td.dp { font-size: .85em; color: #333; }
 .pp-table td.off { color: #333; font-weight: 700; }
 .pp-table td.absent { color: #b91c1c; }
+.pp-table td.wish { color: #dc2626; }
 /* 配送の日：青い地と左上の「配」「半」 */
 .sp-配送 { --pb: #dbe8f6; --pc: #1d4f8a; }
 .sp-栽培 { --pb: #dcefe2; --pc: #1f6b3d; }
@@ -268,6 +274,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pc-cal .hr { position: absolute; right: 1.4mm; bottom: .8mm; font-size: 2.8mm; color: #444; }
 .pc-cal td.off .tm { color: #333; }
 .pc-cal td.absent .tm { color: #b91c1c; }
+.pc-cal td.wish .tm { color: #dc2626; }
 .pc-cal td.sp { background: var(--pb); }
 .pc-cal td.sp.part { background: linear-gradient(135deg, var(--pb) 50%, #fff 50%); }
 .pc-cal .tag { position: absolute; right: 1.4mm; top: 1mm; font-size: 2.8mm; font-weight: 700; color: var(--pc); }
@@ -417,8 +424,8 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
   </div>
   <div class="sheet edit-only">
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。並び順は上の「条件で並べ替え」か、入力パネルの「人を上へ」「人を下へ」で変えられます（全員の画面と印刷に共通）。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。ほかの部門の応援や配送に行く日は「栽培8h・栽培4h・出荷8h・出荷4h・配送・半日配送」のボタンで印を付けます（8hと配送は実働すべて、4hは4時間、半日配送は実働の半分を行き先の部門の時間に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
-    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます（「有」「有給」は有休に、「公休」は休にそろえます）。ほかの部門の応援や配送に行く日は、セルを選んで「栽培8h」「栽培4h」「出荷8h」「出荷4h」「配送」「半日配送」ボタンを押すか、<code>8-17栽4</code>・<code>8-17出8</code>・<code>8-17配</code>・<code>8-17半配</code> のように打ちます。8hと配送は実働すべて、4hは4時間（実働が短い日は実働まで）、半日配送は実働の半分を行き先の部門の時間に数え、残りは本来の部門に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。<br>並び順：「条件で並べ替え」で部門・勤務時間・出勤時刻などを3つまで組み合わせて並べられます。1人ずつ動かすときは、その人のセルか氏名を選んで「▲ 上へ」「▼ 下へ」か <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>、または氏名をつかんで上下にドラッグします（氏名を <kbd>Shift</kbd>+クリックすると何人かまとめて動かせます）。並び順は全員の画面と印刷に共通です。</p>
+    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（希望休は赤い「休」で表示します）（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。並び順は上の「条件で並べ替え」か、入力パネルの「人を上へ」「人を下へ」で変えられます（全員の画面と印刷に共通）。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。ほかの部門の応援や配送に行く日は「栽培8h・栽培4h・出荷8h・出荷4h・配送・半日配送」のボタンで印を付けます（8hと配送は実働すべて、4hは4時間、半日配送は実働の半分を行き先の部門の時間に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
+    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・希望休・代休・有休・季節休・欠勤」の6種類で、上のボタンでも入れられます（希望休は表と印刷では赤い「休」で表示します。<code>希望</code> と打っても希望休になります）（「有」「有給」は有休に、「公休」は休にそろえます）。ほかの部門の応援や配送に行く日は、セルを選んで「栽培8h」「栽培4h」「出荷8h」「出荷4h」「配送」「半日配送」ボタンを押すか、<code>8-17栽4</code>・<code>8-17出8</code>・<code>8-17配</code>・<code>8-17半配</code> のように打ちます。8hと配送は実働すべて、4hは4時間（実働が短い日は実働まで）、半日配送は実働の半分を行き先の部門の時間に数え、残りは本来の部門に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。<br>並び順：「条件で並べ替え」で部門・勤務時間・出勤時刻などを3つまで組み合わせて並べられます。1人ずつ動かすときは、その人のセルか氏名を選んで「▲ 上へ」「▼ 下へ」か <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>、または氏名をつかんで上下にドラッグします（氏名を <kbd>Shift</kbd>+クリックすると何人かまとめて動かせます）。並び順は全員の画面と印刷に共通です。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -513,9 +520,12 @@ const fmt = h => (Math.round(h * 10) / 10).toLocaleString('ja-JP') + 'h';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 
 // 休みの種類（時間は0として扱う）。よくある書き方はそろえる
-const LEAVE_TYPES = ['休', '代休', '有休', '季節休', '欠勤'];
-const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
+const LEAVE_TYPES = ['休', '希望休', '代休', '有休', '季節休', '欠勤'];
+const LEAVE_ALIASES = { 'やす': '休', '公休': '休', '希望': '希望休', '有': '有休', '有給': '有休', '有給休暇': '有休', '季休': '季節休', '欠': '欠勤' };
 const isLeave = v => LEAVE_TYPES.includes(v);
+// 表と印刷での休みの書き方と色。希望休は「休」と書き、赤い文字で通常の休みと見分ける
+const leaveText = v => v === '希望休' ? '休' : v;
+const leaveCls = v => v === '欠勤' ? 'absent' : v === '希望休' ? 'wish' : 'leave';
 // 部門間の応援・配送の印。時間の後ろに付ける（'8:00-17:00配送'、'8:00-17:00栽培4h'）。
 // to＝時間を数える部門。share＝実働に対する割合、hours＝決まった時間（実働が短い日は実働まで）。残りは本来の部門に数える
 const SUPPORT_TAGS = {
@@ -555,7 +565,7 @@ const shortVal = v => String(v || '').replace(/:00/g, '');
 // セルの表示：時間は「8:00-」「17:00」の2段（印刷と同じ）。配送の印はセルの色と左上の文字で示す
 function cellHtml(v) {
   const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
-  return tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
+  return tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(leaveText(v));
 }
 // 実働時間：拘束5時間以上は1時間休憩。不正はnull
 function cellHours(v) {
@@ -961,7 +971,7 @@ function render() {
       const cls = ['cell'];
       if (c.d === 1) cls.push('mstart');
       const sp = supportSplit(v, hr);
-      if (isLeave(v)) cls.push('off', v === '欠勤' ? 'absent' : 'leave');
+      if (isLeave(v)) cls.push('off', leaveCls(v));
       else if (hr === null) cls.push('bad');
       if (sp) cls.push('sup', `sup-${sp.to}`, ...(sp.part ? ['part'] : []));
       // 応援・配送の分は行き先の部門へ、残りは本来の部門へ（行き先が自分の部門なら全部そのまま）
@@ -1188,7 +1198,7 @@ function updateMbar() {
   const own = divOf(m.dept);
   $('mbChips').innerHTML = times.map(t => `<button type="button" data-v="${esc(t)}">${esc(shortVal(t))}</button>`).join('')
     + supportBtns(own)
-    + LEAVE_TYPES.map(t => `<button type="button" data-v="${t}">${t}</button>`).join('')
+    + LEAVE_TYPES.map(t => `<button type="button"${t === '希望休' ? ' class="wish-btn"' : ''} data-v="${t}">${t}</button>`).join('')
     + '<button type="button" data-v="" class="danger">消す</button>';
 }
 // 選んだセル（範囲）に入れる。1マスだけのときは翌日へ進む
@@ -1279,7 +1289,7 @@ $('applyFixed').onclick = async () => {
 };
 $('clearSel').onclick = clearSelection;
 // 選んだセルに休みを入れるボタン
-$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button" data-leave="${t}">${t}</button>`).join('') + supportBtns('');
+$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button"${t === '希望休' ? ' class="wish-btn" title="表では赤い「休」と表示します"' : ''} data-leave="${t}">${t}</button>`).join('') + supportBtns('');
 $('leaveBtns').addEventListener('mousedown', ev => ev.preventDefault()); // 選択範囲を保つ
 $('leaveBtns').addEventListener('click', ev => {
   if (ev.target.dataset.tag) { applySupport(ev.target.dataset.tag); return; }
@@ -1706,11 +1716,11 @@ function renderPrint(shrink = 1) {
       const v = valueOn(m, d);
       if (cellHours(v) && tallied(m)) cnt[d.iso] = (cnt[d.iso] || 0) + 1;
       const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
-      const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(v);
+      const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(leaveText(v));
       const off = isLeave(v);
       const sp = supportSplit(v, cellHours(v)); if (sp) usedTags.add(sp.tag);
-      const fs = tm ? timeFont : off ? Math.min(offFont, (dayW - 1) / v.length) : timeFont;
-      h += `<td class="${off ? 'off' : ''}${v === '欠勤' ? ' absent' : ''}${sp ? ` sp sp-${sp.to}${sp.part ? ' part' : ''}` : ''}${weCls(d)}"${sp ? ` data-tl="${sp.mark}"` : ''} style="font-size:${fs.toFixed(2)}mm">${body}</td>`;
+      const fs = tm ? timeFont : off ? Math.min(offFont, (dayW - 1) / leaveText(v).length) : timeFont;
+      h += `<td class="${off ? 'off' : ''}${v === '欠勤' ? ' absent' : v === '希望休' ? ' wish' : ''}${sp ? ` sp sp-${sp.to}${sp.part ? ' part' : ''}` : ''}${weCls(d)}"${sp ? ` data-tl="${sp.mark}"` : ''} style="font-size:${fs.toFixed(2)}mm">${body}</td>`;
     });
     h += '</tr>';
     prevDiv = div;
@@ -1834,7 +1844,7 @@ function renderPersonal(all, days) {
         if (!inRange(d.iso)) { cls.push('out'); h += `<td class="${cls.join(' ')}">${dd}</td>`; return; }
         const v = valueOn(m, d), hr = cellHours(v), { time, tag } = splitVal(normVal(v));
         let body = '';
-        if (isLeave(v)) { cls.push('off'); if (v === '欠勤') cls.push('absent'); leaves[v] = (leaves[v] || 0) + 1; body = `<div class="tm" style="font-size:${offFont.toFixed(2)}mm">${esc(v)}</div>`; }
+        if (isLeave(v)) { cls.push('off'); if (v === '欠勤') cls.push('absent'); if (v === '希望休') cls.push('wish'); leaves[v] = (leaves[v] || 0) + 1; body = `<div class="tm" style="font-size:${offFont.toFixed(2)}mm">${esc(leaveText(v))}</div>`; }
         else if (v) {
           const tm = time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
           body = `<div class="tm" style="font-size:${timeFont.toFixed(2)}mm">${tm ? `${tm[1]}〜${tm[2]}` : esc(v)}</div>`;
