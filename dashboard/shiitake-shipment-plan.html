@@ -348,6 +348,49 @@
     .panel-head-right{ width:100%; justify-content:space-between; }
     .site-toggle{ width:100%; justify-content:center; }
   }
+  /* ===================== セル範囲選択・集計帯 ===================== */
+  /* 直近工数計画（work-hours-forecast.html、PR #498）と同じ見た目・考え方。
+     選べるセル：ドラッグ中にブラウザ既定の文字選択（青い反転）が起きないようにする。
+     today-col・合計行・在庫予測の背景と見分けがつく専用の背景色(.cell-selected)を重ねる */
+  .selectable-cell{ cursor:cell; -webkit-user-select:none; user-select:none; }
+  /* 当日の列（.sched/.harvest/.stock td.today-col）の背景も!importantのため、それより詳細度を
+     上げて選択の色が必ず勝つようにする */
+  table td.selectable-cell.cell-selected{
+    background:#bfe0fb !important;
+    box-shadow:inset 0 0 0 1px #2f6fa8;
+  }
+
+  /* 下の集計帯の分だけ、ページ下端に余白を確保する。帯の高さ(文字1行+最小限の余白)に
+     合わせた値とし、iPhone等のホームインジケータ分はenv(safe-area-inset-bottom)で追加確保する */
+  body.has-agg-bar{ padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
+
+  .agg-bar{
+    display:none;
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    background:var(--brown-deep); color:#fff;
+    padding:3px 18px calc(3px + env(safe-area-inset-bottom));
+    gap:4px 16px; align-items:center; flex-wrap:wrap;
+    box-shadow:0 -2px 10px rgba(0,0,0,.2);
+    font-size:13.5px; line-height:1.3;
+  }
+  .agg-bar.show{ display:flex; }
+  .agg-bar .agg-item{ display:flex; gap:4px; align-items:baseline; white-space:nowrap; }
+  .agg-bar .agg-item .k{ opacity:.8; font-size:11.5px; }
+  .agg-bar .agg-item .v{ font-weight:700; font-variant-numeric:tabular-nums; }
+  .agg-bar .agg-warn{ color:#ffd479; font-weight:600; white-space:nowrap; font-size:12px; }
+  .agg-bar .agg-clear{
+    margin-left:auto; padding:2px 10px; border-radius:6px;
+    border:1px solid rgba(255,255,255,.45); background:transparent; color:#fff;
+    font-size:11.5px; line-height:1.3; cursor:pointer;
+  }
+  .agg-bar .agg-clear:hover{ background:rgba(255,255,255,.12); }
+
+  @media (max-width:640px){
+    /* 1行に収まらずボタン・注意表示が折り返して2行になる場合があるため、
+       帯本体より少し広めに確保する */
+    body.has-agg-bar{ padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+    .agg-bar{ font-size:12px; padding:3px 12px calc(3px + env(safe-area-inset-bottom)); }
+  }
 </style>
 </head>
 <body>
@@ -2397,6 +2440,310 @@
     computeHarvestDetailDayValues: computeHarvestDetailDayValues,
     computeHarvestDetailRow: computeHarvestDetailRow,
     computeStockDetailSeries: computeStockDetailSeries,
+  });
+})();
+</script>
+<div id="aggBar" class="agg-bar" role="status">
+  <span class="agg-item"><span class="k">合計</span><span class="v" id="aggSum">－</span></span>
+  <span class="agg-item"><span class="k">平均</span><span class="v" id="aggAvg">－</span></span>
+  <span class="agg-item"><span class="k">個数</span><span class="v" id="aggCount">0</span></span>
+  <span class="agg-item"><span class="k">最小</span><span class="v" id="aggMin">－</span></span>
+  <span class="agg-item"><span class="k">最大</span><span class="v" id="aggMax">－</span></span>
+  <span class="agg-warn" id="aggWarnUnit" style="display:none;">kgと比率（%）が混在しています</span>
+  <span class="agg-warn" id="aggWarnTotal" style="display:none;">合計の行を含むため、二重に数えています</span>
+  <span class="agg-warn" id="aggWarnGrade" style="display:none;">秀・優はLの内訳のため、二重に数えています</span>
+  <button type="button" class="agg-clear" id="aggClearBtn">選択を解除</button>
+</div>
+
+<script>
+// ── セルの範囲選択と、選んだセルの集計（画面下の帯） ──
+// 直近工数計画（work-hours-forecast.html、PR #498）と同じ操作感：ドラッグで四角い範囲、
+// Shift＋クリックで範囲を広げる、Ctrl（Mac は Cmd）＋クリックで1セルずつ追加・解除
+// （別の表のセルも積み上げられる。ドラッグ・Shiftの範囲は同じ表の中だけ）、スマートフォンは
+// タップで1セルずつ追加・解除。表の数字・計算・収穫見込の入力には手を加えない
+// （各セルの表示文字列を読むだけ）。
+(function(){
+  var DASH = '－';
+  // 選べる表：在庫・出荷予定・収穫予測・在庫予測と、収穫予測・在庫予測の「詳細」
+  var SELECTABLE_TABLE_IDS = ['table1', 'table2', 'table2detail', 'table3', 'table3detail'];
+  var SIZE_ROWS = ['M', 'L', '秀', '優', '2L', '袋'];
+
+  // 選べるセル：上の表のtbodyの<td>（数字のセル）。見出し（thead・行頭のサイズ名<th>）と、
+  // 入力欄を含むセル（収穫予測の詳細の合計の行）は選べない
+  function markSelectableCells(){
+    SELECTABLE_TABLE_IDS.forEach(function(id){
+      var table = document.getElementById(id);
+      if (!table) return;
+      table.querySelectorAll('tbody td').forEach(function(td){
+        if (td.querySelector('input, select, textarea, button')) return;
+        td.classList.add('selectable-cell');
+      });
+    });
+  }
+
+  // セルの行の名前（サイズ名：M・L・秀・優・2L・袋・合計）。秀・優の行の見出しには
+  // 比率の注記が付くことがある（例：「秀_60」）ため、先頭のサイズ名だけを取り出す
+  function rowLabelOf(cell){
+    var tr = cell.closest('tr');
+    var th = tr && tr.querySelector('th');
+    var text = th ? th.textContent.trim() : '';
+    var m = text.match(/^(合計|2L|秀|優|袋|M|L)/);
+    return m ? m[1] : text;
+  }
+  // 比率の列（収穫比率・在庫比率）は「%」、それ以外は「kg」
+  function unitOf(cell){ return cell.classList.contains('ratio-col') ? '%' : 'kg'; }
+
+  // セルの表示文字列を数値にする。「－」・空欄・数字でないものはnull（数えない）。
+  // カンマ・末尾の「%」は除く。「0.0」は0として数える
+  function parseCellNumber(text){
+    var t = String(text == null ? '' : text).trim();
+    if (t === '' || t === DASH || t === '-' || t === '—') return null;
+    t = t.replace(/,/g, '').replace(/%$/, '').replace(/^＋/, '+').replace(/^[−－]/, '-');
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t)) return null;
+    var n = Number(t);
+    return isNaN(n) ? null : n;
+  }
+
+  var cellSelection = new Set(); // 現在選択中の<td>要素の集合
+  var lastAnchorCell = null; // Shift+クリックで範囲の起点にする最後の単独選択セル
+  var dragState = null; // ドラッグ中だけ使う一時状態
+
+  function cellRowCol(cell){
+    var tr = cell.closest('tr');
+    var tbody = tr ? tr.parentElement : null;
+    var table = cell.closest('table');
+    if (!tr || !tbody || !table) return null;
+    var row = Array.prototype.indexOf.call(tbody.children, tr);
+    var col = cell.cellIndex;
+    if (row < 0 || col < 0) return null;
+    return { table: table, tbody: tbody, row: row, col: col };
+  }
+
+  // anchorCellからcurrentCellまでの四角い範囲に含まれる選択可能セルを返す（同じ表の中のみ。
+  // 表が違う場合はanchorCell単体のみを返す）
+  function cellsInRect(anchorCell, currentCell){
+    var a = cellRowCol(anchorCell);
+    var b = cellRowCol(currentCell);
+    if (!a) return [];
+    if (!b || a.table !== b.table) return [anchorCell];
+    var r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
+    var c0 = Math.min(a.col, b.col), c1 = Math.max(a.col, b.col);
+    var out = [];
+    for (var r = r0; r <= r1; r++) {
+      var tr = a.tbody.children[r];
+      if (!tr) continue;
+      for (var c = c0; c <= c1; c++) {
+        var cell = tr.cells[c];
+        if (cell && cell.classList.contains('selectable-cell')) out.push(cell);
+      }
+    }
+    return out;
+  }
+
+  function clearCellSelection(){
+    if (!cellSelection.size && !lastAnchorCell) { updateSelectionVisuals(); return; }
+    cellSelection = new Set();
+    lastAnchorCell = null;
+    dragState = null;
+    updateSelectionVisuals();
+  }
+
+  function toggleCellInSelection(cell){
+    if (cellSelection.has(cell)) cellSelection.delete(cell);
+    else cellSelection.add(cell);
+    lastAnchorCell = cell;
+    updateSelectionVisuals();
+  }
+
+  // 選択中のセル集合から集計値を算出する。純粋関数（テストから直接呼べる）。
+  // 「－」・空欄のセルは計算にも個数にも入れない。
+  // mixedUnit：kgのセルと比率（%）のセルが混在
+  // doubleCountTotal：合計の行と各サイズ（M・L・秀・優・2L・袋）の行を一緒に選んだ
+  // doubleCountGrade：Lの行と秀・優の行を一緒に選んだ（秀・優はLの内訳）
+  function computeSelectionAggregation(cells){
+    var nums = [];
+    var units = {};
+    var rows = {};
+    var percentSign = true;
+    cells.forEach(function(cell){
+      rows[rowLabelOf(cell)] = true;
+      var n = parseCellNumber(cell.textContent);
+      if (n === null) return;
+      nums.push(n);
+      var unit = unitOf(cell);
+      units[unit] = true;
+      if (unit !== '%' || !/%$/.test(cell.textContent.trim())) percentSign = false;
+    });
+    var count = nums.length;
+    var sum = count ? nums.reduce(function(a, b){ return a + b; }, 0) : null;
+    var unitList = Object.keys(units);
+    var hasSize = SIZE_ROWS.some(function(r){ return rows[r]; });
+    return {
+      count: count, sum: sum,
+      avg: count ? sum / count : null,
+      min: count ? Math.min.apply(null, nums) : null,
+      max: count ? Math.max.apply(null, nums) : null,
+      unit: unitList.length === 1 ? unitList[0] : (unitList.length ? 'mixed' : null),
+      percentSign: count > 0 && percentSign,
+      mixedUnit: unitList.length > 1,
+      doubleCountTotal: !!rows['合計'] && hasSize,
+      doubleCountGrade: !!rows['L'] && (!!rows['秀'] || !!rows['優']),
+    };
+  }
+
+  // kgは小数1桁、%（比率）は小数2桁（3桁区切り）。単位が混在するときは小数2桁
+  function fmtAgg(v, agg){
+    if (v === null || v === undefined || isNaN(v)) return DASH;
+    var digits = agg.unit === 'kg' ? 1 : 2;
+    return Number(v).toLocaleString('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + (agg.percentSign ? '%' : '');
+  }
+
+  function updateAggBar(){
+    var bar = document.getElementById('aggBar');
+    if (!bar) return;
+    var cells = Array.from(cellSelection);
+    if (!cells.length) {
+      bar.classList.remove('show');
+      document.body.classList.remove('has-agg-bar');
+      return;
+    }
+    var agg = computeSelectionAggregation(cells);
+    document.getElementById('aggSum').textContent = fmtAgg(agg.sum, agg);
+    document.getElementById('aggAvg').textContent = fmtAgg(agg.avg, agg);
+    document.getElementById('aggCount').textContent = String(agg.count);
+    document.getElementById('aggMin').textContent = fmtAgg(agg.min, agg);
+    document.getElementById('aggMax').textContent = fmtAgg(agg.max, agg);
+    document.getElementById('aggWarnUnit').style.display = agg.mixedUnit ? '' : 'none';
+    document.getElementById('aggWarnTotal').style.display = agg.doubleCountTotal ? '' : 'none';
+    document.getElementById('aggWarnGrade').style.display = agg.doubleCountGrade ? '' : 'none';
+    bar.classList.add('show');
+    document.body.classList.add('has-agg-bar');
+  }
+
+  function updateSelectionVisuals(){
+    document.querySelectorAll('.cell-selected').forEach(function(c){
+      if (!cellSelection.has(c)) c.classList.remove('cell-selected');
+    });
+    cellSelection.forEach(function(c){ c.classList.add('cell-selected'); });
+    updateAggBar();
+  }
+
+  // タッチ操作の後、ブラウザが互換性のため送る合成マウスイベント(mousedown等)を
+  // 誤って「新しいクリック」として扱わないよう、直前のtouchendから短い間はmousedownを無視する
+  var lastTouchEndAt = 0;
+  document.addEventListener('mousedown', function(e){
+    if (e.button !== 0) return; // 左クリックのみ
+    if (Date.now() - lastTouchEndAt < 800) return; // タッチ操作に続く合成イベントは無視する
+    var cell = e.target.closest && e.target.closest('.selectable-cell');
+    if (!cell) {
+      // 表の外のクリックで選択を解除する。ただし集計の帯と、「詳細」の開閉（summary）では
+      // 解除しない（詳細を開閉しても他の表の選択は残す）
+      if (!e.target.closest('.agg-bar') && !e.target.closest('summary')) clearCellSelection();
+      return;
+    }
+    e.preventDefault(); // ドラッグ中に文字列選択（青い反転）が起きないようにする
+    var additive = e.ctrlKey || e.metaKey;
+    var extendFromAnchor = e.shiftKey && lastAnchorCell;
+    var anchor = extendFromAnchor ? lastAnchorCell : cell;
+    var base = additive ? new Set(cellSelection) : new Set();
+    if (additive && !extendFromAnchor && cellSelection.has(cell)) {
+      // Ctrl（Cmd）＋クリックで、選択済みのセルは解除する
+      cellSelection.delete(cell);
+      lastAnchorCell = cell;
+      dragState = null;
+      updateSelectionVisuals();
+      return;
+    }
+    dragState = { anchor: anchor, base: base };
+    cellSelection = new Set(base);
+    cellsInRect(anchor, cell).forEach(function(c){ cellSelection.add(c); });
+    if (!extendFromAnchor) lastAnchorCell = cell;
+    updateSelectionVisuals();
+  });
+
+  // 指定位置のセル。ドラッグを始めると画面下に集計の帯が出るため、帯の下に隠れた
+  // セル（画面の一番下に見えている行）にもドラッグが届くよう、重なった要素の中から探す
+  function selectableCellAtPoint(x, y){
+    var els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
+    for (var i = 0; i < els.length; i++) {
+      var cell = els[i] && els[i].closest && els[i].closest('.selectable-cell');
+      if (cell) return cell;
+    }
+    return null;
+  }
+
+  document.addEventListener('mousemove', function(e){
+    if (!dragState) return;
+    var cell = selectableCellAtPoint(e.clientX, e.clientY);
+    if (!cell) return;
+    cellSelection = new Set(dragState.base);
+    cellsInRect(dragState.anchor, cell).forEach(function(c){ cellSelection.add(c); });
+    updateSelectionVisuals();
+  });
+
+  document.addEventListener('mouseup', function(){ dragState = null; });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') clearCellSelection();
+  });
+
+  // スマートフォン・タブレット：ドラッグの代わりに、タップのたびに選択に加える/外す。
+  // 表のスクロール（指でなぞる操作）と区別するため、タッチ開始〜終了の移動量が小さい
+  // 場合だけタップ（セル選択）として扱う
+  var touchStartCell = null, touchStartPos = null;
+  document.addEventListener('touchstart', function(e){
+    var t = e.touches[0];
+    if (!t) return;
+    var el = document.elementFromPoint(t.clientX, t.clientY);
+    var cell = el && el.closest && el.closest('.selectable-cell');
+    touchStartCell = cell || null;
+    touchStartPos = cell ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', function(e){
+    lastTouchEndAt = Date.now();
+    if (!touchStartCell || !touchStartPos) { touchStartCell = null; touchStartPos = null; return; }
+    var t = e.changedTouches[0];
+    if (t) {
+      var dx = Math.abs(t.clientX - touchStartPos.x), dy = Math.abs(t.clientY - touchStartPos.y);
+      if (dx < 10 && dy < 10) toggleCellInSelection(touchStartCell);
+    }
+    touchStartCell = null; touchStartPos = null;
+  }, { passive: true });
+
+  document.getElementById('aggClearBtn').addEventListener('click', clearCellSelection);
+
+  // 「詳細」を閉じたら、その詳細の表で選んでいたセルだけを選択から外す（他の表の選択は残す）
+  ['harvestDetailSection', 'stockDetailSection'].forEach(function(id){
+    var details = document.getElementById(id);
+    if (!details) return;
+    details.addEventListener('toggle', function(){
+      if (details.open) return;
+      var changed = false;
+      Array.from(cellSelection).forEach(function(c){
+        if (details.contains(c)) { cellSelection.delete(c); changed = true; }
+      });
+      if (lastAnchorCell && details.contains(lastAnchorCell)) lastAnchorCell = null;
+      if (changed) updateSelectionVisuals();
+    });
+  });
+
+  // 基準日・実績日・拠点の切り替えや、詳細の再計算で表の数字が描き直されたら、選択を
+  // 解除して帯を消す。各画面の描画処理には手を加えず、表の中身（文字）の書き換えを
+  // 見張って判断する（選択の色付けはclassの変更のため、ここでは反応しない）
+  var observer = new MutationObserver(function(){ clearCellSelection(); });
+  markSelectableCells();
+  SELECTABLE_TABLE_IDS.forEach(function(id){
+    var table = document.getElementById(id);
+    var tbody = table && table.querySelector('tbody');
+    if (tbody) observer.observe(tbody, { childList: true, characterData: true, subtree: true });
+  });
+
+  window.__test = window.__test || {};
+  Object.assign(window.__test, {
+    parseSelectionCellNumber: parseCellNumber,
+    computeSelectionAggregation: computeSelectionAggregation,
+    clearCellSelection: clearCellSelection,
+    getCellSelection: function(){ return Array.from(cellSelection); },
   });
 })();
 </script>
