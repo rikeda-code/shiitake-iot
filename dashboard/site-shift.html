@@ -80,7 +80,8 @@ td.cell.absent { color: var(--sun); }
 /* 希望休：文字は「休」のまま、赤い文字で通常の休み（黒）と見分ける */
 td.cell.off.leave { color: var(--ink); }
 td.cell.off.wish { color: var(--wish); }
-.leave-btns .wish-btn, .mbar-chips .wish-btn { color: var(--wish); border-color: var(--wish); }
+.leave-btns .wish-btn, .mbar-chips .wish-btn { color: var(--wish); border-color: var(--wish); font-weight: 700; }
+.wish-note { margin: 0; } .wish-note b { color: var(--ink); } .wish-note b.wish, .mbar-head .now.wish { color: var(--wish); }
 td.cell.custom { font-size: .68rem; color: var(--accent); }
 /* 応援・配送の日：行き先の部門の色の地（4h・半日配送は斜めに半分）と左上の印（配・半配・栽8・栽4・出8・出4） */
 td.cell.sup { background: var(--sup-soft); }
@@ -231,6 +232,7 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table td.off { color: #333; font-weight: 700; }
 .pp-table td.absent { color: #b91c1c; }
 .pp-table td.wish { color: #dc2626; }
+.pp-head .wish-key, .pc-sum .wish-key { color: #dc2626; font-weight: 700; }
 /* 配送の日：青い地と左上の「配」「半」 */
 .sp-配送 { --pb: #dbe8f6; --pc: #1d4f8a; }
 .sp-栽培 { --pb: #dcefe2; --pc: #1f6b3d; }
@@ -423,9 +425,10 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
     </fieldset>
   </div>
   <div class="sheet edit-only">
+    <p class="hint wish-note">注：<b>休</b>（黒）＝休み　<b class="wish">休</b>（赤）＝希望休</p>
     <div class="grid-box" id="gridBox"><div class="loading">読み込み中…</div></div>
-    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（希望休は赤い「休」で表示します）（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。並び順は上の「条件で並べ替え」か、入力パネルの「人を上へ」「人を下へ」で変えられます（全員の画面と印刷に共通）。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。ほかの部門の応援や配送に行く日は「栽培8h・栽培4h・出荷8h・出荷4h・配送・半日配送」のボタンで印を付けます（8hと配送は実働すべて、4hは4時間、半日配送は実働の半分を行き先の部門の時間に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
-    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・希望休・代休・有休・季節休・欠勤」の6種類で、上のボタンでも入れられます（希望休は表と印刷では赤い「休」で表示します。<code>希望</code> と打っても希望休になります）（「有」「有給」は有休に、「公休」は休にそろえます）。ほかの部門の応援や配送に行く日は、セルを選んで「栽培8h」「栽培4h」「出荷8h」「出荷4h」「配送」「半日配送」ボタンを押すか、<code>8-17栽4</code>・<code>8-17出8</code>・<code>8-17配</code>・<code>8-17半配</code> のように打ちます。8hと配送は実働すべて、4hは4時間（実働が短い日は実働まで）、半日配送は実働の半分を行き先の部門の時間に数え、残りは本来の部門に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。<br>並び順：「条件で並べ替え」で部門・勤務時間・出勤時刻などを3つまで組み合わせて並べられます。1人ずつ動かすときは、その人のセルか氏名を選んで「▲ 上へ」「▼ 下へ」か <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>、または氏名をつかんで上下にドラッグします（氏名を <kbd>Shift</kbd>+クリックすると何人かまとめて動かせます）。並び順は全員の画面と印刷に共通です。</p>
+    <p class="hint touch-only">セルをタップすると、画面の下に入力パネルが出ます。時間を打って「入れる」を押すか、その人の固定シフト・よく使う時間・休みのボタンを押すと入ります（赤い「休」は希望休）（1マスずつ入れると翌日へ進みます）。何日分かまとめて入れるときは「範囲選択」にチェックを入れて、終わりのセルをタップします。表は指で左右・上下に動かせます。並び順は上の「条件で並べ替え」か、入力パネルの「人を上へ」「人を下へ」で変えられます（全員の画面と印刷に共通）。時間は <code>8-17</code>、<code>8:30-15</code> のように入れます。ほかの部門の応援や配送に行く日は「栽培8h・栽培4h・出荷8h・出荷4h・配送・半日配送」のボタンで印を付けます（8hと配送は実働すべて、4hは4時間、半日配送は実働の半分を行き先の部門の時間に数えます。もう一度押すと外れます）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。</p>
+    <p class="hint mouse-only">セルをクリックして選択。ドラッグか <kbd>Shift</kbd>+クリックで範囲選択。文字を打つと入力、<kbd>Enter</kbd>で確定、<kbd>Delete</kbd>で消去。<kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> でExcelやスプレッドシートと相互にコピペできます。選んだ範囲の右下の青い四角をドラッグすると、同じ内容を縦か横に広げられます（2日分を選んで広げると、その並びをくり返します）。時間は <code>8-17</code>、<code>8:30-15</code>、<code>8:00〜17:00</code> のどれで入れても同じ表記にそろえます。休みは「休・代休・有休・季節休・欠勤」の5種類で、上のボタンでも入れられます。希望休は赤い「休」のボタンで入れ、表と印刷では赤い「休」で表示します（<code>希望</code> と打っても入ります）（「有」「有給」は有休に、「公休」は休にそろえます）。ほかの部門の応援や配送に行く日は、セルを選んで「栽培8h」「栽培4h」「出荷8h」「出荷4h」「配送」「半日配送」ボタンを押すか、<code>8-17栽4</code>・<code>8-17出8</code>・<code>8-17配</code>・<code>8-17半配</code> のように打ちます。8hと配送は実働すべて、4hは4時間（実働が短い日は実働まで）、半日配送は実働の半分を行き先の部門の時間に数え、残りは本来の部門に数えます（もう一度押すと印を外します）。休憩は拘束5時間以上で1時間を引きます。斜線のセルは入社前・退職後の日です。印刷は上の「印刷・PDF」タブから行います。<br>並び順：「条件で並べ替え」で部門・勤務時間・出勤時刻などを3つまで組み合わせて並べられます。1人ずつ動かすときは、その人のセルか氏名を選んで「▲ 上へ」「▼ 下へ」か <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>、または氏名をつかんで上下にドラッグします（氏名を <kbd>Shift</kbd>+クリックすると何人かまとめて動かせます）。並び順は全員の画面と印刷に共通です。</p>
   </div>
 
   <div class="panels two edit-only">
@@ -1188,7 +1191,8 @@ function updateMbar() {
   const v = data[m.key]?.[c.iso] || '';
   $('mbWho').textContent = multi ? `${s.r1 - s.r0 + 1}人 × ${s.c1 - s.c0 + 1}日を選択中` : m.name;
   $('mbDay').textContent = multi ? '' : `${c.m}/${c.d}（${WD[c.wd]}）`;
-  $('mbNow').textContent = multi ? '' : !canEdit(cursor.r, cursor.c) ? '入社前・退職後の日' : `今：${v ? shortVal(v) : '空欄'}`;
+  $('mbNow').textContent = multi ? '' : !canEdit(cursor.r, cursor.c) ? '入社前・退職後の日' : `今：${v ? shortVal(leaveText(v)) : '空欄'}`;
+  $('mbNow').classList.toggle('wish', !multi && v === '希望休');
   // ボタン：その曜日の固定シフト → この人がよく使う時間 → 休みの種類 → 消す
   const freq = {};
   Object.values(data[m.key] || {}).forEach(x => { const t = splitVal(x).time; if (cellHours(t)) freq[t] = (freq[t] || 0) + 1; }); // 応援・配送の印は除いた時間で数える
@@ -1198,7 +1202,7 @@ function updateMbar() {
   const own = divOf(m.dept);
   $('mbChips').innerHTML = times.map(t => `<button type="button" data-v="${esc(t)}">${esc(shortVal(t))}</button>`).join('')
     + supportBtns(own)
-    + LEAVE_TYPES.map(t => `<button type="button"${t === '希望休' ? ' class="wish-btn"' : ''} data-v="${t}">${t}</button>`).join('')
+    + LEAVE_TYPES.map(t => `<button type="button"${t === '希望休' ? ' class="wish-btn" title="希望休（表では赤い「休」）"' : ''} data-v="${t}">${leaveText(t)}</button>`).join('')
     + '<button type="button" data-v="" class="danger">消す</button>';
 }
 // 選んだセル（範囲）に入れる。1マスだけのときは翌日へ進む
@@ -1289,7 +1293,7 @@ $('applyFixed').onclick = async () => {
 };
 $('clearSel').onclick = clearSelection;
 // 選んだセルに休みを入れるボタン
-$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button"${t === '希望休' ? ' class="wish-btn" title="表では赤い「休」と表示します"' : ''} data-leave="${t}">${t}</button>`).join('') + supportBtns('');
+$('leaveBtns').innerHTML = LEAVE_TYPES.map(t => `<button type="button"${t === '希望休' ? ' class="wish-btn" title="希望休（表では赤い「休」）"' : ''} data-leave="${t}">${leaveText(t)}</button>`).join('') + supportBtns('');
 $('leaveBtns').addEventListener('mousedown', ev => ev.preventDefault()); // 選択範囲を保つ
 $('leaveBtns').addEventListener('click', ev => {
   if (ev.target.dataset.tag) { applySupport(ev.target.dataset.tag); return; }
@@ -1705,6 +1709,7 @@ function renderPrint(shrink = 1) {
   const yr = first.iso.slice(0, 4);
   let h = `<div class="pp-head"><h2>${esc($('site').value)}　シフト表　${yr}年${first.m}月${first.d}日〜${last.m}月${last.d}日</h2><!--deliv--></div>`;
   const usedTags = new Set(); // 印刷する範囲で使われている応援・配送の印（見出しに凡例を出す）
+  let anyWish = false;        // 希望休があれば見出しに注釈を出す
   h += `<table class="pp-table" style="font-size:${baseFont.toFixed(2)}mm"><colgroup><col style="width:${nameW}mm"><col style="width:${deptW}mm">${days.map(() => `<col style="width:${dayW.toFixed(2)}mm">`).join('')}</colgroup>`;
   h += `<thead><tr style="height:${(rowH * headH).toFixed(2)}mm"><th>氏名</th><th>部門</th>${days.map(d => `<th class="${headCls(d)}">${d.d === 1 || d === first ? `<span class="mo">${d.m}月</span>` : ''}${d.d}<span class="wd">${WD[d.wd]}</span></th>`).join('')}</tr></thead><tbody>`;
   const cnt = {};
@@ -1717,7 +1722,7 @@ function renderPrint(shrink = 1) {
       if (cellHours(v) && tallied(m)) cnt[d.iso] = (cnt[d.iso] || 0) + 1;
       const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
       const body = tm ? `<span class="t2">${tm[1]}-<br>${tm[2]}</span>` : esc(leaveText(v));
-      const off = isLeave(v);
+      const off = isLeave(v); if (v === '希望休') anyWish = true;
       const sp = supportSplit(v, cellHours(v)); if (sp) usedTags.add(sp.tag);
       const fs = tm ? timeFont : off ? Math.min(offFont, (dayW - 1) / leaveText(v).length) : timeFont;
       h += `<td class="${off ? 'off' : ''}${v === '欠勤' ? ' absent' : v === '希望休' ? ' wish' : ''}${sp ? ` sp sp-${sp.to}${sp.part ? ' part' : ''}` : ''}${weCls(d)}"${sp ? ` data-tl="${sp.mark}"` : ''} style="font-size:${fs.toFixed(2)}mm">${body}</td>`;
@@ -1730,6 +1735,7 @@ function renderPrint(shrink = 1) {
     h += `<tfoot><tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d.iso] || ''}</td>`).join('')}</tr></tfoot>`;
   }
   h += '</table>';
+  if (anyWish) h = h.replace('<!--deliv-->', '<span class="meta">　注：<span class="wish-key">休</span>（赤）＝希望休</span><!--deliv-->');
   if (usedTags.size) h = h.replace('<!--deliv-->', '<span class="meta">　' + Object.keys(SUPPORT_TAGS).filter(t => usedTags.has(t))
     .map(t => `<span class="dv-key sp-${SUPPORT_TAGS[t].to}">${SUPPORT_TAGS[t].mark}</span>＝${t}`).join('　') + '</span>');
   onePage(h);
@@ -1832,7 +1838,7 @@ function renderPersonal(all, days) {
     ? `${first.iso.slice(0, 4)}年${first.m}月${first.d}日〜${last.m}月${last.d}日`
     : `${first.iso.slice(0, 4)}年${first.m}月${first.d}日〜${last.iso.slice(0, 4)}年${last.m}月${last.d}日`;
   const pages = list.map(m => {
-    let work = 0, hours = 0; const leaves = {}, tagDays = {};
+    let work = 0, hours = 0, wishDays = 0; const leaves = {}, tagDays = {};
     let h = `<div class="print-page"><div class="pc-head"><span class="who">${esc(m.name)}</span><span class="dp">${esc(m.dept)}</span><span class="ttl">${esc($('site').value)}　シフト表　${span}</span></div>`;
     h += `<table class="pc-cal"><thead><tr>${FX_ORDER.map(wd => `<th class="${wd === 0 ? 'sun' : wd === 6 ? 'sat' : ''}">${WD[wd]}</th>`).join('')}</tr></thead><tbody>`;
     weeks.forEach(w => {
@@ -1844,7 +1850,7 @@ function renderPersonal(all, days) {
         if (!inRange(d.iso)) { cls.push('out'); h += `<td class="${cls.join(' ')}">${dd}</td>`; return; }
         const v = valueOn(m, d), hr = cellHours(v), { time, tag } = splitVal(normVal(v));
         let body = '';
-        if (isLeave(v)) { cls.push('off'); if (v === '欠勤') cls.push('absent'); if (v === '希望休') cls.push('wish'); leaves[v] = (leaves[v] || 0) + 1; body = `<div class="tm" style="font-size:${offFont.toFixed(2)}mm">${esc(leaveText(v))}</div>`; }
+        if (isLeave(v)) { cls.push('off'); if (v === '欠勤') cls.push('absent'); if (v === '希望休') { cls.push('wish'); wishDays++; } leaves[leaveText(v)] = (leaves[leaveText(v)] || 0) + 1; body = `<div class="tm" style="font-size:${offFont.toFixed(2)}mm">${esc(leaveText(v))}</div>`; }
         else if (v) {
           const tm = time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
           body = `<div class="tm" style="font-size:${timeFont.toFixed(2)}mm">${tm ? `${tm[1]}〜${tm[2]}` : esc(v)}</div>`;
@@ -1859,7 +1865,7 @@ function renderPersonal(all, days) {
     h += '</tbody></table>';
     const lv = LEAVE_TYPES.filter(t => leaves[t]).map(t => `${t} ${leaves[t]}日`).join('・');
     h += `<div class="pc-sum"><span>出勤 <b>${work}</b>日</span><span>勤務時間 <b>${fmt(hours)}</b></span>${lv ? `<span>休み ${lv}</span>` : ''}${Object.keys(tagDays).length ? `<span>応援・配送 ${Object.keys(SUPPORT_TAGS).filter(t => tagDays[t]).map(t => `${t} ${tagDays[t]}日`).join('・')}</span>` : ''}`
-      + `<span class="note">実働は拘束5時間以上のとき休憩1時間を引いた時間です</span></div></div>`;
+      + `${wishDays ? '<span>注：<span class="wish-key">休</span>（赤）＝希望休</span>' : ''}<span class="note">実働は拘束5時間以上のとき休憩1時間を引いた時間です</span></div></div>`;
     return h;
   });
   $('previewScale').innerHTML = pages.join('');
