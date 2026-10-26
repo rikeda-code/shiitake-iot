@@ -439,7 +439,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
       <div class="scroll-x"><table class="mem-table" id="memTable"></table></div>
       <form class="add-form" id="addForm">
         <label>氏名<input id="newName" required placeholder="例：中村 陽子"></label>
-        <label>部門<select id="newRole"><option>栽培</option><option>出荷</option><option>配送・栽培</option><option>配送・出荷</option></select></label>
+        <label>部門<select id="newRole"></select></label>
         <label>雇用区分<select id="newEmp"><option>アルバイト</option><option>社員</option><option>技能実習生</option></select></label>
         <label>入社日<input type="date" id="newJoin" required></label>
         <button class="primary" type="submit">登録</button>
@@ -1509,7 +1509,9 @@ $('fxSave').onclick = async () => {
 /* ── メンバー ── */
 let retiring = null, moving = null; // 退職・異動の入力中の人／部門変更の入力中の人
 // 部門変更で選べる部門（整理済み_Mの部門列に書く値）
-const DEPT_CHOICES = ['栽培', '出荷', '配送', '配送・栽培', '配送・出荷'];
+// 部門の選択肢（新人登録・部門変更で共通）。整理済み_Mにある書き方のうち、シフト表に載る部門（営業・事務・培養は載せない）
+const DEPT_CHOICES = ['栽培', '出荷', '配送', '配送・栽培', '配送・出荷', '生産部長'];
+$('newRole').innerHTML = DEPT_CHOICES.map(d => `<option>${d}</option>`).join('');
 const md = s => s ? `${s.slice(0, 4)}/${+s.slice(5, 7)}/${+s.slice(8)}` : '—';
 const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職/異動', 9: '退職' };
 function renderMembers() {
