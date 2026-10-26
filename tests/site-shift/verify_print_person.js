@@ -2,7 +2,7 @@
 // 確かめること：
 //  - 「印刷の形」の切り替えで、一覧用の設定（部門・表示）と個人別の設定（印刷する人）が入れ替わる
 //  - 個人別：選んだ人数だけページができ、1人1ページ・月曜始まりのカレンダーで、期間外の日は空欄
-//  - 時間・休み・配送の印・実働、下の集計（出勤日数・勤務時間・休みの内訳・配送日数）が正しい
+//  - 時間・休み・配送の印・実働、下の集計（出勤日数・勤務時間・休みの内訳・応援・配送の日数）が正しい
 //  - 全員／全部外す／表で選んだ人／シフトがある人、部門名でまとめて、Shift+クリックの範囲選択
 //  - 期間の変更（11日〜25日）で週の数が変わる。拠点を変えると選び直しになる
 //  - 印刷（print メディア）で1人ずつ改ページされ、ページが A4横の印刷範囲に収まる
@@ -113,11 +113,13 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('平日は時間と実働', p1.byDay['12'].tm === '8:00〜17:00' && p1.byDay['12'].hr === '実働8h', p1.byDay['12']);
   check('土日の休み', p1.byDay['17'].tm === '休' && p1.byDay['17'].cls.includes('off'), p1.byDay['17']);
   check('有休', p1.byDay['20'].tm === '有休', p1.byDay['20']);
-  check('配送の印', p1.byDay['22'].tag === '配送' && p1.byDay['22'].cls.includes('dv'), p1.byDay['22']);
-  check('半日配送の印', p1.byDay['27'].tag === '半日配送' && p1.byDay['27'].cls.includes('dvh'), p1.byDay['27']);
+  // 印のマスは行き先の部門の色（sp-配送）。半日配送などの一部だけの日は part も付く
+  const clsOf = d => p1.byDay[d].cls.split(/\s+/);
+  check('配送の印', p1.byDay['22'].tag === '配送' && clsOf('22').includes('sp-配送') && !clsOf('22').includes('part'), p1.byDay['22']);
+  check('半日配送の印', p1.byDay['27'].tag === '半日配送' && clsOf('27').includes('sp-配送') && clsOf('27').includes('part'), p1.byDay['27']);
   check('11月1日は「11/1」、11月の時間も出る', '11/1' in p1.byDay && p1.byDay['2'].tm === '8:30〜15:00' && p1.byDay['2'].hr === '実働5.5h', Object.keys(p1.byDay).slice(-12));
   // 10月平日15日（うち有休1）→ 出勤14日×8h、11/2〜6 5日×5.5h → 出勤19日 139.5h、休み：休6日（10月の土日）・有休1日、配送2日
-  check('集計（出勤日数・勤務時間・休みの内訳・配送）', p1.sum.includes('出勤 19日') && p1.sum.includes('勤務時間 139.5h') && p1.sum.includes('休み 休 6日・有休 1日') && p1.sum.includes('配送 2日'), p1.sum);
+  check('集計（出勤日数・勤務時間・休みの内訳・配送）', p1.sum.includes('出勤 19日') && p1.sum.includes('勤務時間 139.5h') && p1.sum.includes('休み 休 6日・有休 1日') && p1.sum.includes('応援・配送 配送 1日・半日配送 1日'), p1.sum);
   const p3 = await page.$eval('#previewScale .print-page:nth-child(3)', pg => ({ who: pg.querySelector('.who').textContent, sum: pg.querySelector('.pc-sum').innerText.replace(/\s+/g, ' '), absent: !!pg.querySelector('td.absent') }));
   check('欠勤は赤字・休みの内訳に入る', p3.who === '出荷 三子' && p3.absent && p3.sum.includes('出勤 8日') && p3.sum.includes('勤務時間 32h') && p3.sum.includes('欠勤 1日'), p3);
   const p5 = await page.$eval('#previewScale .print-page:nth-child(5)', pg => pg.querySelector('.pc-sum').innerText.replace(/\s+/g, ' '));
