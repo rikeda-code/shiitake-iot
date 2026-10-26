@@ -796,9 +796,11 @@
 <script>
 // ── 表示状態（拠点・詳細の開閉）をページのURLのクエリに保ち、リロードしても同じ状態で開く ──
 // クエリ：site＝いなべ／群馬／南丹（いなべは省略）、harvestDetail＝open（収穫予測の詳細を開く。
-// 閉じているときは省略）、stockDetail＝open（在庫予測の詳細を開く。閉じているときは省略）。
-// 拠点の切り替え・詳細の開閉のたびに history.replaceState で書き換える（履歴は増やさない）。
-// クエリが無い・値がおかしいときは今までどおり いなべ・詳細は閉じた状態。基準日・実績日は保たない。
+// 閉じているときは省略）、stockDetail＝open（在庫予測の詳細を開く。閉じているときは省略）、
+// base＝基準日（YYYY-MM-DD。今日のときは省略）、actual＝実績日（YYYY-MM-DD。前日のときは省略）。
+// 拠点の切り替え・詳細の開閉・日付の変更のたびに history.replaceState で書き換える（履歴は増やさない）。
+// クエリが無い・値がおかしいときは今までどおり いなべ・詳細は閉じた状態・基準日は今日・実績日は前日
+// （日付がおかしいときは、その日付だけ既定に戻す）。翌日以降に開き直しても、クエリの日付のまま表示する。
 // htmlpreview（URLが「?https://github.com/…/shiitake-shipment-plan.html」の形）で開いた場合は、
 // 表示するファイルのURLの後ろに「?site=…」を付ける（htmlpreviewはその後ろのクエリを付けたまま
 // ファイルを取りに行くが、GitHubはクエリを無視するため表示は壊れない）。
@@ -808,6 +810,26 @@
   var SITES = ['いなべ', '群馬', '南丹'];
   var DEFAULT_SITE = 'いなべ';
   var DETAILS = { harvestDetail: 'harvestDetailSection', stockDetail: 'stockDetailSection' };
+  var MIN_DATE_ISO = '2000-01-01'; // これより前の日付は、おかしな値として既定に戻す
+
+  function pad2(n){ return String(n).padStart(2, '0'); }
+  function toISO(d){ return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function addDaysISO(iso, n){
+    var p = iso.split('-').map(Number);
+    var d = new Date(p[0], p[1] - 1, p[2]);
+    d.setDate(d.getDate() + n);
+    return toISO(d);
+  }
+  // 日付の値の検査：実在する YYYY-MM-DD で、MIN_DATE_ISO以降・todayISO以前（日付の入力欄の
+  // max＝今日。今日より先は選べない）ならそのまま返し、それ以外はnull。純粋関数
+  function validDate(value, todayISO){
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    var p = value.split('-').map(Number);
+    var d = new Date(p[0], p[1] - 1, p[2]);
+    if (toISO(d) !== value) return null;
+    if (value < MIN_DATE_ISO || value > todayISO) return null;
+    return value;
+  }
 
   // location.search を、htmlpreview用の前置き（「?https://…」の部分）と、このページの状態の
   // クエリに分ける。純粋関数（テストから直接呼べる）
@@ -825,11 +847,15 @@
   }
 
   // クエリから表示状態を読む。おかしい値は既定（いなべ・閉じる）にする。純粋関数
-  function readStateFromSearch(search){
+  // todayISOは省略可（省略時は今日）。日付（base・actual）はおかしい値ならnull（＝既定）
+  function readStateFromSearch(search, todayISO){
     var params = new URLSearchParams(splitSearch(search).query);
     var site = params.get('site');
     var state = { site: SITES.indexOf(site) >= 0 ? site : DEFAULT_SITE };
     Object.keys(DETAILS).forEach(function(key){ state[key] = params.get(key) === 'open'; });
+    var t = todayISO || toISO(new Date());
+    state.base = validDate(params.get('base'), t);
+    state.actual = validDate(params.get('actual'), t);
     return state;
   }
 
@@ -840,6 +866,10 @@
       var el = document.getElementById(DETAILS[key]);
       state[key] = !!(el && el.open);
     });
+    var baseEl = document.getElementById('refDateInput');
+    var actualEl = document.getElementById('harvestRefDateInput');
+    state.base = baseEl ? baseEl.value : '';
+    state.actual = actualEl ? actualEl.value : '';
     return state;
   }
 
@@ -852,6 +882,11 @@
     Object.keys(DETAILS).forEach(function(key){
       if (state[key]) params.set(key, 'open'); else params.delete(key);
     });
+    // 日付：既定（基準日＝今日、実績日＝前日）のときはクエリを付けない。日付の入力欄が
+    // 空・おかしいときも付けない
+    var todayISO = toISO(new Date());
+    if (validDate(state.base, todayISO) && state.base !== todayISO) params.set('base', state.base); else params.delete('base');
+    if (validDate(state.actual, todayISO) && state.actual !== addDaysISO(todayISO, -1)) params.set('actual', state.actual); else params.delete('actual');
     var url = location.pathname + joinSearch(parts.prefix, params.toString()) + location.hash;
     try { history.replaceState(history.state, '', url); } catch (e) { console.warn('[表示状態] URLを書き換えられませんでした:', e); }
   }
@@ -860,6 +895,9 @@
   // 読み込みは、本体の描画が終わった後のupdateHarvestStockDetail()が選ばれている拠点を見て行うため、
   // いなべ以外なら読み込み・保存・入力をしない（PR #515 の安全策）がそのまま働く）
   var initial = readStateFromSearch(location.search);
+  // 基準日・実績日の初期値。日付の入力欄を既定値（今日・前日）にする下のスクリプトが、
+  // この値があればそれで上書きする（日付の関係・選べる範囲・今日より先を選べない制限はそちらのまま）
+  window.__initialViewDates = { base: initial.base, actual: initial.actual };
   document.querySelectorAll('#siteToggle button').forEach(function(b){
     b.classList.toggle('active', b.getAttribute('data-site') === initial.site);
   });
@@ -877,11 +915,23 @@
     var el = document.getElementById(DETAILS[key]);
     if (el) el.addEventListener('toggle', writeStateToUrl);
   });
+  // 日付の変更（入力欄・« ‹ › »・今日／前日ボタン）。日付を更新する下のスクリプトより先に
+  // 登録されるため、更新が終わってから書き込む
+  ['refDateInput', 'harvestRefDateInput'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', function(){ setTimeout(writeStateToUrl, 0); });
+  });
+  ['prevMonth', 'prevDay', 'nextDay', 'nextMonth', 'todayBtn',
+   'harvestPrevMonth', 'harvestPrevDay', 'harvestNextDay', 'harvestNextMonth', 'harvestTodayBtn'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('click', function(){ setTimeout(writeStateToUrl, 0); });
+  });
 
   window.__test = window.__test || {};
   Object.assign(window.__test, {
     splitViewStateSearch: splitSearch,
     readViewStateFromSearch: readStateFromSearch,
+    validViewDate: validDate,
   });
 })();
 </script>
@@ -1859,6 +1909,8 @@
   var input = document.getElementById('refDateInput');
   input.max = todayISO;
   input.value = todayISO;
+  // URLのクエリ（base）に日付があれば、その日付で開く（リロード・翌日以降に開き直したとき）
+  if (window.__initialViewDates && window.__initialViewDates.base) input.value = window.__initialViewDates.base;
 
   var dcols = document.querySelectorAll('.dcol');
 
@@ -1971,6 +2023,8 @@
   const todayISO = toISO(today);
   input.max = todayISO;
   input.value = toISO(addDays(today, -1));
+  // URLのクエリ（actual）に日付があれば、その日付で開く（リロード・翌日以降に開き直したとき）
+  if (window.__initialViewDates && window.__initialViewDates.actual) input.value = window.__initialViewDates.actual;
 
   function clamp(){
     if (input.value > todayISO) input.value = todayISO;
