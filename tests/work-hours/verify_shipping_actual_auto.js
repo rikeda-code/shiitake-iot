@@ -341,7 +341,7 @@ const TABLE_GRID_FN = `
 // 表（拠点・カテゴリ・指標の3列＋月の列）から { site: { metric: { 月(yyyy/M): テキスト } } } を作る。
 // blockLabelが文字列ならカテゴリ列がその文言の行、数値なら拠点内でその指標が何回目に
 // 出てくる行か（1始まり）で選ぶ。予実＞生産計画の表は、付帯作業の行のカテゴリの割り当てが
-// 既存の仕様上「出荷内訳（構成比）」「出荷内訳（計画）」の文言と一致しないことがあるため、
+// 「出荷内訳（構成比）」「出荷内訳（実績／計画）」の文言と一致しないことがあった（修正済み）ため、
 // 何回目の行か（1回目＝構成比、2回目＝実数計画）で選ぶ
 async function readSiteMetricTable(page, metrics, blockLabel) {
   return page.evaluate(({ fnSrc, metrics, blockLabel }) => {
@@ -405,8 +405,12 @@ async function renderAndWait(page, fnName) {
 }
 
 function fmtProd(v) { return v === null ? '—' : v.toLocaleString('ja-JP'); }
-// 予実＞生産計画の表示。過去月（〜境目月）の値なしは「—」、未来月の値なしは空欄
-function fmtPlan(v, past) { return v === null ? (past ? '—' : '') : v.toLocaleString('ja-JP', { maximumFractionDigits: 0 }); }
+// 予実＞生産計画の表示。過去月（〜境目月）は勤務実績＞生産実績の表と同じ書式（出荷内訳は既定の
+// 書式、値なしは「—」）、未来月は今までどおり整数（値なしは空欄）
+function fmtPlan(v, past) {
+  if (past) return v === null ? '—' : v.toLocaleString('ja-JP');
+  return v === null ? '' : v.toLocaleString('ja-JP', { maximumFractionDigits: 0 });
+}
 function fmtH(h) { return h === null ? '—' : (h < 10 ? h.toFixed(1) : Math.round(h).toLocaleString('ja-JP')) + ' h'; }
 
 /* ===================== 本体 ===================== */

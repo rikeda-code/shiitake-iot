@@ -6487,6 +6487,17 @@ function formatShippingRatio(v) {
   return v.toLocaleString('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// 勤務実績＞生産実績の表の数字の書式（予実＞生産計画の過去月も同じ書式で表示する）。
+// 表示の書式だけで、値自体は丸めない
+// ・構成比（isRatio）：小数2桁
+// ・収穫量(kg)・出荷量(kg)：整数（四捨五入。売り上げ分析シートのg→kg換算値等は丸めない）
+// ・それ以外：toLocaleString('ja-JP')の既定の書式
+function formatProductionValue(metric, v, isRatio) {
+  if (isRatio) return formatShippingRatio(v);
+  if (metric === '収穫量(kg)' || metric === '出荷量(kg)') return Math.round(v).toLocaleString('ja-JP');
+  return v.toLocaleString('ja-JP');
+}
+
 // 拠点の出荷内訳（実績）のレコード（records：prodData形式、値の配列の並びは共通）から、
 // 「出荷内訳（構成比）」のまとまりの4行（パック数・袋数・バラ数・付帯作業）を作る。
 // 純粋関数（テストから直接呼べる）。各行に isRatio:true を付ける（付帯作業は全てnull）
@@ -6992,12 +7003,13 @@ function renderPlanTable({ months: planMonths, records }, cutoffMonth) {
 
     // カテゴリ列は「行ごと」ではなく「カテゴリのまとまりごと」に1つの結合セル(rowspan)で表示する。
     // 出荷関連の2グループ（構成比データ側・実数計画データ側）は、シート上の生カテゴリ文言に
-    // 依存せず指標の内容と出現順で「出荷内訳（構成比）」「出荷内訳（計画）」を割り当てる。
+    // 依存せず指標の内容と出現順で「出荷内訳（構成比）」「出荷内訳（実績／計画）」を割り当てる
+    // （2つ目のまとまりは、過去月が実績・未来月が計画の値になるため「実績／計画」）。
     // 「付帯作業」の行も同じまとまりに合流させる（指定しないと付帯作業の行でまとまりが
     // 途中で切れ、カテゴリ列の見出しが行とずれてしまうため。生産実績タブと同じ指定）
     const blocks = groupIntoLabeledBlocks(
       siteRecs,
-      n => (n === 1 ? '出荷内訳（構成比）' : '出荷内訳（計画）'),
+      n => (n === 1 ? '出荷内訳（構成比）' : '出荷内訳（実績／計画）'),
       ['付帯作業']
     );
 
@@ -7015,18 +7027,23 @@ function renderPlanTable({ months: planMonths, records }, cutoffMonth) {
           : '';
 
         const cls = rowClass(r, block.label);
-        // 表示上の丸め桁数のみをブロック単位で変える。「出荷内訳（計画）」は表示を整数に
-        // 四捨五入するが、r.values（集計・計算に使う元の数値）自体は変更しない
+        // 表示上の丸め桁数のみをブロック単位で変える。「出荷内訳（実績／計画）」の未来月は表示を
+        // 整数に四捨五入するが、r.values（集計・計算に使う元の数値）自体は変更しない
         // 「出荷内訳（構成比）」は過去月（実績の割合）・未来月（シートの値）とも小数2桁で表示する
-        const maxFractionDigits = block.label === '出荷内訳（計画）' ? 0 : 1;
-        const fmt = v => (block.label === '出荷内訳（構成比）'
+        const isRatioBlock = block.label === '出荷内訳（構成比）';
+        const maxFractionDigits = block.label === '出荷内訳（実績／計画）' ? 0 : 1;
+        const fmtFuture = v => (isRatioBlock
           ? formatShippingRatio(v)
           : v.toLocaleString('ja-JP', { maximumFractionDigits: maxFractionDigits }));
-        // 過去月（〜境目月、実績の値）の値なしは生産実績の表と同じ「—」、未来月は今までどおり空欄
+        // 過去月（〜境目月、実績の値）は勤務実績＞生産実績の表と同じ書式（値なしは「—」）、
+        // 未来月は今までどおり（値なしは空欄）
         const isPast = m => cutoffMonth && monthToNum(m) <= monthToNum(cutoffMonth);
+        const fmtCell = (v, m) => (isPast(m)
+          ? (v !== null ? formatProductionValue(r.metric, v, isRatioBlock) : '—')
+          : (v !== null ? fmtFuture(v) : ''));
         html += `<tr class="${cls}">${siteCell}${catCell}
           <td style="font-size:0.82rem">${r.metric}</td>
-          ${r.values.map((v, mi) => `<td>${v !== null ? fmt(v) : (isPast(planMonths[mi]) ? '—' : '')}</td>`).join('')}
+          ${r.values.map((v, mi) => `<td>${fmtCell(v, planMonths[mi])}</td>`).join('')}
         </tr>`;
         rowIdx++;
       });
@@ -7303,22 +7320,7 @@ function renderProductionTable({ months: filteredMonths, records }) {
           if (mi >= originalCount) { html += '<td class="col-num"></td>'; return; }
           const v = pi >= 0 ? r.values[pi] : null;
           if (v === null) { html += '<td class="col-num empty">—</td>'; return; }
-          if (r.isRatio) {
-            // 出荷内訳（構成比）は小数2桁（予実＞生産計画の構成比と同じ表示）
-            html += `<td class="col-num">${formatShippingRatio(v)}</td>`;
-            return;
-          }
-          if (r.metric === '収穫量(kg)') {
-            html += `<td class="col-num">${Math.round(v).toLocaleString('ja-JP')}</td>`;
-            return;
-          }
-          if (r.metric === '出荷量(kg)') {
-            // 出荷量(kg)も収穫量(kg)と同じく表示のみ整数（四捨五入）にする。
-            // 生産データ自体の値（売り上げ分析シートのg→kg換算値）は丸めない
-            html += `<td class="col-num">${Math.round(v).toLocaleString('ja-JP')}</td>`;
-            return;
-          }
-          html += `<td class="col-num">${v.toLocaleString('ja-JP')}</td>`;
+          html += `<td class="col-num">${formatProductionValue(r.metric, v, !!r.isRatio)}</td>`;
         });
 
         html += '</tr>';
@@ -13015,6 +13017,7 @@ window.__cultTest = {
   createStdHoursEngine,
   createYojitsuStdHoursEngine,
   getActualCutoffMonth,
+  formatProductionValue,
   monthToNum,
   calcCs,
   loadStdSettings,

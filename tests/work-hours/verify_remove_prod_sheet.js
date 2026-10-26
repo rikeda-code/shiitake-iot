@@ -75,9 +75,10 @@ function harvestValue(site, m) {
   return 10000 + SITES.indexOf(site) * 1000 + mo * 10 + (y - 2025) * 500 + 0.5;
 }
 // 売り上げ分析（出荷量(固定)、g単位 → 表示はkg）
+// 小数（.4）を含めて、表示が整数に丸められることを確認できるようにしてある
 function shipmentKg(site, m) {
   const [y, mo] = m.split('/').map(Number);
-  return 8000 + SITES.indexOf(site) * 1000 + mo + (y - 2025) * 100;
+  return 8000 + SITES.indexOf(site) * 1000 + mo + (y - 2025) * 100 + 0.4;
 }
 
 // 整理済み_計画_更新
@@ -237,7 +238,7 @@ function buildShipmentUrlCsv() {
 }
 function buildShipmentYearCsv(site, year) {
   const rows = [[`${year}年 売り上げ分析`], ['月', '出荷量(実重量)', '出荷量(固定)', '売上']];
-  for (let mo = 1; mo <= 12; mo++) rows.push([`${mo}月`, '1', String(shipmentKg(site, `${year}/${mo}`) * 1000), '1']);
+  for (let mo = 1; mo <= 12; mo++) rows.push([`${mo}月`, '1', String(Math.round(shipmentKg(site, `${year}/${mo}`) * 1000)), '1']);
   return toCsv(rows);
 }
 function buildKinshoCsv() {
@@ -430,9 +431,13 @@ function fmtProdCell(metric, v) {
   if (metric === '収穫量(kg)' || metric === '出荷量(kg)') return Math.round(v).toLocaleString('ja-JP');
   return v.toLocaleString('ja-JP');
 }
-// 予実＞生産計画：「出荷内訳（計画）」は整数、それ以外は小数1桁、構成比は小数2桁。過去月の値なしは「—」
-function fmtPlanCell(block, v, past) {
-  if (v === null) return past ? '—' : '';
+// 予実＞生産計画の表示。
+// ・過去月（〜境目月）：勤務実績＞生産実績の表と同じ書式（構成比は小数2桁、収穫量・出荷量は整数、
+//   それ以外は既定の書式、値なしは「—」）
+// ・未来月（今までどおり）：「出荷内訳（実績／計画）」は整数、それ以外は小数1桁、構成比は小数2桁、値なしは空欄
+function fmtPlanCell(block, metric, v, past) {
+  if (past) return block === 'ratio' ? fmtRatio(v) : fmtProdCell(metric, v);
+  if (v === null) return '';
   if (block === 'ratio') return fmtRatio(v);
   return v.toLocaleString('ja-JP', { maximumFractionDigits: block === 'actual' ? 0 : 1 });
 }
@@ -559,31 +564,51 @@ function fmtPlanCell(block, v, past) {
       Object.keys(PLAN_SUMMARY).forEach(m => expectedPlanRows.push(`${site}/${summaryCat}/${m}`));
       CULT_METRICS.forEach(m => expectedPlanRows.push(`${site}/栽培内訳（コンテナ数）/${m}`));
       SHIP_METRICS.forEach(m => expectedPlanRows.push(`${site}/出荷内訳（構成比）/${m}`));
-      SHIP_METRICS.forEach(m => expectedPlanRows.push(`${site}/出荷内訳（計画）/${m}`));
+      SHIP_METRICS.forEach(m => expectedPlanRows.push(`${site}/出荷内訳（実績／計画）/${m}`));
     });
     const gotPlanRows = planRows.map(r => `${r.site}/${r.cat}/${r.metric}`);
     check('予実＞生産計画：カテゴリ列の見出しが行とずれない（構成比・計画とも付帯作業・合計(点数)まで同じまとまり）',
       JSON.stringify(gotPlanRows) === JSON.stringify(expectedPlanRows), gotPlanRows.filter((r, i) => r !== expectedPlanRows[i]).slice(0, 5));
     const catCells = await page.evaluate(() => Array.from(document.querySelectorAll('#main td.col-cat')).map(td => [td.textContent.trim(), td.getAttribute('rowspan')]));
     check('予実＞生産計画：構成比・計画のまとまりの結合セルはそれぞれ5行分',
-      catCells.filter(c => c[0] === '出荷内訳（構成比）' || c[0] === '出荷内訳（計画）').every(c => c[1] === '5')
-      && catCells.filter(c => c[0] === '出荷内訳（構成比）').length === 3 && catCells.filter(c => c[0] === '出荷内訳（計画）').length === 3, catCells);
+      catCells.filter(c => c[0] === '出荷内訳（構成比）' || c[0] === '出荷内訳（実績／計画）').every(c => c[1] === '5')
+      && catCells.filter(c => c[0] === '出荷内訳（構成比）').length === 3 && catCells.filter(c => c[0] === '出荷内訳（実績／計画）').length === 3, catCells);
     const pastBad = [], futureBad = [];
     planRows.forEach(r => PLAN_MONTHS.forEach((m, i) => {
       const past = ymNum(m) <= ymNum(cutoff);
-      const block = r.cat === '出荷内訳（構成比）' ? 'ratio' : (r.cat === '出荷内訳（計画）' ? 'actual' : 'other');
+      const block = r.cat === '出荷内訳（構成比）' ? 'ratio' : (r.cat === '出荷内訳（実績／計画）' ? 'actual' : 'other');
       let v;
       if (past) {
         v = block === 'ratio' ? expectedRatio(r.site, r.metric, m, cutoff) : expectedActual(r.site, r.metric, m, cutoff);
       } else if (block === 'ratio') v = PLAN_RATIO[r.metric];
       else if (block === 'actual') v = PLAN_ACTUAL[r.site][r.metric][i];
       else v = CULT_METRICS.includes(r.metric) ? PLAN_CULT : PLAN_SUMMARY[r.metric];
-      const exp = fmtPlanCell(block, v, past);
+      const exp = fmtPlanCell(block, r.metric, v, past);
       if (r.byMonth[m] !== exp) (past ? pastBad : futureBad).push({ site: r.site, cat: r.cat, metric: r.metric, m, got: r.byMonth[m], exp });
     }));
     check('予実＞生産計画の過去月（〜2026/9）：全ての行が勤務実績＞生産実績と同じ実績の値（シートの計画値は使わない）、構成比は実績の割合（小数2桁）、構成比の付帯作業・合計(点数)は「—」',
       pastBad.length === 0, pastBad.slice(0, 5));
     check('予実＞生産計画の未来月（2026/10〜）：シートの値のまま（構成比は小数2桁の表示）', futureBad.length === 0, futureBad.slice(0, 5));
+    // 過去月の各行が、勤務実績＞生産実績の同じ行・同じ月と同じ文字列で表示される
+    const sameBad = [];
+    let compared = 0;
+    planRows.forEach(r => {
+      let prodRow = null;
+      if (r.cat === '出荷内訳（構成比）') prodRow = r.metric === '合計(点数)' ? null : rows.find(x => x.site === r.site && x.cat === '出荷内訳（構成比）' && x.metric === r.metric);
+      else if (r.cat === '出荷内訳（実績／計画）') prodRow = rows.find(x => x.site === r.site && x.cat === '出荷内訳（実績）' && x.metric === r.metric);
+      else prodRow = rows.find(x => x.site === r.site && x.cat !== '出荷内訳（実績）' && x.cat !== '出荷内訳（構成比）' && x.metric === r.metric);
+      displayMonths.forEach(m => {
+        const exp = prodRow ? prodRow.byMonth[m] : '—'; // 構成比のまとまりの合計(点数)は生産実績の表に無い行（「—」）
+        compared++;
+        if (r.byMonth[m] !== exp) sameBad.push({ site: r.site, cat: r.cat, metric: r.metric, m, plan: r.byMonth[m], prod: exp });
+      });
+    });
+    check(`予実＞生産計画の過去月の各行が、勤務実績＞生産実績の同じ行・同じ月と同じ文字列（${compared}セル）`, sameBad.length === 0 && compared === 60 * 12, sameBad.slice(0, 5));
+    const harvestPlan = planRows.find(x => x.site === 'いなべ' && x.metric === '収穫量(kg)').byMonth;
+    const shipPlan = planRows.find(x => x.site === 'いなべ' && x.metric === '出荷量(kg)').byMonth;
+    check('例：収穫量・出荷量の過去月は整数（いなべ2026/9：10,590.5→10,591、8,109.4→8,109）、未来月は今までどおり小数1桁まで（88,888）',
+      harvestPlan['2026/9'] === '10,591' && shipPlan['2026/9'] === '8,109' && harvestPlan['2026/10'] === '88,888',
+      [harvestPlan['2026/9'], shipPlan['2026/9'], harvestPlan['2026/10']]);
     const ex = r => planRows.find(x => x.site === 'いなべ' && x.metric === r.metric && x.cat === r.cat).byMonth;
     const kinshoPlan = ex({ metric: '菌床購入数(本)', cat: '生産実績' });
     const ratioPlan = ex({ metric: 'パック数', cat: '出荷内訳（構成比）' });
@@ -609,7 +634,7 @@ function fmtPlanCell(block, v, past) {
     await renderAndWait(page, 'renderPlanTab');
     const planRows = await readTableRows(page);
     const k = planRows.find(r => r.site === 'いなべ' && r.metric === '菌床購入数(本)').byMonth;
-    const pack = planRows.find(r => r.site === 'いなべ' && r.cat === '出荷内訳（計画）' && r.metric === 'パック数').byMonth;
+    const pack = planRows.find(r => r.site === 'いなべ' && r.cat === '出荷内訳（実績／計画）' && r.metric === 'パック数').byMonth;
     check('予実＞生産計画の2026/10も実績の値になり（菌床購入数・パック数）、2026/11は計画値のまま',
       k['2026/10'] === kinshoValue('いなべ', '2026/10').toLocaleString('ja-JP') && pack['2026/10'] === '18' && k['2026/11'] === '99,999' && pack['2026/11'] === '109,805',
       [k['2026/10'], pack['2026/10'], k['2026/11'], pack['2026/11']]);
