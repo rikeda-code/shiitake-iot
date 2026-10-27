@@ -781,7 +781,13 @@ function listen() {
   unsubs.push(metaRef(site, 'dates').onSnapshot(snap => {
     memberDates = snap.exists ? snap.data() : {};
     if (ready) renderMembers();
-  }, err => showLoadError(err)));
+  }, err => {
+    // Firestoreのルールでmeta/datesがまだ許可されていない場合でも、シフト表全体を
+    // エラー表示にはしない（実際の日付は整理済み_Mの値だけ＝年月や月度の1日のまま表示される）
+    console.warn('meta/datesを読み込めませんでした：', err);
+    memberDates = {};
+    if (ready) renderMembers();
+  }));
   rowOrder = { keys: [], rules: null };
   unsubs.push(metaRef(site, 'order').onSnapshot(snap => {
     if (orderTimer && orderSite === site) return; // 自分の並べ替えをまだ送っていないときは、届いた古い並びで戻さない

@@ -175,6 +175,35 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('部門変更でkHの古いキー(出荷)は消える(もともと項目は無い)', !datesAfterDeptH['kH|パート|出荷'], JSON.stringify(datesAfterDeptH));
   check('部門変更でkHの新しいキー(配送)にも項目は作られない', !datesAfterDeptH['kH|パート|配送'], JSON.stringify(datesAfterDeptH));
 
+  /* ===================== meta/datesの読み込みがエラーになっても、シフト表・固定シフトは
+     そのまま動き、メンバー欄の日付は整理済み_Mの値だけ（年月）で表示される ===================== */
+  {
+    const seed2 = {
+      [`shiftSites/${SITE}/meta/members`]: { list: MEMBERS, updatedAt: 4102444800000 },
+      [`shiftSites/${SITE}/months/2026-10`]: { cells: {} },
+      [`shiftSites/${SITE}/months/2026-11`]: { cells: {} },
+      [`shiftSites/${SITE}/meta/fixed`]: {},
+      [`shiftSites/${SITE}/meta/dates`]: { 'kA|社員|栽培': { leave: '2026-12-20' } },
+      __errorPaths: [`shiftSites/${SITE}/meta/dates`],
+    };
+    const page2 = await openShiftPage(ctx, { seed: seed2, members: MEMBERS });
+    const warnings = [];
+    page2.on('console', msg => { if (msg.type() === 'warning') warnings.push(msg.text()); });
+    page2.on('pageerror', e => check('meta/datesがエラーでもページでエラーが出ない', false, e.message));
+    await page2.goto(URL);
+    await page2.waitForSelector('#grid tbody td.name[data-r]', { timeout: 8000 }).then(() => true, () => false);
+    const names2 = await page2.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent)).catch(() => []);
+    check('meta/datesがエラーでもシフト表は表示される', names2.includes('退職 予定子'), JSON.stringify(names2));
+    const fxNames2 = await page2.$$eval('#fxPerson option', os => os.map(o => o.textContent)).catch(() => []);
+    check('meta/datesがエラーでも固定シフトの一覧は表示される', fxNames2.some(t => t.includes('退職 予定子')), JSON.stringify(fxNames2));
+    // meta/datesにleave:'2026-12-20'があっても、読み込みに失敗しているため使われず、
+    // 整理済み_Mの値(2026-12-01)から年月だけが表示される
+    const leaveA2 = await page2.textContent('#memTable tr[data-key="kA"] td:nth-child(6)').catch(() => '');
+    check('meta/datesがエラーのときは年月だけ表示される(2026/12)', leaveA2.trim() === '2026/12', leaveA2);
+    check('console.warnでエラーが記録される', warnings.some(w => w.includes('meta/dates')), JSON.stringify(warnings));
+    await page2.close();
+  }
+
   await browser.close();
   const ng = results.filter(r => !r.ok).length;
   console.log(`\n${results.length - ng}/${results.length} OK`);

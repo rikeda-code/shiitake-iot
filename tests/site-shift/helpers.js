@@ -11,7 +11,11 @@ function normalizeNameLike(raw) {
 function fakeFirebase(seed) {
   // ページの中で動く、最低限の Firebase compat の偽物
   const DEL = { __del: true };
-  const db = JSON.parse(JSON.stringify(seed));
+  // seed.__errorPaths（パスの配列）に入れたパスは、onSnapshotが常にエラーを返す
+  // （Firestoreのルールで許可されていない文書の再現用。配信中のdbには含めない）
+  const errorPaths = new Set((seed && seed.__errorPaths) || []);
+  const cleanSeed = Object.assign({}, seed); delete cleanSeed.__errorPaths;
+  const db = JSON.parse(JSON.stringify(cleanSeed));
   const subs = {};
   window.__db = db;
   window.__writes = [];
@@ -31,6 +35,11 @@ function fakeFirebase(seed) {
     collection: n => ({ doc: id => ref(`${path}/${n}/${id}`) }),
     onSnapshot(a, b, c) {
       const cb = typeof a === 'function' ? a : b;
+      const errCb = typeof a === 'function' ? b : c;
+      if (errorPaths.has(path)) {
+        if (errCb) setTimeout(() => errCb(new Error('permission-denied（偽物のエラー）')), 0);
+        return () => {};
+      }
       (subs[path] ||= []).push(cb);
       setTimeout(() => cb(snapOf(path)), 0);
       return () => { subs[path] = subs[path].filter(x => x !== cb); };
