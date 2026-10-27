@@ -60,6 +60,9 @@ const LEGACY_SOURCES = {
               blankAs: { '社員': '8:00-17:00', '技能実習': '8:00-17:00' } }],
 };
 const LEGACY_FROM = '2026-10-01';
+// 旧シフト表（いなべ）へのバックアップ書き込み。この期間のシフトは、アプリで保存するたびに旧シフト表の同じ人・同じ日のセルにも書く
+// （新しい指示書への切り替え 11/11 の予備。期間が終わったら to を過ぎて自然に止まる）
+const LEGACY_MIRROR = { site: 'いなべ', id: LEGACY_SHEET_ID, gid: LEGACY_SHEET_GID, nameCol: 0, from: '2026-11-11', to: '2026-12-10' };
 // 旧シフト表の呼び名 → 整理済み_Mの氏名（work-hours-forecast.html と同じ対応表）
 const LEGACY_NAME_ALIASES = {
   'ハイ': 'NGUYEN VAN HAI', 'ヴィン': 'HOANG VAN VINH', 'タム': 'DAO VAN TAM',
@@ -109,6 +112,7 @@ function doPost(e) {
     switch (req.action) {
       case 'saveShifts': return json_(saveShifts_(req));
       case 'upsertCells': return json_(upsertCells_(req));
+      case 'mirrorLegacyAll': return json_(mirrorLegacyAll_());
       case 'saveFixed':  return json_(saveFixed_(req));
       case 'addMember':  clearMemberCache_(); return json_(addMember_(req));
       case 'retire':     clearMemberCache_(); return json_(setRetire_(req.key, req.date, req.flag || 9));
@@ -415,7 +419,13 @@ function upsertCells_(req) {
   const out = rows.filter((r, i) => !remove[i]).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
   if (last >= 2) sh.getRange(2, 1, last - 1, DATA_HEADERS.length).clearContent();
   if (out.length) sh.getRange(2, 1, out.length, DATA_HEADERS.length).setValues(out);
-  return { changed };
+  // 旧シフト表への書き込みに失敗しても、シフト_データの保存は成功として返す
+  let mirror = null;
+  if (site === LEGACY_MIRROR.site) {
+    try { mirror = mirrorLegacy_(cells.map(c => ({ key: c.key, date: c.date, value: normalizeShift_(c.value) }))); }
+    catch (err) { mirror = { error: String(err && err.message || err) }; }
+  }
+  return { changed, mirror };
 }
 
 function saveFixed_(req) {
@@ -450,20 +460,12 @@ function hoursRange_(site, from, to) {
 
 /* ===================== 旧シフト表の取り込み（1回だけ実行） ===================== */
 
-// 旧シフト表の fromIso〜toIso の時間・休みを読み、整理済み_Mの人に照合して返す
-function readLegacy_(site, fromIso, toIso) {
-  const sources = LEGACY_SOURCES[site];
-  if (!sources) throw new Error(`${site}の旧シフト表は登録されていません`);
-  // 日付は時差の影響を受けないよう、文字列の年・月・日から作る
-  const [fy, fm, fd] = fromIso.split('-').map(Number);
-  const from = new Date(fy, fm - 1, fd);
-  const pad2 = n => ('0' + n).slice(-2);
-  const iso = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
-
-  // 照合：整理済み_Mの氏名・呼び名の対応表・名字（その拠点で1人に決まるとき）の順に探す
+// 旧シフト表の名前 → 整理済み_Mの人。整理済み_Mの氏名・呼び名の対応表・名字（その拠点で1人に決まるとき）の順に探す
+function legacyMatcher_(site) {
   const members = readMembers_().filter(m => m.site === site);
   const aliases = Object.assign({}, LEGACY_NAME_ALIASES, LEGACY_SITE_ALIASES[site] || {});
   const pick = hits => hits.sort((a, b) => (a.flag === 9) - (b.flag === 9) || (a.flag === 3) - (b.flag === 3))[0] || null;
+  const reasons = {};
   const findMember = rawName => {
     // 「野呂8」「中島5(3)」のような後ろの数字・括弧は外して照合する
     const k = normalizeName_(rawName).replace(/[0-9]+$/, '');
@@ -480,7 +482,20 @@ function readLegacy_(site, fromIso, toIso) {
     reasons[rawName] = others.length ? `整理済み_MのB列が在職中・入社ではない（${others.map(m => m.name + '：B列' + m.flag).join('・')}）` : `整理済み_Mの${site}に見つからない`;
     return null;
   };
-  const reasons = {};
+  return { findMember, reasons };
+}
+
+// 旧シフト表の fromIso〜toIso の時間・休みを読み、整理済み_Mの人に照合して返す
+function readLegacy_(site, fromIso, toIso) {
+  const sources = LEGACY_SOURCES[site];
+  if (!sources) throw new Error(`${site}の旧シフト表は登録されていません`);
+  // 日付は時差の影響を受けないよう、文字列の年・月・日から作る
+  const [fy, fm, fd] = fromIso.split('-').map(Number);
+  const from = new Date(fy, fm - 1, fd);
+  const pad2 = n => ('0' + n).slice(-2);
+  const iso = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
+
+  const { findMember, reasons } = legacyMatcher_(site);
 
   // シートを選ぶ
   const sheets = [];
@@ -582,4 +597,73 @@ function importLegacyShift() {
   });
   if (unmatched.length) Logger.log('整理済み_Mで見つからず取り込まなかった人：' + unmatched.join('、'));
   if (skipped.length) Logger.log('時間として読めず取り込まなかったセル（先頭50件）：\n' + skipped.slice(0, 50).join('\n'));
+}
+
+/* ===================== 旧シフト表へのバックアップ書き込み ===================== */
+
+// アプリの値 → 旧シフト表の書き方。時間は「08:00-17:00」（旧の指示書が先頭・末尾5文字で読むため0埋め）、
+// 社員・技能実習生の 8:00-17:00 は旧シフト表と同じ「1」。休みは「休」（有休・欠勤はそのまま）。応援・配送の印は外す
+function legacyValue_(value, member) {
+  const s = String(value || '').replace(/(半日配送|配送|栽培8h|栽培4h|出荷8h|出荷4h)$/, '');
+  if (!s) return '';
+  if (LEAVE_TYPES.indexOf(s) >= 0) return s === '有休' || s === '欠勤' ? s : '休';
+  const m = s.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+  if (!m) return s;
+  const pad = n => ('0' + n).slice(-2);
+  const full = /社員|技能実習/.test(String(member && member.empType || '')) && s === '8:00-17:00';
+  return full ? '1' : `${pad(m[1])}:${m[2]}-${pad(m[3])}:${m[4]}`;
+}
+
+// cells（{key, date, value}）のうち LEGACY_MIRROR の期間の分を、旧シフト表の同じ人・同じ日のセルに書く。
+// 書くのは変わったセルを囲む範囲だけ（読んでから書き戻す）。旧シフト表にいない人は notFound で返す
+function mirrorLegacy_(cells) {
+  const M = LEGACY_MIRROR;
+  const target = (cells || []).filter(c => c.date >= M.from && c.date <= M.to);
+  if (!target.length) return { written: 0 };
+  const sh = SpreadsheetApp.openById(M.id).getSheets().filter(x => x.getSheetId() === M.gid)[0];
+  if (!sh) throw new Error('旧シフト表のタブが見つかりません');
+  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+  // 日付の列：1行目の「11/11」「2026/11/11」など
+  const head = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+  const colOf = {};
+  head.forEach((t, i) => {
+    const m = String(t).normalize('NFKC').trim().match(/^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})/);
+    if (!m) return;
+    const y = m[1] || M.from.slice(0, 4), pad = n => ('0' + n).slice(-2);
+    const iso = `${y}-${pad(m[2])}-${pad(m[3])}`;
+    if (iso >= M.from && iso <= M.to && !colOf[iso]) colOf[iso] = i + 1;
+  });
+  // 人の行：名前の列を整理済み_Mに照合（同じ人が2行あれば上の行）
+  const { findMember } = legacyMatcher_(M.site);
+  const names = sh.getRange(1, M.nameCol + 1, lastRow, 1).getDisplayValues();
+  const rowOf = {}, memberOf = {};
+  names.forEach((r, i) => {
+    const raw = String(r[0] || '').trim();
+    if (!raw || i === 0) return;
+    const m = findMember(raw);
+    if (m && !rowOf[m.key]) { rowOf[m.key] = i + 1; memberOf[m.key] = m; }
+  });
+  const writes = [], notFound = {};
+  target.forEach(c => {
+    const r = rowOf[c.key], col = colOf[c.date];
+    if (!r) { notFound[c.key] = true; return; }
+    if (!col) return;
+    writes.push({ r, col, v: legacyValue_(c.value, memberOf[c.key]) });
+  });
+  if (!writes.length) return { written: 0, notFound: Object.keys(notFound) };
+  const r0 = Math.min.apply(null, writes.map(w => w.r)), r1 = Math.max.apply(null, writes.map(w => w.r));
+  const c0 = Math.min.apply(null, writes.map(w => w.col)), c1 = Math.max.apply(null, writes.map(w => w.col));
+  const range = sh.getRange(r0, c0, r1 - r0 + 1, c1 - c0 + 1);
+  const block = range.getValues();
+  writes.forEach(w => { block[w.r - r0][w.col - c0] = w.v; });
+  range.setValues(block);
+  return { written: writes.length, notFound: Object.keys(notFound) };
+}
+
+// 期間の分をシフト_データからまとめて旧シフト表に書く（書き込みを始める前に入っていた分の取り込み用。POST action=mirrorLegacyAll）
+function mirrorLegacyAll_() {
+  const M = LEGACY_MIRROR;
+  const cells = readData_().filter(r => r.site === M.site && r.date >= M.from && r.date <= M.to)
+    .map(r => ({ key: r.key, date: r.date, value: r.value }));
+  return mirrorLegacy_(cells);
 }
