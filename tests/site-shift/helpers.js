@@ -1,8 +1,21 @@
 // 拠点シフト表のテスト共通：Firebase（認証・Firestore）とGASをページ内の偽物に差し替えて開く
+
+// gas/shift-webapp.gs の normalizeName_ と同じロジック（偽のaddMember応答のkey作成に使う）
+function normalizeNameLike(raw) {
+  let s = String(raw || '').normalize('NFKC');
+  const cut = ['（', '('].map(c => s.indexOf(c)).filter(i => i >= 0).sort((a, b) => a - b)[0];
+  if (cut !== undefined) s = s.slice(0, cut);
+  return s.replace(/\s+/g, '').toUpperCase();
+}
+
 function fakeFirebase(seed) {
   // ページの中で動く、最低限の Firebase compat の偽物
   const DEL = { __del: true };
-  const db = JSON.parse(JSON.stringify(seed));
+  // seed.__errorPaths（パスの配列）に入れたパスは、onSnapshotが常にエラーを返す
+  // （Firestoreのルールで許可されていない文書の再現用。配信中のdbには含めない）
+  const errorPaths = new Set((seed && seed.__errorPaths) || []);
+  const cleanSeed = Object.assign({}, seed); delete cleanSeed.__errorPaths;
+  const db = JSON.parse(JSON.stringify(cleanSeed));
   const subs = {};
   window.__db = db;
   window.__writes = [];
@@ -22,6 +35,11 @@ function fakeFirebase(seed) {
     collection: n => ({ doc: id => ref(`${path}/${n}/${id}`) }),
     onSnapshot(a, b, c) {
       const cb = typeof a === 'function' ? a : b;
+      const errCb = typeof a === 'function' ? b : c;
+      if (errorPaths.has(path)) {
+        if (errCb) setTimeout(() => errCb(new Error('permission-denied（偽物のエラー）')), 0);
+        return () => {};
+      }
       (subs[path] ||= []).push(cb);
       setTimeout(() => cb(snapOf(path)), 0);
       return () => { subs[path] = subs[path].filter(x => x !== cb); };
@@ -57,8 +75,17 @@ async function openShiftPage(ctx, { seed, members }) {
   // 後から登録した route が優先される
   await page.route(/gstatic\.com\/firebasejs\//, r => r.fulfill({ contentType: 'text/javascript', body: '' }));
   await page.route(/gstatic\.com\/firebasejs\/.*app-compat\.js/, r => r.fulfill({ contentType: 'text/javascript', body: `(${fakeFirebase})(${JSON.stringify(seed)});` }));
-  await page.route(/script\.google\.com/, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'ok', members, shifts: [], fixed: {} }) }));
+  await page.route(/script\.google\.com/, r => {
+    const body = { status: 'ok', members, shifts: [], fixed: {} };
+    // addMember だけ、本物のGAS（gas/shift-webapp.gs の normalizeName_）と同じ考え方でkeyを返す
+    // （site-shift.htmlが戻り値のkeyを使ってmeta/datesに書くため）
+    if (r.request().method() === 'POST') {
+      let req = {}; try { req = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* 無視 */ }
+      if (req.action === 'addMember') { body.row = 999; body.key = normalizeNameLike(req.name); }
+    }
+    r.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
   return page;
 }
 
-module.exports = { fakeFirebase, openShiftPage };
+module.exports = { fakeFirebase, openShiftPage, normalizeNameLike };

@@ -450,7 +450,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
       <form class="add-form" id="addForm">
         <label>氏名<input id="newName" required placeholder="例：中村 陽子"></label>
         <label>部門<select id="newRole"></select></label>
-        <label>雇用区分<select id="newEmp"><option>アルバイト</option><option>社員</option><option>技能実習生</option></select></label>
+        <label>雇用区分<select id="newEmp"><option>社員</option><option>パート</option><option>技能実習生</option></select></label>
         <label>入社日<input type="date" id="newJoin" required></label>
         <button class="primary" type="submit">登録</button>
       </form>
@@ -489,6 +489,9 @@ let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
 let fixed = {};     // fixed[key] = 月〜日の7要素
+// 実際の入社日・退職日（異動日）：{ `${key}|${empType}|${dept}` : { join:'yyyy-MM-dd', leave:'yyyy-MM-dd' } }。
+// PR #532以降、整理済み_Mの入退社の列には月度の1日しか書かれないため、実際の日付はここに別途持つ
+let memberDates = {};
 let rowOrder = { keys: [], rules: null }; // 表の並び順（拠点ごと）：keys＝人の並び、rules＝最後に使った並べ替えの条件
 let monthData = {};   // Firestoreから届いた月ごとのシフト：{ 'yyyy-MM': { key: { iso: 値 } } }
 let pending = {};     // まだFirestoreに送っていない変更：{ 'yyyy-MM': { key: { iso: 値（''は消去） } } }
@@ -517,8 +520,9 @@ const periodLabel = () => { const c = periodCols(); return `${c[0].m}/${c[0].d}�
 const NO_TALLY_DEPTS = ['生産部長'];
 // 「栽培・配送」のように2つ書いた部門は、先に書いた方がメイン（栽培・配送＝栽培の人がたまに配送、配送・栽培＝配送の人）
 const divOf = dept => DIVS.find(v => dept.startsWith(v)) || (dept.includes('配送') ? '配送' : dept.includes('出荷') ? '出荷' : dept.includes('栽培') ? '栽培' : 'その他');
-// 在籍の判定は整理済み_MのB列フラグだけで行う（1在職中・2入社＝載せる／3退職・異動・8他所属・9退職＝載せない）
-const ON_SHIFT_FLAGS = [1, 2];
+// 在籍の判定は整理済み_MのB列フラグだけで行う（1在職中・2入社・3退職・異動予定＝載せる／8他所属・9退職＝載せない。
+// 3は退職日までの入力を現場で止めないよう載せる。退職日以降も入力できてよい）
+const ON_SHIFT_FLAGS = [1, 2, 3];
 const activeOn = (m, d) => ON_SHIFT_FLAGS.includes(m.flag);
 const fmt = h => (Math.round(h * 10) / 10).toLocaleString('ja-JP') + 'h';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
@@ -613,7 +617,10 @@ async function api(method, payload) {
    shiftSites/{拠点}/months/{yyyy-MM} … { cells: { key: { 'yyyy-MM-dd': '8:00-17:00' } } }
    shiftSites/{拠点}/meta/members     … { list: [整理済み_Mのメンバー], updatedAt }
    shiftSites/{拠点}/meta/fixed       … { key: [月〜日の7要素] }
-   shiftSites/{拠点}/meta/order       … { keys: [人の並び], rules: [並べ替えの条件], updatedAt, updatedBy } */
+   shiftSites/{拠点}/meta/order       … { keys: [人の並び], rules: [並べ替えの条件], updatedAt, updatedBy }
+   shiftSites/{拠点}/meta/dates       … { `${key}|${empType}|${dept}`: { join:'yyyy-MM-dd', leave:'yyyy-MM-dd' } }
+                                        実際の入社日・退職日（異動日）。整理済み_Mの入退社の列には
+                                        PR #532以降「月度の1日」しか書かれないため、ここに別途持つ */
 const firebaseConfig = {
   apiKey: 'AIzaSyDUmBcQAHCnWlv5a5Lv7nS5tRBQ-LvVtjo',
   // Firebase Hosting（shiitake-iot.web.app）で開いたときは、ログインもページと同じ場所で行う（ブラウザの設定に左右されない）
@@ -755,7 +762,7 @@ let gotMonths = new Set(), gotMembers = false;
 function listen() {
   unsubs.forEach(u => u()); unsubs = [];
   const site = curSite();
-  monthData = {}; gotMonths = new Set(); gotMembers = false; ready = false;
+  monthData = {}; gotMonths = new Set(); gotMembers = false; ready = false; memberDates = {};
   periodMonths().forEach(ym => {
     unsubs.push(monthRef(site, ym).onSnapshot({ includeMetadataChanges: false }, snap => {
       if (!snap.exists && !snap.metadata.fromCache) migrateMonth(site, ym);
@@ -771,6 +778,16 @@ function listen() {
     fixed = snap.exists ? snap.data() : {};
     if (ready) renderFixed();
   }, err => showLoadError(err)));
+  unsubs.push(metaRef(site, 'dates').onSnapshot(snap => {
+    memberDates = snap.exists ? snap.data() : {};
+    if (ready) renderMembers();
+  }, err => {
+    // Firestoreのルールでmeta/datesがまだ許可されていない場合でも、シフト表全体を
+    // エラー表示にはしない（実際の日付は整理済み_Mの値だけ＝年月や月度の1日のまま表示される）
+    console.warn('meta/datesを読み込めませんでした：', err);
+    memberDates = {};
+    if (ready) renderMembers();
+  }));
   rowOrder = { keys: [], rules: null };
   unsubs.push(metaRef(site, 'order').onSnapshot(snap => {
     if (orderTimer && orderSite === site) return; // 自分の並べ替えをまだ送っていないときは、届いた古い並びで戻さない
@@ -1549,7 +1566,45 @@ let retiring = null, moving = null; // 退職・異動の入力中の人／部�
 const DEPT_CHOICES = ['栽培', '栽培・配送', '出荷', '出荷・配送', '配送', '配送・栽培', '配送・出荷', '生産部長'];
 $('newRole').innerHTML = DEPT_CHOICES.map(d => `<option>${d}</option>`).join('');
 const md = s => s ? `${s.slice(0, 4)}/${+s.slice(5, 7)}/${+s.slice(8)}` : '—';
-const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職/異動', 9: '退職' };
+const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職・異動予定', 9: '退職' };
+// 整理済み_Mで同じ名前の行が2つになる場合に備え、名前・雇用区分・部門で見分けるキー
+// （meta/datesの見出し。部門変更で部門が変わると、このキーも変わる）
+const datesKey = m => `${m.key}|${m.empType}|${m.dept}`;
+// 月度：11日〜翌月10日。gas/shift-webapp.gsのmonthDegreeOf_と同じ考え方
+function monthDegreeOf(dateStr) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  if (d >= 11) return `${y}-${pad(mo)}`;
+  let py = y, pm = mo - 1;
+  if (pm < 1) { pm = 12; py--; }
+  return `${py}-${pad(pm)}`;
+}
+// 整理済み_Mの値（m.join/m.leave）とFirestoreのmeta/dates（実際の日付）から、実際に使える
+// 日付（'yyyy-MM-dd'）を返す。整理済み_Mの値の日が01（月度の1日。PR #532以降の書き方）の
+// ときだけmeta/datesを見て、その日付の月度が整理済み_Mの値の年月と同じときだけ使う。
+// 使えないとき（日が01以外＝#532より前の実際の日付／meta/datesが無い／月度が違う）は
+// 整理済み_Mの値をそのまま返す
+function resolveDate(m, which) {
+  const raw = m[which];
+  if (!raw) return '';
+  if (raw.slice(8) !== '01') return raw;
+  const actual = (memberDates[datesKey(m)] || {})[which];
+  return (actual && monthDegreeOf(actual) === raw.slice(0, 7)) ? actual : raw;
+}
+// メンバー欄の表示用：resolveDate()が実際の日付を返せたときはmd()の形、使えないとき
+// （整理済み_Mの値が月度の1日のまま）は年月だけ表示する
+function dispDate(m, which) {
+  const raw = m[which];
+  if (!raw) return '—';
+  const actual = resolveDate(m, which);
+  if (raw.slice(8) === '01' && actual === raw) return `${raw.slice(0, 4)}/${+raw.slice(5, 7)}`;
+  return md(actual);
+}
+// 実際の日付（meta/dates）の保存。GASへの書き込みが成功した後に呼ぶ。失敗してもエラーには
+// せず（整理済み_Mへの書き込みは完了しているため）トーストで知らせ、falseを返す
+async function saveMemberDates(site, patch) {
+  try { await metaRef(site, 'dates').set(patch, { merge: true }); return true; }
+  catch (err) { toast('実際の日付を保存できませんでした（整理済み_Mへの書き込みは完了）：' + err.message); return false; }
+}
 function renderMembers() {
   const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType) && !isPlaceholder(m.name));
   let h = '<tr><th>氏名</th><th>部門</th><th>雇用区分</th><th>状態</th><th>入社日</th><th>退職日</th><th></th></tr>';
@@ -1560,7 +1615,7 @@ function renderMembers() {
       : moving === m.key
       ? `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select><button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button>`
       : [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="dept">部門変更</button><button data-act="leave">退職・異動</button>`;
-    h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${m.flag === 2 ? `<input type="date" class="join-input" value="${esc(m.join || '')}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">` : md(m.join)}</td><td>${md(m.leave)}</td><td><div class="acts">${acts}</div></td></tr>`;
+    h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${m.flag === 2 ? `<input type="date" class="join-input" value="${esc(resolveDate(m, 'join'))}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">` : dispDate(m, 'join')}</td><td>${dispDate(m, 'leave')}</td><td><div class="acts">${acts}</div></td></tr>`;
   });
   $('memTable').innerHTML = h;
 }
@@ -1574,45 +1629,57 @@ $('memTable').addEventListener('click', async ev => {
   if (act === 'cancel') { retiring = moving = null; renderMembers(); return; }
   try {
     let done = ''; // 読み直しの知らせに上書きされないよう、最後に出す
+    let okDates = true; // 実際の日付（meta/dates）の保存に失敗したときは、その知らせを優先し成功の知らせは出さない
     if (act === 'deptOk') {
       const dept = $('newDept').value;
       if (dept === m.dept) { moving = null; renderMembers(); return; }
       b.disabled = true;
       await api('POST', { action: 'changeDept', key, site: curSite(), dept });
+      // 実際の日付があれば、新しい部門のキーへ移す（古いキーは消す）
+      const oldKey = datesKey(m), newKey = `${m.key}|${m.empType}|${dept}`;
+      const val = memberDates[oldKey];
+      const patch = { [oldKey]: firebase.firestore.FieldValue.delete() };
+      if (val) patch[newKey] = val;
+      okDates = await saveMemberDates(curSite(), patch);
       done = `${m.name}さんの部門を「${dept}」に変えました`;
     } else if (act === 'ok') {
       await api('POST', { action: 'retire', key, date: $('leaveDate').value, flag: +$('leaveFlag').value });
+      okDates = await saveMemberDates(curSite(), { [datesKey(m)]: { leave: $('leaveDate').value } });
       done = `${m.name}さんの退職日を整理済み_Mに書き込みました`;
     } else if (act === 'undo') {
       await api('POST', { action: 'undoRetire', key });
+      okDates = await saveMemberDates(curSite(), { [datesKey(m)]: { leave: firebase.firestore.FieldValue.delete() } });
       done = '在職中に戻しました';
     }
     retiring = moving = null; await refreshMembers(true);
-    if (done) toast(done);
+    if (done && okDates) toast(done);
   } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
 });
 // 入社日の変更（入社＝B列2の人だけ。在職中の人は整理済み_Mの入退社列が空のため対象外）
 $('memTable').addEventListener('change', async ev => {
   const inp = ev.target.closest('.join-input'); if (!inp) return;
   const key = inp.closest('tr').dataset.key, m = members.find(x => x.key === key);
-  if (!m || !inp.value || inp.value === m.join) { if (!inp.value) inp.value = m?.join || ''; return; }
+  const curVal = m ? resolveDate(m, 'join') : '';
+  if (!m || !inp.value || inp.value === curVal) { if (!inp.value) inp.value = curVal; return; }
   inp.disabled = true;
   try {
     await api('POST', { action: 'setJoinDate', key, site: curSite(), date: inp.value });
-    const done = `${m.name}さんの入社日を ${md(inp.value)} に変えました`;
+    const okDates = await saveMemberDates(curSite(), { [datesKey(m)]: { join: inp.value } });
     await refreshMembers(true);
-    toast(done);
-  } catch (err) { toast('書き込めませんでした：' + err.message); inp.value = m.join || ''; inp.disabled = false; }
+    if (okDates) toast(`${m.name}さんの入社日を ${md(inp.value)} に変えました`);
+  } catch (err) { toast('書き込めませんでした：' + err.message); inp.value = curVal; inp.disabled = false; }
 });
 $('addForm').addEventListener('submit', async ev => {
   ev.preventDefault();
   const name = $('newName').value.trim(); if (!name) return;
+  const site = $('site').value, dept = $('newRole').value, empType = $('newEmp').value, joinDate = $('newJoin').value;
   try {
-    await api('POST', { action: 'addMember', site: $('site').value, name, dept: $('newRole').value, empType: $('newEmp').value, joinDate: $('newJoin').value });
+    const res = await api('POST', { action: 'addMember', site, name, dept, empType, joinDate });
+    const okDates = await saveMemberDates(site, { [`${res.key}|${empType}|${dept}`]: { join: joinDate } });
     $('newName').value = '';
-    toast(`${name}さんを整理済み_Mに登録しました。固定シフトを設定してください`);
     await refreshMembers(true);
     const added = rows.find(x => x.name === name); if (added) { fxKey = added.key; fxDraft = null; renderFixed(); }
+    if (okDates) toast(`${name}さんを整理済み_Mに登録しました。固定シフトを設定してください`);
   } catch (err) { toast('登録できませんでした：' + err.message); }
 });
 
