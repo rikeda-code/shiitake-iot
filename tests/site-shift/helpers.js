@@ -12,9 +12,10 @@ function fakeFirebase(seed) {
   // ページの中で動く、最低限の Firebase compat の偽物
   const DEL = { __del: true };
   // seed.__errorPaths（パスの配列）に入れたパスは、onSnapshotが常にエラーを返す
-  // （Firestoreのルールで許可されていない文書の再現用。配信中のdbには含めない）
+  // （Firestoreのルールで許可されていない文書の再現用。配信中のdbには含めない。getもpermission-deniedになる）
+  // seed.__email：ログインした人のメール（省略時 tester@example.com）
   const errorPaths = new Set((seed && seed.__errorPaths) || []);
-  const cleanSeed = Object.assign({}, seed); delete cleanSeed.__errorPaths;
+  const cleanSeed = Object.assign({}, seed); delete cleanSeed.__errorPaths; delete cleanSeed.__email;
   const db = JSON.parse(JSON.stringify(cleanSeed));
   const subs = {};
   window.__db = db;
@@ -44,7 +45,11 @@ function fakeFirebase(seed) {
       setTimeout(() => cb(snapOf(path)), 0);
       return () => { subs[path] = subs[path].filter(x => x !== cb); };
     },
-    get: async () => snapOf(path),
+    async get() {
+      if (errorPaths.has(path)) throw Object.assign(new Error('Missing or insufficient permissions.（偽物のエラー）'), { code: 'permission-denied' });
+      return snapOf(path);
+    },
+    async delete() { window.__writes.push({ path, deleted: true }); delete db[path]; notify(path); },
     async set(data, opt) {
       window.__writes.push({ path, data: clone(data) });
       db[path] = opt && opt.merge ? merge(db[path] || {}, data) : merge({}, data);
@@ -58,7 +63,7 @@ function fakeFirebase(seed) {
     runTransaction: async fn => fn({ get: async r => snapOf(r.path), set: (r, d) => { db[r.path] = d; notify(r.path); } }),
   });
   firestore.FieldValue = { delete: () => DEL, serverTimestamp: () => Date.now() };
-  const user = { email: 'tester@example.com' };
+  const user = { email: (seed && seed.__email) || 'tester@example.com', getIdToken: async () => 'fake-id-token' };
   const authObj = { currentUser: user, onAuthStateChanged: cb => setTimeout(() => cb(user), 0), signOut: async () => {}, signInWithPopup: async () => {} };
   const auth = () => authObj;
   auth.GoogleAuthProvider = class { setCustomParameters() {} };

@@ -24,6 +24,8 @@
  * コード更新時は「デプロイを管理」から新バージョンとして再デプロイすること。
  *
  * ── リクエスト ────────────────────────────────────────
+ * どのリクエストにも idToken（アプリでログインした人の Firebase IDトークン）を付ける。
+ * 拠点に閲覧・編集できる人の名簿があれば、読むのは名簿の人だけ、書くのは admins・editors だけ（下の「閲覧・編集できる人」）
  * GET  ?action=load&site=いなべ&month=2026-11      … メンバー・シフト・固定シフト
  * GET  ?action=members&site=いなべ                 … メンバーだけ
  * GET  ?action=legacy&site=いなべ&from=2026-10-11&to=2026-11-10 … 旧シフト表の内容（アプリの「旧シフト表から取り込む」用）
@@ -92,6 +94,7 @@ const TZ = 'Asia/Tokyo';
 function doGet(e) {
   const p = e.parameter || {};
   try {
+    requireAccess_([p.site], p.idToken, false);
     if (p.action === 'load') return json_(loadMonth_(p.site, p.month, p.fresh === '1'));
     if (p.action === 'hours') return json_(hoursRange_(p.site, p.from, p.to));
     if (p.action === 'legacy') {
@@ -110,6 +113,7 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    requireAccess_(postSites_(req), req.idToken, true);
     switch (req.action) {
       case 'saveShifts': return json_(saveShifts_(req));
       case 'upsertCells': return json_(upsertCells_(req));
@@ -128,6 +132,62 @@ function doPost(e) {
     if (['addMember', 'retire', 'undoRetire', 'changeDept', 'setJoinDate'].indexOf(req.action) >= 0) clearMemberCache_();
     lock.releaseLock();
   }
+}
+
+/* ===================== 閲覧・編集できる人 =====================
+ * 拠点ごとの名簿は Firestore の shiftAcl/{拠点} { admins, editors, viewers:[メール] } に置く（名簿のない拠点は、ログインした人なら誰でも）。
+ * admins＝名簿を直せる人（編集もできる）、editors＝編集、viewers＝閲覧だけ。
+ * アプリから届いたログインの証明（Firebase の IDトークン）で、その人として名簿を読みに行く。
+ * Firestore のルールが名簿に載っていない人には読ませないので、読めた＝載っている、404＝名簿なし（制限なし）になる。
+ * 初めてデプロイしたときは、エディタで authorizeAccessCheck を1回実行して外部への通信を許可すること */
+const FIRESTORE_DOCS = 'https://firestore.googleapis.com/v1/projects/shiitake-iot/databases/(default)/documents/';
+const ACCESS_CACHE_SEC = 600;
+
+function authorizeAccessCheck() { UrlFetchApp.fetch(FIRESTORE_DOCS.replace(/documents\/$/, ''), { muteHttpExceptions: true }); }
+
+// その人がその拠点で何をできるか：'edit'（編集）／'view'（閲覧だけ）／'none'（見られない）
+function siteRole_(site, idToken) {
+  const cache = CacheService.getScriptCache();
+  const ck = 'acl:' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, site + '|' + idToken));
+  const hit = cache.get(ck);
+  if (hit) return hit;
+  const res = UrlFetchApp.fetch(FIRESTORE_DOCS + 'shiftAcl/' + encodeURIComponent(site), { headers: { Authorization: 'Bearer ' + idToken }, muteHttpExceptions: true });
+  const code = res.getResponseCode();
+  let role;
+  if (code === 404) role = 'edit';
+  else if (code === 403) role = 'none';
+  else if (code === 401) throw new Error('ログインの期限が切れました。ページを読み込み直してください');
+  else if (code === 200) {
+    const f = JSON.parse(res.getContentText()).fields || {};
+    const list = name => ((f[name] && f[name].arrayValue && f[name].arrayValue.values) || []).map(v => String(v.stringValue || '').toLowerCase());
+    const email = tokenEmail_(idToken);
+    role = list('admins').concat(list('editors')).indexOf(email) >= 0 ? 'edit' : list('viewers').indexOf(email) >= 0 ? 'view' : 'none';
+  } else throw new Error('閲覧・編集できる人の名簿を読めませんでした（' + code + '）');
+  cache.put(ck, role, ACCESS_CACHE_SEC);
+  return role;
+}
+// IDトークンに書かれたメール（トークンが本物かは、Firestore が受け付けたことで確かめている）
+function tokenEmail_(idToken) {
+  let s = String(idToken).split('.')[1] || '';
+  while (s.length % 4) s += '=';
+  return String(JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(s)).getDataAsString()).email || '').toLowerCase();
+}
+function requireAccess_(sites, idToken, edit) {
+  if (!idToken) throw new Error('ログインの確認ができませんでした。ページを読み込み直してください');
+  sites.filter((s, i) => s && sites.indexOf(s) === i).forEach(site => {
+    const role = siteRole_(site, idToken);
+    if (role === 'none' || (edit && role !== 'edit')) throw new Error(`${site}のシフトを${edit ? '変える' : '見る'}権限がありません`);
+  });
+}
+// 書き込みが関わる拠点。人（key）だけで指定する操作は、整理済み_Mでその人がいる拠点すべて
+function postSites_(req) {
+  if (req.action === 'mirrorLegacyAll') return [LEGACY_MIRROR.site];
+  const sites = req.site ? [req.site] : [];
+  if (req.key && ['retire', 'undoRetire', 'changeDept', 'setJoinDate'].indexOf(req.action) >= 0) {
+    readMembers_(false).forEach(m => { if (m.key === req.key && (!req.site || m.site === req.site)) sites.push(m.site); });
+  }
+  if (!sites.length) throw new Error('拠点を指定してください');
+  return sites;
 }
 
 function json_(obj) {
