@@ -33,7 +33,8 @@
  *   { action:'upsertCells', site, cells:[{key,date,value}] }   // 変わったセルだけ（valueが空なら削除）。アプリ版が保存のたびに送る
  *   { action:'saveFixed',  site, key, name, pattern:[月..日 の '8:00-17:00' or '休'] }
  *   { action:'addMember',  site, name, dept, empType, joinDate }
- *   { action:'retire',     key, date, flag }   // flag: 9=退職 / 3=退職・異動
+ *   { action:'retire',     key, date, flag }   // flagは「どちらの操作か」のみに使う: 9=退職 / 3=異動。
+ *                                              // 実際にF列へ書く値（1/3/8/9）は日付の月度から自動で決める
  *   { action:'undoRetire', key }
  *   { action:'changeDept', key, site, dept }   // 部門（所属）を変える。整理済み_Mの部門列を書き換える
  *   { action:'setJoinDate', key, site, date }  // 入社日を変える（入社＝B列2の人だけ。dateは yyyy-MM-dd）
@@ -158,6 +159,22 @@ function cellDate_(v) {
   return m ? `${m[1]}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}` : '';
 }
 
+// 月度：11日〜翌月10日。日付（yyyy-MM-dd）の月度を 'yyyy-MM' で返す
+// （日が11以上ならその年月、10以下なら前の月の年月）
+function monthDegreeOf_(dateStr) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  if (d >= 11) return `${y}-${('0' + mo).slice(-2)}`;
+  let py = y, pm = mo - 1;
+  if (pm < 1) { pm = 12; py--; }
+  return `${py}-${('0' + pm).slice(-2)}`;
+}
+
+// 月度の値：その月度の1日を日本時間0時のDateで返す（セルに書く値。セルの書式は変えない）
+function monthDegreeValue_(ym) { return new Date(`${ym}-01T00:00:00+09:00`); }
+
+// 今の月度（日本時間の今日の月度）
+function currentMonthDegree_() { return monthDegreeOf_(fmtDate_(new Date())); }
+
 function normalizeName_(raw) {
   let s = String(raw || '').normalize('NFKC');
   const cut = ['（', '('].map(c => s.indexOf(c)).filter(i => i >= 0).sort((a, b) => a - b)[0];
@@ -254,11 +271,21 @@ function readMembersFromSheet_() {
   return out;
 }
 
+// matches（readMembers_(true)を絞り込んだ配列）がちょうど1件であることを確かめて返す。
+// 0件はnotFoundMsgで、2件以上は該当の行番号を添えたエラーにする（書き込み前に必ず呼ぶ）
+function requireSingleRow_(matches, notFoundMsg) {
+  if (!matches.length) throw new Error(notFoundMsg);
+  if (matches.length > 1) throw new Error(`整理済み_Mに該当する行が複数あります（${matches.map(x => x.row).join('・')}行目）。整理済み_Mを直してください`);
+  return matches[0];
+}
+
 function addMember_(req) {
   if (!req.name || !req.site || !req.dept || !req.joinDate) throw new Error('氏名・拠点・部門・入社日は必須です');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
-  const dup = readMembers_(true).find(m => m.site === req.site && normalizeName_(m.name) === normalizeName_(req.name) && m.flag !== 9);
+  // 8（他所属）・9（退職）以外の行があれば二重登録とみなす（パート→社員等で元の行を8にして
+  // 新しい行を足せるように、8は重複チェックから外す）
+  const dup = readMembers_(true).find(m => m.site === req.site && normalizeName_(m.name) === normalizeName_(req.name) && m.flag !== 8 && m.flag !== 9);
   if (dup) throw new Error(`${req.name}さんはすでに${req.site}に登録されています`);
   // 名前が入っている最後の行の次に書く
   const names = sh.getRange(1, cols.name, sh.getLastRow(), 1).getValues();
@@ -266,29 +293,30 @@ function addMember_(req) {
   while (lastRow > MASTER_HEADER_ROW && !String(names[lastRow - 1][0]).trim()) lastRow--;
   const r = lastRow + 1;
   const set = (c, v) => { if (c > 0) sh.getRange(r, c).setValue(v); };
-  set(cols.flag, 2);
+  const ym = monthDegreeOf_(req.joinDate);
+  set(cols.flag, ym <= currentMonthDegree_() ? 1 : 2);
   set(cols.empType, req.empType || '');
   set(cols.site, req.site);
   set(cols.prj, req.site);
   set(cols.dept, req.dept);
   set(cols.name, req.name);
-  if (cols.date > 0) sh.getRange(r, cols.date).setValue(new Date(req.joinDate + 'T00:00:00+09:00'));
+  if (cols.date > 0) sh.getRange(r, cols.date).setValue(monthDegreeValue_(ym));
   return { row: r, key: normalizeName_(req.name) };
 }
 
-function findMemberRow_(key) {
-  const m = readMembers_(true).find(x => x.key === key);
-  if (!m) throw new Error('整理済み_Mに該当する人が見つかりません');
-  return m;
-}
-
+// 退職・異動。req.flagは「どちらの操作か」（9=退職／3=異動）としてだけ使い、実際にF列へ
+// 書く値は日付の月度から自動で決める：月度が今の月度以降（まだ終わっていない＝未来）なら3、
+// 前の月度以前（すでに終わっている）なら退職は9・異動は8
 function setRetire_(key, date, flag) {
   if (!date) throw new Error('退職日を入れてください');
-  const m = findMemberRow_(key);
+  const matches = readMembers_(true).filter(x => x.key === key && [1, 2, 3].indexOf(x.flag) >= 0);
+  const m = requireSingleRow_(matches, '整理済み_Mに該当する人が見つかりません');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
-  sh.getRange(m.row, cols.flag).setValue(flag === 3 ? 3 : 9);
-  if (cols.date > 0) sh.getRange(m.row, cols.date).setValue(new Date(date + 'T00:00:00+09:00'));
+  const ym = monthDegreeOf_(date);
+  const isTransfer = flag === 3;
+  sh.getRange(m.row, cols.flag).setValue(ym >= currentMonthDegree_() ? 3 : (isTransfer ? 8 : 9));
+  if (cols.date > 0) sh.getRange(m.row, cols.date).setValue(monthDegreeValue_(ym));
   return {};
 }
 
@@ -296,19 +324,21 @@ function setRetire_(key, date, flag) {
 // 入社日を変える。入退社列は在職中の人には使わない（退職・異動の日も同じ列）ため、入社（B列=2）の人だけ
 function setJoinDate_(req) {
   if (!req.key || !/^\d{4}-\d{2}-\d{2}$/.test(req.date || '')) throw new Error('人と入社日を指定してください');
-  const m = readMembers_(true).find(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag === 2);
-  if (!m) throw new Error('入社（B列=2）の人だけ入社日を変えられます');
+  const matches = readMembers_(true).filter(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag === 2);
+  const m = requireSingleRow_(matches, '入社（B列=2）の人だけ入社日を変えられます');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
   if (cols.date < 0) throw new Error('整理済み_Mに「入退社」の列が見つかりません');
-  sh.getRange(m.row, cols.date).setValue(new Date(req.date + 'T00:00:00+09:00'));
+  const ym = monthDegreeOf_(req.date);
+  sh.getRange(m.row, cols.flag).setValue(ym <= currentMonthDegree_() ? 1 : 2);
+  sh.getRange(m.row, cols.date).setValue(monthDegreeValue_(ym));
   return { before: m.join, after: req.date };
 }
 
 function changeDept_(req) {
   if (!req.key || !req.dept) throw new Error('人と新しい部門を指定してください');
-  const m = readMembers_(true).find(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag !== 9);
-  if (!m) throw new Error('整理済み_Mに該当する人が見つかりません');
+  const matches = readMembers_(true).filter(x => x.key === req.key && (!req.site || x.site === req.site) && [1, 2, 3].indexOf(x.flag) >= 0);
+  const m = requireSingleRow_(matches, '整理済み_Mに該当する人が見つかりません');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
   const before = String(sh.getRange(m.row, cols.dept).getValue()).trim();
@@ -317,7 +347,8 @@ function changeDept_(req) {
 }
 
 function undoRetire_(key) {
-  const m = findMemberRow_(key);
+  const matches = readMembers_(true).filter(x => x.key === key && x.flag === 3);
+  const m = requireSingleRow_(matches, '整理済み_Mに該当する人が見つかりません');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
   sh.getRange(m.row, cols.flag).setValue(1);
