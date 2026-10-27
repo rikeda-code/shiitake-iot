@@ -1,10 +1,24 @@
 # 拠点シフト表 Firestore ルール（閲覧・編集できる人）
 
 Firestore のルールは Firebase コンソール（Firestore Database →「ルール」）で管理している。
-拠点シフト表の部分は、今の `match /shiftSites/{document=**} { ... }` を消して、下の内容に置き換える。
-置く場所は `match /databases/{database}/documents { ... }` の中。ほかのデータ（@10-ff.com 限定のもの）の決まりはそのまま残す。
+https://console.firebase.google.com/project/shiitake-iot/firestore/rules を開き、全部選んで下の全文に置き換えて「公開」する。
+
+注意：会社のデータの決まり（@10-ff.com なら読み書きできる）は、全部のコレクションに効く `match /{document=**}` だった。
+ルールはどれか1つが許せば通るので、そのままだと名簿にない @10-ff.com の人もいなべを読めてしまう。
+そのため会社の決まりから shiftSites・shiftAcl を外している。
 
 ```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 会社のデータは今までどおり @10-ff.com だけ（拠点シフト表の shiftSites・shiftAcl は下の決まりだけで判断する）
+    match /{collection}/{document=**} {
+      allow read, write: if collection != 'shiftSites' && collection != 'shiftAcl'
+        && request.auth != null
+        && request.auth.token.email_verified
+        && request.auth.token.email.matches('.*@10-ff[.]com$');
+    }
+
     // ── 拠点シフト表（site-shift.html） ──
     // 名簿 shiftAcl/{拠点} { admins, editors, viewers: [メール] } のある拠点は、載っている人だけ。名簿のない拠点はログインした人なら誰でも
     function shiftSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
@@ -30,6 +44,8 @@ Firestore のルールは Firebase コンソール（Firestore Database →「�
       allow create: if shiftSignedIn() && shiftAclOwner();
       allow update, delete: if shiftSignedIn() && (shiftAclOwner() || shiftMe() in resource.data.get('admins', []));
     }
+  }
+}
 ```
 
 ## 反映の順番
