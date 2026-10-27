@@ -623,9 +623,17 @@ const firebaseConfig = {
   messagingSenderId: '118184889783',
   appId: '1:118184889783:web:fb2e61fa5607e30f0bec32',
 };
+// 同じサイトの収穫ダッシュボードのキャッシュ（gvizCache:）で localStorage が満杯だと、ログインの確認や Firestore が動かなくなる。
+// 満杯のときは、消してよいそのキャッシュを空ける
+(function freeStorage() {
+  try { localStorage.setItem('__t', '1'); localStorage.removeItem('__t'); return; } catch (e) { /* 満杯か使えない */ }
+  try { Object.keys(localStorage).filter(k => k.startsWith('gvizCache:') || k.startsWith('firestore_')).forEach(k => localStorage.removeItem(k)); } catch (e) { /* 使えないブラウザ */ }
+})();
 firebase.initializeApp(firebaseConfig);
 const fs = firebase.firestore();
-fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* 使えないブラウザではオフライン保存なしで動く */ });
+// タブ間の同期（synchronizeTabs）は localStorage を使い、満杯だと Firestore ごと止まるので使わない。
+// 2つ目のタブはオフライン保存なしで動く（オンラインなら同じように読み書きできる）
+fs.enablePersistence().catch(() => { /* 使えないブラウザ・2つ目のタブではオフライン保存なしで動く */ });
 const auth = firebase.auth();
 const MEMBERS_STALE_MS = 30 * 60 * 1000; // メンバーは30分たったら整理済み_Mから読み直す
 const siteRef = site => fs.collection('shiftSites').doc(site);
