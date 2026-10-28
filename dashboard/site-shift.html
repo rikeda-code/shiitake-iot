@@ -398,6 +398,7 @@ body.mbar-open .toast { bottom: calc(220px + env(safe-area-inset-bottom, 0px)); 
   </header>
 
   <div class="toolbar">
+    <button id="backBtn" disabled title="この拠点で前に見ていた画面（タブ・期間）に戻ります。ほかの拠点の画面には戻りません">◀ 戻る</button>
     <select id="site" aria-label="拠点"><option>いなべ</option><option>群馬</option><option>南丹</option></select>
     <select id="month" aria-label="対象期間"></select>
     <button id="applyFixed" class="edit-only ro-hide">固定シフトを反映</button>
@@ -940,6 +941,7 @@ function showLoadError(err) {
 async function load() {
   document.body.classList.toggle('readonly', !writable());
   renderAcl();
+  updateBackBtn();
   if (siteRoles[curSite()] === 'none') { // 見られる拠点が1つもない
     unsubs.forEach(u => u()); unsubs = [];
     $('gridBox').innerHTML = '<div class="notice error">見られる拠点がありません。シフト表の管理者に、このアカウント（' + esc(myEmail()) + '）を名簿に入れてもらってください。</div>';
@@ -1669,7 +1671,7 @@ $('legacyBtn').onclick = async () => {
   } finally { btn.disabled = false; }
 };
 $('logoutBtn').onclick = async () => { await flush(); auth.signOut(); };
-$('month').onchange = () => { [year, month] = $('month').value.split('-').map(Number); $('ppFrom').value = ''; $('ppTo').value = ''; load(); };
+$('month').onchange = () => { if (loadedMonth && loadedMonth !== $('month').value) pushBack({ view: curView(), month: loadedMonth }); [year, month] = $('month').value.split('-').map(Number); $('ppFrom').value = ''; $('ppTo').value = ''; load(); };
 
 // 絞り込みを変えたら選択を解いて描き直す
 function refilter() { if (editing) commit(); sel = cursor = anchor = null; render(); }
@@ -2001,6 +2003,7 @@ $('addForm').addEventListener('submit', async ev => {
 
 /* ── 印刷・PDF ── */
 function setView(v) {
+  if (v !== curView()) pushBack({ view: curView(), month: $('month').value });
   document.body.dataset.view = v;
   $('tabEdit').setAttribute('aria-selected', v === 'edit');
   $('tabPrint').setAttribute('aria-selected', v === 'print');
@@ -2009,6 +2012,33 @@ function setView(v) {
 }
 $('tabEdit').onclick = () => setView('edit');
 $('tabPrint').onclick = () => setView('print');
+
+/* ── 戻る（前の画面＝タブと期間を拠点ごとに覚える） ── */
+// 履歴は拠点ごとに別。拠点の切り替えは記録しないので、戻るでほかの拠点へ移ったり、ほかの拠点の履歴が動いたりしない
+const BACK_MAX = 30;
+const backStacks = {}; // 拠点 → [{ view, month }, …]（最後が直前の画面）
+let backRestoring = false;
+function curView() { return document.body.dataset.view || 'edit'; }
+function pushBack(scr) {
+  if (backRestoring) return;
+  const st = backStacks[curSite()] || (backStacks[curSite()] = []);
+  const top = st[st.length - 1];
+  if (!top || top.view !== scr.view || top.month !== scr.month) st.push(scr);
+  if (st.length > BACK_MAX) st.shift();
+  updateBackBtn();
+}
+function updateBackBtn() { $('backBtn').disabled = !(backStacks[curSite()] || []).length; }
+$('backBtn').onclick = () => {
+  const st = backStacks[curSite()]; if (!st || !st.length) return;
+  const scr = st.pop();
+  backRestoring = true;
+  try {
+    const mo = $('month');
+    if (scr.month !== mo.value && [...mo.options].some(o => o.value === scr.month)) { mo.value = scr.month; mo.onchange(); }
+    if (scr.view !== curView()) setView(scr.view);
+  } finally { backRestoring = false; }
+  updateBackBtn();
+};
 
 // 印刷の期間は日付で選ぶ（入力中の期間の外や、月をまたいでもよい。最大31日）
 function setPpRange(from, to) { $('ppFrom').value = isoOf(from); $('ppTo').value = isoOf(to); }
