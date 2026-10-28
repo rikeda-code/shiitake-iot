@@ -1,11 +1,16 @@
 // 椎茸 日々の過不足確認シート（shiitake-shipment-plan.html）の収穫予測・在庫予測
 // パネルの「詳細」が、いなべ以外（群馬・南丹）を選んだときに止まることの検証。
-// 本体（table1〜3）は拠点トグルを切り替えても常にいなべのデータを表示する作り
-// （見た目のみのトグル）だが、詳細は拠点を見て収穫見込GAS（直近工数計画・PR #503が
-// 実データとして使う）に読み書きするため、いなべ以外を選んだまま入力すると、本体の
-// 表示と食い違う拠点の実データを書き換えてしまう。これを防ぐ安全策の確認。
+// 詳細は拠点を見て収穫見込GAS（直近工数計画・PR #503が実データとして使う）に読み書き
+// するため、いなべ以外を選んだまま入力すると、本体の表示と食い違う拠点の実データを
+// 書き換えてしまう。これを防ぐ安全策の確認。
 // 保存先GAS(HARVEST_FORECAST_GAS_URL)・CSVモックの組み立ては
 // verify_shipment_plan_harvest_detail.js と同じ構成を複製している（他ファイルへの依存なし）。
+// 本体（table1〜3）は、パネル1（在庫・出荷予定）が群馬でも実データで表示するように
+// なったため、「拠点トグルを切り替えても常にいなべのデータを表示する」仕様では無くなった。
+// ⑤で、群馬・南丹を選んだときにいなべの数字を出し続けないこと（群馬のパネル2・3、
+// 南丹のパネル1〜3は「－」＋「◯◯は準備中です」になること）を確認する
+// （パネル1が群馬の実データで正しく表示されることの検証は別ファイル
+// verify_shipment_plan_gunma_panel1.js が担当する）。
 const { chromium } = require('playwright');
 
 function csvCell(v) { if (v === null || v === undefined) return ''; const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
@@ -34,6 +39,7 @@ const SALES_RAW_INABE_ORDER_GID = '545062393';
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const GRADE_RATIO_SHEET_GID = '1773303848';
 const HARVEST_URL_SHEET_GID = '1996914203';
+const STOCK_URL_SHEET_GID = '717295394'; // 「URL_在庫管理表」タブ（いなべの列・2026年の行を使う）
 const HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
 const HARVEST_DAILY_TOTAL_GID = '1164843574';
 const TARGET_SHEET_ID = 'FAKE_TARGET_SHEET_ID';
@@ -101,6 +107,14 @@ function buildSalesRawInabeCsv(baseline) {
   row('重量', '優', 'L', 5);
   return toCsvText(rows);
 }
+// 「URL_在庫管理表」タブ：1行目=見出し(A列「出荷量」・B以降に拠点名)、以降の行=年×拠点のURL。
+// いなべの2026年の欄に、このテストが使う椎茸在庫ファイル(STOCK_SHEET_ID)のURLを入れる
+function buildStockUrlCsv() {
+  return toCsvText([
+    ['出荷量', 'いなべ', '群馬', '南丹'],
+    [2026, 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID + '/edit?gid=' + STOCK_SHEET_GID + '#gid=' + STOCK_SHEET_GID, '', ''],
+  ]);
+}
 function buildHarvestUrlCsv() {
   return toCsvText([
     ['収穫管理表', 'いなべ', '群馬', '南丹'],
@@ -160,6 +174,7 @@ async function setupPage(browser, opts) {
     else if (url.includes(STOCK_SHEET_ID) && url.includes('gid=' + ALLOCATION_SHEET_GID)) body = buildAllocationCsv();
     else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + GRADE_RATIO_SHEET_GID)) body = buildGradeRatioCsv();
     else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + HARVEST_URL_SHEET_GID)) body = buildHarvestUrlCsv();
+    else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + STOCK_URL_SHEET_GID)) body = buildStockUrlCsv();
     else if (url.includes(SALES_SHEET_ID) && url.includes('gid=' + SALES_INDEX_GID)) body = buildSalesIndexCsv(baseline.getFullYear() + '.' + (baseline.getMonth() + 1));
     else if (url.includes(SALES_SHEET_ID) && url.includes('gid=' + SALES_MONTH_GID)) body = buildSalesMonthCsv(31);
     else if (url.includes(SALES_RAW_SHEET_ID) && url.includes('gid=' + SALES_RAW_INABE_ORDER_GID)) body = buildSalesRawInabeCsv(baseline);
@@ -271,7 +286,12 @@ async function clickSite(page, site) {
     await page.close();
   }
 
-  console.log('=== ⑤本体（table1・table2・table3）は拠点切替の影響を受けない（回帰） ===');
+  // 拠点ごとの設定（SITE_DATA）に無い動作の追加により、本体（table1〜3）は拠点トグルを
+  // 切り替えても「常にいなべのデータを表示する」仕様では無くなった（パネル1＝在庫・出荷予定は
+  // 群馬でも実データで表示するようになった。群馬のパネル2・3、南丹のパネル1〜3は、いなべの
+  // 数字を出さないよう「－」＋「◯◯は準備中です」の注記になる）。この回帰確認は、新しい
+  // 仕様（いなべの数字を出し続けない）に合わせて書き直した
+  console.log('=== ⑤本体（table1・table2・table3）：群馬・南丹を選んでもいなべの数字を出し続けない（回帰） ===');
   {
     const { page } = await setupPage(browser, { loadValues: {} });
     const before = {
@@ -279,12 +299,33 @@ async function clickSite(page, site) {
       t3: await text(page, mainStockCell('M', 0)),
       stockProduct: await text(page, '[data-stock-product="M"]'),
     };
+    check('切替前のtable1はいなべの実データ(－ではない)', before.stockProduct !== '－');
+    check('切替前のtable2はいなべの実データ(－ではない)', before.t2 !== '－');
+    check('切替前のtable3はいなべの実データ(－ではない)', before.t3 !== '－');
+
     await clickSite(page, '群馬');
-    check('table2本体は群馬選択後も変わらない', (await text(page, mainHarvestCell('M', 0))) === before.t2);
-    check('table3本体は群馬選択後も変わらない', (await text(page, mainStockCell('M', 0))) === before.t3);
-    check('table1本体は群馬選択後も変わらない', (await text(page, '[data-stock-product="M"]')) === before.stockProduct);
+    // このテストのモック（URL_在庫管理表・販売予実抽出シート等）は群馬の実データを
+    // 用意していないため、パネル1（table1）は「－」＋「URL_在庫管理表に群馬の
+    // 在庫管理表がありません」になる（新しい実データの検証は別ファイル
+    // verify_shipment_plan_gunma_panel1.jsが担当）
+    check('table1(製品在庫)は群馬選択後、いなべの数字のままではない', (await text(page, '[data-stock-product="M"]')) !== before.stockProduct);
+    check('table1に群馬の在庫管理表が無い旨の注記が出る', (await text(page, '#table1SiteNote') || '').includes('群馬'));
+    check('table2(収穫予測)は群馬選択後「－」になる(準備中のためいなべの数字のままではない)', (await text(page, mainHarvestCell('M', 0))) === '－');
+    check('table2に「群馬は準備中です」の注記が出る', (await text(page, '#table2SiteNote')) === '群馬は準備中です');
+    check('table3(在庫予測)は群馬選択後「－」になる(準備中のためいなべの数字のままではない)', (await text(page, mainStockCell('M', 0))) === '－');
+    check('table3に「群馬は準備中です」の注記が出る', (await text(page, '#table3SiteNote')) === '群馬は準備中です');
+
     await clickSite(page, '南丹');
-    check('table2本体は南丹選択後も変わらない', (await text(page, mainHarvestCell('M', 0))) === before.t2);
+    check('table1(製品在庫)は南丹選択後「－」になる', (await text(page, '[data-stock-product="M"]')) === '－');
+    check('table1に「南丹は準備中です」の注記が出る', (await text(page, '#table1SiteNote')) === '南丹は準備中です');
+    check('table2(収穫予測)は南丹選択後も「－」になる', (await text(page, mainHarvestCell('M', 0))) === '－');
+    check('table3(在庫予測)は南丹選択後も「－」になる', (await text(page, mainStockCell('M', 0))) === '－');
+
+    await clickSite(page, 'いなべ');
+    check('いなべに戻すとtable1がもとの実データに戻る', (await text(page, '[data-stock-product="M"]')) === before.stockProduct);
+    check('いなべに戻すとtable2がもとの実データに戻る', (await text(page, mainHarvestCell('M', 0))) === before.t2);
+    check('いなべに戻すとtable3がもとの実データに戻る', (await text(page, mainStockCell('M', 0))) === before.t3);
+    check('いなべに戻すと注記が消える', (await text(page, '#table1SiteNote')) === '' && (await text(page, '#table2SiteNote')) === '' && (await text(page, '#table3SiteNote')) === '');
     await page.close();
   }
 
