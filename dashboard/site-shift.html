@@ -2105,8 +2105,10 @@ function renderPrint(shrink = 1) {
     const len = [...text].reduce((t, ch) => t + (ch.charCodeAt(0) < 0x2000 ? 0.75 : 1), 0);
     return Math.min(cap, (nameW - 2) / Math.max(len, 1));
   };
-  const nameFont = name => fitFont(name, baseFont);
-  const subFont = text => fitFont(text, baseFont * 0.8);
+  // 氏名欄は2段（氏名／部門・雇用区分）になるため、合わせて行の高さを超えないよう、
+  // 時間の2段（timeFont＝行の高さの43%）と同じ考え方で上段を行の高さの43%、下段を35%を上限にする
+  const nameFont = name => fitFont(name, Math.min(baseFont, rowH * 0.43));
+  const subFont = text => fitFont(text, rowH * 0.35);
   const yr = first.iso.slice(0, 4);
   let h = `<div class="pp-head"><h2>${esc($('site').value)}　シフト表　${yr}年${first.m}月${first.d}日〜${last.m}月${last.d}日</h2><!--deliv--></div>`;
   const usedTags = new Set(); // 印刷する範囲で使われている応援・配送の印（見出しに凡例を出す）

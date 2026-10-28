@@ -252,6 +252,46 @@ const CELLS = {
     await page.close(); await ctx.close();
   }
 
+  /* ===================== 印刷（一覧）：いなべの全員に近い人数（38人）で、氏名欄の2段が
+     行の高さ(rowH)を超えず、1枚に収める仕組み(shrink)が余計に縮めていないこと ===================== */
+  {
+    const DEPTS = ['栽培', '栽培', '栽培', '栽培・配送', '出荷', '出荷', '出荷・配送', '配送', '配送・栽培', '生産部長'];
+    const EMP = ['社員', 'パート', 'パート', '技能実習生'];
+    const MEMBERS38 = Array.from({ length: 38 }, (_, i) => ({
+      key: `b${i}`, name: `従業員 ${String(i + 1).padStart(2, '0')}`, dept: DEPTS[i % DEPTS.length], empType: EMP[i % EMP.length], flag: 1, row: i + 1, join: '', leave: '',
+    }));
+    const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const page = await openShiftPage(ctx, { seed: baseSeed(MEMBERS38), members: MEMBERS38 });
+    await page.goto(URL);
+    await page.waitForSelector('#grid tbody td.name[data-r]');
+    await page.click('#tabPrint');
+    await page.waitForTimeout(500);
+
+    const info = await page.evaluate(() => {
+      const pg = document.getElementById('printPage');
+      const table = pg.querySelector('.pp-table');
+      const rows = [...table.querySelectorAll('tbody tr')];
+      const showCount = !!table.querySelector('tfoot');
+      const row = rows[0];
+      const nm = row.querySelector('td.nm');
+      // renderPrint()と同じ式で、縮め(shrink)が入らないときの行の高さ(rowH)を計算する
+      const PAGE_W = 270, TABLE_H = 184 - 10, headH = 2.4;
+      const lines = rows.length + (showCount ? 1 : 0) + headH;
+      const expectedRowH = Math.min(7, TABLE_H / lines); // shrink=1のときの値
+      const actualRowH = parseFloat(row.style.height);
+      return {
+        rowCount: rows.length, expectedRowH, actualRowH,
+        nmScrollHeight: nm.scrollHeight, nmClientHeight: nm.clientHeight,
+        tableHeight: table.offsetHeight,
+        room: pg.clientHeight - pg.querySelector('.pp-head').offsetHeight - 6,
+      };
+    });
+    check('印刷（38人）：行の高さがshrink=1のまま（PR #538の前と同じ計算、差0.1mm以内）', Math.abs(info.actualRowH - info.expectedRowH) <= 0.1, JSON.stringify(info));
+    check('印刷（38人）：氏名欄(td.nm)の中身の高さが行の高さを超えない', info.nmScrollHeight <= info.nmClientHeight + 1, JSON.stringify(info));
+    check('印刷（38人）：1枚に収まる（表の高さが収まる範囲内）', info.tableHeight <= info.room + 1, JSON.stringify(info));
+    await page.close(); await ctx.close();
+  }
+
   /* ===================== B1：F列3に「取消」と「退職・異動」の両方 ===================== */
   {
     const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
