@@ -221,9 +221,19 @@
 
 const MONTH_LABELS = [
   '25/1','25/2','25/3','25/4','25/5','25/6','25/7','25/8','25/9','25/10','25/11','25/12',
-  '26/1','26/2','26/3','26/4','26/5','26/6','26/7','26/8','26/9',
+  '26/1','26/2','26/3','26/4','26/5','26/6','26/7','26/8','26/9','26/10',
 ];
 const N = MONTH_LABELS.length;
+
+// ── 着地見込みの月 ──
+// 月の途中で、元シートに「着地見込み」として入れた値を表示する月。棒は薄い色、折れ線は点線で区別する。
+// 収穫量シートは見出し「着地見込み」、売上・菌床代シートは「着地見込」列から取る。
+// 出荷量＆出荷額シートには着地見込みが無く、月の途中の実績(入力済み分だけ)が出てしまうため、
+// この月の出荷量・出荷額・売上単価は表示しない(月が締まって実績月になったら、ここから外す)。
+const FORECAST_LABEL = '26/10';
+const FORECAST_IDX = MONTH_LABELS.indexOf(FORECAST_LABEL);
+const isForecast = (idx) => idx >= 0 && idx === FORECAST_IDX;
+const monthLabel = (idx) => MONTH_LABELS[idx] + (isForecast(idx) ? '（着地見込）' : '');
 
 const SITES = [
   { key: 'inabe',  name: 'いなべ', color: '#38bdf8' },
@@ -238,48 +248,50 @@ const ALL_LOCS = [TOTAL_SITE, ...SITES];
 // 成功した項目はここを自動的に上書きする。収穫量シートは行番号のみが頼りでラベル照合ができず、
 // 行がずれると無音で誤ったデータになるリスクがあるため、ライブ取得の対象外(手動更新のまま)。
 // 収穫量 (kg) — 収穫量シート「中期計画（7月修正)」 いなべ11行目/群馬27行目/南丹43行目, AV列(2025.1)〜 ※手動更新
+// 26/10はBQ列「着地見込み」(10/27までの収穫実績＋10/28〜31の収穫見込。2026年ファーム売上高・収穫量の10月拠点タブから)
 const HARVEST = {
-  inabe:  [12565.0,13083.0,10519.0,11161.0,14106.8,6917.1,7974.0,9202.0,15652.0,17981.0,20719.0,29626.0, 19941.0,18079.0,14571.0,13764.0,15453.0,15516.7,14387.0,11216.0,16488.0],
-  gunma:  [11451.0,9556.5,8853.0,8940.2,7751.0,7752.9,5762.0,8153.0,11686.4,13878.0,15607.0,14827.0,    21367.0,13837.0,16281.0,12082.0,13708.0,16308.3,10036.0,13474.0,13334.0],
-  nantan: [10965.0,10606.0,10965.0,7051.0,10085.4,8011.6,7528.1,8443.0,8356.0,13518.0,13246.0,19404.0,   17186.0,10864.0,12266.0,9044.0,9722.0,11379.8,10704.0,10564.0,13643.0],
+  inabe:  [12565.0,13083.0,10519.0,11161.0,14106.8,6917.1,7974.0,9202.0,15652.0,17981.0,20719.0,29626.0, 19941.0,18079.0,14571.0,13764.0,15453.0,15516.7,14387.0,11216.0,16488.0,24996.3],
+  gunma:  [11451.0,9556.5,8853.0,8940.2,7751.0,7752.9,5762.0,8153.0,11686.4,13878.0,15607.0,14827.0,    21367.0,13837.0,16281.0,12082.0,13708.0,16308.3,10036.0,13474.0,13334.0,18467.0],
+  nantan: [10965.0,10606.0,10965.0,7051.0,10085.4,8011.6,7528.1,8443.0,8356.0,13518.0,13246.0,19404.0,   17186.0,10864.0,12266.0,9044.0,9722.0,11379.8,10704.0,10564.0,13643.0,18087.0],
 };
 // 出荷量 (kg) ・出荷額 (円) — 出荷量＆出荷額シート「2026/2025 + 拠点名」タブ B列(出荷量,g→kg換算)/E列(出荷額) ※ライブ取得
 const SHIPMENT = {
-  inabe:  [11234.93,12128.28,9130.68,8693.36,11275.06,5512.51,5823.75,7596.91,11913.37,15576.84,16585.79,24439.55, 15501.78,16248.34,13623.74,13220.34,13252.29,13650.16,12736.24,10033.11,2792.18],
-  gunma:  [9807.25,7804.84,7009.85,7524.37,7259.08,5408.6,4062.65,6291.54,8275.95,12508.84,15161.75,16730.57,       18476.72,16252.5,14718.2,12460.8,13040.8,12431.77,10316.63,10814.34,3051.29],
-  nantan: [8618.63,8984.1,9033.75,6635.26,8567.71,6706.2,5499.87,7388.61,7014.9,11460.19,11234.89,19718.95,         12866.15,12009.55,11056.15,8345.25,8367.1,10067.4,9573.45,9176.88,2208.54],
+  inabe:  [11234.93,12128.28,9130.68,8693.36,11275.06,5512.51,5823.75,7596.91,11913.37,15576.84,16585.79,24439.55, 15501.78,16248.34,13623.74,13220.34,13252.29,13650.16,12736.24,10033.11,13344.68,null],
+  gunma:  [9807.25,7804.84,7009.85,7524.37,7259.08,5408.6,4062.65,6291.54,8275.95,12508.84,15161.75,16730.57,       18476.72,16252.5,14718.2,12460.8,13040.8,12431.77,10316.63,10814.34,11829.55,null],
+  nantan: [8618.63,8984.1,9033.75,6635.26,8567.71,6706.2,5499.87,7388.61,7014.9,11460.19,11234.89,19718.95,         12866.15,12009.55,11056.15,8345.25,8367.1,10067.4,9573.45,9176.88,10466.56,null],
 };
 const SHIPMENT_VALUE = {
-  inabe:  [11132798,11530269,8911935,7812855,10076090,5511492,6069812,7700518,12165553,15610663,16565013,25253268, 15692233,16711474,13845602,13971265,13071502,14290350,13289932,10504745,2982760],
-  gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,11248802,3166940],
-  nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,9739035,2359049],
+  inabe:  [11132798,11530269,8911935,7812855,10076090,5511492,6069812,7700518,12165553,15610663,16565013,25253268, 15692233,16711474,13845602,13971265,13071502,14290350,13289932,10504745,14042080,null],
+  gunma:  [9082034,7367469,6902636,7461163,6592847,5492052,4339946,6604613,8293180,11588142,15053276,17036100,     18069627,16493436,14894184,12874015,13900314,12800771,10121200,11248802,12122182,null],
+  nantan: [8722794,8814886,8925983,6168925,7745634,6378445,5327551,7371925,7244655,11950353,11784106,20796248,     13572384,12390664,11141335,8547530,8592262,10370057,10247242,9739035,10941773,null],
 };
 // 売上単価 (円/g) — 出荷量＆出荷額シート「g単価(売上ベース)」列の値をそのまま採用する。
 // 拠点タブ(いなべ/群馬/南丹)はJ列、全拠点タブはI列。全社合計も各拠点から算出せず全拠点タブの値を使う。
 // ※シート側の計算結果をそのまま表示する項目のため、コード側では一切計算しない ※ライブ取得
 const UNIT_PRICE = {
-  inabe:  [0.9355,0.8403,0.9575,0.7763,0.7735,0.9365,0.9915,0.9756,0.9001,0.958,0.9763,0.9829, 1.0127,0.9839,0.9571,0.9706,0.9453,0.8899,0.8894,0.9587,0.7665],
-  gunma:  [0.7195,0.8167,0.8841,0.7433,0.7311,0.785,0.9513,0.9155,0.947,0.919,0.9143,0.9608,   0.8816,0.9708,0.8684,0.9156,0.9231,0.8651,0.8435,0.8387,0.6442],
-  nantan: [0.9507,0.9011,0.9273,0.825,0.743,0.7823,0.7849,0.9141,0.9796,0.9561,1.0454,0.9612,  0.9519,0.9504,0.8909,0.8945,0.9546,0.909,0.9832,1.0077,0.7411],
-  total:  [0.8902,0.8528,0.9263,0.7863,0.7471,0.8314,0.907,0.9365,0.899,0.9451,0.9725,0.9698,  0.9443,0.9701,0.9054,0.9318,0.9392,0.8896,0.9024,0.9304,0.7132],
+  inabe:  [0.9355,0.8403,0.9575,0.7763,0.7735,0.9365,0.9915,0.9756,0.9001,0.958,0.9763,0.9829, 1.0127,0.9839,0.9571,0.9706,0.9453,0.8899,0.8894,0.9587,0.9933,null],
+  gunma:  [0.7195,0.8167,0.8841,0.7433,0.7311,0.785,0.9513,0.9155,0.947,0.919,0.9143,0.9608,   0.8816,0.9708,0.8684,0.9156,0.9231,0.8651,0.8435,0.8387,0.9063,null],
+  nantan: [0.9507,0.9011,0.9273,0.825,0.743,0.7823,0.7849,0.9141,0.9796,0.9561,1.0454,0.9612,  0.9519,0.9504,0.8909,0.8945,0.9546,0.909,0.9832,1.0077,0.9961,null],
+  total:  [0.8902,0.8528,0.9263,0.7863,0.7471,0.8314,0.907,0.9365,0.899,0.9451,0.9725,0.9698,  0.9443,0.9701,0.9054,0.9318,0.9392,0.8896,0.9024,0.9304,0.9652,null],
 };
 // 菌床仕入本数 (本) — 菌床本数シート「菌床数集計」タブ 各拠点合計行(千葉七河+自社菌床), D列(2025.1)〜 ※ライブ取得
 const BED_COUNT = {
-  inabe:  [24453,25301,3248,24441,21605,10701,13063,23460,24362,31541,46440,50115, 22680,12960,23063,14930,25646,26133,18900,35638,35680],
-  gunma:  [22680,17640,2520,10080,12600,10080,14490,14760,18170,22610,45360,47880, 27720,22680,20160,17640,23930,18900,20160,20160,22680],
-  nantan: [15120,22680,2520,10080,15120,11160,15360,16728,20389,22502,39418,47834, 19922,11871,20993,12156,13850,18056,20160,23098,23998],
+  inabe:  [24453,25301,3248,24441,21605,10701,13063,23460,24362,31541,46440,50115, 22680,12960,23063,14930,25646,26133,18900,35638,35680,35130],
+  gunma:  [22680,17640,2520,10080,12600,10080,14490,14760,18170,22610,45360,47880, 27720,22680,20160,17640,23930,18900,20160,20160,22680,29230],
+  nantan: [15120,22680,2520,10080,15120,11160,15360,16728,20389,22502,39418,47834, 19922,11871,20993,12156,13850,18056,20160,23098,23998,38020],
 };
 // 売上 (円) — 売上・菌床代シート「26年度計画①（実績入力用）」 いなべ14行目/群馬(安中)15行目/南丹16行目, Q列(2025.1)〜 実績のみ ※ライブ取得
+// (26/10は「着地見込」列。計算方法はシートのBC6のメモ参照)
 const REVENUE = {
-  inabe:  [10510096,10191882,8742871,7231155,8720873,5162377,5774116,7396001,11146965,15047070,16075945,24021559, 15698105,15986374,13039789,12832284,12526989,12146811,11327563,9618283,null],
-  gunma:  [6896257,6374300,6177660,5606524,5307398,4245882,3625088,5760112,7695618,11534373,13863046,15940866,     16288202,15778578,12586789,11408840,12356300,10713760,8654177,9070090,null],
-  nantan: [8194037,8095650,8377298,5594517,6365436,5246525,4316604,6730172,6880656,10956651,11745408,18952887,     12247781,11413810,9850296,7465095,8592262,9151246,9412868,9247707,null],
+  inabe:  [10510096,10191882,8742871,7231155,8720873,5162377,5774116,7396001,11146965,15047070,16075945,24021559, 15698105,15986374,13039789,12832284,12526989,12146811,11327563,9618283,13255374,20160571],
+  gunma:  [6896257,6374300,6177660,5606524,5307398,4245882,3625088,5760112,7695618,11534373,13863046,15940866,     16288202,15778578,12586789,11408840,12356300,10713760,8654177,9070090,10720653,14585808],
+  nantan: [8194037,8095650,8377298,5594517,6365436,5246525,4316604,6730172,6880656,10956651,11745408,18952887,     12247781,11413810,9850296,7465095,8592262,9151246,9412868,9247707,10425539,15225094],
 };
 // 菌床代 (円) — 同シート いなべ26行目/群馬(安中)27行目/南丹28行目, Q列(2025.1)〜 実績のみ ※ライブ取得
 const SUBSTRATE_COST = {
-  inabe:  [5500765,5664620,725410,4784825,4672165,2923785,2899060,5082135,6458858,7196051,10894824,11663781, 5335008,3040416,5353681,3308734,5887526,5791467,4433940,8365970,null],
-  gunma:  [5128410,3982230,568890,2275560,2844450,2275560,3271117,3342570,5122461,5304306,10641456,11232648,   6503112,5342148,4737696,4138344,5613978,4433940,4729536,4729536,null],
-  nantan: [3428040,5120010,568890,2853910,3386250,2519370,3467520,3742980,4672251,5072346,9116966,11074582,     4628974,2749833,4859239,2771516,3249210,4030216,4729536,5421982,null],
+  inabe:  [5500765,5664620,725410,4784825,4672165,2923785,2899060,5082135,6458858,7196051,10894824,11663781, 5335008,3040416,5353681,3308734,5887526,5791467,4433940,8365970,8372704,8243556],
+  gunma:  [5128410,3982230,568890,2275560,2844450,2275560,3271117,3342570,5122461,5304306,10641456,11232648,   6503112,5342148,4737696,4138344,5613978,4433940,4729536,4729536,5320728,6857358],
+  nantan: [3428040,5120010,568890,2853910,3386250,2519370,3467520,3742980,4672251,5072346,9116966,11074582,     4628974,2749833,4859239,2771516,3249210,4030216,4729536,5421982,5631970,8921396],
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -390,24 +402,28 @@ function numOrNull(v) {
   return Number.isFinite(n) && n !== 0 ? n : null;
 }
 
-// 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列はラベル行の文言(出荷量(固定)/出荷額/売上)で
+// gvizは列ごとに型を推定し、数値の列にある見出しの文字(出荷量・R8.9など)を値から落とす。
+// そのため見出し行は headers=n で列名(table.cols[].label)として受け取り、ここから探す。
+// 列名は上からn行分の文字が半角スペースでつながるので、最後の語を見出しとして使う。
+function columnLabels(table) {
+  return (table.cols || []).map(c => String(c.label || '').trim().split(/\s+/).pop());
+}
+
+// 出荷量＆出荷額シート: 「{年}{拠点名}」タブ(例:2025いなべ)。列は見出し(2行目の出荷量(固定)/出荷額/売上)で
 // 特定し、行は「n月」ラベルで特定する(行・列位置に依存しないため多少の行列挿入があっても壊れにくい)。
 async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const tabName = `${year}${siteNameJP}`;
-  const table = await fetchSheet(sheetId, tabName, 1);
+  const table = await fetchSheet(sheetId, tabName, 2);
   const rows = table.rows || [];
   let colB = null, colE = null, colJ = null;
-  rows.forEach(row => {
-    (row.c || []).forEach((c, i) => {
-      const label = c && c.v != null ? String(c.v).trim() : '';
-      // 出荷量の見出しはタブによって表記が異なる(いなべ:「出荷量(固定)」／群馬・南丹:「出荷量」)
-      if (label === '出荷量(固定)' || label === '出荷量') colB = i;
-      if (label === '出荷額') colE = i;
-      if (label === 'g単価(売上ベース)') colJ = i;
-    });
+  columnLabels(table).forEach((label, i) => {
+    // 出荷量の見出しはタブによって表記が異なる(いなべ:「出荷量(固定)」／群馬・南丹:「出荷量」)
+    if (colB == null && (label === '出荷量(固定)' || label === '出荷量')) colB = i;
+    if (colE == null && label === '出荷額') colE = i;
+    if (colJ == null && label === 'g単価(売上ベース)') colJ = i;
   });
   if (colB == null || colE == null) {
-    throw new Error(`${tabName}: 列見出しが見つかりません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
+    throw new Error(`${tabName}: 列見出しが見つかりません(列名=${columnLabels(table).slice(0, 12).join(',')})`);
   }
   // 売上単価は見出しが変わっても取得を続けられるよう、見つからない場合はJ列(0始まりで9)を採用する
   if (colJ == null) colJ = 9;
@@ -415,10 +431,13 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
   const shipment = Array(12).fill(null);
   const shipmentValue = Array(12).fill(null);
   const unitPrice = Array(12).fill(null);
+  // 同じタブの下の方に「1月〜12月」の行を持つ別の表があるため、上の表(各月の最初の行)だけを採用する
+  const seen = new Set();
   rows.forEach(row => {
     const cells = row.c || [];
     const month = monthFromCell(cells[0]);
-    if (month == null) return;
+    if (month == null || seen.has(month)) return;
+    seen.add(month);
     const bVal = numOrNull(cells[colB]?.v);
     const eVal = numOrNull(cells[colE]?.v);
     const jVal = numOrNull(cells[colJ]?.v);
@@ -434,23 +453,21 @@ async function fetchShipmentSiteYear(sheetId, year, siteNameJP) {
 // このタブの「g単価(売上ベース)」列(I列)の値をそのまま採用する。
 async function fetchTotalUnitPriceYear(sheetId, year) {
   const tabName = `${year}全拠点`;
-  const table = await fetchSheet(sheetId, tabName, 1);
+  const table = await fetchSheet(sheetId, tabName, 2);
   const rows = table.rows || [];
-  let colI = null;
-  rows.forEach(row => {
-    (row.c || []).forEach((c, i) => {
-      const label = c && c.v != null ? String(c.v).trim() : '';
-      if (label === 'g単価(売上ベース)') colI = i;
-    });
-  });
+  let colI = columnLabels(table).indexOf('g単価(売上ベース)');
+  if (colI < 0) colI = null;
   // 見出しが見つからない場合はI列(0始まりで8)を採用する
   if (colI == null) colI = 8;
 
   const unitPrice = Array(12).fill(null);
+  // 同じタブの下の方に「1月〜12月」の行を持つ別の表があるため、上の表(各月の最初の行)だけを採用する
+  const seen = new Set();
   rows.forEach(row => {
     const cells = row.c || [];
     const month = monthFromCell(cells[0]);
-    if (month == null) return;
+    if (month == null || seen.has(month)) return;
+    seen.add(month);
     const v = numOrNull(cells[colI]?.v);
     unitPrice[month - 1] = v != null ? +v.toFixed(4) : null;
   });
@@ -499,8 +516,10 @@ async function fetchShipmentAll(sheetId) {
 }
 
 // 売上・菌床代シート: 列構成が期間によって変化する(実績のみ1列 → 計画/実績/予実差異/前月差異の4列 →
-// 計画/実績の2列)ため、月ラベル行("R7.1"等)と実績/計画マーカー行を毎回スキャンして「実績」列だけを
-// 特定する。対象行も固定行番号ではなく科目名(売上高（いなべ）等)で照合するため行挿入に強い。
+// 計画/実績の2列)ため、月ラベル行("R7.1"等)と実績/計画マーカー行から「実績」列だけを特定する。
+// この2行は数値の列にあり値からは落ちるので、上6行を列名(headers=6、例「R8.9 実績」)として受け取る。
+// 対象行も固定行番号ではなく科目名(売上高（いなべ）等)で照合するため行挿入に強い。
+const SALES_HEADER_ROWS = 6;
 function parseSalesTable(table) {
   const REVENUE_LABELS = { '売上高（いなべ）': 'inabe', '売上高（安中）': 'gunma', '売上高（南丹）': 'nantan' };
   const COST_LABELS = { '売上原価（いなべ）菌床代': 'inabe', '売上原価（安中）菌床代': 'gunma', '売上原価（南丹）菌床代': 'nantan' };
@@ -508,30 +527,21 @@ function parseSalesTable(table) {
   const substrateCost = { inabe: Array(N).fill(null), gunma: Array(N).fill(null), nantan: Array(N).fill(null) };
 
   const rows = table.rows || [];
-  let monthRowIdx = -1, markerRowIdx = -1;
-  rows.forEach((row, i) => {
-    const joined = (row.c || []).map(c => (c && c.v != null ? String(c.v) : '')).join('|');
-    if (monthRowIdx === -1 && (joined.match(/R\d+\.\d+/g) || []).length >= 10) monthRowIdx = i;
-    if (markerRowIdx === -1 && (joined.match(/実績/g) || []).length >= 5 && (joined.match(/計画/g) || []).length >= 5) markerRowIdx = i;
-  });
-  if (monthRowIdx === -1 || markerRowIdx === -1) {
-    throw new Error(`月ラベル行/実績列が見つかりません(取得行数=${rows.length}) ${sampleRowStrings(rows)}`);
-  }
-
-  const monthCells = rows[monthRowIdx].c || [];
-  const markerCells = rows[markerRowIdx].c || [];
   const colToIdx = {};
-  const maxCols = Math.max(monthCells.length, markerCells.length);
-  for (let c = 0; c < maxCols; c++) {
-    const marker = markerCells[c]?.v != null ? String(markerCells[c].v).trim() : '';
-    if (marker !== '実績') continue;
-    const label = monthCells[c]?.v != null ? String(monthCells[c].v).trim() : '';
-    const m = label.match(/^R(\d+)\.(\d+)$/);
-    if (!m) continue;
+  (table.cols || []).forEach((col, c) => {
+    // 着地見込みの月だけは「着地見込」列を採用する(実績列はまだ空のため)
+    const m = String(col.label || '').trim().match(/R(\d+)\.(\d+)\s+(実績|着地見込)$/);
+    if (!m) return;
+    const marker = m[3];
     const year = 2018 + parseInt(m[1], 10);
     const month = parseInt(m[2], 10);
     const idx = (year - 2025) * 12 + (month - 1);
-    if (idx >= 0 && idx < N) colToIdx[c] = idx;
+    if (idx < 0 || idx >= N) return;
+    if ((marker === '着地見込') !== isForecast(idx)) return;
+    colToIdx[c] = idx;
+  });
+  if (!Object.keys(colToIdx).length) {
+    throw new Error(`月ラベル/実績の列が見つかりません(列名=${(table.cols || []).slice(0, 8).map(c => c.label).join(',')})`);
   }
 
   rows.forEach(row => {
@@ -557,7 +567,7 @@ function coverageText(arr) {
   const { idx } = lastValid(arr);
   if (idx < 0) return '未入力';
   const [yy, mm] = MONTH_LABELS[idx].split('/');
-  return `20${yy}年${mm}月`;
+  return `20${yy}年${mm}月${isForecast(idx) ? '（着地見込）' : ''}`;
 }
 
 function updateLiveBanner() {
@@ -575,6 +585,7 @@ function updateLiveBanner() {
     売上＝${coverageText(DATA.total.revenue)}${statusIcon('sales')}／
     菌床代＝${coverageText(DATA.total.substrateCost)}${statusIcon('sales')}
     （各元シートへの入力状況により異なります。それ以降は未入力のため「—」表示です）
+    ${FORECAST_IDX >= 0 ? `<br>${FORECAST_LABEL}は着地見込み（グラフの棒は薄い色・折れ線は点線）。出荷量・出荷額・売上単価は月が締まるまで表示しません` : ''}
     ${lastLiveFetchAt ? `<br><span style="font-size:0.75rem;color:var(--muted)">最終ライブ取得: ${lastLiveFetchAt.toLocaleString('ja-JP')}</span>` : ''}
     ${errLines.length ? `<br>${errLines.map(l => `<span style="color:var(--bad)">${l}</span>`).join('<br>')}` : ''}
   `;
@@ -588,7 +599,7 @@ async function refreshLiveData() {
   const [bedRes, shipRes, salesRes] = await Promise.allSettled([
     fetchSheet(LIVE_SHEETS.bedCount.id, LIVE_SHEETS.bedCount.tab, 1).then(parseBedCountTable),
     fetchShipmentAll(LIVE_SHEETS.shipment.id),
-    fetchSheet(LIVE_SHEETS.sales.id, LIVE_SHEETS.sales.tab, 1).then(parseSalesTable),
+    fetchSheet(LIVE_SHEETS.sales.id, LIVE_SHEETS.sales.tab, SALES_HEADER_ROWS).then(parseSalesTable),
   ]);
 
   if (bedRes.status === 'fulfilled') {
@@ -633,15 +644,20 @@ async function refreshLiveData() {
   render();
 }
 
+// 着地見込みの月を空にする(出荷量＆出荷額シートは月の途中の入力済み分しか無いため。FORECAST_LABELのコメント参照)
+function withoutForecast(arr) {
+  return arr.map((v, i) => isForecast(i) ? null : v);
+}
+
 function calcSite(siteKey) {
   const harvest       = HARVEST[siteKey];
-  const shipment      = SHIPMENT[siteKey];
+  const shipment      = withoutForecast(SHIPMENT[siteKey]);
   const bedCount      = BED_COUNT[siteKey];
-  const shipmentValue = SHIPMENT_VALUE[siteKey];
+  const shipmentValue = withoutForecast(SHIPMENT_VALUE[siteKey]);
   const revenue       = REVENUE[siteKey];
   const substrateCost = SUBSTRATE_COST[siteKey];
   // 売上単価はシート「g単価(売上ベース)」列の値をそのまま使う(コード側では計算しない)
-  const unitPrice     = UNIT_PRICE[siteKey];
+  const unitPrice     = withoutForecast(UNIT_PRICE[siteKey]);
 
   const yieldRate   = shipment.map((v,i) => (v == null || !harvest[i]) ? null : +(v / harvest[i] * 100).toFixed(1));
   const costRatio   = revenue.map((v,i) => (v == null || substrateCost[i] == null) ? null : +(substrateCost[i] / v * 100).toFixed(1));
@@ -680,7 +696,7 @@ function buildData() {
     substrateCost: sumArr(data.inabe.substrateCost, data.gunma.substrateCost, data.nantan.substrateCost),
     grossProfit: sumArr(data.inabe.grossProfit, data.gunma.grossProfit, data.nantan.grossProfit),
     // 売上単価は合算できないため、全拠点タブから取得した値をそのまま使う
-    unitPrice: UNIT_PRICE.total,
+    unitPrice: withoutForecast(UNIT_PRICE.total),
   };
   data.total.yieldRate = data.total.shipment.map((v,i) => (v == null || !data.total.harvest[i]) ? null : +(v / data.total.harvest[i] * 100).toFixed(1));
   data.total.costRatio = data.total.revenue.map((v,i) => (v == null || data.total.substrateCost[i] == null) ? null : +(data.total.substrateCost[i] / v * 100).toFixed(1));
@@ -730,7 +746,19 @@ const COMPARE_METRIC_KEYS = Object.keys(METRIC_DEFS);
 // 目標値などの基準線。実績と区別できるよう、点を描かない灰色の破線で重ねる
 const BASELINE_COLOR = '#6b7280';
 function baselineSeries(value, label, length = 12) {
-  return { label, data: Array(length).fill(value), color: BASELINE_COLOR, type: 'line', axis: 'y', dash: [4, 4], pointRadius: 0 };
+  return { label, data: Array(length).fill(value), color: BASELINE_COLOR, type: 'line', axis: 'y', dash: [4, 4], pointRadius: 0, baseline: true };
+}
+
+// 年別に切り出した12ヶ月の中で、着地見込みの月が何番目か(その年に無ければ-1)
+function forecastIdxInYear(year) {
+  const i = FORECAST_IDX - (year - YEARS[0]) * 12;
+  return FORECAST_IDX >= 0 && i >= 0 && i < 12 ? i : -1;
+}
+// 系列に着地見込みの月を付ける(drawComboが棒を薄く・折れ線を点線にする)。基準線は対象外
+function markForecast(series, year) {
+  const f = forecastIdxInYear(year);
+  series.forEach(s => { if (!s.baseline && s.forecastIdx == null) s.forecastIdx = f; });
+  return series;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -844,7 +872,7 @@ function kpiCardHtml(d, c) {
       ${st.momPct != null ? `<span class="delta ${cls(st.momPct)}">前月比 ${pctLabel(st.momPct)}</span>` : ''}
       ${st.yoyPct != null ? `<span class="delta ${cls(st.yoyPct)}">前年比 ${pctLabel(st.yoyPct)}</span>` : ''}
     </div>
-    <div class="kpi-asof">${st.idx >= 0 ? MONTH_LABELS[st.idx] : ''}時点</div>
+    <div class="kpi-asof">${st.idx >= 0 ? monthLabel(st.idx) : ''}時点</div>
   </div>`;
 }
 
@@ -856,20 +884,29 @@ function drawCombo(canvasId, labels, series) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const axesUsed = [...new Set(series.map(s => s.axis || 'y'))];
 
-  const datasets = series.map(s => ({
-    type: s.type || 'bar',
-    label: s.label,
-    data: s.data,
-    backgroundColor: s.type === 'line' ? 'transparent' : s.color + 'cc',
-    borderColor: s.color,
-    borderWidth: s.type === 'line' ? 2.5 : 1,
-    borderRadius: s.type === 'line' ? 0 : 4,
-    borderDash: s.dash || undefined,
-    pointRadius: s.pointRadius != null ? s.pointRadius : (s.type === 'line' ? 3 : 0),
-    tension: s.tension != null ? s.tension : 0.3,
-    spanGaps: false,
-    yAxisID: s.axis || 'y',
-  }));
+  const datasets = series.map(s => {
+    // 着地見込みの月: 棒は薄い色、折れ線はその月へつながる区間を点線・点を白抜きにする
+    const f = s.forecastIdx != null ? s.forecastIdx : -1;
+    const isLine = s.type === 'line';
+    return {
+      type: s.type || 'bar',
+      label: s.label,
+      data: s.data,
+      backgroundColor: isLine ? 'transparent'
+        : (f >= 0 ? s.data.map((_, i) => s.color + (i === f ? '4d' : 'cc')) : s.color + 'cc'),
+      borderColor: s.color,
+      borderWidth: isLine ? 2.5 : 1,
+      borderRadius: isLine ? 0 : 4,
+      borderDash: s.dash || undefined,
+      segment: isLine && f >= 0 ? { borderDash: c => c.p1DataIndex === f ? [5, 4] : (s.dash || undefined) } : undefined,
+      pointBackgroundColor: isLine && f >= 0 ? s.data.map((_, i) => i === f ? '#ffffff' : s.color) : undefined,
+      pointRadius: s.pointRadius != null ? s.pointRadius : (isLine ? 3 : 0),
+      tension: s.tension != null ? s.tension : 0.3,
+      spanGaps: false,
+      yAxisID: s.axis || 'y',
+      forecastIdx: f,
+    };
+  });
 
   const scales = { x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { display: false } } };
   axesUsed.forEach(id => {
@@ -891,7 +928,7 @@ function drawCombo(canvasId, labels, series) {
         tooltip: {
           backgroundColor: '#ffffff', borderColor: '#e3e6ea', borderWidth: 1,
           titleColor: '#1f2430', bodyColor: '#374151',
-          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toLocaleString('ja-JP')}` },
+          callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toLocaleString('ja-JP')}${c.dataIndex === c.dataset.forecastIdx ? '（着地見込）' : ''}` },
         },
       },
       scales,
@@ -909,7 +946,7 @@ function renderYearSplitCombo(containerId, title, buildSeries, d) {
     </div>`).join('')}</div>`;
   YEARS.forEach(y => {
     const ds = sliceDataset(d, y);
-    const series = buildSeries(ds);
+    const series = markForecast(buildSeries(ds), y);
     chart(`${containerId}-${y}`, `${title}（${y}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
   });
 }
@@ -920,7 +957,7 @@ function renderCurrentYearCombo(containerId, title, buildSeries, d) {
   const canvasId = `${containerId}-canvas`;
   document.getElementById(containerId).innerHTML =
     `<div class="chart-wrap" onclick="openZoom('${canvasId}')"><canvas id="${canvasId}"></canvas></div>`;
-  const series = buildSeries(sliceDataset(d, CURRENT_YEAR));
+  const series = markForecast(buildSeries(sliceDataset(d, CURRENT_YEAR)), CURRENT_YEAR);
   chart(canvasId, `${title}（${CURRENT_YEAR}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
 }
 // ────────────────────────────────────────────────────────────────
@@ -962,7 +999,7 @@ function buildAlertsHtml(d) {
     <tbody>${rows.map(r => `<tr>
       <td>${r.m.label}</td>
       <td><span class="badge badge-${r.sev}">${r.sevLabel}</span></td>
-      <td>前月比 ${pctLabel(r.st.momPct)}（${MONTH_LABELS[r.st.idx]}時点）</td>
+      <td>前月比 ${pctLabel(r.st.momPct)}（${monthLabel(r.st.idx)}時点）</td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -988,7 +1025,7 @@ const TABLE_COLUMNS = [
 function buildMonthlyTableHtml(d) {
   const head = `<th>月</th>` + TABLE_COLUMNS.map(c => `<th class="num">${c.label}</th>`).join('');
   const rows = MONTH_LABELS.map((m, i) =>
-    `<tr><td class="dim">${m}</td>${TABLE_COLUMNS.map(c => `<td class="num">${fmt(d[c.key][i], c.digits)}</td>`).join('')}</tr>`
+    `<tr><td class="dim">${monthLabel(i)}</td>${TABLE_COLUMNS.map(c => `<td class="num">${fmt(d[c.key][i], c.digits)}</td>`).join('')}</tr>`
   ).join('');
   const footer = `<tr class="footer-row"><td class="dim">累計/平均</td>${TABLE_COLUMNS.map(c => {
     const v = c.agg === 'sum' ? sumValid(d[c.key]) : avgValid(d[c.key]);
@@ -1016,7 +1053,8 @@ function salesCostBuckets(period) {
       if (!idxs.length) continue;
       const first = MONTH_LABELS[idxs[0]];
       const last = MONTH_LABELS[idxs[idxs.length - 1]];
-      buckets.push({ label: idxs.length === 1 ? first : `${first}-${last.split('/')[1]}`, idxs });
+      const label = idxs.length === 1 ? first : `${first}-${last.split('/')[1]}`;
+      buckets.push({ label: label + (idxs.some(isForecast) ? '（着地見込含む）' : ''), idxs });
     }
   });
   return buckets;
@@ -1210,6 +1248,7 @@ function renderSiteCompareMetric(containerId, key) {
       dash: loc.key === 'total' ? [6, 4] : undefined,
     }));
     if (def.baseline != null) series.push(baselineSeries(def.baseline, `基準 ${def.baseline}${def.unit}`));
+    markForecast(series, y);
     chart(`${containerId}-${y}`, `${def.label} 拠点比較（${y}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
   });
 }
@@ -1236,8 +1275,8 @@ function renderYearCompareMetric(containerId, key, d) {
     <div class="metric-block-title">${def.label}</div>
     <div class="chart-wrap" onclick="openZoom('${canvasId}')"><canvas id="${canvasId}"></canvas></div>`;
   const series = [
-    { label: `${yearCompareA}年`, data: yearSlice(d[key], yearCompareA), color: '#1e3a8a', type: def.kind, axis: 'y' },
-    { label: `${yearCompareB}年`, data: yearSlice(d[key], yearCompareB), color: '#dc2626', type: def.kind, axis: 'y', dash: def.kind === 'line' ? [6,3] : undefined },
+    { label: `${yearCompareA}年`, data: yearSlice(d[key], yearCompareA), color: '#1e3a8a', type: def.kind, axis: 'y', forecastIdx: forecastIdxInYear(yearCompareA) },
+    { label: `${yearCompareB}年`, data: yearSlice(d[key], yearCompareB), color: '#dc2626', type: def.kind, axis: 'y', dash: def.kind === 'line' ? [6,3] : undefined, forecastIdx: forecastIdxInYear(yearCompareB) },
   ];
   if (def.baseline != null) series.push(baselineSeries(def.baseline, `基準 ${def.baseline}${def.unit}`));
   chart(canvasId, `${def.label} 年度比較（${yearCompareA}年 / ${yearCompareB}年）`, (id) => drawCombo(id, YEAR_MONTH_LABELS, series));
