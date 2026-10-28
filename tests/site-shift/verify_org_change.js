@@ -15,8 +15,9 @@
 //    キーにcanceled:trueを付ける。戻り値のwarningがあればトーストで出る
 //  - 入社取消になった行（canceled:true かつ F列3・入退社が空）は、シフト表・固定シフトの人の
 //    一覧・メンバー欄のどこにも出ない
-//  - 同じ名前の行が2つ以上あるとき：メンバー欄は両方出す。シフト表・固定シフトの一覧は、
-//    実際の日付で「今日が入社日〜最終在籍日」に入る行を1つだけ出す
+//  - 同じ名前の行が2つ以上あるとき：メンバー欄・シフト表は行ごとに出す（シフト表の持ち主でない
+//    日の扱いはverify_two_row_display.jsで検証）。固定シフトの一覧は実際の日付で
+//    「今日が入社日〜最終在籍日」に入る行を1つだけ出す
 // 実行：python3 -m http.server 8811 --directory dashboard を起動してから
 //       node tests/site-shift/verify_org_change.js
 const { chromium } = require('playwright');
@@ -57,7 +58,8 @@ function baseSeed(members, dates) {
     const actsOf = async key => page.$$eval(`#memTable tr[data-key="${key}"] button`, bs => bs.map(b => b.dataset.act));
     check('F列1のボタンは組織内の変更・退職異動（部門変更は無い）', JSON.stringify(await actsOf('b1')) === JSON.stringify(['org', 'leave']), await actsOf('b1'));
     check('F列2のボタンは組織内の変更・入社取消・退職異動', JSON.stringify(await actsOf('b2')) === JSON.stringify(['org', 'cancelJoin', 'leave']), await actsOf('b2'));
-    check('F列3のボタンは取消のまま', JSON.stringify(await actsOf('b3')) === JSON.stringify(['undo']), await actsOf('b3'));
+    // F列3は「取消」に加えて「退職・異動」も出す（動きはF列1と同じ）
+    check('F列3のボタンは取消・退職異動', JSON.stringify(await actsOf('b3')) === JSON.stringify(['undo', 'leave']), await actsOf('b3'));
     await page.close(); await ctx.close();
   }
 
@@ -167,10 +169,10 @@ function baseSeed(members, dates) {
     await page.waitForSelector('#memTable tr[data-key]');
 
     await page.click('#memTable tr[data-key="f1"] button[data-act="cancelJoin"]');
-    await page.waitForSelector('.dialog');
-    const dlgText = await page.textContent('.dialog span');
-    check('入社取消：確認ダイアログの文言', /入社を取り消します/.test(dlgText) && /F列を3・入退社を空に/.test(dlgText), dlgText);
-    await page.click('#dlgOk');
+    await page.waitForSelector('#memTable tr.mem-edit[data-id="f1|パート|栽培"]');
+    const dlgText = await page.textContent('#memTable tr.mem-edit .confirm-msg');
+    check('入社取消：行の下の確認の文言', /入社を取り消します/.test(dlgText) && /F列を3・入退社を空に/.test(dlgText), dlgText);
+    await page.click('#memTable button[data-act="cancelJoinOk"]');
     await page.waitForTimeout(400);
     check('入社取消でcancelJoinが送られる(key=f1, empType=パート, dept=栽培)', gasCalls.some(c => c.action === 'cancelJoin' && c.key === 'f1' && c.empType === 'パート' && c.dept === '栽培'), JSON.stringify(gasCalls));
     const datesAfter = await page.evaluate(site => window.__db[`shiftSites/${site}/meta/dates`], SITE);
@@ -192,8 +194,8 @@ function baseSeed(members, dates) {
     await page.goto(URL);
     await page.waitForSelector('#memTable tr[data-key]');
     await page.click('#memTable tr[data-key="f2"] button[data-act="cancelJoin"]');
-    await page.waitForSelector('.dialog');
-    await page.click('#dlgNo');
+    await page.waitForSelector('#memTable tr.mem-edit[data-id="f2|パート|栽培"]');
+    await page.click('#memTable button[data-act="cancel"]');
     await page.waitForTimeout(200);
     check('入社取消：やめるを押すとcancelJoinは送られない', !gasCalls.some(c => c.action === 'cancelJoin'), JSON.stringify(gasCalls));
     await page.close(); await ctx.close();
@@ -284,11 +286,20 @@ function baseSeed(members, dates) {
     await page.goto(URL);
     await page.waitForSelector('#grid tbody td.name[data-r]');
 
-    const gridNames = await page.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent));
+    // シフト表・印刷は整理済み_Mの行ごとに2行とも出す（次回の見分け方の修正：同じ名前の
+    // 行が2つ以上あるとき、持ち主でない日は斜線(na)にする）ように変わったため、
+    // 「1行にまとめる」ではなく「2行とも出て、在籍期間の外は斜線になる」ことを確かめる
+    const gridNames = await page.$$eval('#grid tbody td.name[data-r] .nm-main', els => els.map(e => e.childNodes[0].textContent));
     const count = gridNames.filter(n => n === '二重 太郎').length;
-    check('シフト表：同じ名前の行は1行にまとまる', count === 1, JSON.stringify(gridNames));
-    const roleTexts = await page.$$eval('#grid tbody tr', trs => trs.map(tr => tr.querySelector('td.role .chip')?.textContent));
-    check('シフト表：今日時点で有効な行(出荷、F列3)が選ばれる', roleTexts.includes('出荷') && !roleTexts.includes('栽培'), JSON.stringify(roleTexts));
+    check('シフト表：同じ名前の行は2行とも出す', count === 2, JSON.stringify(gridNames));
+    const depts = await page.$$eval('#grid tbody tr', trs => trs.map(tr => tr.querySelector('td.name .nm-sub .chip')?.textContent).filter(Boolean));
+    check('シフト表：始まりの早い元の行(出荷)が上、新しい行(栽培)が下', depts[0] === '出荷' && depts[1] === '栽培', JSON.stringify(depts));
+    // 表示期間(10/11〜11/10)は新しい行(栽培、入社11/11)の在籍期間の外なので全日斜線、
+    // 元の行(出荷、異動予定日11/10まで)は表示期間すべて入力できる
+    const naCounts = await page.$$eval('#grid tbody tr', trs => trs.map(tr => tr.querySelectorAll('td.cell').length ? tr.querySelectorAll('td.cell.na').length : null).filter(x => x !== null));
+    const cellCounts = await page.$$eval('#grid tbody tr', trs => trs.map(tr => tr.querySelectorAll('td.cell').length).filter(x => x > 0));
+    check('シフト表：元の行(出荷)は表示期間すべて入力できる(斜線なし)', naCounts[0] === 0, JSON.stringify(naCounts));
+    check('シフト表：新しい行(栽培)は表示期間すべて持ち主でない(全日斜線)', naCounts[1] > 0 && naCounts[1] === cellCounts[1], JSON.stringify([naCounts, cellCounts]));
 
     const fxNames = await page.$$eval('#fxPerson option', os => os.map(o => o.textContent));
     const fxCount = fxNames.filter(t => t.includes('二重 太郎')).length;

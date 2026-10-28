@@ -55,7 +55,9 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.goto(URL);
   await page.waitForSelector('#grid tbody td.name[data-r]');
 
-  const names = () => page.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent));
+  // 氏名欄は2段（氏名＋入社等のバッジ／下段に部門・雇用区分）になったため、氏名はnm-mainの
+  // 先頭のテキストノード（バッジを含まない）から取る
+  const names = () => page.$$eval('#grid tbody td.name[data-r] .nm-main', els => els.map(e => e.childNodes[0].textContent));
   const saved = () => page.evaluate(site => (window.__db[`shiftSites/${site}/meta/order`] || {}).keys || null, SITE);
   const wait = ms => page.waitForTimeout(ms);
   const nm = keys => keys.map(k => MEMBERS.find(m => m.key === k).name);
@@ -152,7 +154,8 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // 9) 印刷と固定シフトの人選びも同じ順
   await page.click('#tabPrint');
   await wait(300);
-  const pp = await page.$$eval('#printPage tbody td.nm', t => t.map(x => x.textContent));
+  // 印刷のtd.nmも氏名の下に部門・雇用区分(.dp)が入るため、先頭のテキストノードだけを取る
+  const pp = await page.$$eval('#printPage tbody td.nm', t => t.map(x => x.childNodes[0].textContent));
   check('印刷の表も同じ並び', eq(pp, full2), pp);
   await page.click('#tabEdit');
   const fx = await page.$$eval('#fxPerson option', o => o.map(x => x.textContent.replace(/（.*$/, '')));
@@ -181,7 +184,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await mp.waitForSelector('#mbar:not([hidden])');
   await mp.tap('.mbar-nav [data-row="1"]');
   await mp.waitForTimeout(400);
-  const mn = await mp.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent));
+  const mn = await mp.$$eval('#grid tbody td.name[data-r] .nm-main', els => els.map(e => e.childNodes[0].textContent));
   check('スマホの「人を下へ」で1つ下へ', mn[0] === '栽培 一郎' && mn[1] === '栽培 二郎', mn);
   check('スマホでパネルの人も動かした人のまま', await mp.$eval('#mbWho', e => e.textContent) === '栽培 二郎', await mp.$eval('#mbWho', e => e.textContent));
   const over = await mp.evaluate(() => document.documentElement.scrollWidth - innerWidth);
