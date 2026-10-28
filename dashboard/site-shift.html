@@ -163,7 +163,8 @@ kbd { font-family: var(--font-code); font-size: .72rem; border:1px solid var(--l
 .mem-table .m-flag { display: block; }
 .mem-table .m-date { display: block; color: var(--muted); }
 .mem-table td.m-status input[type=date] { display: block; margin-top: 2px; width: 100%; }
-.mem-table tr.mem-edit td { background: var(--accent-soft); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mem-table tr.mem-edit td { background: var(--accent-soft); }
+.mem-table .mem-edit-box { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mem-table .acts { display:flex; flex-direction: column; align-items: flex-start; gap:4px; }
 .mem-table button { padding: 3px 8px; font-size: .75rem; white-space: nowrap; }
 .mem-table input[type=date] { padding: 2px 4px; font-size: .78rem; border:1px solid var(--line); border-radius: 4px; background: var(--surface); max-width: 100%; }
@@ -1750,14 +1751,14 @@ function renderMembers() {
       + `<td class="m-status"><span class="m-flag">${esc(String(FLAG_LABEL[m.flag] || m.flag))}</span>${dateHtml}</td>`
       + `<td class="m-acts"><div class="acts">${acts}</div></td></tr>`;
     if (retiring === m.key) {
-      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4">`
+      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4"><div class="mem-edit-box">`
         + `<input type="date" id="leaveDate" aria-label="退職日" value="${allCols[allCols.length - 1]?.iso || ''}">`
         + `<select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select>`
-        + `<button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button></td></tr>`;
+        + `<button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button></div></td></tr>`;
     } else if (moving === m.key) {
-      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4">`
+      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4"><div class="mem-edit-box">`
         + `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select>`
-        + `<button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button></td></tr>`;
+        + `<button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button></div></td></tr>`;
     }
   });
   $('memTable').innerHTML = h;

@@ -33,6 +33,12 @@ const widths = page => page.$eval('#memTable', el => {
   return { tableScrollWidth: el.scrollWidth, wrapClientWidth: wrap.clientWidth };
 });
 const fits = w => w.tableScrollWidth <= w.wrapClientWidth;
+// 入力中の行（tr.mem-edit）のtdの横幅と#memTable自体の横幅（colspan="4"で4列分に
+// 広がっているか＝1列目の幅に押し込まれていないかの確認）
+const memEditWidths = page => page.$eval('#memTable', el => {
+  const td = el.querySelector('tr.mem-edit td');
+  return { tdWidth: td ? td.getBoundingClientRect().width : null, tableWidth: el.getBoundingClientRect().width };
+});
 
 (async () => {
   const browser = await chromium.launch();
@@ -59,6 +65,12 @@ const fits = w => w.tableScrollWidth <= w.wrapClientWidth;
     await page.waitForSelector('#memTable tr.mem-edit[data-key="k1"]');
     const w1 = await widths(page);
     check(`[${width}px] 退職・異動の入力中も#memTableが囲みの幅を超えない`, fits(w1), JSON.stringify(w1));
+    const me1 = await memEditWidths(page);
+    check(`[${width}px] 退職・異動の入力中、tr.mem-editのtdの横幅が#memTableの横幅とほぼ同じ(差4px以内＝4列分に広がっている)`, Math.abs(me1.tdWidth - me1.tableWidth) <= 4, JSON.stringify(me1));
+    if (width === 1400) {
+      const tops = await page.$$eval('#leaveDate, #leaveFlag, button[data-act="ok"], button[data-act="cancel"]', els => els.map(e => e.getBoundingClientRect().top));
+      check('[1400px] 退職日・区分・確定・やめるが1行に並んでいる(上端の差10px以内)', Math.max(...tops) - Math.min(...tops) <= 10, JSON.stringify(tops));
+    }
     await page.click('#memTable button[data-act="cancel"]');
 
     // 部門変更の入力中
@@ -66,6 +78,8 @@ const fits = w => w.tableScrollWidth <= w.wrapClientWidth;
     await page.waitForSelector('#memTable tr.mem-edit[data-key="k1"]');
     const w2 = await widths(page);
     check(`[${width}px] 部門変更の入力中も#memTableが囲みの幅を超えない`, fits(w2), JSON.stringify(w2));
+    const me2 = await memEditWidths(page);
+    check(`[${width}px] 部門変更の入力中、tr.mem-editのtdの横幅が#memTableの横幅とほぼ同じ(差4px以内＝4列分に広がっている)`, Math.abs(me2.tdWidth - me2.tableWidth) <= 4, JSON.stringify(me2));
     await page.click('#memTable button[data-act="cancel"]');
 
     if (width === 1400) {
