@@ -134,7 +134,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.mouse.up();
   await wait(400);
   check('氏名のドラッグで最後へ', eq(await names(), [...b2.slice(1), b2[0]]), await names());
-  check('ドラッグした人が選ばれたまま', await page.$eval('td.name.row-sel', td => td.firstChild.textContent) === b2[0], '');
+  check('ドラッグした人が選ばれたまま', await page.$eval('td.name.row-sel .nm-main', e => e.childNodes[0].textContent) === b2[0], '');
 
   // 8) 部門の絞り込み中：隠れている人をとばす
   const full = await names();

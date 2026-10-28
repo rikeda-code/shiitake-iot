@@ -149,6 +149,45 @@ const CELLS = {
     await page.close(); await ctx.close();
   }
 
+  /* ===================== 氏名欄(td.name)はdisplay:flexにせず、中身(div.nm-box)だけflexにする =====================
+     （表のセルにdisplay:flexを付けると、行の高さ・sticky・見出しとの幅がずれるおそれがあるため。
+     #535のtr.mem-editと同じ問題） */
+  for (const width of [1400, 390]) {
+    const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+    const page = await openShiftPage(ctx, { seed: baseSeed(MEMBERS, {}, CELLS), members: MEMBERS });
+    await page.goto(URL);
+    await page.waitForSelector('#grid tbody td.name[data-r]');
+
+    const displayOf = await page.$eval('#grid tbody td.name', td => getComputedStyle(td).display);
+    check(`[${width}px] td.nameの計算されたdisplayはtable-cell`, displayOf === 'table-cell', displayOf);
+
+    const diffs = await page.$$eval('#grid tbody tr', trs => trs.map(tr => {
+      const name = tr.querySelector('td.name'), cell = tr.querySelector('td.cell');
+      if (!name || !cell) return null;
+      return Math.abs(name.getBoundingClientRect().height - cell.getBoundingClientRect().height);
+    }).filter(d => d !== null));
+    check(`[${width}px] 本体の各行でtd.nameの高さがtd.cellの高さと同じ(差1px以内)`, diffs.every(d => d <= 1), JSON.stringify(diffs));
+
+    const rects = await page.evaluate(() => {
+      const head = document.querySelector('#grid thead th.name').getBoundingClientRect();
+      const body = document.querySelector('#grid tbody td.name').getBoundingClientRect();
+      const foot = document.querySelector('#grid tfoot th.name').getBoundingClientRect();
+      return { head: { left: head.left, width: head.width }, body: { left: body.left, width: body.width }, foot: { left: foot.left, width: foot.width } };
+    });
+    check(`[${width}px] thead/tbody/tfootのname列の左端が同じ(差1px以内)`, Math.abs(rects.head.left - rects.body.left) <= 1 && Math.abs(rects.body.left - rects.foot.left) <= 1, JSON.stringify(rects));
+    check(`[${width}px] thead/tbody/tfootのname列の幅が同じ(差1px以内)`, Math.abs(rects.head.width - rects.body.width) <= 1 && Math.abs(rects.body.width - rects.foot.width) <= 1, JSON.stringify(rects));
+
+    // 横にスクロールしても、td.name(sticky)の左端は表の囲みの左端から動かない
+    const before = await page.$eval('#grid tbody td.name', td => td.getBoundingClientRect().left);
+    await page.$eval('#gridBox', el => { el.scrollLeft = 200; });
+    await page.waitForTimeout(100);
+    const after = await page.$eval('#grid tbody td.name', td => td.getBoundingClientRect().left);
+    const scrolled = await page.$eval('#gridBox', el => el.scrollLeft);
+    check(`[${width}px] 横スクロール後もtd.nameの左端が動かない(stickyが効いている、scrollLeft=${scrolled})`, scrolled > 0 && Math.abs(after - before) <= 1, JSON.stringify({ before, after, scrolled }));
+
+    await page.close(); await ctx.close();
+  }
+
   /* ===================== 固定シフト：固定シフトの反映は持ち主でない日に入らない ===================== */
   {
     const seed = baseSeed(MEMBERS, {}, CELLS);

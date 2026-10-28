@@ -257,7 +257,7 @@ function baseSeed(members, dates) {
     await page.goto(URL);
     await page.waitForSelector('#grid tbody td.name[data-r]');
 
-    const gridNames = await page.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent));
+    const gridNames = await page.$$eval('#grid tbody td.name[data-r] .nm-main', els => els.map(e => e.childNodes[0].textContent));
     check('入社取消になった行はシフト表に出ない', !gridNames.includes('消える 花子'), JSON.stringify(gridNames));
     check('ほかの行はシフト表に出る', gridNames.includes('残る 次郎'), JSON.stringify(gridNames));
 

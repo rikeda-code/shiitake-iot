@@ -65,7 +65,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.waitForSelector('#grid tbody td.name[data-r]');
 
   /* ===================== 1. F列3の表示・F列9は出ない ===================== */
-  const gridNames = await page.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent));
+  const gridNames = await page.$$eval('#grid tbody td.name[data-r] .nm-main', els => els.map(e => e.childNodes[0].textContent));
   check('シフト表：F列3(退職・異動予定)の人が出る', gridNames.includes('退職 予定子') && gridNames.includes('退職 不明男'), JSON.stringify(gridNames));
   check('シフト表：F列9(退職済み)の人は出ない', !gridNames.includes('退職済 完了郎'), JSON.stringify(gridNames));
 
@@ -197,7 +197,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     page2.on('pageerror', e => check('meta/datesがエラーでもページでエラーが出ない', false, e.message));
     await page2.goto(URL);
     await page2.waitForSelector('#grid tbody td.name[data-r]', { timeout: 8000 }).then(() => true, () => false);
-    const names2 = await page2.$$eval('#grid tbody td.name[data-r]', tds => tds.map(td => td.firstChild.textContent)).catch(() => []);
+    const names2 = await page2.$$eval('#grid tbody td.name[data-r] .nm-main', els => els.map(e => e.childNodes[0].textContent)).catch(() => []);
     check('meta/datesがエラーでもシフト表は表示される', names2.includes('退職 予定子'), JSON.stringify(names2));
     const fxNames2 = await page2.$$eval('#fxPerson option', os => os.map(o => o.textContent)).catch(() => []);
     check('meta/datesがエラーでも固定シフトの一覧は表示される', fxNames2.some(t => t.includes('退職 予定子')), JSON.stringify(fxNames2));

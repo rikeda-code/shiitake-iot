@@ -67,8 +67,11 @@ table.grid { border-collapse: separate; border-spacing: 0; font-variant-numeric:
 .grid thead th.sun .d, .grid thead th.sun { color: var(--sun); }
 .grid thead th.sat .d, .grid thead th.sat { color: var(--sat); }
 .grid .name { position: sticky; left: 0; background: var(--surface); z-index: 2; text-align:left; padding: 2px 10px;
-  min-width: 170px; max-width: 170px; overflow: hidden; font-weight:700; display:flex; flex-direction:column; justify-content:center; gap:1px; }
+  min-width: 170px; max-width: 170px; overflow: hidden; font-weight:700; }
 .grid thead .name { z-index: 4; }
+/* 本体の名前の欄（氏名＋部門・雇用区分の2段）だけをflexにする。td.name自体はdisplayを指定しない
+   普通の表のセルのまま（flexにすると行の高さ・sticky・見出しとの幅がずれるため） */
+.grid tbody .name .nm-box { display:flex; flex-direction:column; justify-content:center; gap:1px; height:100%; }
 .grid .name .nm-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grid .name .nm-sub { display:flex; align-items:center; gap:4px; font-weight:400; overflow:hidden; }
 .grid .name .nm-emp { font-size:.68rem; color: var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -531,6 +534,7 @@ let allCols = [];   // 期間の全日：{ iso:'2026-10-11', ym:'2026-10', m, d,
 let cols = [];      // 表に並べる日（「表示する日」で絞り込んだもの）
 let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
+let rowRangeGroups = new Map(); // activeOnDate用：render()のたびに作り直すkey→在籍期間の一覧
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
 let fixed = {};     // fixed[key] = 月〜日の7要素
 // 実際の入社日・退職日（異動日）：{ `${key}|${empType}|${dept}` : { join:'yyyy-MM-dd', leave:'yyyy-MM-dd' } }。
@@ -1032,13 +1036,21 @@ function visibleRows() {
   groups.sort((ga, gb) => (pos.get(ga[0].key) ?? Infinity) - (pos.get(gb[0].key) ?? Infinity) || defaultCmp(ga[0], gb[0]));
   return groups.flat();
 }
+// key→その行の一覧と各行の在籍期間（effectiveRange）。render()・renderPrint()・applyFixedの
+// 1回の処理の中で1回だけ求め、セルごとにfilteredShiftMembers()・effectiveRangeを呼び直さない
+// ようにする（activeOnDateに渡す）
+function rangeGroupsByKey() {
+  const out = new Map();
+  groupByKey(filteredShiftMembers()).forEach((list, key) => out.set(key, list.map(x => ({ x, ...effectiveRange(x) }))));
+  return out;
+}
 // ある日(iso)の、行mの持ち主判定：同じkeyの行が1つだけならいつでも持ち主。2つ以上あるときは、
 // その日が在籍期間に入る行（2つ以上入るなら開始の遅い行）。どれにも入らなければ、その日より前に
-// 開始した行のうち開始が最も遅い行、それも無ければ開始が最も早い行
-function activeOnDate(m, iso) {
-  const group = filteredShiftMembers().filter(x => x.key === m.key);
-  if (group.length <= 1) return true;
-  const info = group.map(x => ({ x, ...effectiveRange(x) }));
+// 開始した行のうち開始が最も遅い行、それも無ければ開始が最も早い行。
+// groupsはrangeGroupsByKey()の結果（省略時はその場で求める。判定の考え方は変わらない）
+function activeOnDate(m, iso, groups) {
+  const info = (groups || rangeGroupsByKey()).get(m.key) || [];
+  if (info.length <= 1) return true;
   const within = info.filter(x => (!x.join || x.join <= iso) && (!x.leave || iso <= x.leave));
   const pick = list => list.reduce((a, b) => (b.join || '') >= (a.join || '') ? b : a);
   if (within.length) return pick(within).x === m;
@@ -1177,6 +1189,7 @@ function render() {
   const everyone = visibleRows();
   renderEditFilter(everyone);
   rows = everyone.filter(m => !deptOff.ed.has(m.dept));
+  rowRangeGroups = rangeGroupsByKey();
   cols = allCols.filter(c => c.iso >= $('edFrom').value && c.iso <= $('edTo').value);
   const n = cols.length;
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
@@ -1199,12 +1212,12 @@ function render() {
     const div = divOf(m.dept);
     const badge = m.flag === 2 ? '<span class="badge new">入社</span>' : '';
     const pastBadge = isPastRetire(m) ? '<span class="badge past">退職日経過</span>' : '';
-    h += `<tr><td class="name d-${div}" data-r="${r}" title="${esc(m.name)}（${esc(m.dept)}）　クリックで行を選択、ドラッグで並び順を変更">`
+    h += `<tr><td class="name d-${div}" data-r="${r}" title="${esc(m.name)}（${esc(m.dept)}）　クリックで行を選択、ドラッグで並び順を変更"><div class="nm-box">`
       + `<span class="nm-main">${esc(m.name)}${badge}${pastBadge}</span>`
-      + `<span class="nm-sub"><span class="chip ${div}">${esc(m.dept)}</span><span class="nm-emp">${esc(m.empType || '—')}</span></span></td>`;
+      + `<span class="nm-sub"><span class="chip ${div}">${esc(m.dept)}</span><span class="nm-emp">${esc(m.empType || '—')}</span></span></div></td>`;
     cols.forEach((c, i) => {
       // 同じ名前の行が2つ以上あるとき、持ち主でない行のその日は斜線にし、入力・集計の対象外にする
-      if (!activeOnDate(m, c.iso)) { h += `<td class="cell na" data-r="${r}" data-c="${i}"></td>`; return; }
+      if (!activeOnDate(m, c.iso, rowRangeGroups)) { h += `<td class="cell na" data-r="${r}" data-c="${i}"></td>`; return; }
       const v = data[m.key]?.[c.iso] || '';
       const hr = cellHours(v);
       const cls = ['cell'];
@@ -1243,7 +1256,7 @@ function render() {
 
 /* ── 選択・入力 ── */
 const norm = s => s && { r0: Math.min(s.r0, s.r1), r1: Math.max(s.r0, s.r1), c0: Math.min(s.c0, s.c1), c1: Math.max(s.c0, s.c1) };
-const canEdit = (r, c) => writable() && rows[r] && cols[c] && activeOnDate(rows[r], cols[c].iso);
+const canEdit = (r, c) => writable() && rows[r] && cols[c] && activeOnDate(rows[r], cols[c].iso, rowRangeGroups);
 function setVal(r, c, v) {
   if (!canEdit(r, c)) return;
   const key = rows[r].key, iso = cols[c].iso;
@@ -1510,7 +1523,7 @@ function applyFixed(overwrite) {
   rows.forEach((m, r) => {
     const pat = fixed[m.key]; if (!pat) return;
     cols.forEach((c, i) => {
-      if (!activeOnDate(m, c.iso)) return;
+      if (!activeOnDate(m, c.iso, rowRangeGroups)) return;
       if (!overwrite && data[m.key]?.[c.iso]) return;
       setVal(r, i, pat[FX_ORDER.indexOf(c.wd)] || '休'); count++;
     });
@@ -2066,8 +2079,9 @@ function renderPrint(shrink = 1) {
   ensureMonths([...new Set(days.map(x => x.ym))]);
   if (ppMode === 'person') { renderPersonal(peopleAll, days); return; }
   // 一覧の表は整理済み_Mの行ごと（同じ名前の行が2つあれば2行とも出す）
+  const printGroups = rangeGroupsByKey();
   let list = visibleRows().filter(m => !deptOff.pp.has(m.dept));
-  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => activeOnDate(m, d.iso) && valueOn(m, d)));
+  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => activeOnDate(m, d.iso, printGroups) && valueOn(m, d)));
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
   const showCount = $('ppCount').checked;
 
@@ -2106,7 +2120,7 @@ function renderPrint(shrink = 1) {
     const sub = `${m.dept}・${m.empType || '—'}`;
     h += `<tr class="${prevDiv && prevDiv !== div ? 'grp' : ''}" style="height:${rowH.toFixed(2)}mm"><td class="nm" style="font-size:${nameFont(m.name).toFixed(2)}mm">${esc(m.name)}<span class="dp" style="font-size:${subFont(sub).toFixed(2)}mm">${esc(sub)}</span></td>`;
     days.forEach(d => {
-      if (!activeOnDate(m, d.iso)) { h += `<td class="na${weCls(d)}"></td>`; return; }
+      if (!activeOnDate(m, d.iso, printGroups)) { h += `<td class="na${weCls(d)}"></td>`; return; }
       const v = valueOn(m, d);
       if (cellHours(v) && tallied(m)) cnt[d.iso] = (cnt[d.iso] || 0) + 1;
       const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
