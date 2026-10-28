@@ -44,8 +44,8 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.goto(URL);
   await page.waitForSelector('#grid tbody td.name[data-r]');
 
-  // 部門の色（chip のクラス）
-  const chips = await page.$$eval('#grid tbody td.role .chip', els => els.map(e => [e.textContent, e.className]));
+  // 部門の色（chip のクラス。部門の列は無くなり、氏名欄の下段(nm-sub)に出る）
+  const chips = await page.$$eval('#grid tbody td.name .nm-sub .chip', els => els.map(e => [e.textContent, e.className]));
   check('栽培・配送は栽培の色', chips.some(([t, c]) => t === '栽培・配送' && c.includes('栽培')), JSON.stringify(chips));
   check('出荷・配送は出荷の色', chips.some(([t, c]) => t === '出荷・配送' && c.includes('出荷')), JSON.stringify(chips));
   check('配送・栽培はこれまで通り配送の色', chips.some(([t, c]) => t === '配送・栽培' && c.includes('配送')), JSON.stringify(chips));
@@ -97,7 +97,8 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.click('#dlgOk');
   await page.waitForTimeout(200);
   const cellsNow = await page.$$eval('#grid tbody tr:first-child td.cell', tds => tds.map(td => ({ tl: td.dataset.tl || '', title: td.title })));
-  const cols = await page.$$eval('#grid thead th', ths => ths.slice(2, -1).map(th => th.querySelector('.d').textContent));
+  // 部門の列が無くなった分、見出しは氏名の次から日付が始まる（旧:slice(2,-1)）
+  const cols = await page.$$eval('#grid thead th', ths => ths.slice(1, -1).map(th => th.querySelector('.d').textContent));
   const at = d => cellsNow[cols.indexOf(String(d))];
   check('反映で10/19（月）に半日配送の印', at(19)?.tl === '半配', JSON.stringify(at(19)));
   check('反映で10/21（水）に出荷4hの印', at(21)?.tl === '出4', JSON.stringify(at(21)));

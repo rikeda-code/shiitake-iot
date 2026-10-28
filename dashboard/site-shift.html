@@ -66,10 +66,15 @@ table.grid { border-collapse: separate; border-spacing: 0; font-variant-numeric:
 .grid thead th .d { display:block; font-size:.9rem; color: var(--ink); font-weight:700; }
 .grid thead th.sun .d, .grid thead th.sun { color: var(--sun); }
 .grid thead th.sat .d, .grid thead th.sat { color: var(--sat); }
-.grid .name, .grid .role { position: sticky; background: var(--surface); z-index: 2; text-align:left; padding: 0 10px; }
-.grid .name { left: 0; min-width: 150px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-weight:700; }
-.grid .role { left: 150px; min-width: 56px; }
-.grid thead .name, .grid thead .role { z-index: 4; }
+.grid .name { position: sticky; left: 0; background: var(--surface); z-index: 2; text-align:left; padding: 2px 10px;
+  min-width: 170px; max-width: 170px; overflow: hidden; font-weight:700; }
+.grid thead .name { z-index: 4; }
+/* 本体の名前の欄（氏名＋部門・雇用区分の2段）だけをflexにする。td.name自体はdisplayを指定しない
+   普通の表のセルのまま（flexにすると行の高さ・sticky・見出しとの幅がずれるため） */
+.grid tbody .name .nm-box { display:flex; flex-direction:column; justify-content:center; gap:1px; height:100%; }
+.grid .name .nm-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid .name .nm-sub { display:flex; align-items:center; gap:4px; font-weight:400; overflow:hidden; }
+.grid .name .nm-emp { font-size:.68rem; color: var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .chip { font-size:.72rem; padding:2px 7px; border-radius:999px; font-weight:700; }
 .chip.栽培 { background: var(--saibai-soft); color: var(--saibai); }
 .chip.出荷 { background: var(--shukka-soft); color: var(--shukka); }
@@ -162,10 +167,12 @@ kbd { font-family: var(--font-code); font-size: .72rem; border:1px solid var(--l
 .mem-table .m-emp { display: block; color: var(--muted); font-size: .85em; }
 .mem-table .m-flag { display: block; }
 .mem-table .m-date { display: block; color: var(--muted); }
+.mem-table .m-date.past { color: var(--sun); font-weight: 700; }
 .mem-table td.m-status input[type=date] { display: block; margin-top: 2px; width: 100%; }
 .mem-table tr.mem-edit td { background: var(--accent-soft); }
 .mem-table .mem-edit-box { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mem-table .org-note { flex-basis: 100%; font-size: .78rem; color: #a35a00; }
+.mem-table .confirm-msg { flex-basis: 100%; font-size: .82rem; }
 .mem-table .acts { display:flex; flex-direction: column; align-items: flex-start; gap:4px; }
 .mem-table button { padding: 3px 8px; font-size: .75rem; white-space: nowrap; }
 .mem-table input[type=date] { padding: 2px 4px; font-size: .78rem; border:1px solid var(--line); border-radius: 4px; background: var(--surface); max-width: 100%; }
@@ -184,6 +191,7 @@ button.danger { color: var(--sun); }
 td.cell.na { background: repeating-linear-gradient(135deg, var(--off-soft) 0 4px, var(--surface) 4px 8px); color: transparent; cursor: not-allowed; }
 .badge { font-size: .68rem; padding: 1px 6px; border-radius: 999px; background: var(--off-soft); color: var(--muted); margin-left: 4px; font-weight: 400; }
 .badge.new { background: var(--saibai-soft); color: var(--saibai); }
+.badge.past { background: var(--off-soft); color: var(--sun); font-weight: 700; }
 .panels.two { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
 
 .status { font-size: .8rem; color: var(--muted); }
@@ -254,9 +262,10 @@ body:not([data-view="print"]) .print-only { display: none !important; }
 .pp-table thead th .wd { display: block; font-weight: 400; font-size: .82em; }
 .pp-table .sun { color: #c2410c; } .pp-table .sat { color: #1d4ed8; }
 .pp-table td.we, .pp-table th.we { background: #f6f6f4; }
-.pp-table td.nm { text-align: left; font-weight: 700; }
-.pp-table td.dp { font-size: .85em; color: #333; }
+.pp-table td.nm { text-align: left; font-weight: 700; line-height: 1.15; }
+.pp-table td.nm .dp { display: block; font-weight: 400; color: #333; }
 .pp-table td.off { color: #333; font-weight: 700; }
+.pp-table td.na { background: repeating-linear-gradient(135deg, #e3e3de 0 1mm, #fff 1mm 2mm); }
 .pp-table td.absent { color: #b91c1c; }
 .pp-table td.wish { color: #dc2626; }
 .pp-head .wish-key, .pc-sum .wish-key { color: #dc2626; font-weight: 700; }
@@ -514,7 +523,6 @@ const FX_ORDER = [1,2,3,4,5,6,0]; // 月〜日
 const HOURS = Array.from({ length: 20 }, (_, i) => i + 4); // 4〜23時
 const MINS = ['00', '30'];
 const $ = id => document.getElementById(id);
-const narrowMQ = matchMedia('(max-width: 720px)'); // スマホの幅
 // 最後に画面にふれたのが指かマウスか（指のときはドラッグ・ダブルクリックの代わりに入力パネルを使う）
 let lastPointer = 'mouse';
 document.addEventListener('pointerdown', ev => { lastPointer = ev.pointerType; }, true);
@@ -526,6 +534,7 @@ let allCols = [];   // 期間の全日：{ iso:'2026-10-11', ym:'2026-10', m, d,
 let cols = [];      // 表に並べる日（「表示する日」で絞り込んだもの）
 let members = [];   // 整理済み_Mの拠点メンバー
 let rows = [];      // 表に出す人
+let rowRangeGroups = new Map(); // activeOnDate用：render()のたびに作り直すkey→在籍期間の一覧
 let data = {};      // data[key][iso] = '8:00-17:00' / 休・代休・有休・季節休・欠勤（期間の2か月分をまるごと持つ）
 let fixed = {};     // fixed[key] = 月〜日の7要素
 // 実際の入社日・退職日（異動日）：{ `${key}|${empType}|${dept}` : { join:'yyyy-MM-dd', leave:'yyyy-MM-dd' } }。
@@ -562,7 +571,6 @@ const divOf = dept => DIVS.find(v => dept.startsWith(v)) || (dept.includes('配�
 // 在籍の判定は整理済み_MのB列フラグだけで行う（1在職中・2入社・3退職・異動予定＝載せる／8他所属・9退職＝載せない。
 // 3は退職日までの入力を現場で止めないよう載せる。退職日以降も入力できてよい）
 const ON_SHIFT_FLAGS = [1, 2, 3];
-const activeOn = (m, d) => ON_SHIFT_FLAGS.includes(m.flag);
 const fmt = h => (Math.round(h * 10) / 10).toLocaleString('ja-JP') + 'h';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 
@@ -976,11 +984,13 @@ function effectiveRange(m) {
   const leave = (m.flag === 3 || m.flag === 9) ? resolveDate(m, 'leave') : '';
   return { join, leave };
 }
+// 日本時間の今日（'yyyy-MM-dd'）。toISOString()は世界標準時になるため、「今日」の判定には使わない
+function todayJST() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); }
 // 同じ名前のグループ（同一key）から、今日時点で表に出す1行を選ぶ：
 // 実際の日付で「今日が入社日〜最終在籍日に入る行」、無ければF列1→3→2の順で最初の行
 function pickActiveToday(group) {
   if (group.length === 1) return group[0];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayJST();
   const inRange = group.find(m => {
     const { join, leave } = effectiveRange(m);
     return (!join || join <= today) && (!leave || today <= leave);
@@ -989,10 +999,10 @@ function pickActiveToday(group) {
   const order = [1, 3, 2];
   return group.slice().sort((a, b) => order.indexOf(a.flag) - order.indexOf(b.flag))[0];
 }
-// 保存した並び順（rowOrder.keys）に従う。並び順に入っていない人（あとから入った人など）は下に、元の順で付ける
-function visibleMembers() {
-  const pos = new Map(rowOrder.keys.map((k, i) => [k, i]));
-  const filtered = members.filter(m => {
+// シフトに出す行（ON_SHIFT_FLAGS・事務/営業除外・名前未定枠除外・入社取消除外）をkeyでまとめる。
+// どちらの関数も同じ絞り込みをするため、ここで共通化する
+function filteredShiftMembers() {
+  return members.filter(m => {
     if (!ON_SHIFT_FLAGS.includes(m.flag)) return false;
     // 事務・営業の人はシフトに載せない
     if (/事務|営業/.test(m.dept + m.empType)) return false;
@@ -1000,10 +1010,53 @@ function visibleMembers() {
     if (isPlaceholder(m.name)) return false;
     return !isCanceledOut(m);
   });
+}
+function groupByKey(list) {
   const groups = new Map();
-  filtered.forEach(m => { const g = groups.get(m.key); if (g) g.push(m); else groups.set(m.key, [m]); });
+  list.forEach(m => { const g = groups.get(m.key); if (g) g.push(m); else groups.set(m.key, [m]); });
+  return groups;
+}
+// 保存した並び順（rowOrder.keys）に従う。並び順に入っていない人（あとから入った人など）は下に、元の順で付ける
+// 固定シフトの人の一覧・並べ替えの基準・個人別印刷の人選びなど、1人1行でよい場面で使う
+function visibleMembers() {
+  const pos = new Map(rowOrder.keys.map((k, i) => [k, i]));
+  const groups = groupByKey(filteredShiftMembers());
   return [...groups.values()].map(pickActiveToday)
     .sort((a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity) || defaultCmp(a, b));
+}
+// シフト表・印刷に出す行（整理済み_Mの行ごと。組織内の変更#537で同じkeyの行が2つあれば2行とも出す）。
+// 並び順はkeyの位置で決め、同じkeyの行は隣り合わせにして、始まりの早い行（元の行）を上にする
+function visibleRows() {
+  const pos = new Map(rowOrder.keys.map((k, i) => [k, i]));
+  const byStart = (a, b) => {
+    const ja = effectiveRange(a).join || '', jb = effectiveRange(b).join || '';
+    return ja < jb ? -1 : ja > jb ? 1 : a.row - b.row;
+  };
+  const groups = [...groupByKey(filteredShiftMembers()).values()].map(g => g.slice().sort(byStart));
+  groups.sort((ga, gb) => (pos.get(ga[0].key) ?? Infinity) - (pos.get(gb[0].key) ?? Infinity) || defaultCmp(ga[0], gb[0]));
+  return groups.flat();
+}
+// key→その行の一覧と各行の在籍期間（effectiveRange）。render()・renderPrint()・applyFixedの
+// 1回の処理の中で1回だけ求め、セルごとにfilteredShiftMembers()・effectiveRangeを呼び直さない
+// ようにする（activeOnDateに渡す）
+function rangeGroupsByKey() {
+  const out = new Map();
+  groupByKey(filteredShiftMembers()).forEach((list, key) => out.set(key, list.map(x => ({ x, ...effectiveRange(x) }))));
+  return out;
+}
+// ある日(iso)の、行mの持ち主判定：同じkeyの行が1つだけならいつでも持ち主。2つ以上あるときは、
+// その日が在籍期間に入る行（2つ以上入るなら開始の遅い行）。どれにも入らなければ、その日より前に
+// 開始した行のうち開始が最も遅い行、それも無ければ開始が最も早い行。
+// groupsはrangeGroupsByKey()の結果（省略時はその場で求める。判定の考え方は変わらない）
+function activeOnDate(m, iso, groups) {
+  const info = (groups || rangeGroupsByKey()).get(m.key) || [];
+  if (info.length <= 1) return true;
+  const within = info.filter(x => (!x.join || x.join <= iso) && (!x.leave || iso <= x.leave));
+  const pick = list => list.reduce((a, b) => (b.join || '') >= (a.join || '') ? b : a);
+  if (within.length) return pick(within).x === m;
+  const before = info.filter(x => x.join && x.join < iso);
+  if (before.length) return pick(before).x === m;
+  return info.reduce((a, b) => (b.join || '') < (a.join || '') ? b : a).x === m;
 }
 
 /* ── 並び順 ── */
@@ -1133,17 +1186,17 @@ function renderEditFilter(all) {
 }
 function render() {
   needRender = false;
-  const everyone = visibleMembers();
+  const everyone = visibleRows();
   renderEditFilter(everyone);
   rows = everyone.filter(m => !deptOff.ed.has(m.dept));
+  rowRangeGroups = rangeGroupsByKey();
   cols = allCols.filter(c => c.iso >= $('edFrom').value && c.iso <= $('edTo').value);
   const n = cols.length;
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
   // 集計の行は、表に出ている人の部門（栽培・出荷・配送と、集計するその他）
   let divs = DIVS.filter(v => rows.some(m => divOf(m.dept) === v)).concat(rows.some(m => tallied(m) && divOf(m.dept) === 'その他') ? ['その他'] : []);
-  // 幅の狭い画面では部門の列を省き、氏名の左の色で部門を示す
-  const compact = narrowMQ.matches, lead = compact ? 1 : 2;
-  let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th>' + (compact ? '' : '<th class="role">部門</th>');
+  const lead = 1; // 部門の列は無く、氏名の列だけ（氏名の下段に部門・雇用区分を出す）
+  let h = '<table class="grid" id="grid"><thead><tr><th class="name">氏名</th>';
   cols.forEach((c, i) => {
     const mo = i === 0 || c.d === 1 ? `<span class="mo">${c.m}月</span>` : '';
     h += `<th class="${c.wd === 0 ? 'sun' : c.wd === 6 ? 'sat' : ''}${c.d === 1 ? ' mstart' : ''}">${mo}<span class="d">${c.d}</span>${WD[c.wd]}</th>`;
@@ -1158,8 +1211,13 @@ function render() {
     let sum = 0;
     const div = divOf(m.dept);
     const badge = m.flag === 2 ? '<span class="badge new">入社</span>' : '';
-    h += `<tr><td class="name d-${div}" data-r="${r}" title="${esc(m.name)}（${esc(m.dept)}）　クリックで行を選択、ドラッグで並び順を変更">${esc(m.name)}${badge}</td>` + (compact ? '' : `<td class="role"><span class="chip ${div}">${esc(m.dept)}</span></td>`);
+    const pastBadge = isPastRetire(m) ? '<span class="badge past">退職日経過</span>' : '';
+    h += `<tr><td class="name d-${div}" data-r="${r}" title="${esc(m.name)}（${esc(m.dept)}）　クリックで行を選択、ドラッグで並び順を変更"><div class="nm-box">`
+      + `<span class="nm-main">${esc(m.name)}${badge}${pastBadge}</span>`
+      + `<span class="nm-sub"><span class="chip ${div}">${esc(m.dept)}</span><span class="nm-emp">${esc(m.empType || '—')}</span></span></div></td>`;
     cols.forEach((c, i) => {
+      // 同じ名前の行が2つ以上あるとき、持ち主でない行のその日は斜線にし、入力・集計の対象外にする
+      if (!activeOnDate(m, c.iso, rowRangeGroups)) { h += `<td class="cell na" data-r="${r}" data-c="${i}"></td>`; return; }
       const v = data[m.key]?.[c.iso] || '';
       const hr = cellHours(v);
       const cls = ['cell'];
@@ -1198,7 +1256,7 @@ function render() {
 
 /* ── 選択・入力 ── */
 const norm = s => s && { r0: Math.min(s.r0, s.r1), r1: Math.max(s.r0, s.r1), c0: Math.min(s.c0, s.c1), c1: Math.max(s.c0, s.c1) };
-const canEdit = (r, c) => writable() && rows[r] && cols[c] && activeOn(rows[r], c);
+const canEdit = (r, c) => writable() && rows[r] && cols[c] && activeOnDate(rows[r], cols[c].iso, rowRangeGroups);
 function setVal(r, c, v) {
   if (!canEdit(r, c)) return;
   const key = rows[r].key, iso = cols[c].iso;
@@ -1430,7 +1488,6 @@ document.querySelector('.mbar-nav').addEventListener('click', ev => {
 });
 $('mbRange').addEventListener('change', ev => { if (ev.target.checked) toast('範囲の終わりのセルをタップしてください'); });
 $('mbClose').onclick = () => { mbOpen = false; $('mbRange').checked = false; sel = cursor = anchor = null; paintSel(); };
-narrowMQ.addEventListener('change', () => { if (ready && !editing) render(); });
 document.addEventListener('keydown', ev => {
   if (editing || !cursor || ev.target.closest('select, button, input, form')) return;
   const k = ev.key, sh = ev.shiftKey;
@@ -1466,7 +1523,7 @@ function applyFixed(overwrite) {
   rows.forEach((m, r) => {
     const pat = fixed[m.key]; if (!pat) return;
     cols.forEach((c, i) => {
-      if (!activeOn(m, i)) return;
+      if (!activeOnDate(m, c.iso, rowRangeGroups)) return;
       if (!overwrite && data[m.key]?.[c.iso]) return;
       setVal(r, i, pat[FX_ORDER.indexOf(c.wd)] || '休'); count++;
     });
@@ -1724,7 +1781,7 @@ $('fxSave').onclick = async () => {
 };
 
 /* ── メンバー ── */
-let retiring = null, orgEditing = null; // 退職・異動の入力中の人／組織内の変更の入力中の人（どちらもdata-id＝datesKeyで持つ）
+let retiring = null, orgEditing = null, cancelConfirming = null; // 退職・異動／組織内の変更／入社取消の確認の入力中の人（どれもdata-id＝datesKeyで持つ）
 // 部門の選択肢（新人登録・組織内の変更で共通）。整理済み_Mにある書き方のうち、シフト表に載る部門（営業・事務・培養は載せない）
 // 栽培・配送／出荷・配送＝メインは栽培／出荷で、たまに配送を手伝う人（時間は栽培／出荷に数え、配送・半日配送の印の日だけ配送へ回す）
 const DEPT_CHOICES = ['栽培', '栽培・配送', '出荷', '出荷・配送', '配送', '配送・栽培', '配送・出荷', '生産部長'];
@@ -1745,9 +1802,9 @@ function addDaysStr(dateStr, n) {
 const dayBefore = s => addDaysStr(s, -1);
 // 今日より後の最初の11日（組織内の変更＝changeOrgの変更日の初期値）
 function nextElevenAfterToday() {
-  const now = new Date();
-  let y = now.getFullYear(), m = now.getMonth() + 1;
-  if (now.getDate() >= 11) { m++; if (m > 12) { m = 1; y++; } }
+  const [y0, mo0, d0] = todayJST().split('-').map(Number);
+  let y = y0, m = mo0;
+  if (d0 >= 11) { m++; if (m > 12) { m = 1; y++; } }
   return `${y}-${pad(m)}-11`;
 }
 // 月度：11日〜翌月10日。gas/shift-webapp.gsのmonthDegreeOf_と同じ考え方
@@ -1779,6 +1836,21 @@ function dispDate(m, which) {
   if (raw.slice(8) === '01' && actual === raw) return `${raw.slice(0, 4)}/${+raw.slice(5, 7)}`;
   return md(actual);
 }
+// 最終在籍日（F列3）：resolveDateと同じしくみだが、実際の日付（meta/dates）が無いときの
+// フォールバックは月度の翌月10日（整理済み_Mの月度の最終日）にする
+// （resolveDateは月度の1日のまま返すため、退職日を過ぎたかどうかの判定には使えない）
+function lastServiceDate(m) {
+  const raw = m.leave;
+  if (!raw) return '';
+  if (raw.slice(8) !== '01') return raw;
+  const actual = (memberDates[datesKey(m)] || {}).leave;
+  if (actual && monthDegreeOf(actual) === raw.slice(0, 7)) return actual;
+  const [y, mo] = raw.slice(0, 7).split('-').map(Number);
+  let yy = y, mm = mo + 1; if (mm > 12) { mm = 1; yy++; }
+  return `${yy}-${pad(mm)}-10`;
+}
+// F列3の人で、最終在籍日が日本時間の今日より前（退職・異動予定のまま日付を過ぎている）
+function isPastRetire(m) { const end = lastServiceDate(m); return m.flag === 3 && !!end && end < todayJST(); }
 // 実際の日付（meta/dates）の保存。GASへの書き込みが成功した後に呼ぶ。失敗してもエラーには
 // せず（整理済み_Mへの書き込みは完了しているため）トーストで知らせ、falseを返す
 async function saveMemberDates(site, patch) {
@@ -1793,9 +1865,9 @@ function renderMembers() {
     const id = datesKey(m);
     const dateHtml = m.flag === 2
       ? `<input type="date" class="join-input" value="${esc(resolveDate(m, 'join'))}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">`
-      : m.flag === 3 ? `<span class="m-date">${dispDate(m, 'leave')}</span>` : '';
+      : m.flag === 3 ? `<span class="m-date${isPastRetire(m) ? ' past' : ''}">${dispDate(m, 'leave')}</span>` : '';
     let acts;
-    if (m.flag === 3) acts = `<button data-act="undo">取消</button>`;
+    if (m.flag === 3) acts = `<button data-act="undo">取消</button><button data-act="leave">退職・異動</button>`;
     else if (m.flag === 2) acts = `<button data-act="org">組織内の変更</button><button data-act="cancelJoin">入社取消</button><button data-act="leave">退職・異動</button>`;
     else acts = `<button data-act="org">組織内の変更</button><button data-act="leave">退職・異動</button>`;
     h += `<tr data-key="${esc(m.key)}" data-id="${esc(id)}">`
@@ -1819,6 +1891,10 @@ function renderMembers() {
         + `<select id="orgDept" aria-label="新しい部門">${deptOpts}</select>`
         + `<select id="orgEmp" aria-label="新しい雇用区分">${empOpts}</select>`
         + `<button class="primary" id="orgOk" data-act="orgOk" disabled>確定</button><button data-act="cancel">やめる</button></div>${note}</td></tr>`;
+    } else if (cancelConfirming === id) {
+      h += `<tr class="mem-edit" data-id="${esc(id)}"><td colspan="4"><div class="mem-edit-box">`
+        + `<span class="confirm-msg">${esc(m.name)}さんの入社を取り消します。整理済み_MのF列を3・入退社を空にします。行の削除は管理者が行います</span>`
+        + `<button class="primary" data-act="cancelJoinOk">取り消す</button><button data-act="cancel">やめる</button></div></td></tr>`;
     }
   });
   $('memTable').innerHTML = h;
@@ -1840,21 +1916,10 @@ $('memTable').addEventListener('click', async ev => {
   const id = b.closest('tr').dataset.id;
   const m = members.find(x => datesKey(x) === id);
   const act = b.dataset.act;
-  if (act === 'leave') { retiring = id; orgEditing = null; renderMembers(); return; }
-  if (act === 'org') { orgEditing = id; retiring = null; renderMembers(); return; }
-  if (act === 'cancel') { retiring = orgEditing = null; renderMembers(); return; }
-  if (act === 'cancelJoin') {
-    const ok = await ask(`${m.name}さんの入社を取り消します。整理済み_MのF列を3・入退社を空にします。行の削除は管理者が行います`, '取り消す');
-    if (!ok) return;
-    b.disabled = true;
-    try {
-      await api('POST', { action: 'cancelJoin', key: m.key, site: curSite(), empType: m.empType, dept: m.dept });
-      const okDates = await saveMemberDates(curSite(), { [id]: { canceled: true } });
-      await refreshMembers(true);
-      if (okDates) toast(`${m.name}さんの入社取消を登録しました`);
-    } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
-    return;
-  }
+  if (act === 'leave') { retiring = id; orgEditing = cancelConfirming = null; renderMembers(); return; }
+  if (act === 'org') { orgEditing = id; retiring = cancelConfirming = null; renderMembers(); return; }
+  if (act === 'cancelJoin') { cancelConfirming = id; retiring = orgEditing = null; renderMembers(); return; }
+  if (act === 'cancel') { retiring = orgEditing = cancelConfirming = null; renderMembers(); return; }
   try {
     let done = ''; // 読み直しの知らせに上書きされないよう、最後に出す
     let okDates = true; // 実際の日付（meta/dates）の保存に失敗したときは、その知らせを優先し成功の知らせは出さない
@@ -1893,8 +1958,12 @@ $('memTable').addEventListener('click', async ev => {
       if (rec.orgTo) patch[`${m.key}|${rec.orgTo.empType}|${rec.orgTo.dept}`] = { canceled: true };
       okDates = await saveMemberDates(curSite(), patch);
       done = res.warning || '在職中に戻しました';
+    } else if (act === 'cancelJoinOk') {
+      await api('POST', { action: 'cancelJoin', key: m.key, site: curSite(), empType: m.empType, dept: m.dept });
+      okDates = await saveMemberDates(curSite(), { [id]: { canceled: true } });
+      done = `${m.name}さんの入社取消を登録しました`;
     }
-    retiring = orgEditing = null; await refreshMembers(true);
+    retiring = orgEditing = cancelConfirming = null; await refreshMembers(true);
     if (done && okDates) toast(done);
   } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
 });
@@ -2002,22 +2071,24 @@ function onePage(html) {
 }
 function renderPrint(shrink = 1) {
   if (!allCols.length || (!members.length && !rows.length)) { onePage('<div class="loading">読み込み中…</div>'); return; }
-  const all = visibleMembers();
+  const peopleAll = visibleMembers(); // 部門の選択肢・個人別の人選びは1人1行でよい
   // 部門の選択肢（この拠点にいる部門だけ）
-  $('ppDepts').innerHTML = deptFilterHtml(all, deptOff.pp, 'ppd');
+  $('ppDepts').innerHTML = deptFilterHtml(peopleAll, deptOff.pp, 'ppd');
   if (!$('ppFrom').value) setPpRange(dateOf(allCols[0].iso), dateOf(allCols[allCols.length - 1].iso));
   const days = ppRange();
   ensureMonths([...new Set(days.map(x => x.ym))]);
-  if (ppMode === 'person') { renderPersonal(all, days); return; }
-  let list = all.filter(m => !deptOff.pp.has(m.dept));
-  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => valueOn(m, d)));
+  if (ppMode === 'person') { renderPersonal(peopleAll, days); return; }
+  // 一覧の表は整理済み_Mの行ごと（同じ名前の行が2つあれば2行とも出す）
+  const printGroups = rangeGroupsByKey();
+  let list = visibleRows().filter(m => !deptOff.pp.has(m.dept));
+  if (!$('ppEmpty').checked) list = list.filter(m => days.some(d => activeOnDate(m, d.iso, printGroups) && valueOn(m, d)));
   const tallied = m => !NO_TALLY_DEPTS.includes(m.dept);
   const showCount = $('ppCount').checked;
 
   // A4横（余白10mm）より少し内側の 270×184mm に収める
   const PAGE_W = 270, TABLE_H = 184 - 10;
-  const nameW = 34, deptW = 13;
-  const dayW = (PAGE_W - nameW - deptW) / days.length;
+  const nameW = 34 + 13; // 氏名・部門の列を1つにまとめた分の幅（旧:氏名34mm＋部門13mm）
+  const dayW = (PAGE_W - nameW) / days.length;
   const headH = 2.4; // 見出し：月・日・曜日
   const lines = list.length + (showCount ? 1 : 0) + headH;
   const rowH = Math.min(7, TABLE_H / lines) * shrink;
@@ -2029,23 +2100,29 @@ function renderPrint(shrink = 1) {
   const weCls = d => d.wd === 0 || d.wd === 6 ? ' we' : '';
   const headCls = d => d.wd === 0 ? 'we sun' : d.wd === 6 ? 'we sat' : '';
   const first = days[0], last = days[days.length - 1];
-  // 氏名は枠に収まる大きさまで文字を小さくする（全角1、半角0.75文字分で数える）
-  const nameFont = name => {
-    const len = [...name].reduce((t, ch) => t + (ch.charCodeAt(0) < 0x2000 ? 0.75 : 1), 0);
-    return Math.min(baseFont, (nameW - 2) / Math.max(len, 1));
+  // 文字数から枠に収まる大きさを求める（全角1、半角0.75文字分で数える）
+  const fitFont = (text, cap) => {
+    const len = [...text].reduce((t, ch) => t + (ch.charCodeAt(0) < 0x2000 ? 0.75 : 1), 0);
+    return Math.min(cap, (nameW - 2) / Math.max(len, 1));
   };
+  // 氏名欄は2段（氏名／部門・雇用区分）になるため、合わせて行の高さを超えないよう、
+  // 時間の2段（timeFont＝行の高さの43%）と同じ考え方で上段を行の高さの43%、下段を35%を上限にする
+  const nameFont = name => fitFont(name, Math.min(baseFont, rowH * 0.43));
+  const subFont = text => fitFont(text, rowH * 0.35);
   const yr = first.iso.slice(0, 4);
   let h = `<div class="pp-head"><h2>${esc($('site').value)}　シフト表　${yr}年${first.m}月${first.d}日〜${last.m}月${last.d}日</h2><!--deliv--></div>`;
   const usedTags = new Set(); // 印刷する範囲で使われている応援・配送の印（見出しに凡例を出す）
   let anyWish = false;        // 希望休があれば見出しに注釈を出す
-  h += `<table class="pp-table" style="font-size:${baseFont.toFixed(2)}mm"><colgroup><col style="width:${nameW}mm"><col style="width:${deptW}mm">${days.map(() => `<col style="width:${dayW.toFixed(2)}mm">`).join('')}</colgroup>`;
-  h += `<thead><tr style="height:${(rowH * headH).toFixed(2)}mm"><th>氏名</th><th>部門</th>${days.map(d => `<th class="${headCls(d)}">${d.d === 1 || d === first ? `<span class="mo">${d.m}月</span>` : ''}${d.d}<span class="wd">${WD[d.wd]}</span></th>`).join('')}</tr></thead><tbody>`;
+  h += `<table class="pp-table" style="font-size:${baseFont.toFixed(2)}mm"><colgroup><col style="width:${nameW}mm">${days.map(() => `<col style="width:${dayW.toFixed(2)}mm">`).join('')}</colgroup>`;
+  h += `<thead><tr style="height:${(rowH * headH).toFixed(2)}mm"><th>氏名</th>${days.map(d => `<th class="${headCls(d)}">${d.d === 1 || d === first ? `<span class="mo">${d.m}月</span>` : ''}${d.d}<span class="wd">${WD[d.wd]}</span></th>`).join('')}</tr></thead><tbody>`;
   const cnt = {};
   let prevDiv = null;
   list.forEach(m => {
     const div = divOf(m.dept);
-    h += `<tr class="${prevDiv && prevDiv !== div ? 'grp' : ''}" style="height:${rowH.toFixed(2)}mm"><td class="nm" style="font-size:${nameFont(m.name).toFixed(2)}mm">${esc(m.name)}</td><td class="dp">${esc(m.dept)}</td>`;
+    const sub = `${m.dept}・${m.empType || '—'}`;
+    h += `<tr class="${prevDiv && prevDiv !== div ? 'grp' : ''}" style="height:${rowH.toFixed(2)}mm"><td class="nm" style="font-size:${nameFont(m.name).toFixed(2)}mm">${esc(m.name)}<span class="dp" style="font-size:${subFont(sub).toFixed(2)}mm">${esc(sub)}</span></td>`;
     days.forEach(d => {
+      if (!activeOnDate(m, d.iso, printGroups)) { h += `<td class="na${weCls(d)}"></td>`; return; }
       const v = valueOn(m, d);
       if (cellHours(v) && tallied(m)) cnt[d.iso] = (cnt[d.iso] || 0) + 1;
       const tm = splitVal(normVal(v)).time.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
@@ -2060,7 +2137,7 @@ function renderPrint(shrink = 1) {
   });
   h += '</tbody>';
   if (showCount) {
-    h += `<tfoot><tr style="height:${rowH.toFixed(2)}mm"><th colspan="2" style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d.iso] || ''}</td>`).join('')}</tr></tfoot>`;
+    h += `<tfoot><tr style="height:${rowH.toFixed(2)}mm"><th style="text-align:left">出勤人数</th>${days.map(d => `<td class="${weCls(d)}" style="font-size:${cellFont.toFixed(2)}mm">${cnt[d.iso] || ''}</td>`).join('')}</tr></tfoot>`;
   }
   h += '</table>';
   if (anyWish) h = h.replace('<!--deliv-->', '<span class="meta">　注：<span class="wish-key">休</span>（赤）＝希望休</span><!--deliv-->');
