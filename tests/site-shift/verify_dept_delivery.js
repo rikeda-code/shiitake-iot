@@ -65,9 +65,9 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // 新人登録・部門変更の選択肢
   const roles = await page.$$eval('#newRole option', os => os.map(o => o.textContent));
   check('新人登録の部門に栽培・配送／出荷・配送がある', roles.includes('栽培・配送') && roles.includes('出荷・配送'), JSON.stringify(roles));
-  await page.click('#memTable tr[data-key="a1"] button[data-act="dept"]');
-  const opts = await page.$$eval('#newDept option', os => os.map(o => o.textContent));
-  check('部門変更の選択肢に出荷・配送がある', opts.includes('出荷・配送'), JSON.stringify(opts));
+  await page.click('#memTable tr[data-key="a1"] button[data-act="org"]'); // 旧:部門変更(data-act="dept")は組織内の変更に置き換わった
+  const opts = await page.$$eval('#orgDept option', os => os.map(o => o.textContent));
+  check('組織内の変更の部門の選択肢に出荷・配送がある', opts.includes('出荷・配送'), JSON.stringify(opts));
   await page.click('#memTable button[data-act="cancel"]');
 
   // 固定シフト：a1（栽培・配送）の月曜に半日配送、水曜に出荷4h

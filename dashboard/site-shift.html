@@ -165,6 +165,7 @@ kbd { font-family: var(--font-code); font-size: .72rem; border:1px solid var(--l
 .mem-table td.m-status input[type=date] { display: block; margin-top: 2px; width: 100%; }
 .mem-table tr.mem-edit td { background: var(--accent-soft); }
 .mem-table .mem-edit-box { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mem-table .org-note { flex-basis: 100%; font-size: .78rem; color: #a35a00; }
 .mem-table .acts { display:flex; flex-direction: column; align-items: flex-start; gap:4px; }
 .mem-table button { padding: 3px 8px; font-size: .75rem; white-space: nowrap; }
 .mem-table input[type=date] { padding: 2px 4px; font-size: .78rem; border:1px solid var(--line); border-radius: 4px; background: var(--surface); max-width: 100%; }
@@ -960,16 +961,49 @@ function syncSelectors() {
 // 並び順を決めていないときの順：部門 → 整理済み_Mの行の順
 const DIV_ORDER = ['栽培', '出荷', '配送', 'その他'];
 const defaultCmp = (a, b) => DIV_ORDER.indexOf(divOf(a.dept)) - DIV_ORDER.indexOf(divOf(b.dept)) || a.dept.localeCompare(b.dept, 'ja') || a.row - b.row;
+// 入社取消になった行（meta/datesのcanceledがtrueで、整理済み_MがF列3・入退社が空のまま）は
+// シフト表・固定シフトの人の一覧・メンバー欄のどこにも出さない（行の削除・F列の修正は管理者が行う）
+function isCanceledOut(m) {
+  const rec = memberDates[datesKey(m)];
+  return !!(rec && rec.canceled && m.flag === 3 && !m.leave);
+}
+// 組織内の変更（changeOrg）で整理済み_Mが同じ名前の2行になっているとき、今日時点で実際に
+// 在籍している行を選ぶための在籍期間。sheetの値（resolveDate）で表せないF列1の「入社日」
+// （変更日の月度が今の月度以前で、新しい行がF列1のまま作られた場合）はmeta/datesを直接見る
+function effectiveRange(m) {
+  const rec = memberDates[datesKey(m)] || {};
+  const join = m.flag === 2 ? resolveDate(m, 'join') : (m.flag === 1 ? (rec.join || '') : '');
+  const leave = (m.flag === 3 || m.flag === 9) ? resolveDate(m, 'leave') : '';
+  return { join, leave };
+}
+// 同じ名前のグループ（同一key）から、今日時点で表に出す1行を選ぶ：
+// 実際の日付で「今日が入社日〜最終在籍日に入る行」、無ければF列1→3→2の順で最初の行
+function pickActiveToday(group) {
+  if (group.length === 1) return group[0];
+  const today = new Date().toISOString().slice(0, 10);
+  const inRange = group.find(m => {
+    const { join, leave } = effectiveRange(m);
+    return (!join || join <= today) && (!leave || today <= leave);
+  });
+  if (inRange) return inRange;
+  const order = [1, 3, 2];
+  return group.slice().sort((a, b) => order.indexOf(a.flag) - order.indexOf(b.flag))[0];
+}
 // 保存した並び順（rowOrder.keys）に従う。並び順に入っていない人（あとから入った人など）は下に、元の順で付ける
 function visibleMembers() {
   const pos = new Map(rowOrder.keys.map((k, i) => [k, i]));
-  return members.filter(m => {
+  const filtered = members.filter(m => {
     if (!ON_SHIFT_FLAGS.includes(m.flag)) return false;
     // 事務・営業の人はシフトに載せない
     if (/事務|営業/.test(m.dept + m.empType)) return false;
     // 名前の決まっていない新規要員の枠（いなべパ出A・群馬正Bなど）は載せない
-    return !isPlaceholder(m.name);
-  }).sort((a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity) || defaultCmp(a, b));
+    if (isPlaceholder(m.name)) return false;
+    return !isCanceledOut(m);
+  });
+  const groups = new Map();
+  filtered.forEach(m => { const g = groups.get(m.key); if (g) g.push(m); else groups.set(m.key, [m]); });
+  return [...groups.values()].map(pickActiveToday)
+    .sort((a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity) || defaultCmp(a, b));
 }
 
 /* ── 並び順 ── */
@@ -1690,17 +1724,32 @@ $('fxSave').onclick = async () => {
 };
 
 /* ── メンバー ── */
-let retiring = null, moving = null; // 退職・異動の入力中の人／部門変更の入力中の人
-// 部門変更で選べる部門（整理済み_Mの部門列に書く値）
-// 部門の選択肢（新人登録・部門変更で共通）。整理済み_Mにある書き方のうち、シフト表に載る部門（営業・事務・培養は載せない）
+let retiring = null, orgEditing = null; // 退職・異動の入力中の人／組織内の変更の入力中の人（どちらもdata-id＝datesKeyで持つ）
+// 部門の選択肢（新人登録・組織内の変更で共通）。整理済み_Mにある書き方のうち、シフト表に載る部門（営業・事務・培養は載せない）
 // 栽培・配送／出荷・配送＝メインは栽培／出荷で、たまに配送を手伝う人（時間は栽培／出荷に数え、配送・半日配送の印の日だけ配送へ回す）
 const DEPT_CHOICES = ['栽培', '栽培・配送', '出荷', '出荷・配送', '配送', '配送・栽培', '配送・出荷', '生産部長'];
 $('newRole').innerHTML = DEPT_CHOICES.map(d => `<option>${d}</option>`).join('');
+// 雇用区分の正しい値（整理済み_Mの入力規則と同じ。gas/shift-webapp.gsのEMP_TYPESと同じ）
+const EMP_TYPES = ['社員', 'パート', '技能実習生'];
 const md = s => s ? `${s.slice(0, 4)}/${+s.slice(5, 7)}/${+s.slice(8)}` : '—';
 const FLAG_LABEL = { 1: '在職中', 2: '入社', 3: '退職・異動予定', 9: '退職' };
 // 整理済み_Mで同じ名前の行が2つになる場合に備え、名前・雇用区分・部門で見分けるキー
-// （meta/datesの見出し。部門変更で部門が変わると、このキーも変わる）
+// （meta/datesの見出し・メンバー欄のdata-id。組織内の変更で雇用区分・部門が変わると、このキーも変わる）
 const datesKey = m => `${m.key}|${m.empType}|${m.dept}`;
+// 日付（yyyy-MM-dd）のn日後／前（マイナス可）。gas/shift-webapp.gsのaddDays_と同じ考え方
+function addDaysStr(dateStr, n) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, mo - 1, d + n);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+const dayBefore = s => addDaysStr(s, -1);
+// 今日より後の最初の11日（組織内の変更＝changeOrgの変更日の初期値）
+function nextElevenAfterToday() {
+  const now = new Date();
+  let y = now.getFullYear(), m = now.getMonth() + 1;
+  if (now.getDate() >= 11) { m++; if (m > 12) { m = 1; y++; } }
+  return `${y}-${pad(m)}-11`;
+}
 // 月度：11日〜翌月10日。gas/shift-webapp.gsのmonthDegreeOf_と同じ考え方
 function monthDegreeOf(dateStr) {
   const [y, mo, d] = dateStr.split('-').map(Number);
@@ -1737,78 +1786,131 @@ async function saveMemberDates(site, patch) {
   catch (err) { toast('実際の日付を保存できませんでした（整理済み_Mへの書き込みは完了）：' + err.message); return false; }
 }
 function renderMembers() {
-  const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType) && !isPlaceholder(m.name));
+  const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType) && !isPlaceholder(m.name) && !isCanceledOut(m));
   let h = '<colgroup><col class="m-name"><col class="m-dept"><col class="m-status"><col class="m-acts"></colgroup>'
     + '<tr><th>氏名</th><th>部門・雇用区分</th><th>状態・日付</th><th>操作</th></tr>';
   list.forEach(m => {
+    const id = datesKey(m);
     const dateHtml = m.flag === 2
       ? `<input type="date" class="join-input" value="${esc(resolveDate(m, 'join'))}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">`
       : m.flag === 3 ? `<span class="m-date">${dispDate(m, 'leave')}</span>` : '';
-    const acts = [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="dept">部門変更</button><button data-act="leave">退職・異動</button>`;
-    h += `<tr data-key="${esc(m.key)}">`
+    let acts;
+    if (m.flag === 3) acts = `<button data-act="undo">取消</button>`;
+    else if (m.flag === 2) acts = `<button data-act="org">組織内の変更</button><button data-act="cancelJoin">入社取消</button><button data-act="leave">退職・異動</button>`;
+    else acts = `<button data-act="org">組織内の変更</button><button data-act="leave">退職・異動</button>`;
+    h += `<tr data-key="${esc(m.key)}" data-id="${esc(id)}">`
       + `<td class="m-name">${esc(m.name)}</td>`
       + `<td class="m-dept"><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span><span class="m-emp">${esc(m.empType || '—')}</span></td>`
       + `<td class="m-status"><span class="m-flag">${esc(String(FLAG_LABEL[m.flag] || m.flag))}</span>${dateHtml}</td>`
       + `<td class="m-acts"><div class="acts">${acts}</div></td></tr>`;
-    if (retiring === m.key) {
-      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4"><div class="mem-edit-box">`
+    if (retiring === id) {
+      h += `<tr class="mem-edit" data-id="${esc(id)}"><td colspan="4"><div class="mem-edit-box">`
         + `<input type="date" id="leaveDate" aria-label="退職日" value="${allCols[allCols.length - 1]?.iso || ''}">`
         + `<select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select>`
         + `<button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button></div></td></tr>`;
-    } else if (moving === m.key) {
-      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4"><div class="mem-edit-box">`
-        + `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select>`
-        + `<button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button></div></td></tr>`;
+    } else if (orgEditing === id) {
+      const defDate = nextElevenAfterToday();
+      const deptOpts = [...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('');
+      const empOpts = EMP_TYPES.map(t => `<option${t === m.empType ? ' selected' : ''}>${esc(t)}</option>`).join('');
+      const dateField = m.flag === 1 ? `<input type="date" id="orgDate" aria-label="変更日" value="${defDate}">` : '';
+      const note = m.flag === 1 ? `<div class="org-note" id="orgNote" hidden>変更日が月度の途中です。この月度は勤務時間ダッシュボードで元の行と新しい行の両方が計画に入ります（変更日を11日にすると重なりません）</div>` : '';
+      h += `<tr class="mem-edit" data-id="${esc(id)}"><td colspan="4"><div class="mem-edit-box">`
+        + dateField
+        + `<select id="orgDept" aria-label="新しい部門">${deptOpts}</select>`
+        + `<select id="orgEmp" aria-label="新しい雇用区分">${empOpts}</select>`
+        + `<button class="primary" id="orgOk" data-act="orgOk" disabled>確定</button><button data-act="cancel">やめる</button></div>${note}</td></tr>`;
     }
   });
   $('memTable').innerHTML = h;
 }
+// 組織内の変更の入力行：部門・雇用区分がどちらも今と同じなら確定を押せない。
+// 変更日が11日でないときは注意を出す（確定は止めない）
+function updateOrgEditState() {
+  const deptEl = document.getElementById('orgDept'), empEl = document.getElementById('orgEmp');
+  const okBtn = document.getElementById('orgOk');
+  if (!deptEl || !empEl || !okBtn) return;
+  const m = members.find(x => datesKey(x) === orgEditing);
+  if (!m) return;
+  okBtn.disabled = deptEl.value === m.dept && empEl.value === m.empType;
+  const dateEl = document.getElementById('orgDate'), note = document.getElementById('orgNote');
+  if (dateEl && note) note.hidden = dateEl.value.slice(8) === '11';
+}
 $('memTable').addEventListener('click', async ev => {
   const b = ev.target.closest('button'); if (!b) return;
-  const key = b.closest('tr').dataset.key;
-  const m = members.find(x => x.key === key);
+  const id = b.closest('tr').dataset.id;
+  const m = members.find(x => datesKey(x) === id);
   const act = b.dataset.act;
-  if (act === 'leave') { retiring = key; moving = null; renderMembers(); return; }
-  if (act === 'dept') { moving = key; retiring = null; renderMembers(); return; }
-  if (act === 'cancel') { retiring = moving = null; renderMembers(); return; }
+  if (act === 'leave') { retiring = id; orgEditing = null; renderMembers(); return; }
+  if (act === 'org') { orgEditing = id; retiring = null; renderMembers(); return; }
+  if (act === 'cancel') { retiring = orgEditing = null; renderMembers(); return; }
+  if (act === 'cancelJoin') {
+    const ok = await ask(`${m.name}さんの入社を取り消します。整理済み_MのF列を3・入退社を空にします。行の削除は管理者が行います`, '取り消す');
+    if (!ok) return;
+    b.disabled = true;
+    try {
+      await api('POST', { action: 'cancelJoin', key: m.key, site: curSite(), empType: m.empType, dept: m.dept });
+      const okDates = await saveMemberDates(curSite(), { [id]: { canceled: true } });
+      await refreshMembers(true);
+      if (okDates) toast(`${m.name}さんの入社取消を登録しました`);
+    } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
+    return;
+  }
   try {
     let done = ''; // 読み直しの知らせに上書きされないよう、最後に出す
     let okDates = true; // 実際の日付（meta/dates）の保存に失敗したときは、その知らせを優先し成功の知らせは出さない
-    if (act === 'deptOk') {
-      const dept = $('newDept').value;
-      if (dept === m.dept) { moving = null; renderMembers(); return; }
+    if (act === 'orgOk') {
+      const newDept = $('orgDept').value, newEmpType = $('orgEmp').value;
+      const dateEl = document.getElementById('orgDate');
+      const date = dateEl ? dateEl.value : undefined;
+      if (newDept === m.dept && newEmpType === m.empType) return;
       b.disabled = true;
-      await api('POST', { action: 'changeDept', key, site: curSite(), dept });
-      // 実際の日付があれば、新しい部門のキーへ移す（古いキーは消す）
-      const oldKey = datesKey(m), newKey = `${m.key}|${m.empType}|${dept}`;
-      const val = memberDates[oldKey];
-      const patch = { [oldKey]: firebase.firestore.FieldValue.delete() };
-      if (val) patch[newKey] = val;
-      okDates = await saveMemberDates(curSite(), patch);
-      done = `${m.name}さんの部門を「${dept}」に変えました`;
+      const res = await api('POST', { action: 'changeOrg', key: m.key, site: curSite(), empType: m.empType, dept: m.dept, date, newEmpType, newDept });
+      const newKey = `${m.key}|${newEmpType}|${newDept}`;
+      if (res.mode === 'split') {
+        okDates = await saveMemberDates(curSite(), {
+          [id]: { leave: dayBefore(date), orgTo: { empType: newEmpType, dept: newDept } },
+          [newKey]: { join: date },
+        });
+        done = `${m.name}さんの組織内の変更を登録しました（整理済み_Mに新しい行を追加）`;
+      } else {
+        // 実際の日付があれば、新しい部門・雇用区分のキーへ移す（古いキーは消す）
+        const val = memberDates[id];
+        const patch = { [id]: firebase.firestore.FieldValue.delete() };
+        if (val) patch[newKey] = val;
+        okDates = await saveMemberDates(curSite(), patch);
+        done = `${m.name}さんの部門・雇用区分を変えました`;
+      }
     } else if (act === 'ok') {
-      await api('POST', { action: 'retire', key, date: $('leaveDate').value, flag: +$('leaveFlag').value });
-      okDates = await saveMemberDates(curSite(), { [datesKey(m)]: { leave: $('leaveDate').value } });
+      await api('POST', { action: 'retire', key: m.key, site: curSite(), empType: m.empType, dept: m.dept, date: $('leaveDate').value, flag: +$('leaveFlag').value });
+      okDates = await saveMemberDates(curSite(), { [id]: { leave: $('leaveDate').value } });
       done = `${m.name}さんの退職日を整理済み_Mに書き込みました`;
     } else if (act === 'undo') {
-      await api('POST', { action: 'undoRetire', key });
-      okDates = await saveMemberDates(curSite(), { [datesKey(m)]: { leave: firebase.firestore.FieldValue.delete() } });
-      done = '在職中に戻しました';
+      const rec = memberDates[id] || {};
+      const payload = { action: 'undoRetire', key: m.key, site: curSite(), empType: m.empType, dept: m.dept };
+      if (rec.orgTo) payload.orgTo = rec.orgTo;
+      const res = await api('POST', payload);
+      const patch = { [id]: { leave: firebase.firestore.FieldValue.delete(), orgTo: firebase.firestore.FieldValue.delete() } };
+      if (rec.orgTo) patch[`${m.key}|${rec.orgTo.empType}|${rec.orgTo.dept}`] = { canceled: true };
+      okDates = await saveMemberDates(curSite(), patch);
+      done = res.warning || '在職中に戻しました';
     }
-    retiring = moving = null; await refreshMembers(true);
+    retiring = orgEditing = null; await refreshMembers(true);
     if (done && okDates) toast(done);
   } catch (err) { toast('書き込めませんでした：' + err.message); b.disabled = false; }
+});
+$('memTable').addEventListener('change', ev => {
+  if (ev.target.matches('#orgDept, #orgEmp, #orgDate')) updateOrgEditState();
 });
 // 入社日の変更（入社＝B列2の人だけ。在職中の人は整理済み_Mの入退社列が空のため対象外）
 $('memTable').addEventListener('change', async ev => {
   const inp = ev.target.closest('.join-input'); if (!inp) return;
-  const key = inp.closest('tr').dataset.key, m = members.find(x => x.key === key);
+  const id = inp.closest('tr').dataset.id, m = members.find(x => datesKey(x) === id);
   const curVal = m ? resolveDate(m, 'join') : '';
   if (!m || !inp.value || inp.value === curVal) { if (!inp.value) inp.value = curVal; return; }
   inp.disabled = true;
   try {
-    await api('POST', { action: 'setJoinDate', key, site: curSite(), date: inp.value });
-    const okDates = await saveMemberDates(curSite(), { [datesKey(m)]: { join: inp.value } });
+    await api('POST', { action: 'setJoinDate', key: m.key, site: curSite(), empType: m.empType, dept: m.dept, date: inp.value });
+    const okDates = await saveMemberDates(curSite(), { [id]: { join: inp.value } });
     await refreshMembers(true);
     if (okDates) toast(`${m.name}さんの入社日を ${md(inp.value)} に変えました`);
   } catch (err) { toast('書き込めませんでした：' + err.message); inp.value = curVal; inp.disabled = false; }
