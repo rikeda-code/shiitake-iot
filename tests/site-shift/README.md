@@ -12,6 +12,7 @@ node tests/site-shift/verify_access_control.js  # 閲覧・編集できる人（
 node tests/site-shift/verify_member_table_fit.js  # メンバー欄(#memTable)を4列・横スクロールなしで表示
 node tests/site-shift/verify_org_change.js      # 組織内の変更・入社取消・取消(orgTo)・同名2行の見分け方
 node tests/site-shift/verify_two_row_display.js # シフト表・印刷の2段・2行表示、退職日経過の表示、入社取消の行内確認
+node tests/site-shift/verify_back_button.js     # ◀ 戻る（タブ・期間の履歴を拠点ごとに持つ）
 ```
 
 `verify_gas_legacy_mirror.js`・`verify_gas_master_write.js` は gas/shift-webapp.gs 自体（整理済み_Mへの
