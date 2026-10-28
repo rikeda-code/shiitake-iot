@@ -208,6 +208,7 @@
     display:inline-block;
   }
   .panel-head .note{ font-size:12.5px; color:var(--ink-soft); }
+  .panel-head h2 .site-note{ font-weight:400; color:var(--red); }
 
   .table-scroll{ overflow-x:auto; }
 
@@ -419,7 +420,7 @@
   <!-- ============ 出荷予定 ============ -->
   <section class="panel">
     <div class="panel-head">
-      <h2>在庫 ・ 出荷予定</h2>
+      <h2>在庫 ・ 出荷予定<span class="note site-note" id="table1SiteNote" hidden></span></h2>
       <div class="panel-head-right">
         <span class="note">単位：kg　/　当日〜8日後の出荷予定</span>
         <div class="day-nav day-nav-compact">
@@ -508,7 +509,7 @@
   <!-- ============ 収穫予測 ============ -->
   <section class="panel harvest">
     <div class="panel-head">
-      <h2>収穫予測</h2>
+      <h2>収穫予測<span class="note site-note" id="table2SiteNote" hidden></span></h2>
       <div class="panel-head-right">
         <span class="note">実績 ・ 比率 ／ 日別収穫予測（kg）</span>
         <div class="day-nav day-nav-compact">
@@ -657,7 +658,7 @@
   <!-- ============ 在庫予測 ============ -->
   <section class="panel stock">
     <div class="panel-head">
-      <h2>在庫予測</h2>
+      <h2>在庫予測<span class="note site-note" id="table3SiteNote" hidden></span></h2>
       <span class="note">実績 ・ 比率 ／ 日別過不足予測（kg・＋過剰／−不足）</span>
     </div>
     <div class="table-scroll">
@@ -942,20 +943,76 @@
      引き続きサンプル値のまま ── -->
 <script>
 (function(){
-  var STOCK_SHEET_ID = '1ecjNSdIIT3BzQpUIq5T25v1IjEV8eYwZpC1XwU5bacE';
-  var STOCK_SHEET_GID = '0'; // 「椎茸在庫」シートのgid
-  var ALLOCATION_SHEET_GID = '276290820'; // 「転写_秀優_判別」タブ
   var SALES_SHEET_ID = '18zyC0JwVyaW3i18LQdvHQeDpEcfzM8iolhclgNocrnM';
   var SALES_INDEX_GID = '538861653'; // 「シート判別」タブ
   var SALES_RAW_SHEET_ID = '17DD5aRxc9bv8uZzEfnK_Q9IGOvQVH4ieJU1c-qu7dOc';
-  var SALES_RAW_INABE_ORDER_GID = '545062393'; // 「いなべ_受注」タブ
   var DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg'; // DB共有
   var GRADE_RATIO_SHEET_GID = '1773303848'; // 「収穫_秀優比率」タブ
+  var STOCK_URL_SHEET_GID = '717295394'; // 「URL_在庫管理表」タブ（1行目=見出し:A「出荷量」・B以降に拠点名、以降の行=年×拠点のファイルURL）
   var HARVEST_URL_SHEET_GID = '1996914203'; // 「URL_収穫管理表」タブ（いなべの列を使う）
   var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定。URLにgidがあればそちらを使う）
   var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
   var HARVEST_DAILY_TOTAL_GID = '1164843574'; // 「2026.5いなべ収穫計画」の「転写」タブ
   var STOCK_DASH = '－';
+
+  // パネル1（在庫・出荷予定）で対応している拠点ごとの設定。南丹は未対応のためここに無い
+  // （SITE_DATA[site]が無い＝「準備中」扱いにする）。allocationGid＝「転写_秀優_判別」タブの
+  // gid（在庫ファイルは拠点ごとに別ファイルなのでgidも別）、salesColOffset＝販売予実抽出シートの
+  // 受注計画でいなべのW〜Z列(22〜25列目)から何列右にずれているか、orderGid＝販売抽出シート
+  // (商品別)の拠点ごとの受注タブのgid
+  var SITE_DATA = {
+    'いなべ': { allocationGid: '276290820', salesColOffset: 0, orderGid: '545062393' },
+    '群馬':   { allocationGid: '272244694', salesColOffset: 28, orderGid: '1218802781' },
+  };
+
+  // 選ばれている拠点（#siteToggleのボタンのactiveクラスから読む。見つからなければいなべ）
+  function activeSite(){
+    var b = document.querySelector('#siteToggle button.active');
+    return b ? b.getAttribute('data-site') : 'いなべ';
+  }
+
+  // 「URL_在庫管理表」タブは拠点を切り替えるたびに読み直す必要が無いため、ページを
+  // 開いている間は一度読んだ内容を使い回す
+  var stockUrlTablePromise = null;
+  function fetchStockUrlTable(){
+    if (!stockUrlTablePromise) {
+      stockUrlTablePromise = fetchCsvSheet(DB_SHARE_SHEET_ID, STOCK_URL_SHEET_GID).catch(function(err){
+        stockUrlTablePromise = null; // 失敗時は次回また取得し直せるようにする
+        throw err;
+      });
+    }
+    return stockUrlTablePromise;
+  }
+
+  // 「在庫を読む日（基準日の前日）の年」×「選んでいる拠点の列」から、椎茸在庫ファイルの
+  // スプレッドシートID・gidを取り出す。見出し行（1行目）に拠点名が無い・該当の年の行が無い・
+  // その拠点の欄が空欄・URLからIDを取り出せない場合はnullを返す
+  async function resolveStockSheetInfo(site, stockDate){
+    var json = await fetchStockUrlTable();
+    var rows = (json.table && json.table.rows) || [];
+    var headerRow = rows[0] && rows[0].c;
+    var siteCol = -1;
+    if (headerRow) {
+      for (var h = 1; h < headerRow.length; h++) {
+        if (headerRow[h] && String(headerRow[h].v).trim() === site) { siteCol = h; break; }
+      }
+    }
+    if (siteCol === -1) return null;
+    var targetYear = stockDate.getFullYear();
+    for (var i = 1; i < rows.length; i++) {
+      var c = rows[i] && rows[i].c;
+      if (!c) continue;
+      var yearVal = readCellNumber(json, i, 0);
+      if (yearVal !== targetYear) continue;
+      var url = c[siteCol] && c[siteCol].v;
+      if (!url) return null;
+      var idMatch = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (!idMatch) return null;
+      var gidMatch = String(url).match(/gid=(\d+)/);
+      return { sheetId: idMatch[1], gid: gidMatch ? gidMatch[1] : '0' };
+    }
+    return null;
+  }
 
   // 1行目=日付、60〜67行目=各サイズの生在庫／製品在庫（B列がラベル）。
   //
@@ -1056,41 +1113,28 @@
   // （半日〜1日程度）キャッシュし続け、cache-busterやfetchのno-store指定では
   // 回避できない（Google側サーバーの内部キャッシュのため）。
   // 同じ内容を/export?format=csv&gid=で取得すると最新の内容が正しく反映されるため、
-  // gid指定のexportエンドポイントに切り替える。取得したCSVの2次元配列を、
-  // 既存のfindDateColIndex()・findRowIndexByLabel()・readCellNumber()がそのまま
-  // 使えるよう、gvizのJSON形式相当（table.rows[].c[].v）に詰め替えて返す
-  async function fetchStockSheet(){
-    var url = 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID +
-      '/export?format=csv&gid=' + STOCK_SHEET_GID;
-    var res = await fetch(url, { cache: 'no-store' });
-    var text = await res.text();
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // /exportはUTF-8 BOM付きで返ることがあるため除去
-    var csvRows = parseCsv(text);
-    return { table: { rows: csvRows.map(function(cells){
-      return { c: cells.map(function(v){ return { v: v }; }) };
-    }) } };
-  }
+  // gid指定のexportエンドポイントに切り替える（下のfetchCsvSheet()）。取得したCSVの
+  // 2次元配列は、既存のfindDateColIndex()・findRowIndexByLabel()・readCellNumber()が
+  // そのまま使えるよう、gvizのJSON形式相当（table.rows[].c[].v）に詰め替えて返す
 
-  // 秀/優の製品在庫の按分ルール（含む文字列・除外文字列・換算係数・加算先）を
-  // 「転写_秀優_判別」タブから取得する。ラベルパターンや係数をJS側にハードコード
-  // せず、スプレッドシート側で一覧管理できるようにするため
-  async function fetchAllocationRules(){
-    var url = 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID +
-      '/export?format=csv&gid=' + ALLOCATION_SHEET_GID;
-    var res = await fetch(url, { cache: 'no-store' });
-    var text = await res.text();
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    var rows = parseCsv(text);
+  // 秀/優の製品在庫の按分ルール（含む文字列・除外文字列・換算係数・加算先）を、指定した
+  // ファイル（椎茸在庫と同じファイル）の「転写_秀優_判別」タブ（拠点ごとにgidが違う）から
+  // 取得する。ラベルパターンや係数をJS側にハードコードせず、スプレッドシート側で
+  // 一覧管理できるようにするため
+  async function fetchAllocationRules(sheetId, gid){
+    var json = await fetchCsvSheet(sheetId, gid);
+    var rows = (json.table && json.table.rows) || [];
     var rules = [];
     for (var i = 1; i < rows.length; i++) { // 1行目はヘッダーなのでスキップ
-      var cells = rows[i];
-      if (!cells || !cells[0]) continue;
+      var c = rows[i] && rows[i].c;
+      var cell0 = c && c[0] && c[0].v;
+      if (!cell0) continue;
       rules.push({
-        key: cells[0],
-        include: cells[1] || '',
-        exclude: cells[2] || '',
-        factor: parseFloat(cells[3]) || 1,
-        target: cells[4] || ''
+        key: cell0,
+        include: (c[1] && c[1].v) || '',
+        exclude: (c[2] && c[2].v) || '',
+        factor: parseFloat(c[3] && c[3].v) || 1,
+        target: (c[4] && c[4].v) || ''
       });
     }
     return rules;
@@ -1153,9 +1197,10 @@
     return d.getFullYear() + '.' + (d.getMonth() + 1);
   }
 
-  // 指定日のいなべ拠点の受注計画（M/L/2L/袋のサイズ別内訳）を取得する。
-  // 月シートはmonthCacheに保存して使い回し、同じ月を何度も取得しない
-  async function fetchOrderPlanForDate(sheetIndex, date, monthCache){
+  // 指定日・指定拠点の受注計画（M/L/2L/袋のサイズ別内訳）を取得する。列番号は
+  // いなべのW〜Z列（0始まりで22〜25）を基準に、拠点のcolOffset（いなべ=0、群馬=28）を
+  // 足して読む。月シートはmonthCacheに保存して使い回し、同じ月を何度も取得しない
+  async function fetchOrderPlanForDate(sheetIndex, date, monthCache, colOffset){
     var key = yearMonthKey(date);
     var gid = sheetIndex[key];
     if (!gid) return null;
@@ -1165,11 +1210,12 @@
     var json = monthCache[key];
     var day = date.getDate();
     var rowIdx = (day + 3) - 1;
+    var off = colOffset || 0;
     return {
-      'M': readCellNumber(json, rowIdx, 22),
-      'L': readCellNumber(json, rowIdx, 23),
-      '2L': readCellNumber(json, rowIdx, 24),
-      '袋': readCellNumber(json, rowIdx, 25),
+      'M': readCellNumber(json, rowIdx, 22 + off),
+      'L': readCellNumber(json, rowIdx, 23 + off),
+      '2L': readCellNumber(json, rowIdx, 24 + off),
+      '袋': readCellNumber(json, rowIdx, 25 + off),
     };
   }
 
@@ -1229,10 +1275,12 @@
   // B列（c[1]）の文字列labelで前方一致する行を検索し、その行番号を返す。
   // 見つからない場合は-1を返す（gvizが行を間引くため、番号ではなく
   // 毎回この検索で特定する。findDateColIndex()の行版）。
-  // labelに含まれる半角"L"は全角"Ｌ"も許容し、完全一致ではなく前方一致にすることで、
-  // "L生在庫　秀Ｌ_40　優Ｌ_60"のような注記追加や表記ゆれにも耐えられるようにする
+  // labelに含まれる半角"L"・"M"は全角"Ｌ"・"Ｍ"も許容し（群馬＝安中の行名に「Ｌ製品在庫」
+  // 「Ｍ製品在庫」のような全角表記がある）、完全一致ではなく前方一致にすることで、
+  // "L生在庫　秀Ｌ_40　優Ｌ_60"のような注記追加や表記ゆれにも耐えられるようにする。
+  // "2L"の"2"は全角を許容する必要が無いため半角のままでよい
   function findRowIndexByLabel(json, label){
-    var pattern = '^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/L/g, '[LＬ]');
+    var pattern = '^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/L/g, '[LＬ]').replace(/M/g, '[MＭ]');
     var re = new RegExp(pattern);
     var rows = (json.table && json.table.rows) || [];
     for (var i = 0; i < rows.length; i++) {
@@ -1440,6 +1488,14 @@
     return out;
   }
 
+  // パネル1（table1）見出し近くの注記。textが無ければ隠す
+  function setTable1SiteNote(text){
+    var el = document.getElementById('table1SiteNote');
+    if (!el) return;
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
   function showStockFallback(){
     var cells = getStockCells();
     ['M', 'L', '2L', '袋'].forEach(function(size){
@@ -1521,12 +1577,35 @@
   document.addEventListener('DOMContentLoaded', recomputeAllTotalRows);
 
   // targetDate（基準日の前日。M・L・2L・袋の製品在庫・生在庫列は、既存のHTML構造上
-  // data-offset="-1"の列に対応する）に一致する日付列を「椎茸在庫」シートから探し、
-  // 見つかればその列の60〜67行目の値を描画する。取得失敗・列が見つからない場合は
-  // 画面全体を壊さないよう空欄（「－」）にフォールバックする
+  // data-offset="-1"の列に対応する）の年×選ばれている拠点から、「URL_在庫管理表」タブで
+  // 椎茸在庫ファイルを特定し、その「椎茸在庫」タブから一致する日付列を探して、
+  // 見つかればその列の値を描画する。拠点が未対応（SITE_DATAに無い）・URLが無い・
+  // 読み込み失敗・列が見つからない場合は、画面全体を壊さないよう空欄（「－」）に
+  // フォールバックし、パネル見出し近くに理由を注記する
+  var stockRequestToken = 0;
   window.updateStockLiveData = async function(targetDate){
+    // 基準日・拠点の切替で短時間に複数回呼ばれた場合に、後から完了した古い呼び出しの
+    // 結果が新しい呼び出しの結果を上書きしないよう、世代番号で判定する
+    var myToken = ++stockRequestToken;
+    function isStale(){ return myToken !== stockRequestToken; }
+    var site = activeSite();
+    var siteCfg = SITE_DATA[site];
     try {
-      var json = await fetchStockSheet();
+      if (!siteCfg) {
+        showStockFallback();
+        setTable1SiteNote(site + 'は準備中です');
+        return;
+      }
+      var stockInfo = await resolveStockSheetInfo(site, targetDate);
+      if (isStale()) return;
+      if (!stockInfo) {
+        showStockFallback();
+        setTable1SiteNote('URL_在庫管理表に' + site + 'の在庫管理表がありません');
+        return;
+      }
+      setTable1SiteNote('');
+      var json = await fetchCsvSheet(stockInfo.sheetId, stockInfo.gid);
+      if (isStale()) return;
       var colIdx = findDateColIndex(json, targetDate);
       if (colIdx < 0) { showStockFallback(); return; }
       var cells = getStockCells();
@@ -1559,9 +1638,11 @@
       if (gradeRawSyu) { gradeRawSyu.textContent = fmtStockNumber(syuRaw); applyZeroClass(gradeRawSyu, syuRaw); }
       if (gradeRawYuu) { gradeRawYuu.textContent = fmtStockNumber(yuuRaw); applyZeroClass(gradeRawYuu, yuuRaw); }
 
-      // 秀/優の製品在庫：按分ルール（含む文字列・除外文字列・換算係数・加算先）を
-      // 「転写_秀優_判別」タブから取得し、椎茸在庫シートの該当ラベルを検索・集計する
-      var allocationRules = await fetchAllocationRules();
+      // 秀/優の製品在庫：按分ルール（含む文字列・除外文字列・換算係数・加算先）を、
+      // 拠点の設定（allocationGid）が指す「転写_秀優_判別」タブから取得し、
+      // 椎茸在庫シートの該当ラベルを検索・集計する
+      var allocationRules = await fetchAllocationRules(stockInfo.sheetId, siteCfg.allocationGid);
+      if (isStale()) return;
       var syuProduct = computeAllocatedValue(json, allocationRules, colIdx, '秀・製品在庫');
       var yuuProduct = computeAllocatedValue(json, allocationRules, colIdx, '優・製品在庫');
       var gradeProductSyu = document.querySelector('[data-stock-product="秀"]');
@@ -1570,26 +1651,46 @@
       if (gradeProductYuu) { gradeProductYuu.textContent = fmtStockNumber(yuuProduct); applyZeroClass(gradeProductYuu, yuuProduct); }
     } catch (err) {
       console.error('[椎茸在庫] 取得エラー:', err);
+      if (isStale()) return;
       showStockFallback();
     } finally {
       // M・L・2L・袋のセルへの反映（成功時・列未検出時・取得失敗時のいずれも）が
       // 全て終わった後に、table1の合計（製品在庫・生在庫）を追従して再計算する
-      recomputeTotalRow(document.getElementById('table1'), [0, 1]);
+      // （世代チェックで古い呼び出しなら、新しい呼び出しの結果を壊さないよう何もしない）
+      if (!isStale()) recomputeTotalRow(document.getElementById('table1'), [0, 1]);
     }
   };
 
+  function dashShipmentCells(){
+    ['M', '2L', '袋', 'L', '秀', '優'].forEach(function(size){
+      for (var offset = 0; offset <= 8; offset++) {
+        var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
+        if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
+      }
+    });
+  }
+
   // 「当日出荷予定〜7日後出荷予定」列を「販売予実抽出シート」から直接取得する。
   // refDateは基準日（当日、オフセット無し）。updateStockLiveDataに渡す
-  // addDays(ref,-1)（基準日の前日）とは別物なので取り違えないよう注意
+  // addDays(ref,-1)（基準日の前日）とは別物なので取り違えないよう注意。
+  // 列番号（M/L/2L/袋）・受注タブのgid（秀/優）は拠点ごとの設定（SITE_DATA）に従う
+  var shipmentForecastRequestToken = 0;
   window.updateShipmentForecast = async function(refDate){
+    var myToken = ++shipmentForecastRequestToken;
+    function isStale(){ return myToken !== shipmentForecastRequestToken; }
+    var site = activeSite();
+    var siteCfg = SITE_DATA[site];
     try {
+      if (!siteCfg) { dashShipmentCells(); return; }
       var sheetIndex = await fetchSalesSheetIndex();
+      if (isStale()) return;
       var monthCache = {};
-      // 「販売抽出シート（商品別）」の「いなべ_受注」シートは日付ごとに取り直す必要が
+      // 「販売抽出シート（商品別）」の拠点ごとの受注タブは日付ごとに取り直す必要が
       // 無いため一度だけ取得する。取得自体に失敗しても秀・優が「－」になるだけで、
       // M/L/2L/袋側の処理には影響しない
       var gradeJson = null;
-      try { gradeJson = await fetchCsvSheet(SALES_RAW_SHEET_ID, SALES_RAW_INABE_ORDER_GID); } catch (e) { gradeJson = null; }
+      try { gradeJson = await fetchCsvSheet(SALES_RAW_SHEET_ID, siteCfg.orderGid); } catch (e) { gradeJson = null; }
+      if (isStale()) return;
 
       // 当日〜8日後に必要な年月をあらかじめ洗い出し、まとめて並行取得しておく
       // （fetchOrderPlanForDate自体は変更しない。ここでmonthCacheを
@@ -1605,11 +1706,13 @@
         if (!gid || monthCache[key]) return null;
         return fetchCsvSheet(SALES_SHEET_ID, gid).then(function(json){ monthCache[key] = json; }).catch(function(){});
       }));
+      if (isStale()) return;
 
       for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
-        var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache);
+        var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache, siteCfg.salesColOffset);
         var gradePlan = gradeJson ? await fetchShipmentGradeForDate(gradeJson, d) : { '秀': null, '優': null };
+        if (isStale()) return;
         ['M', 'L', '2L', '袋', '秀', '優'].forEach(function(size){
           var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
           if (!cell) return;
@@ -1620,16 +1723,48 @@
       }
     } catch (err) {
       console.error('[出荷予定] 取得エラー:', err);
-      ['M', '2L', '袋', 'L', '秀', '優'].forEach(function(size){
-        for (var offset = 0; offset <= 8; offset++) {
-          var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
-          if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
-        }
-      });
+      if (isStale()) return;
+      dashShipmentCells();
     } finally {
-      recomputeTotalRow(document.getElementById('table1'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      if (!isStale()) recomputeTotalRow(document.getElementById('table1'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
   };
+
+  function setTable2SiteNote(text){
+    var el = document.getElementById('table2SiteNote');
+    if (!el) return;
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  // 収穫予測（table2）は今回いなべのみ対応。それ以外の拠点を選んでいるときは、
+  // いなべの数字を出さないよう、すべて「－」にして見出し近くに注記する
+  function showHarvestForecastUnsupported(site){
+    ['M', 'L', '2L', '袋'].forEach(function(size){
+      var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
+      var ratioCell = document.querySelector('[data-harvest-ratio="' + size + '"]');
+      if (actualCell) { actualCell.textContent = STOCK_DASH; actualCell.classList.remove('zero'); }
+      if (ratioCell) ratioCell.textContent = STOCK_DASH;
+      for (var offset = 0; offset <= 8; offset++) {
+        var cell = document.querySelector('[data-harvest="' + size + '"][data-harvest-offset="' + offset + '"]');
+        if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
+      }
+    });
+    ['秀', '優'].forEach(function(grade){
+      var actualCell = document.querySelector('[data-harvest-actual="' + grade + '"]');
+      if (actualCell) { actualCell.textContent = STOCK_DASH; actualCell.classList.remove('zero'); }
+      for (var offset = 0; offset <= 8; offset++) {
+        var cell = document.querySelector('[data-harvest="' + grade + '"][data-harvest-offset="' + offset + '"]');
+        if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
+      }
+    });
+    for (var o = 0; o <= 8; o++) {
+      var totalCell = document.querySelector('[data-harvest-total-offset="' + o + '"]');
+      if (totalCell) totalCell.textContent = STOCK_DASH;
+    }
+    setTable2SiteNote(site + 'は準備中です');
+    recomputeTotalRow(document.getElementById('table2'), [0, 1]);
+  }
 
   // table2（収穫予測パネル）のM/L/2L/袋を実データで算出する。実績日1日分の
   // 収穫実績から各サイズの比率を求め、将来日（翌日〜8日後）は「転写」タブの
@@ -1640,6 +1775,9 @@
     // 呼び出しの結果が新しい呼び出しの結果を上書きしないよう、世代番号で判定する
     var myToken = ++harvestForecastRequestToken;
     function isStale(){ return myToken !== harvestForecastRequestToken; }
+    var site = activeSite();
+    if (site !== 'いなべ') { showHarvestForecastUnsupported(site); return; }
+    setTable2SiteNote('');
     if (!baseDate) baseDate = harvestDate; // 呼び出し側で省略された場合のフォールバック
     var sizes = ['M', 'L', '2L', '袋'];
     try {
@@ -1739,11 +1877,42 @@
     }
   };
 
+  function setTable3SiteNote(text){
+    var el = document.getElementById('table3SiteNote');
+    if (!el) return;
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  // 在庫予測（table3）は今回いなべのみ対応。それ以外の拠点では、パネル1に実データが
+  // 出ていてもそれを使って計算してしまわないよう（いなべの数字を出さないため）、
+  // すべて「－」にして見出し近くに注記する
+  function showStockForecastUnsupported(site){
+    ['M', 'L', '2L', '袋', '秀', '優'].forEach(function(size){
+      var actualCell = document.querySelector('[data-stock-forecast-actual="' + size + '"]');
+      var ratioCell = document.querySelector('[data-stock-forecast-ratio="' + size + '"]');
+      if (actualCell) { actualCell.textContent = STOCK_DASH; actualCell.classList.remove('zero'); }
+      if (ratioCell) ratioCell.textContent = STOCK_DASH;
+      for (var o = 0; o <= 8; o++) {
+        var cell = document.querySelector('[data-stock-forecast="' + size + '"][data-stock-forecast-offset="' + o + '"]');
+        if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('pos', 'neg'); }
+      }
+    });
+    setTable3SiteNote(site + 'は準備中です');
+    recomputeTotalRow(document.getElementById('table3'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  }
+
   // 在庫予測（table3）：在庫実績＝在庫・出荷予定パネルの製品在庫＋生在庫、
   // 秀/優は収穫予測パネルと同じ比率埋め込み方式でLの実績に掛ける。
   // 当日〜8日後は前日の予測結果を土台に
   // 収穫予測を足し・出荷予定を引く積み上げ計算（D30="=B30+D20-D6"等と同じ）
+  var stockForecastRequestToken = 0;
   window.updateStockForecast = async function(){
+    var myToken = ++stockForecastRequestToken;
+    function isStale(){ return myToken !== stockForecastRequestToken; }
+    var site = activeSite();
+    if (site !== 'いなべ') { showStockForecastUnsupported(site); return; }
+    setTable3SiteNote('');
     var sizes = ['M', 'L', '2L', '袋'];
 
     function readDomNumber(selector){
@@ -1794,6 +1963,7 @@
         gradeRatios['秀'] = null;
         gradeRatios['優'] = null;
       }
+      if (isStale()) return; // 拠点の切替等で後から呼ばれた処理に追い越された場合、ここで書き込みをやめる
       var gradeActual = { '秀': null, '優': null };
       ['秀', '優'].forEach(function(grade){
         var lActual = actual['L'];
@@ -1841,15 +2011,17 @@
         }
       });
     } finally {
-      recomputeTotalRow(document.getElementById('table3'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-      // 合計行のプラス/マイナス色も、再計算後の値に合わせて付け直す
-      var totalRow = document.querySelector('#table3 tbody tr:last-child');
-      if (totalRow) {
-        var cells = totalRow.querySelectorAll('td');
-        for (var i = 2; i < cells.length; i++) {
-          var v = parseFloat(String(cells[i].textContent).replace(/,/g, ''));
-          cells[i].classList.remove('pos', 'neg');
-          if (!isNaN(v)) cells[i].classList.add(v >= 0 ? 'pos' : 'neg');
+      if (!isStale()) {
+        recomputeTotalRow(document.getElementById('table3'), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        // 合計行のプラス/マイナス色も、再計算後の値に合わせて付け直す
+        var totalRow = document.querySelector('#table3 tbody tr:last-child');
+        if (totalRow) {
+          var cells = totalRow.querySelectorAll('td');
+          for (var i = 2; i < cells.length; i++) {
+            var v = parseFloat(String(cells[i].textContent).replace(/,/g, ''));
+            cells[i].classList.remove('pos', 'neg');
+            if (!isNaN(v)) cells[i].classList.add(v >= 0 ? 'pos' : 'neg');
+          }
         }
       }
     }
@@ -1978,16 +2150,22 @@
   // （在庫予測パネルが空のまま計算されるバグの原因）。setTimeoutで
   // 現在の同期実行がすべて終わった後まで遅延させることで回避する
   setTimeout(function(){ render(); }, 0);
+
+  // 拠点切り替えトグルから呼べるよう公開する（本体の描画一式：在庫・出荷予定・収穫予測・
+  // 在庫予測・詳細を基準日のrenderと同じ流れでやり直す。各更新関数は自前の世代番号
+  // （requestToken）で、古い読み込みが新しい拠点の表示を上書きしないよう守っている）
+  window.__rerenderShipmentPlan = render;
 })();
 
-// ── 拠点切り替えトグル（見た目のみ。データ連携ロジックは今後実装） ──
+// ── 拠点切り替えトグル：押した拠点のactiveクラスを切り替え、本体の描画をやり直す ──
 (function(){
   const buttons = document.querySelectorAll('#siteToggle button');
   buttons.forEach(btn => {
     btn.addEventListener('click', function(){
+      if (btn.classList.contains('active')) return;
       buttons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      // TODO: 拠点切り替え時のデータ取得・再描画ロジックをここに実装予定
+      if (typeof window.__rerenderShipmentPlan === 'function') window.__rerenderShipmentPlan();
     });
   });
 })();

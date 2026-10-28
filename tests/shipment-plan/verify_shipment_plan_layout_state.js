@@ -32,6 +32,7 @@ const SALES_RAW_INABE_ORDER_GID = '545062393';
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const GRADE_RATIO_SHEET_GID = '1773303848';
 const HARVEST_URL_SHEET_GID = '1996914203';
+const STOCK_URL_SHEET_GID = '717295394'; // 「URL_在庫管理表」タブ（いなべの列・2026年の行を使う）
 const HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
 const HARVEST_DAILY_TOTAL_GID = '1164843574';
 const TARGET_SHEET_ID = 'FAKE_TARGET_SHEET_ID';
@@ -108,6 +109,14 @@ function buildSalesRawInabeCsv(baseline) {
   row('重量', '優', 'L', 5);
   return toCsvText(rows);
 }
+// 「URL_在庫管理表」タブ：1行目=見出し(A列「出荷量」・B以降に拠点名)、以降の行=年×拠点のURL。
+// いなべの2026年の欄に、このテストが使う椎茸在庫ファイル(STOCK_SHEET_ID)のURLを入れる
+function buildStockUrlCsv() {
+  return toCsvText([
+    ['出荷量', 'いなべ', '群馬', '南丹'],
+    [2026, 'https://docs.google.com/spreadsheets/d/' + STOCK_SHEET_ID + '/edit?gid=' + STOCK_SHEET_GID + '#gid=' + STOCK_SHEET_GID, '', ''],
+  ]);
+}
 function buildHarvestUrlCsv() {
   return toCsvText([
     ['収穫管理表', 'いなべ', '群馬', '南丹'],
@@ -180,6 +189,7 @@ async function setupPage(browser, opts) {
     else if (url.includes(STOCK_SHEET_ID) && url.includes('gid=' + ALLOCATION_SHEET_GID)) body = buildAllocationCsv();
     else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + GRADE_RATIO_SHEET_GID)) body = buildGradeRatioCsv();
     else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + HARVEST_URL_SHEET_GID)) body = buildHarvestUrlCsv();
+    else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + STOCK_URL_SHEET_GID)) body = buildStockUrlCsv();
     else if (url.includes(SALES_SHEET_ID) && url.includes('gid=' + SALES_INDEX_GID)) body = buildSalesIndexCsv(baseline.getFullYear() + '.' + (baseline.getMonth() + 1));
     else if (url.includes(SALES_SHEET_ID) && url.includes('gid=' + SALES_MONTH_GID)) body = buildSalesMonthCsv(31);
     else if (url.includes(SALES_RAW_SHEET_ID) && url.includes('gid=' + SALES_RAW_INABE_ORDER_GID)) body = buildSalesRawInabeCsv(baseline);
@@ -459,7 +469,8 @@ async function viewState(page) {
   }
   {
     // 南丹をクエリで直接開く（リロードと同じ）
-    const { page, posts, loadQueries } = await setupPage(browser, { keepDetails: true, query: '?site=' + encodeURIComponent('南丹') + '&harvestDetail=open' });
+    // 南丹はパネル1〜3が「準備中」で数字が出ないため、本体の数字を待たない（skipDataWait）
+    const { page, posts, loadQueries } = await setupPage(browser, { keepDetails: true, skipDataWait: true, query: '?site=' + encodeURIComponent('南丹') + '&harvestDetail=open' });
     await settle(page);
     await page.waitForTimeout(300);
     const st = await viewState(page);
