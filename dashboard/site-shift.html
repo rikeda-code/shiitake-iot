@@ -150,14 +150,31 @@ kbd { font-family: var(--font-code); font-size: .72rem; border:1px solid var(--l
 .fx-table tr.is-off .time { opacity: .35; pointer-events: none; }
 .fx-table td.work { font-family: var(--font-code); font-weight: 700; color: var(--accent); text-align: right; }
 .scroll-x { overflow-x: auto; }
-/* メンバー管理 */
-.mem-table { border-collapse: collapse; width: 100%; font-size: .82rem; }
-.mem-table td, .mem-table th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+/* メンバー管理：4列（氏名／部門・雇用区分／状態・日付／操作）に収め、横スクロールが
+   出ないようtable-layout:fixedで列幅を固定し、長い名前・部門名は折り返す */
+.mem-table { border-collapse: collapse; width: 100%; max-width: 100%; table-layout: fixed; font-size: .82rem; }
+.mem-table td, .mem-table th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; overflow-wrap: break-word; word-break: break-word; }
 .mem-table th { font-size: .72rem; color: var(--muted); font-weight: 400; }
-.mem-table tr.retired td { color: var(--off); }
-.mem-table .acts { display:flex; gap:4px; justify-content:flex-end; }
-.mem-table button { padding: 3px 8px; font-size: .75rem; }
-.mem-table input[type=date] { padding: 2px 4px; font-size: .78rem; border:1px solid var(--line); border-radius: 4px; background: var(--surface); }
+.mem-table col.m-name { width: 22%; }
+.mem-table col.m-dept { width: 25%; }
+.mem-table col.m-status { width: 24%; }
+.mem-table col.m-acts { width: 29%; }
+.mem-table .m-emp { display: block; color: var(--muted); font-size: .85em; }
+.mem-table .m-flag { display: block; }
+.mem-table .m-date { display: block; color: var(--muted); }
+.mem-table td.m-status input[type=date] { display: block; margin-top: 2px; width: 100%; }
+.mem-table tr.mem-edit td { background: var(--accent-soft); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mem-table .acts { display:flex; flex-direction: column; align-items: flex-start; gap:4px; }
+.mem-table button { padding: 3px 8px; font-size: .75rem; white-space: nowrap; }
+.mem-table input[type=date] { padding: 2px 4px; font-size: .78rem; border:1px solid var(--line); border-radius: 4px; background: var(--surface); max-width: 100%; }
+@media (max-width: 720px) {
+  /* 狭い画面では「退職・異動」ボタンが収まるよう、ボタンを小さくし操作列を広めにとる */
+  .mem-table button { padding: 2px 6px; font-size: .68rem; }
+  .mem-table col.m-name { width: 20%; }
+  .mem-table col.m-dept { width: 24%; }
+  .mem-table col.m-status { width: 22%; }
+  .mem-table col.m-acts { width: 34%; }
+}
 button.danger { color: var(--sun); }
 .add-form { display:grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; align-items: end; }
 .add-form label { display:flex; flex-direction:column; gap: 3px; font-size: .72rem; color: var(--muted); }
@@ -1720,15 +1737,28 @@ async function saveMemberDates(site, patch) {
 }
 function renderMembers() {
   const list = members.filter(m => ON_SHIFT_FLAGS.includes(m.flag) && !/事務|営業/.test(m.dept + m.empType) && !isPlaceholder(m.name));
-  let h = '<tr><th>氏名</th><th>部門</th><th>雇用区分</th><th>状態</th><th>入社日</th><th>退職日</th><th></th></tr>';
+  let h = '<colgroup><col class="m-name"><col class="m-dept"><col class="m-status"><col class="m-acts"></colgroup>'
+    + '<tr><th>氏名</th><th>部門・雇用区分</th><th>状態・日付</th><th>操作</th></tr>';
   list.forEach(m => {
-    const gone = false;
-    const acts = retiring === m.key
-      ? `<input type="date" id="leaveDate" aria-label="退職日" value="${allCols[allCols.length - 1]?.iso || ''}"><select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select><button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button>`
-      : moving === m.key
-      ? `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select><button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button>`
-      : [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="dept">部門変更</button><button data-act="leave">退職・異動</button>`;
-    h += `<tr class="${gone ? 'retired' : ''}" data-key="${esc(m.key)}"><td>${esc(m.name)}</td><td><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span></td><td>${esc(m.empType || '—')}</td><td>${FLAG_LABEL[m.flag] || m.flag}</td><td>${m.flag === 2 ? `<input type="date" class="join-input" value="${esc(resolveDate(m, 'join'))}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">` : dispDate(m, 'join')}</td><td>${dispDate(m, 'leave')}</td><td><div class="acts">${acts}</div></td></tr>`;
+    const dateHtml = m.flag === 2
+      ? `<input type="date" class="join-input" value="${esc(resolveDate(m, 'join'))}" aria-label="${esc(m.name)}さんの入社日" title="日付を変えると整理済み_Mの入社日を書き換えます">`
+      : m.flag === 3 ? `<span class="m-date">${dispDate(m, 'leave')}</span>` : '';
+    const acts = [3, 9].includes(m.flag) ? `<button data-act="undo">取消</button>` : `<button data-act="dept">部門変更</button><button data-act="leave">退職・異動</button>`;
+    h += `<tr data-key="${esc(m.key)}">`
+      + `<td class="m-name">${esc(m.name)}</td>`
+      + `<td class="m-dept"><span class="chip ${divOf(m.dept)}">${esc(m.dept)}</span><span class="m-emp">${esc(m.empType || '—')}</span></td>`
+      + `<td class="m-status"><span class="m-flag">${esc(String(FLAG_LABEL[m.flag] || m.flag))}</span>${dateHtml}</td>`
+      + `<td class="m-acts"><div class="acts">${acts}</div></td></tr>`;
+    if (retiring === m.key) {
+      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4">`
+        + `<input type="date" id="leaveDate" aria-label="退職日" value="${allCols[allCols.length - 1]?.iso || ''}">`
+        + `<select id="leaveFlag" aria-label="区分"><option value="9">退職</option><option value="3">異動</option></select>`
+        + `<button class="primary" data-act="ok">確定</button><button data-act="cancel">やめる</button></td></tr>`;
+    } else if (moving === m.key) {
+      h += `<tr class="mem-edit" data-key="${esc(m.key)}"><td colspan="4">`
+        + `<select id="newDept" aria-label="変更後の部門">${[...new Set([m.dept, ...DEPT_CHOICES])].map(d => `<option${d === m.dept ? ' selected' : ''}>${esc(d)}</option>`).join('')}</select>`
+        + `<button class="primary" data-act="deptOk">変更</button><button data-act="cancel">やめる</button></td></tr>`;
+    }
   });
   $('memTable').innerHTML = h;
 }

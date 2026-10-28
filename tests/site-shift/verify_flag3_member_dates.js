@@ -93,7 +93,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('新人登録の雇用区分は「社員」「パート」「技能実習生」の3つ', eq(empOpts, ['社員', 'パート', '技能実習生']), JSON.stringify(empOpts));
 
   /* ===================== 3. 状態の表示 ===================== */
-  const flagText = await page.textContent('#memTable tr[data-key="kA"] td:nth-child(4)');
+  const flagText = await page.textContent('#memTable tr[data-key="kA"] td.m-status .m-flag');
   check('F列3の状態表示は「退職・異動予定」', flagText.trim() === '退職・異動予定', flagText);
 
   /* ===================== 1(続き). F列3の取消ボタン ===================== */
@@ -106,7 +106,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check('取消でkAのleaveがmeta/datesから消える', !datesAfterUndo['kA|社員|栽培']?.leave, JSON.stringify(datesAfterUndo));
 
   /* ===================== 4. 表示：実際の日付／年月だけ ===================== */
-  const leaveA = await page.textContent('#memTable tr[data-key="kB"] td:nth-child(6)'); // kAは取消済みなので変化前のkBで確認
+  const leaveA = await page.textContent('#memTable tr[data-key="kB"] td.m-status .m-date'); // kAは取消済みなので変化前のkBで確認
   // meta/dates一致なし → 年月だけ
   check('meta/datesが無いときは年月だけ表示される(2026/12)', leaveA.trim() === '2026/12', leaveA);
 
@@ -198,7 +198,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     check('meta/datesがエラーでも固定シフトの一覧は表示される', fxNames2.some(t => t.includes('退職 予定子')), JSON.stringify(fxNames2));
     // meta/datesにleave:'2026-12-20'があっても、読み込みに失敗しているため使われず、
     // 整理済み_Mの値(2026-12-01)から年月だけが表示される
-    const leaveA2 = await page2.textContent('#memTable tr[data-key="kA"] td:nth-child(6)').catch(() => '');
+    const leaveA2 = await page2.textContent('#memTable tr[data-key="kA"] td.m-status .m-date').catch(() => '');
     check('meta/datesがエラーのときは年月だけ表示される(2026/12)', leaveA2.trim() === '2026/12', leaveA2);
     check('console.warnでエラーが記録される', warnings.some(w => w.includes('meta/dates')), JSON.stringify(warnings));
     await page2.close();
