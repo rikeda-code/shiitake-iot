@@ -62,7 +62,7 @@ const memEditWidths = page => page.$eval('#memTable', el => {
 
     // 退職・異動の入力中
     await page.click('#memTable tr[data-key="k1"] button[data-act="leave"]');
-    await page.waitForSelector('#memTable tr.mem-edit[data-key="k1"]');
+    await page.waitForSelector('#memTable tr.mem-edit[data-id="k1|社員|栽培"]');
     const w1 = await widths(page);
     check(`[${width}px] 退職・異動の入力中も#memTableが囲みの幅を超えない`, fits(w1), JSON.stringify(w1));
     const me1 = await memEditWidths(page);
@@ -73,13 +73,19 @@ const memEditWidths = page => page.$eval('#memTable', el => {
     }
     await page.click('#memTable button[data-act="cancel"]');
 
-    // 部門変更の入力中
-    await page.click('#memTable tr[data-key="k1"] button[data-act="dept"]');
-    await page.waitForSelector('#memTable tr.mem-edit[data-key="k1"]');
+    // 組織内の変更（旧:部門変更）の入力中。k1はF列1のため変更日の入力欄(#orgDate)も出る
+    await page.click('#memTable tr[data-key="k1"] button[data-act="org"]');
+    await page.waitForSelector('#memTable tr.mem-edit[data-id="k1|社員|栽培"]');
     const w2 = await widths(page);
-    check(`[${width}px] 部門変更の入力中も#memTableが囲みの幅を超えない`, fits(w2), JSON.stringify(w2));
+    check(`[${width}px] 組織内の変更の入力中も#memTableが囲みの幅を超えない`, fits(w2), JSON.stringify(w2));
     const me2 = await memEditWidths(page);
-    check(`[${width}px] 部門変更の入力中、tr.mem-editのtdの横幅が#memTableの横幅とほぼ同じ(差4px以内＝4列分に広がっている)`, Math.abs(me2.tdWidth - me2.tableWidth) <= 4, JSON.stringify(me2));
+    check(`[${width}px] 組織内の変更の入力中、tr.mem-editのtdの横幅が#memTableの横幅とほぼ同じ(差4px以内＝4列分に広がっている)`, Math.abs(me2.tdWidth - me2.tableWidth) <= 4, JSON.stringify(me2));
+    // 変更日を11日以外にして注意書きを出した状態でも横スクロールが出ないこと
+    await page.fill('#memTable #orgDate', '2026-11-20');
+    await page.dispatchEvent('#memTable #orgDate', 'change');
+    await page.waitForSelector('#memTable #orgNote:not([hidden])');
+    const w2b = await widths(page);
+    check(`[${width}px] 組織内の変更の注意書き表示中も#memTableが囲みの幅を超えない`, fits(w2b), JSON.stringify(w2b));
     await page.click('#memTable button[data-act="cancel"]');
 
     if (width === 1400) {
@@ -124,8 +130,8 @@ const memEditWidths = page => page.$eval('#memTable', el => {
     await page.waitForSelector('#memTable tr[data-key]');
 
     await page.click('#memTable tr[data-key="k1"] button[data-act="leave"]');
-    const editRow = await page.waitForSelector('#memTable tr.mem-edit[data-key="k1"]');
-    check('退職・異動を押すと、その人の行の下にtr.mem-editが出て、同じdata-keyを持つ', !!editRow, editRow);
+    const editRow = await page.waitForSelector('#memTable tr.mem-edit[data-id="k1|社員|栽培"]');
+    check('退職・異動を押すと、その人の行の下にtr.mem-editが出て、同じdata-id(行の見分けキー)を持つ', !!editRow, editRow);
     await page.fill('#memTable #leaveDate', '2026-12-25');
     await page.selectOption('#memTable #leaveFlag', '9');
     await page.click('#memTable button[data-act="ok"]');

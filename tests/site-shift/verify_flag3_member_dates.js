@@ -153,27 +153,32 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const datesAfterRetire = await page.evaluate(site => window.__db[`shiftSites/${site}/meta/dates`], SITE);
   check('退職の確定でmeta/datesにleaveが書かれる(k1)', datesAfterRetire['k1|社員|栽培']?.leave === '2026-12-25', JSON.stringify(datesAfterRetire));
 
-  /* ===================== 4. 部門変更：項目（あれば）が新しいキーに移る ===================== */
-  // kE（meta/datesにjoin:'2026-11-11'がある）の部門を出荷→栽培・配送に変える
-  await page.click('#memTable tr[data-key="kE"] button[data-act="dept"]');
-  await page.selectOption('#memTable #newDept', '栽培・配送');
-  await page.click('#memTable button[data-act="deptOk"]');
+  /* ===================== 4. 組織内の変更（旧:部門変更）：項目（あれば）が新しいキーに移る =====================
+     旧「部門変更」ボタン（data-act="dept"）・changeDeptは「組織内の変更」（data-act="org"、changeOrg）に
+     置き換わった。F列2は同じ行の上書き（mode:overwrite）、F列1は整理済み_Mを2行に分ける
+     （mode:split）になるため、assertionもその書き込み内容に合わせて更新した（helpers.jsのfake GASが
+     membersのF列からmodeを決めて返す） */
+  // kE（F列2、meta/datesにjoin:'2026-11-11'がある）の部門を出荷→栽培・配送に変える（mode:overwrite）
+  await page.click('#memTable tr[data-key="kE"] button[data-act="org"]');
+  await page.selectOption('#memTable #orgDept', '栽培・配送');
+  await page.click('#memTable button[data-act="orgOk"]');
   await page.waitForTimeout(400);
-  check('部門変更でchangeDeptが送られる(key=kE, dept=栽培・配送)', gasCalls.some(c => c.action === 'changeDept' && c.key === 'kE' && c.dept === '栽培・配送'), JSON.stringify(gasCalls));
+  check('組織内の変更でchangeOrgが送られる(key=kE, newDept=栽培・配送)', gasCalls.some(c => c.action === 'changeOrg' && c.key === 'kE' && c.newDept === '栽培・配送'), JSON.stringify(gasCalls));
   const datesAfterDeptE = await page.evaluate(site => window.__db[`shiftSites/${site}/meta/dates`], SITE);
-  check('部門変更でkEの古いキー(出荷)は消える', !datesAfterDeptE['kE|社員|出荷'], JSON.stringify(datesAfterDeptE));
-  check('部門変更でkEの項目(join)が新しいキー(栽培・配送)に移る', datesAfterDeptE['kE|社員|栽培・配送']?.join === '2026-11-11', JSON.stringify(datesAfterDeptE));
+  check('組織内の変更(overwrite)でkEの古いキー(出荷)は消える', !datesAfterDeptE['kE|社員|出荷'], JSON.stringify(datesAfterDeptE));
+  check('組織内の変更(overwrite)でkEの項目(join)が新しいキー(栽培・配送)に移る', datesAfterDeptE['kE|社員|栽培・配送']?.join === '2026-11-11', JSON.stringify(datesAfterDeptE));
 
-  // kH（F列1、meta/datesに項目が無い）の部門変更：移す項目が無いので、新しいキーも作られない
-  // （F列3・9の人は「部門変更」ボタン自体が出ない＝取消のみのため、F列1のkHを使う）
-  await page.click('#memTable tr[data-key="kH"] button[data-act="dept"]');
-  await page.selectOption('#memTable #newDept', '配送');
-  await page.click('#memTable button[data-act="deptOk"]');
+  // kH（F列1、meta/datesに項目が無い）の部門を出荷→配送に変える（mode:split。日付は既定値のまま）
+  await page.click('#memTable tr[data-key="kH"] button[data-act="org"]');
+  const orgDateKH = await page.inputValue('#memTable #orgDate');
+  await page.selectOption('#memTable #orgDept', '配送');
+  await page.click('#memTable button[data-act="orgOk"]');
   await page.waitForTimeout(400);
-  check('部門変更でchangeDeptが送られる(key=kH, dept=配送)', gasCalls.some(c => c.action === 'changeDept' && c.key === 'kH' && c.dept === '配送'), JSON.stringify(gasCalls));
+  check('組織内の変更でchangeOrgが送られる(key=kH, newDept=配送, date指定あり)', gasCalls.some(c => c.action === 'changeOrg' && c.key === 'kH' && c.newDept === '配送' && c.date === orgDateKH), JSON.stringify(gasCalls));
   const datesAfterDeptH = await page.evaluate(site => window.__db[`shiftSites/${site}/meta/dates`], SITE);
-  check('部門変更でkHの古いキー(出荷)は消える(もともと項目は無い)', !datesAfterDeptH['kH|パート|出荷'], JSON.stringify(datesAfterDeptH));
-  check('部門変更でkHの新しいキー(配送)にも項目は作られない', !datesAfterDeptH['kH|パート|配送'], JSON.stringify(datesAfterDeptH));
+  const dayBeforeKH = (() => { const [y, mo, d] = orgDateKH.split('-').map(Number); const dt = new Date(y, mo - 1, d - 1); const pad = n => String(n).padStart(2, '0'); return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`; })();
+  check('組織内の変更(split)でkHの古いキー(出荷)にleave(変更日の前日)とorgToが付く', datesAfterDeptH['kH|パート|出荷']?.leave === dayBeforeKH && datesAfterDeptH['kH|パート|出荷']?.orgTo?.dept === '配送', JSON.stringify(datesAfterDeptH));
+  check('組織内の変更(split)でkHの新しいキー(配送)にjoin(変更日)が作られる', datesAfterDeptH['kH|パート|配送']?.join === orgDateKH, JSON.stringify(datesAfterDeptH));
 
   /* ===================== meta/datesの読み込みがエラーになっても、シフト表・固定シフトは
      そのまま動き、メンバー欄の日付は整理済み_Mの値だけ（年月）で表示される ===================== */

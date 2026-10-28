@@ -35,17 +35,26 @@
  *   { action:'upsertCells', site, cells:[{key,date,value}] }   // 変わったセルだけ（valueが空なら削除）。アプリ版が保存のたびに送る
  *   { action:'saveFixed',  site, key, name, pattern:[月..日 の '8:00-17:00' or '休'] }
  *   { action:'addMember',  site, name, dept, empType, joinDate }
- *   { action:'retire',     key, date, flag }   // flagは「どちらの操作か」のみに使う: 9=退職 / 3=異動。
- *                                              // 実際にF列へ書く値（1/3/8/9）は日付の月度から自動で決める
- *   { action:'undoRetire', key }
- *   { action:'changeDept', key, site, dept }   // 部門（所属）を変える。整理済み_Mの部門列を書き換える
- *   { action:'setJoinDate', key, site, date }  // 入社日を変える（入社＝B列2の人だけ。dateは yyyy-MM-dd）
+ *   { action:'retire',     key, site, empType, dept, date, flag }   // flagは「どちらの操作か」のみに使う:
+ *                                              // 9=退職 / 3=異動。実際にF列へ書く値（1/3/8/9）は日付の月度から自動で決める。
+ *                                              // empType・deptがあれば「名前＋拠点＋雇用区分＋部門」で行を絞る（無ければ従来どおり名前＋拠点）
+ *   { action:'undoRetire', key, site, empType, dept, orgTo:{empType,dept} }
+ *                                              // orgToがあれば、元の行を戻した後、名前＋拠点＋orgTo(雇用区分・部門)の
+ *                                              // F列1/2の行も探してF列3・入退社クリアにする（組織内の変更の取消用）
+ *   { action:'changeDept', key, site, dept }   // 部門（所属）を変える。整理済み_Mの部門列を書き換える（GASの受け口のみ。画面からは呼ばない）
+ *   { action:'setJoinDate', key, site, empType, dept, date }  // 入社日を変える（入社＝B列2の人だけ。dateは yyyy-MM-dd）
+ *   { action:'changeOrg',   key, site, empType, dept, date, newEmpType, newDept }
+ *                                              // 組織内の変更。F列2の人は同じ行の雇用区分・部門を上書き（mode:'overwrite'）。
+ *                                              // F列1の人は変更日（新しい所属の初日）付きで整理済み_Mを2行にする（mode:'split'）：
+ *                                              // 元の行はF列3または8（変更日の前日の月度で判定）、新しい行をF列1または2で追加する
+ *   { action:'cancelJoin',  key, site, empType, dept }   // 入社取消。F列2の人をF列3・入退社クリアにする（行の削除は手動）
  */
 
 const MASTER_SHEET_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
 const MASTER_SHEET_NAME = '整理済み_M';
 const MASTER_HEADER_ROW = 3;   // 3行目が列見出し
 const MASTER_FLAG_COL = 2;     // B列：1在職中 2入社 3退職/異動 8他所属 9退職
+const EMP_TYPES = ['社員', 'パート', '技能実習生']; // 整理済み_Mの雇用区分の入力規則と同じ
 const DATA_SHEET_NAME = 'シフト_データ';
 const FIXED_SHEET_NAME = 'シフト_固定';
 
@@ -120,16 +129,18 @@ function doPost(e) {
       case 'mirrorLegacyAll': return json_(mirrorLegacyAll_());
       case 'saveFixed':  return json_(saveFixed_(req));
       case 'addMember':  clearMemberCache_(); return json_(addMember_(req));
-      case 'retire':     clearMemberCache_(); return json_(setRetire_(req.key, req.date, req.flag || 9));
-      case 'undoRetire': clearMemberCache_(); return json_(undoRetire_(req.key));
+      case 'retire':     clearMemberCache_(); return json_(setRetire_(req));
+      case 'undoRetire': clearMemberCache_(); return json_(undoRetire_(req));
       case 'changeDept': clearMemberCache_(); return json_(changeDept_(req));
       case 'setJoinDate': clearMemberCache_(); return json_(setJoinDate_(req));
+      case 'changeOrg':  clearMemberCache_(); return json_(changeOrg_(req));
+      case 'cancelJoin': clearMemberCache_(); return json_(cancelJoin_(req));
       default: return json_({ status: 'error', message: '不明なactionです' });
     }
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
   } finally {
-    if (['addMember', 'retire', 'undoRetire', 'changeDept', 'setJoinDate'].indexOf(req.action) >= 0) clearMemberCache_();
+    if (['addMember', 'retire', 'undoRetire', 'changeDept', 'setJoinDate', 'changeOrg', 'cancelJoin'].indexOf(req.action) >= 0) clearMemberCache_();
     lock.releaseLock();
   }
 }
@@ -183,7 +194,7 @@ function requireAccess_(sites, idToken, edit) {
 function postSites_(req) {
   if (req.action === 'mirrorLegacyAll') return [LEGACY_MIRROR.site];
   const sites = req.site ? [req.site] : [];
-  if (req.key && ['retire', 'undoRetire', 'changeDept', 'setJoinDate'].indexOf(req.action) >= 0) {
+  if (req.key && ['retire', 'undoRetire', 'changeDept', 'setJoinDate', 'changeOrg', 'cancelJoin'].indexOf(req.action) >= 0) {
     readMembers_(false).forEach(m => { if (m.key === req.key && (!req.site || m.site === req.site)) sites.push(m.site); });
   }
   if (!sites.length) throw new Error('拠点を指定してください');
@@ -231,6 +242,16 @@ function monthDegreeOf_(dateStr) {
 
 // 月度の値：その月度の1日を日本時間0時のDateで返す（セルに書く値。セルの書式は変えない）
 function monthDegreeValue_(ym) { return new Date(`${ym}-01T00:00:00+09:00`); }
+
+// 日付（yyyy-MM-dd）のn日後／前（マイナス可）を'yyyy-MM-dd'で返す。年月をまたいでも正しく計算する
+// （カレンダー上の年月日だけで計算するため、サーバーのタイムゾーンに依存しない）
+function addDays_(dateStr, n) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, mo - 1, d + n);
+  const pad = x => ('0' + x).slice(-2);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+function dayBefore_(dateStr) { return addDays_(dateStr, -1); }
 
 // 今の月度（日本時間の今日の月度）
 function currentMonthDegree_() { return monthDegreeOf_(fmtDate_(new Date())); }
@@ -339,8 +360,18 @@ function requireSingleRow_(matches, notFoundMsg) {
   return matches[0];
 }
 
+// 行の絞り方：名前(key)＋（site指定時は拠点）＋（empTypeとdeptの両方があれば）雇用区分・部門＋F列で絞る。
+// empType・deptが無いリクエスト（古い画面からの呼び出し用）は今までどおり名前・拠点・F列だけで絞る
+function findMemberRows_(req, flags) {
+  return readMembers_(true).filter(x => x.key === req.key
+    && (!req.site || x.site === req.site)
+    && (!(req.empType && req.dept) || (x.empType === req.empType && x.dept === req.dept))
+    && flags.indexOf(x.flag) >= 0);
+}
+
 function addMember_(req) {
   if (!req.name || !req.site || !req.dept || !req.joinDate) throw new Error('氏名・拠点・部門・入社日は必須です');
+  if (EMP_TYPES.indexOf(req.empType) < 0) throw new Error(`雇用区分は${EMP_TYPES.join('・')}のいずれかにしてください`);
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
   // 8（他所属）・9（退職）以外の行があれば二重登録とみなす（パート→社員等で元の行を8にして
@@ -361,15 +392,18 @@ function addMember_(req) {
   set(cols.dept, req.dept);
   set(cols.name, req.name);
   if (cols.date > 0) sh.getRange(r, cols.date).setValue(monthDegreeValue_(ym));
+  SpreadsheetApp.flush();
   return { row: r, key: normalizeName_(req.name) };
 }
 
 // 退職・異動。req.flagは「どちらの操作か」（9=退職／3=異動）としてだけ使い、実際にF列へ
 // 書く値は日付の月度から自動で決める：月度が今の月度以降（まだ終わっていない＝未来）なら3、
 // 前の月度以前（すでに終わっている）なら退職は9・異動は8
-function setRetire_(key, date, flag) {
+function setRetire_(req) {
+  const { date } = req;
+  const flag = req.flag || 9;
   if (!date) throw new Error('退職日を入れてください');
-  const matches = readMembers_(true).filter(x => x.key === key && [1, 2, 3].indexOf(x.flag) >= 0);
+  const matches = findMemberRows_(req, [1, 2, 3]);
   const m = requireSingleRow_(matches, '整理済み_Mに該当する人が見つかりません');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
@@ -377,14 +411,14 @@ function setRetire_(key, date, flag) {
   const isTransfer = flag === 3;
   sh.getRange(m.row, cols.flag).setValue(ym >= currentMonthDegree_() ? 3 : (isTransfer ? 8 : 9));
   if (cols.date > 0) sh.getRange(m.row, cols.date).setValue(monthDegreeValue_(ym));
+  SpreadsheetApp.flush();
   return {};
 }
 
-// 部門（所属）を変える。同じ氏名が別の拠点にもいるときに取り違えないよう、拠点でも絞る
 // 入社日を変える。入退社列は在職中の人には使わない（退職・異動の日も同じ列）ため、入社（B列=2）の人だけ
 function setJoinDate_(req) {
   if (!req.key || !/^\d{4}-\d{2}-\d{2}$/.test(req.date || '')) throw new Error('人と入社日を指定してください');
-  const matches = readMembers_(true).filter(x => x.key === req.key && (!req.site || x.site === req.site) && x.flag === 2);
+  const matches = findMemberRows_(req, [2]);
   const m = requireSingleRow_(matches, '入社（B列=2）の人だけ入社日を変えられます');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
@@ -392,9 +426,11 @@ function setJoinDate_(req) {
   const ym = monthDegreeOf_(req.date);
   sh.getRange(m.row, cols.flag).setValue(ym <= currentMonthDegree_() ? 1 : 2);
   sh.getRange(m.row, cols.date).setValue(monthDegreeValue_(ym));
+  SpreadsheetApp.flush();
   return { before: m.join, after: req.date };
 }
 
+// 部門（所属）を変える。GASの受け口のみ残す（画面からは組織内の変更=changeOrgを使うため呼ばれない）
 function changeDept_(req) {
   if (!req.key || !req.dept) throw new Error('人と新しい部門を指定してください');
   const matches = readMembers_(true).filter(x => x.key === req.key && (!req.site || x.site === req.site) && [1, 2, 3].indexOf(x.flag) >= 0);
@@ -403,17 +439,94 @@ function changeDept_(req) {
   const cols = masterCols_(sh);
   const before = String(sh.getRange(m.row, cols.dept).getValue()).trim();
   sh.getRange(m.row, cols.dept).setValue(req.dept);
+  SpreadsheetApp.flush();
   return { before, after: req.dept };
 }
 
-function undoRetire_(key) {
-  const matches = readMembers_(true).filter(x => x.key === key && x.flag === 3);
+// 組織内の変更。F列2の人は同じ行の雇用区分・部門を上書きするだけ（mode:'overwrite'）。
+// F列1の人は変更日（新しい所属の初日）付きで整理済み_Mを2行にする（mode:'split'）：
+// 元の行は変更日の前日の月度で退職/異動を判定（今の月度以降ならF列3、前ならF列8）、
+// 新しい行はaddMember_と同じ考え方（名前が入っている最後の行の次・変更日の月度でF列1/2判定）で追加する
+function changeOrg_(req) {
+  if (!req.key || !req.site || !req.empType || !req.dept || !req.newDept) throw new Error('人・拠点・今の雇用区分・部門・新しい部門を指定してください');
+  if (EMP_TYPES.indexOf(req.newEmpType) < 0) throw new Error(`雇用区分は${EMP_TYPES.join('・')}のいずれかにしてください`);
+  const matches = findMemberRows_(req, [1, 2]);
+  const m = requireSingleRow_(matches, '整理済み_Mに該当する人が見つかりません');
+  if (req.newEmpType === m.empType && req.newDept === m.dept) throw new Error('雇用区分・部門のどちらかを変えてください');
+  if (m.flag === 1 && !req.date) throw new Error('変更日を指定してください');
+  const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
+  const cols = masterCols_(sh);
+  if (m.flag === 2) {
+    sh.getRange(m.row, cols.empType).setValue(req.newEmpType);
+    sh.getRange(m.row, cols.dept).setValue(req.newDept);
+    SpreadsheetApp.flush();
+    return { mode: 'overwrite' };
+  }
+  // F列1：元の行の前日の月度で退職/異動を判定し、新しい行を追加する
+  const prevYm = monthDegreeOf_(dayBefore_(req.date));
+  const oldFlag = prevYm >= currentMonthDegree_() ? 3 : 8;
+  const prj = cols.prj > 0 ? String(sh.getRange(m.row, cols.prj).getValue() || '').trim() : '';
+  const names = sh.getRange(1, cols.name, sh.getLastRow(), 1).getValues();
+  let lastRow = names.length;
+  while (lastRow > MASTER_HEADER_ROW && !String(names[lastRow - 1][0]).trim()) lastRow--;
+  const newRow = lastRow + 1;
+  const newYm = monthDegreeOf_(req.date);
+  const newFlag = newYm <= currentMonthDegree_() ? 1 : 2;
+  const set = (r, c, v) => { if (c > 0) sh.getRange(r, c).setValue(v); };
+  // 書く順番：新しい行を先に追加してから元の行を書き換える
+  set(newRow, cols.flag, newFlag);
+  set(newRow, cols.empType, req.newEmpType);
+  set(newRow, cols.site, m.site);
+  set(newRow, cols.prj, prj);
+  set(newRow, cols.dept, req.newDept);
+  set(newRow, cols.name, m.name);
+  if (cols.date > 0) sh.getRange(newRow, cols.date).setValue(monthDegreeValue_(newYm));
+  sh.getRange(m.row, cols.flag).setValue(oldFlag);
+  if (cols.date > 0) sh.getRange(m.row, cols.date).setValue(monthDegreeValue_(prevYm));
+  SpreadsheetApp.flush();
+  return { mode: 'split', newRow, oldFlag, newFlag };
+}
+
+// 入社取消：F列2の人をF列3・入退社クリアにする（行の削除は、勤務時間ダッシュボードの
+// 「F列3で退職予定月が未入力」アラートで管理者が気付いて手動で行う運用）
+function cancelJoin_(req) {
+  if (!req.key || !req.site || !req.empType || !req.dept) throw new Error('人・拠点・雇用区分・部門を指定してください');
+  const matches = findMemberRows_(req, [2]);
+  const m = requireSingleRow_(matches, '入社（F列2）の人だけ入社を取り消せます');
+  const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
+  const cols = masterCols_(sh);
+  sh.getRange(m.row, cols.flag).setValue(3);
+  if (cols.date > 0) sh.getRange(m.row, cols.date).clearContent();
+  SpreadsheetApp.flush();
+  return {};
+}
+
+// req.orgTo（{empType,dept}）があれば、元の行を戻した後、名前＋拠点＋orgTo(雇用区分・部門)の
+// F列1/2の行（組織内の変更で作った新しい行）も探してF列3・入退社クリアにする
+// （組織内の変更の取消＝元の所属に戻す）。見つからない・2行以上のときは元の行の書き換えだけ行い、
+// 戻り値にwarningを入れる
+function undoRetire_(req) {
+  const matches = findMemberRows_(req, [3]);
   const m = requireSingleRow_(matches, '整理済み_Mに該当する人が見つかりません');
   const sh = ss_().getSheetByName(MASTER_SHEET_NAME);
   const cols = masterCols_(sh);
   sh.getRange(m.row, cols.flag).setValue(1);
   if (cols.date > 0) sh.getRange(m.row, cols.date).clearContent();
-  return {};
+  const res = {};
+  if (req.orgTo && req.orgTo.empType && req.orgTo.dept) {
+    const newMatches = readMembers_(true).filter(x => x.row !== m.row && x.key === req.key && x.site === m.site
+      && x.empType === req.orgTo.empType && x.dept === req.orgTo.dept && [1, 2].indexOf(x.flag) >= 0);
+    if (newMatches.length === 1) {
+      sh.getRange(newMatches[0].row, cols.flag).setValue(3);
+      if (cols.date > 0) sh.getRange(newMatches[0].row, cols.date).clearContent();
+    } else {
+      res.warning = newMatches.length > 1
+        ? '組織内の変更で作られた新しい行が複数あるため、元の行だけ在職中に戻しました。整理済み_Mを確認してください'
+        : '組織内の変更で作られた新しい行が見つからないため、元の行だけ在職中に戻しました。整理済み_Mを確認してください';
+    }
+  }
+  SpreadsheetApp.flush();
+  return res;
 }
 
 /* ===================== シフト ===================== */

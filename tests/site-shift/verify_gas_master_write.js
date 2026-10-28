@@ -57,7 +57,7 @@ function makeSheet() {
 }
 
 const context = {
-  SpreadsheetApp: { openById: () => ({ getSheetByName: () => makeSheet() }) },
+  SpreadsheetApp: { openById: () => ({ getSheetByName: () => makeSheet() }), flush() {} },
   Utilities: {
     formatDate: (d, tz, fmt) => {
       // 本テストでは TZ='Asia/Tokyo'・fmt='yyyy-MM-dd' のみ使用。システムのタイムゾーンに
@@ -174,7 +174,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   resetGrid([
     row(1, '社員', 'いなべ', 'いなべ', '栽培', 'E010', '退職予定男', '2020-04-01'),
   ]);
-  context.setRetire_('退職予定男', '2026-11-10', 9);
+  context.setRetire_({ key: '退職予定男', date: '2026-11-10', flag: 9 });
   const r = grid[DATA0];
   check('setRetire_：退職日2026-11-10(月度2026-10=今の月度)→F列3', r[COL.flag] === 3, r);
   check('setRetire_：入退社の列は月度の1日(2026-10-01)の日付', sameInstant(r[COL.date], ymVal('2026-10')), r[COL.date]);
@@ -185,7 +185,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   resetGrid([
     row(1, '社員', 'いなべ', 'いなべ', '栽培', 'E010', '退職済男', '2020-04-01'),
   ]);
-  context.setRetire_('退職済男', '2026-10-10', 9);
+  context.setRetire_({ key: '退職済男', date: '2026-10-10', flag: 9 });
   const r = grid[DATA0];
   check('setRetire_：退職日2026-10-10(前の月度)→F列9', r[COL.flag] === 9, r);
   check('setRetire_：入退社の列は月度の1日(2026-09-01)の日付', sameInstant(r[COL.date], ymVal('2026-09')), r[COL.date]);
@@ -196,7 +196,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   resetGrid([
     row(1, '社員', 'いなべ', 'いなべ', '栽培', 'E011', '異動予定子', '2020-04-01'),
   ]);
-  context.setRetire_('異動予定子', '2026-12-20', 3);
+  context.setRetire_({ key: '異動予定子', date: '2026-12-20', flag: 3 });
   check('setRetire_：異動日2026-12-20(今の月度以降)→F列3', grid[DATA0][COL.flag] === 3, grid[DATA0]);
 })();
 
@@ -205,7 +205,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   resetGrid([
     row(1, '社員', 'いなべ', 'いなべ', '栽培', 'E011', '異動済子', '2020-04-01'),
   ]);
-  context.setRetire_('異動済子', '2026-09-30', 3);
+  context.setRetire_({ key: '異動済子', date: '2026-09-30', flag: 3 });
   check('setRetire_：異動日2026-09-30(前の月度)→F列8', grid[DATA0][COL.flag] === 8, grid[DATA0]);
 })();
 
@@ -217,7 +217,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
     row(1, '社員', 'いなべ', 'いなべ', '栽培', '', '兼務太郎', '2024-04-01'),
   ]);
   const before8 = JSON.parse(JSON.stringify(grid[DATA0]));
-  context.setRetire_('兼務太郎', '2026-10-10', 9); // 月度2026-09、前の月度→F列9
+  context.setRetire_({ key: '兼務太郎', date: '2026-10-10', flag: 9 }); // 月度2026-09、前の月度→F列9
   check('setRetire_：F列8の行は変わらない', JSON.stringify(grid[DATA0]) === JSON.stringify(before8), grid[DATA0]);
   check('setRetire_：F列1の行がF列9に書き換わる', grid[DATA0 + 1][COL.flag] === 9, grid[DATA0 + 1]);
 })();
@@ -230,7 +230,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   ]);
   const before = JSON.parse(JSON.stringify(grid));
   let threw = null;
-  try { context.setRetire_('二重男', '2026-10-10', 9); }
+  try { context.setRetire_({ key: '二重男', date: '2026-10-10', flag: 9 }); }
   catch (e) { threw = e; }
   check('setRetire_：F列1の行が2つあるとエラー', !!threw, threw);
   check('setRetire_：エラー文に該当の行番号(4・5行目)が入っている', !!threw && /4・5行目/.test(threw.message), threw && threw.message);
@@ -243,7 +243,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
     row(9, '社員', 'いなべ', 'いなべ', '栽培', '', '退職済三郎', '2024-01-01'),
   ]);
   let threw = null;
-  try { context.setRetire_('退職済三郎', '2026-10-10', 9); }
+  try { context.setRetire_({ key: '退職済三郎', date: '2026-10-10', flag: 9 }); }
   catch (e) { threw = e; }
   check('setRetire_：F列1・2・3の行が無いとエラー', !!threw, threw);
 })();
@@ -253,7 +253,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   resetGrid([
     row(3, '社員', 'いなべ', 'いなべ', '栽培', '', '退職取消男', '2026-10-01'),
   ]);
-  context.undoRetire_('退職取消男');
+  context.undoRetire_({ key: '退職取消男' });
   const r = grid[DATA0];
   check('undoRetire_：F列1に戻る', r[COL.flag] === 1, r);
   check('undoRetire_：入退社の列は消える', r[COL.date] === '', r[COL.date]);
@@ -267,7 +267,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
     row(3, '社員', 'いなべ', 'いなべ', '栽培', '', '兼務花子', '2026-10-01'),
   ]);
   const before8 = JSON.parse(JSON.stringify(grid[DATA0]));
-  context.undoRetire_('兼務花子');
+  context.undoRetire_({ key: '兼務花子' });
   check('undoRetire_：F列8の行は変わらない', JSON.stringify(grid[DATA0]) === JSON.stringify(before8), grid[DATA0]);
   check('undoRetire_：F列3の行がF列1に戻る', grid[DATA0 + 1][COL.flag] === 1, grid[DATA0 + 1]);
 })();
@@ -278,7 +278,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
     row(1, '社員', 'いなべ', 'いなべ', '栽培', '', '在籍四郎', '2024-01-01'),
   ]);
   let threw = null;
-  try { context.undoRetire_('在籍四郎'); }
+  try { context.undoRetire_({ key: '在籍四郎' }); }
   catch (e) { threw = e; }
   check('undoRetire_：F列3の行が無いとエラー', !!threw, threw);
 })();
@@ -291,7 +291,7 @@ check('今の月度（固定した今日=2026-10-27）は2026-10', context.curre
   ]);
   const before = JSON.parse(JSON.stringify(grid));
   let threw = null;
-  try { context.undoRetire_('二重五郎'); }
+  try { context.undoRetire_({ key: '二重五郎' }); }
   catch (e) { threw = e; }
   check('undoRetire_：F列3の行が2つあるとエラー', !!threw, threw);
   check('undoRetire_：エラー時はどの行も書き換わらない', JSON.stringify(grid) === JSON.stringify(before), grid);

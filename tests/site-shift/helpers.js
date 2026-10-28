@@ -87,6 +87,23 @@ async function openShiftPage(ctx, { seed, members }) {
     if (r.request().method() === 'POST') {
       let req = {}; try { req = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* 無視 */ }
       if (req.action === 'addMember') { body.row = 999; body.key = normalizeNameLike(req.name); }
+      // changeOrg：members（テストのシード）から該当の人のF列を見て、本物のGASと同じ考え方で
+      // mode（F列2=overwrite／F列1=split）を返す（site-shift.htmlはこのmodeで書き込む内容を決める）
+      // 多くのテストのメンバーはsiteを持たない（単一拠点のテストのため）。x.siteが無いときは
+      // 拠点では絞らない（req.siteが無いときに絞らないのと同じ考え方）
+      const sameSite = x => !req.site || !x.site || x.site === req.site;
+      if (req.action === 'changeOrg') {
+        const m = (members || []).find(x => x.key === req.key && sameSite(x) && x.empType === req.empType && x.dept === req.dept);
+        body.mode = m && m.flag === 2 ? 'overwrite' : 'split';
+        if (body.mode === 'split') { body.newRow = 999; body.oldFlag = 3; body.newFlag = 1; }
+      }
+      // undoRetire(orgTo)：members（テストのシード）にorgTo先の行がちょうど1つ無ければ、
+      // 本物のGASと同じようにwarningを返す
+      if (req.action === 'undoRetire' && req.orgTo) {
+        const matches = (members || []).filter(x => x.key === req.key && sameSite(x)
+          && x.empType === req.orgTo.empType && x.dept === req.orgTo.dept && (x.flag === 1 || x.flag === 2));
+        if (matches.length !== 1) body.warning = 'テスト用の偽の警告：組織内の変更で作られた新しい行が見つからないか複数あります';
+      }
     }
     r.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
