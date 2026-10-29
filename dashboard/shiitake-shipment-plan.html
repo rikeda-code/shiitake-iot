@@ -949,20 +949,27 @@
   var DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg'; // DB共有
   var GRADE_RATIO_SHEET_GID = '1773303848'; // 「収穫_秀優比率」タブ
   var STOCK_URL_SHEET_GID = '717295394'; // 「URL_在庫管理表」タブ（1行目=見出し:A「出荷量」・B以降に拠点名、以降の行=年×拠点のファイルURL）
-  var HARVEST_URL_SHEET_GID = '1996914203'; // 「URL_収穫管理表」タブ（いなべの列を使う）
+  var HARVEST_URL_SHEET_GID = '1996914203'; // 「URL_収穫管理表」タブ（1行目の見出しが拠点名の列を使う）
   var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定。URLにgidがあればそちらを使う）
-  var HARVEST_DAILY_TOTAL_SHEET_ID = '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw';
-  var HARVEST_DAILY_TOTAL_GID = '1164843574'; // 「2026.5いなべ収穫計画」の「転写」タブ
   var STOCK_DASH = '－';
 
-  // パネル1（在庫・出荷予定）で対応している拠点ごとの設定。南丹は未対応のためここに無い
+  // パネル1〜3で対応している拠点ごとの設定。南丹は未対応のためここに無い
   // （SITE_DATA[site]が無い＝「準備中」扱いにする）。allocationGid＝「転写_秀優_判別」タブの
   // gid（在庫ファイルは拠点ごとに別ファイルなのでgidも別）、salesColOffset＝販売予実抽出シートの
   // 受注計画でいなべのW〜Z列(22〜25列目)から何列右にずれているか、orderGid＝販売抽出シート
-  // (商品別)の拠点ごとの受注タブのgid
+  // (商品別)の拠点ごとの受注タブのgid、harvestUrlColumn＝「URL_収穫管理表」タブで読む見出し列名、
+  // dailyTotal＝拠点ごとの「転写」タブ（日別の収穫合計予測値）のファイルID・gid
   var SITE_DATA = {
-    'いなべ': { allocationGid: '276290820', salesColOffset: 0, orderGid: '545062393' },
-    '群馬':   { allocationGid: '272244694', salesColOffset: 28, orderGid: '1218802781' },
+    'いなべ': {
+      allocationGid: '276290820', salesColOffset: 0, orderGid: '545062393',
+      harvestUrlColumn: 'いなべ',
+      dailyTotal: { id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' }, // 「2026.5いなべ収穫計画」の「転写」タブ
+    },
+    '群馬': {
+      allocationGid: '272244694', salesColOffset: 28, orderGid: '1218802781',
+      harvestUrlColumn: '群馬',
+      dailyTotal: { id: '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y', gid: '1272257227' }, // 「2026.5群馬収穫計画」の「転写」タブ
+    },
   };
 
   // 選ばれている拠点（#siteToggleのボタンのactiveクラスから読む。見つからなければいなべ）
@@ -1361,29 +1368,29 @@
 
   // 実績日1日分のM/L/2L/袋の収穫実績を取得する。「DB共有」ファイルの「URL_収穫管理表」
   // タブ（1行目＝見出し：A1「収穫管理表」・B1「いなべ」・C1「群馬」・D1「南丹」）から、
-  // 見出しが「いなべ」の列（列位置は固定しない）で、実績日の年月に対応する外部
-  // スプレッドシートIDを引き、その「収獲目標値」シートからA列が実績日と一致する
-  // 行のサイズ列（findHarvestSizeCols()で見出しから特定）を読む
-  async function fetchHarvestActual(date){
+  // 見出しがharvestUrlColumn（拠点名）の列（列位置は固定しない）で、実績日の年月に
+  // 対応する外部スプレッドシートIDを引き、その「収獲目標値」シートからA列が実績日と
+  // 一致する行のサイズ列（findHarvestSizeCols()で見出しから特定）を読む
+  async function fetchHarvestActual(date, harvestUrlColumn){
     try {
       var urlJson = await fetchCsvSheet(DB_SHARE_SHEET_ID, HARVEST_URL_SHEET_GID);
       var rows = (urlJson.table && urlJson.table.rows) || [];
       var headerRow = rows[0] && rows[0].c;
-      var inabeCol = -1;
+      var siteCol = -1;
       if (headerRow) {
         for (var h = 1; h < headerRow.length; h++) {
-          if (headerRow[h] && String(headerRow[h].v).trim() === 'いなべ') { inabeCol = h; break; }
+          if (headerRow[h] && String(headerRow[h].v).trim() === harvestUrlColumn) { siteCol = h; break; }
         }
       }
       var targetSheetId = null;
       var targetGid = HARVEST_TARGET_GID;
-      if (inabeCol !== -1) {
+      if (siteCol !== -1) {
         for (var i = 1; i < rows.length; i++) {
           var c = rows[i] && rows[i].c;
           if (!c) continue;
           var d = gvizCellToDate(c[0]);
           if (d && d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth()) {
-            var url = c[inabeCol] && c[inabeCol].v;
+            var url = c[siteCol] && c[siteCol].v;
             if (url) {
               var m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
               if (m) targetSheetId = m[1];
@@ -1410,12 +1417,14 @@
     }
   }
 
-  // 指定日の収穫合計予測値を「2026.5いなべ収穫計画」の「転写」タブから取得する。
+  // 指定日の収穫合計予測値を拠点ごとの「転写」タブ（dailyTotal＝{id, gid}）から取得する。
   // 「転写」タブは当日〜8日後の間で使い回すため、呼び出し側からcacheを渡す
-  async function fetchDailyHarvestTotal(date, cache){
+  // （cacheは呼び出しごとに新規に作られるため、拠点が変わっても前の拠点の内容を
+  // 引き継がない＝拠点ごとに分かれている）
+  async function fetchDailyHarvestTotal(date, cache, dailyTotal){
     try {
       if (!cache.json) {
-        cache.json = await fetchCsvSheet(HARVEST_DAILY_TOTAL_SHEET_ID, HARVEST_DAILY_TOTAL_GID);
+        cache.json = await fetchCsvSheet(dailyTotal.id, dailyTotal.gid);
       }
       var json = cache.json;
       var headerRow = json.table.rows[0];
@@ -1737,8 +1746,8 @@
     el.hidden = !text;
   }
 
-  // 収穫予測（table2）は今回いなべのみ対応。それ以外の拠点を選んでいるときは、
-  // いなべの数字を出さないよう、すべて「－」にして見出し近くに注記する
+  // 収穫予測（table2）は南丹が未対応（SITE_DATAに設定が無い）。南丹を選んでいるときは、
+  // いなべ・群馬の数字を出さないよう、すべて「－」にして見出し近くに注記する
   function showHarvestForecastUnsupported(site){
     ['M', 'L', '2L', '袋'].forEach(function(size){
       var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
@@ -1776,14 +1785,15 @@
     var myToken = ++harvestForecastRequestToken;
     function isStale(){ return myToken !== harvestForecastRequestToken; }
     var site = activeSite();
-    if (site !== 'いなべ') { showHarvestForecastUnsupported(site); return; }
+    var siteCfg = SITE_DATA[site];
+    if (!siteCfg) { showHarvestForecastUnsupported(site); return; }
     setTable2SiteNote('');
     if (!baseDate) baseDate = harvestDate; // 呼び出し側で省略された場合のフォールバック
     var sizes = ['M', 'L', '2L', '袋'];
     try {
       // 実績と秀/優ラベルは互いに依存しないため同時に取得を開始する（ラベルを
       // 使う按分は、これまで通り実績の描画が終わってから行う）
-      var actualPromise = fetchHarvestActual(harvestDate);
+      var actualPromise = fetchHarvestActual(harvestDate, siteCfg.harvestUrlColumn);
       var ratioJsonPromise = fetchGradeRatios().catch(function(){ return null; });
 
       var actual = await actualPromise;
@@ -1830,7 +1840,7 @@
       if (isStale()) return;
       for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offset);
-        var dayTotal = await fetchDailyHarvestTotal(d, dailyTotalCache);
+        var dayTotal = await fetchDailyHarvestTotal(d, dailyTotalCache, siteCfg.dailyTotal);
         if (isStale()) return;
         var totalCell = document.querySelector('[data-harvest-total-offset="' + offset + '"]');
         if (totalCell) totalCell.textContent = dayTotal === null ? STOCK_DASH : (Math.round(dayTotal * 10) / 10).toFixed(1);
@@ -1884,8 +1894,8 @@
     el.hidden = !text;
   }
 
-  // 在庫予測（table3）は今回いなべのみ対応。それ以外の拠点では、パネル1に実データが
-  // 出ていてもそれを使って計算してしまわないよう（いなべの数字を出さないため）、
+  // 在庫予測（table3）は南丹が未対応（SITE_DATAに設定が無い）。南丹を選んでいるときは、
+  // パネル1に実データが出ていてもそれを使って計算してしまわないよう、
   // すべて「－」にして見出し近くに注記する
   function showStockForecastUnsupported(site){
     ['M', 'L', '2L', '袋', '秀', '優'].forEach(function(size){
@@ -1911,7 +1921,7 @@
     var myToken = ++stockForecastRequestToken;
     function isStale(){ return myToken !== stockForecastRequestToken; }
     var site = activeSite();
-    if (site !== 'いなべ') { showStockForecastUnsupported(site); return; }
+    if (!SITE_DATA[site]) { showStockForecastUnsupported(site); return; }
     setTable3SiteNote('');
     var sizes = ['M', 'L', '2L', '袋'];
 
