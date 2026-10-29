@@ -5,12 +5,13 @@
 // 書き換えてしまう。これを防ぐ安全策の確認。
 // 保存先GAS(HARVEST_FORECAST_GAS_URL)・CSVモックの組み立ては
 // verify_shipment_plan_harvest_detail.js と同じ構成を複製している（他ファイルへの依存なし）。
-// 本体（table1〜3）は、パネル1（在庫・出荷予定）が群馬でも実データで表示するように
-// なったため、「拠点トグルを切り替えても常にいなべのデータを表示する」仕様では無くなった。
-// ⑤で、群馬・南丹を選んだときにいなべの数字を出し続けないこと（群馬のパネル2・3、
-// 南丹のパネル1〜3は「－」＋「◯◯は準備中です」になること）を確認する
-// （パネル1が群馬の実データで正しく表示されることの検証は別ファイル
-// verify_shipment_plan_gunma_panel1.js が担当する）。
+// 本体（table1〜3）は、パネル1〜3（在庫・出荷予定・収穫予測・在庫予測）が群馬でも
+// 実データで表示するようになったため、「拠点トグルを切り替えても常にいなべのデータを
+// 表示する」仕様では無くなった。⑤で、群馬・南丹を選んだときにいなべの数字を出し続け
+// ないこと（南丹のパネル1〜3は「－」＋「◯◯は準備中です」になること、群馬は「準備中」の
+// 注記を出さないこと）を確認する（パネル1・パネル2・3が群馬の実データで正しく表示
+// されることの検証は別ファイル verify_shipment_plan_gunma_panel1.js・
+// verify_shipment_plan_gunma_panel23.js が担当する）。
 const { chromium } = require('playwright');
 
 function csvCell(v) { if (v === null || v === undefined) return ''; const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
@@ -287,10 +288,10 @@ async function clickSite(page, site) {
   }
 
   // 拠点ごとの設定（SITE_DATA）に無い動作の追加により、本体（table1〜3）は拠点トグルを
-  // 切り替えても「常にいなべのデータを表示する」仕様では無くなった（パネル1＝在庫・出荷予定は
-  // 群馬でも実データで表示するようになった。群馬のパネル2・3、南丹のパネル1〜3は、いなべの
-  // 数字を出さないよう「－」＋「◯◯は準備中です」の注記になる）。この回帰確認は、新しい
-  // 仕様（いなべの数字を出し続けない）に合わせて書き直した
+  // 切り替えても「常にいなべのデータを表示する」仕様では無くなった（パネル1〜3＝在庫・出荷予定・
+  // 収穫予測・在庫予測のすべてが、群馬でも実データで表示するようになった。南丹のパネル1〜3は、
+  // SITE_DATAに設定が無いため、いなべの数字を出さないよう「－」＋「◯◯は準備中です」の注記に
+  // なる）。この回帰確認は、新しい仕様（いなべの数字を出し続けない）に合わせて書き直した
   console.log('=== ⑤本体（table1・table2・table3）：群馬・南丹を選んでもいなべの数字を出し続けない（回帰） ===');
   {
     const { page } = await setupPage(browser, { loadValues: {} });
@@ -304,16 +305,19 @@ async function clickSite(page, site) {
     check('切替前のtable3はいなべの実データ(－ではない)', before.t3 !== '－');
 
     await clickSite(page, '群馬');
-    // このテストのモック（URL_在庫管理表・販売予実抽出シート等）は群馬の実データを
-    // 用意していないため、パネル1（table1）は「－」＋「URL_在庫管理表に群馬の
-    // 在庫管理表がありません」になる（新しい実データの検証は別ファイル
-    // verify_shipment_plan_gunma_panel1.jsが担当）
+    // このテストのモック（URL_在庫管理表・URL_収穫管理表・販売予実抽出シート等）は群馬の実データを
+    // 用意していないため、パネル1（table1）は「－」＋「URL_在庫管理表に群馬の在庫管理表が
+    // ありません」に、パネル2（table2）はURL_収穫管理表の群馬欄が空のため「－」になる
+    // （「準備中」のプレースホルダーではなく、通常の「データが見つからない」場合の「－」で
+    // あることが、注記が出ないことからわかる）。パネル3はパネル2の「－」が伝播して「－」に
+    // なる（新しい実データの検証は別ファイル verify_shipment_plan_gunma_panel1.js・
+    // verify_shipment_plan_gunma_panel23.jsが担当）
     check('table1(製品在庫)は群馬選択後、いなべの数字のままではない', (await text(page, '[data-stock-product="M"]')) !== before.stockProduct);
     check('table1に群馬の在庫管理表が無い旨の注記が出る', (await text(page, '#table1SiteNote') || '').includes('群馬'));
-    check('table2(収穫予測)は群馬選択後「－」になる(準備中のためいなべの数字のままではない)', (await text(page, mainHarvestCell('M', 0))) === '－');
-    check('table2に「群馬は準備中です」の注記が出る', (await text(page, '#table2SiteNote')) === '群馬は準備中です');
-    check('table3(在庫予測)は群馬選択後「－」になる(準備中のためいなべの数字のままではない)', (await text(page, mainStockCell('M', 0))) === '－');
-    check('table3に「群馬は準備中です」の注記が出る', (await text(page, '#table3SiteNote')) === '群馬は準備中です');
+    check('table2(収穫予測)は群馬選択後「－」になる(URL_収穫管理表に群馬の欄が無いためいなべの数字のままではない)', (await text(page, mainHarvestCell('M', 0))) === '－');
+    check('table2に「群馬は準備中です」の注記は出ない(パネル2も群馬に対応したため)', (await text(page, '#table2SiteNote')) === '');
+    check('table3(在庫予測)は群馬選択後「－」になる(table2の「－」が伝播していなべの数字のままではない)', (await text(page, mainStockCell('M', 0))) === '－');
+    check('table3に「群馬は準備中です」の注記は出ない(パネル3も群馬に対応したため)', (await text(page, '#table3SiteNote')) === '');
 
     await clickSite(page, '南丹');
     check('table1(製品在庫)は南丹選択後「－」になる', (await text(page, '[data-stock-product="M"]')) === '－');

@@ -12,7 +12,9 @@
 //    古い読み込み（前の拠点向け）が遅れて終わってもその時点の表示を上書きしない（世代チェック）
 //  - URL_在庫管理表の群馬の欄が空のとき、製品在庫・生在庫（秀・優を含む）が「－」になり、
 //    見出し近くに「URL_在庫管理表に群馬の在庫管理表がありません」の注記が出る
-//  - 群馬のパネル2・3、南丹のパネル1〜3が「－」＋「◯◯は準備中です」になる
+//  - 群馬のパネル2・3は「準備中」のプレースホルダーでなくなっている（簡易モックで実データ扱いを
+//    確認。詳しい値の検証はverify_shipment_plan_gunma_panel23.jsが担当）。南丹のパネル1〜3は
+//    引き続き「－」＋「◯◯は準備中です」になる
 // 実行：python3 -m http.server 8812 --directory dashboard を起動してから
 //       node tests/shipment-plan/verify_shipment_plan_gunma_panel1.js
 const { chromium } = require('playwright');
@@ -37,6 +39,14 @@ function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMont
 
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const STOCK_URL_SHEET_GID = '717295394'; // 「URL_在庫管理表」タブ
+const HARVEST_URL_SHEET_GID = '1996914203'; // 「URL_収穫管理表」タブ
+// ⑤で群馬のパネル2・3が「準備中」でなくなったこと（実データ扱いになったこと）を確かめるための
+// 簡易モック。詳しい値の検証はverify_shipment_plan_gunma_panel23.jsが担当するため、ここでは
+// ダッシュにならないことと注記が出ないことだけを見る簡単な値にする
+const GUNMA_HARVEST_SHEET_ID = 'FAKE_GUNMA_HARVEST_SHEET_ID';
+const GUNMA_HARVEST_GID = '999999001';
+const GUNMA_DAILY_TOTAL_SHEET_ID = '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y'; // 「2026.5群馬収穫計画」（実物のID）
+const GUNMA_DAILY_TOTAL_GID = '1272257227'; // 「転写」タブ（実物のgid）
 const SALES_SHEET_ID = '18zyC0JwVyaW3i18LQdvHQeDpEcfzM8iolhclgNocrnM';
 const SALES_INDEX_GID = '538861653'; // 「シート判別」タブ
 const SALES_RAW_SHEET_ID = '17DD5aRxc9bv8uZzEfnK_Q9IGOvQVH4ieJU1c-qu7dOc';
@@ -88,6 +98,34 @@ function buildGunmaStockCsv(stockDate) {
   row('A6(30入り)', 9);
   row('A5(30入り)', 2);
   row('B5(30入り)', 13);
+  return toCsvText(rows);
+}
+
+// 「URL_収穫管理表」タブ：1行目=見出し(A「収穫管理表」・B「いなべ」・C「群馬」・D「南丹」)、
+// 2026/10の群馬列に群馬の「収獲目標値」ファイルのURLを置く（いなべ列は空でよい＝この
+// ファイルではいなべの収穫予測を検証しないため）
+function buildHarvestUrlCsv() {
+  return toCsvText([
+    ['収穫管理表', 'いなべ', '群馬', '南丹'],
+    ['2026/10', '', 'https://docs.google.com/spreadsheets/d/' + GUNMA_HARVEST_SHEET_ID + '/edit?gid=' + GUNMA_HARVEST_GID + '#gid=' + GUNMA_HARVEST_GID, ''],
+  ]);
+}
+// 群馬の「収獲目標値(合計)」タブの簡易モック（3行目が見出し、4行目以降が日別実績）。
+// 実績日=2026-10-27にM/L/2L/袋の簡単な値を置く
+function buildGunmaHarvestTargetCsv() {
+  return toCsvText([
+    [],
+    [],
+    ['日付', '目標値', '収穫実績値', 'M', 'L', '2L', '袋'],
+    ['2026/10/27', '', '', 60, 200, 240, 150],
+  ]);
+}
+// 群馬の「転写」タブの簡易モック（1行目=年月見出し。群馬はB1が「見込み1」）。
+// 基準日(2026-10-28)の列に簡単な値を置く
+function buildGunmaDailyTotalCsv(baseDateForKey) {
+  const key = baseDateForKey.getFullYear() + '.' + (baseDateForKey.getMonth() + 1);
+  const rows = [['見込み1', key]];
+  for (let d = 1; d <= 28; d++) rows.push(['', d === baseDateForKey.getDate() ? 500 : '']);
   return toCsvText(rows);
 }
 
@@ -176,6 +214,9 @@ async function setupPage(browser, opts) {
     const url = decodeURIComponent(route.request().url());
     let body = '﻿\r\n';
     if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + STOCK_URL_SHEET_GID)) body = buildStockUrlCsv(opts);
+    else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + HARVEST_URL_SHEET_GID)) body = buildHarvestUrlCsv();
+    else if (url.includes(GUNMA_HARVEST_SHEET_ID) && url.includes('gid=' + GUNMA_HARVEST_GID)) body = buildGunmaHarvestTargetCsv();
+    else if (url.includes(GUNMA_DAILY_TOTAL_SHEET_ID) && url.includes('gid=' + GUNMA_DAILY_TOTAL_GID)) body = buildGunmaDailyTotalCsv(baseline);
     else if (url.includes(GUNMA_STOCK_SHEET_ID) && url.includes('gid=' + GUNMA_STOCK_GID)) body = buildGunmaStockCsv(stockDate);
     else if (url.includes(GUNMA_STOCK_SHEET_ID) && url.includes('gid=' + GUNMA_ALLOCATION_GID)) body = buildGunmaAllocationCsv();
     else if (url.includes(INABE_STOCK_SHEET_ID) && url.includes('gid=' + INABE_STOCK_GID)) body = buildInabeStockCsv(stockDate);
@@ -310,15 +351,20 @@ async function waitStable(page, sel, ms) {
     await page.close();
   }
 
-  console.log('=== ⑤群馬のパネル2・3、南丹のパネル1〜3は「－」＋「準備中」 ===');
+  console.log('=== ⑤群馬のパネル2・3は実データ（準備中ではない）、南丹のパネル1〜3は「－」＋「準備中」 ===');
   {
+    // 群馬のパネル2・3の数値そのものの検証はverify_shipment_plan_gunma_panel23.jsが担当する。
+    // ここでは、パネル1と同じく「準備中」のプレースホルダー扱いでなくなった（SITE_DATAに
+    // 設定が増え、実際のシートから値を取りに行くようになった）ことだけを、簡易なモックで確認する
     const page = await setupPage(browser, { query: '?site=' + encodeURIComponent('群馬') });
     await waitStable(page, '[data-stock-product="M"]');
+    await waitStable(page, '[data-harvest="M"][data-harvest-offset="0"]');
     check('群馬：table1(パネル1)は実データ(－ではない)', (await text(page, '[data-stock-product="M"]')) !== '－');
-    check('群馬：table2(収穫予測)は－', (await text(page, '[data-harvest="M"][data-harvest-offset="0"]')) === '－');
-    check('群馬：table2に「群馬は準備中です」の注記', (await text(page, '#table2SiteNote')) === '群馬は準備中です');
-    check('群馬：table3(在庫予測)は－', (await text(page, '[data-stock-forecast="M"][data-stock-forecast-offset="0"]')) === '－');
-    check('群馬：table3に「群馬は準備中です」の注記', (await text(page, '#table3SiteNote')) === '群馬は準備中です');
+    check('群馬：table2(収穫予測)は実データ(－ではない。パネル2も対応したため)', (await text(page, '[data-harvest="M"][data-harvest-offset="0"]')) !== '－');
+    check('群馬：table2に「群馬は準備中です」の注記は出ない', (await text(page, '#table2SiteNote')) === '', await text(page, '#table2SiteNote'));
+    await waitStable(page, '[data-stock-forecast="M"][data-stock-forecast-offset="0"]');
+    check('群馬：table3(在庫予測)は実データ(－ではない。パネル3も対応したため)', (await text(page, '[data-stock-forecast="M"][data-stock-forecast-offset="0"]')) !== '－');
+    check('群馬：table3に「群馬は準備中です」の注記は出ない', (await text(page, '#table3SiteNote')) === '', await text(page, '#table3SiteNote'));
     await page.close();
   }
   {
