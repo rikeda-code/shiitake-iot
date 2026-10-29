@@ -428,24 +428,28 @@ async function viewState(page) {
     let st = await viewState(page);
     check('クエリが無いときは いなべ・詳細は閉じた状態', st.site === 'いなべ' && !st.harvestDetail && !st.stockDetail && (await page.evaluate(() => location.search)) === '', st);
     const histLen0 = await page.evaluate(() => history.length);
-    await page.click('#siteToggle button[data-site="群馬"]');
+    // 詳細（table2detail・table3detail）が本体未対応の拠点でだけ止まることの確認は、
+    // 本体も対応した群馬ではなく、今も未対応の南丹で行う（本体が対応した群馬については
+    // table2(収穫予測)の群馬選択後の表示がverify_shipment_plan_detail_inabe_only.jsの
+    // 対象。ここではURLの状態保持そのものの確認が主眼）
+    await page.click('#siteToggle button[data-site="南丹"]');
     await page.click('#harvestDetailSection > summary');
     await page.click('#stockDetailSection > summary');
     await page.waitForTimeout(200);
     const q1 = await decodeSearch(page);
-    check('拠点の切り替え・詳細の開閉でURLのクエリが書き換わる（?site=群馬&harvestDetail=open&stockDetail=open）',
-      q1 === '?site=群馬&harvestDetail=open&stockDetail=open', q1);
+    check('拠点の切り替え・詳細の開閉でURLのクエリが書き換わる（?site=南丹&harvestDetail=open&stockDetail=open）',
+      q1 === '?site=南丹&harvestDetail=open&stockDetail=open', q1);
     check('URLの書き換えで履歴は増えない（replaceState）', (await page.evaluate(() => history.length)) === histLen0);
     const loadsBefore = loadQueries.length, postsBefore = posts.length;
     await page.reload();
     await settle(page);
     await page.waitForTimeout(300);
     st = await viewState(page);
-    check('リロードすると群馬・収穫予測の詳細・在庫予測の詳細が開いた状態で表示される', st.site === '群馬' && st.activeCount === 1 && st.harvestDetail && st.stockDetail, st);
+    check('リロードすると南丹・収穫予測の詳細・在庫予測の詳細が開いた状態で表示される', st.site === '南丹' && st.activeCount === 1 && st.harvestDetail && st.stockDetail, st);
     const note = await page.evaluate(() => document.getElementById('harvestDetailNote').textContent);
     const dash = await page.evaluate(() => document.querySelector('[data-harvest-detail="M"][data-harvest-detail-offset="0"]').textContent.trim());
-    check('群馬の状態でリロードしても、GASへの収穫見込の読み込み・保存は送られず、入力欄は無効・詳細は「－」（PR #515 の安全策）',
-      loadQueries.length === loadsBefore && posts.length === postsBefore && st.inputDisabled && dash === '－' && note.includes('いなべのみ対応'), { loads: loadQueries.length - loadsBefore, posts: posts.length - postsBefore, st, dash });
+    check('南丹の状態でリロードしても、GASへの収穫見込の読み込み・保存は送られず、入力欄は無効・詳細は「－」（PR #515 の安全策。対応拠点が増えた今は南丹だけに働く）',
+      loadQueries.length === loadsBefore && posts.length === postsBefore && st.inputDisabled && dash === '－' && note.includes('いなべ・群馬のみ対応'), { loads: loadQueries.length - loadsBefore, posts: posts.length - postsBefore, st, dash });
     // いなべ・詳細を閉じた状態に戻してリロード
     await page.click('#siteToggle button[data-site="いなべ"]');
     await page.click('#harvestDetailSection > summary');
@@ -512,17 +516,20 @@ async function viewState(page) {
     await settle(page);
     let st = await viewState(page);
     check('htmlpreview形式のURL（状態のクエリなし）で開くと いなべ・詳細が閉じた状態', st.site === 'いなべ' && !st.harvestDetail && !st.stockDetail, st);
-    await page.click('#siteToggle button[data-site="群馬"]');
+    // ここも本体未対応の南丹で、GASへの読み込みが送られないこと（PR #515の安全策）を確認する
+    // （群馬は本体が対応したため詳細も読み込みが送られるようになった。検証は
+    // verify_shipment_plan_detail_inabe_only.jsが担当）
+    await page.click('#siteToggle button[data-site="南丹"]');
     await page.click('#harvestDetailSection > summary');
     await page.waitForTimeout(200);
     const q = await decodeSearch(page);
-    check('切り替えると、表示するファイルのURLの後ろに状態のクエリが付く（前のURLは壊さない）', q === previewPrefix + '?site=群馬&harvestDetail=open', q);
+    check('切り替えると、表示するファイルのURLの後ろに状態のクエリが付く（前のURLは壊さない）', q === previewPrefix + '?site=南丹&harvestDetail=open', q);
     const loads = loadQueries.length;
     await page.reload();
     await settle(page);
     st = await viewState(page);
-    check('htmlpreview形式のURLのままリロードしても、群馬・収穫予測の詳細が開いた状態で表示され、GASへの読み込みは送られない',
-      st.site === '群馬' && st.harvestDetail && !st.stockDetail && loadQueries.length === loads, { st, loads: loadQueries.length - loads });
+    check('htmlpreview形式のURLのままリロードしても、南丹・収穫予測の詳細が開いた状態で表示され、GASへの読み込みは送られない',
+      st.site === '南丹' && st.harvestDetail && !st.stockDetail && loadQueries.length === loads, { st, loads: loadQueries.length - loads });
     await page.close();
   }
 

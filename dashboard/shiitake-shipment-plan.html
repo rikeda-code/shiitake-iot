@@ -894,7 +894,7 @@
 
   // 開いたときの状態を反映する。拠点はボタンの見た目（active）だけを切り替える（収穫見込（詳細）の
   // 読み込みは、本体の描画が終わった後のupdateHarvestStockDetail()が選ばれている拠点を見て行うため、
-  // いなべ以外なら読み込み・保存・入力をしない（PR #515 の安全策）がそのまま働く）
+  // 本体が未対応の拠点（南丹）ならそのままだと読み込み・保存・入力をしない（PR #515 の安全策）が働く）
   var initial = readStateFromSearch(location.search);
   // 基準日・実績日の初期値。日付の入力欄を既定値（今日・前日）にする下のスクリプトが、
   // この値があればそれで上書きする（日付の関係・選べる範囲・今日より先を選べない制限はそちらのまま）
@@ -971,6 +971,9 @@
       dailyTotal: { id: '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y', gid: '1272257227' }, // 「2026.5群馬収穫計画」の「転写」タブ
     },
   };
+  // 詳細（収穫見込：手入力）のIIFEが、本体が対応している拠点の一覧を食い違いなく
+  // 参照できるように公開する（詳細側はこれを「対応拠点かどうか」の判定に使う）
+  window.__shipmentPlanSupportedSites = Object.keys(SITE_DATA);
 
   // 選ばれている拠点（#siteToggleのボタンのactiveクラスから読む。見つからなければいなべ）
   function activeSite(){
@@ -2257,12 +2260,20 @@
   var DETAIL_DAY_COUNT = 9; // 基準日（当日）〜8日後
   var DETAIL_DASH = '－';
   var DETAIL_SIZES = ['M', 'L', '秀', '優', '2L', '袋'];
-  // 本体（table1〜3）は拠点トグルを切り替えても常にいなべのデータを表示する作り
-  // （見た目のみのトグル）。詳細は拠点を見て収穫見込GASへ読み書きするため、
-  // いなべ以外を選んだまま入力すると、本体に表示されている値と食い違う拠点の
-  // 収穫見込（直近工数計画・PR #503が使う実データ）を書き換えてしまう。これを
-  // 防ぐため、いなべ以外のときは詳細の読み込み・保存・入力・数値表示を止める
-  var UNSUPPORTED_SITE_NOTE = 'この画面は現在いなべのみ対応です。群馬・南丹の収穫見込は直近工数計画で入力してください。';
+  // 本体（table1〜3）は拠点ごとに対応状況が異なり、対応している拠点（SITE_DATAにある拠点。
+  // 本体側のIIFEからwindow.__shipmentPlanSupportedSitesとして公開される）だけが実データで
+  // 表示される。詳細は拠点を見て収穫見込GASへ読み書きするため、本体が未対応の拠点を選んだ
+  // まま入力すると、本体に表示されていない（「準備中」の）拠点の収穫見込（直近工数計画・
+  // PR #503が使う実データ）を書き換えてしまう。これを防ぐため、本体が未対応の拠点の
+  // ときは詳細の読み込み・保存・入力・数値表示を止める
+  var UNSUPPORTED_SITE_NOTE = 'この画面は現在いなべ・群馬のみ対応です。南丹の収穫見込は直近工数計画で入力してください。';
+
+  // 本体が対応している拠点の一覧（本体側のSITE_DATAと食い違わないよう、本体側のIIFEが
+  // 公開したものを使う。公開されていない場合はいなべだけを対応とみなす）
+  function isDetailSupportedSite(site){
+    var sites = window.__shipmentPlanSupportedSites || ['いなべ'];
+    return sites.indexOf(site) !== -1;
+  }
 
   /* ===================== 日付のユーティリティ（このIIFE専用） ===================== */
   function addDaysIso(iso, n){
@@ -2603,7 +2614,7 @@
     renderTable3Detail(state, seriesBySize);
   }
 
-  // いなべ以外が選ばれているときの詳細の表示。GASへの読み込み・保存は一切行わず、
+  // 本体が未対応の拠点が選ばれているときの詳細の表示。GASへの読み込み・保存は一切行わず、
   // 入力欄を無効化し、詳細の表の数値（実績・比率・日別・合計）をすべて「－」にする
   function renderDetailUnsupportedSite(){
     for (var o = 0; o < DETAIL_DAY_COUNT; o++) {
@@ -2654,7 +2665,7 @@
     var refIso = refInput.value;
     var site = activeSite();
 
-    if (site !== 'いなべ') {
+    if (!isDetailSupportedSite(site)) {
       detailState = null;
       renderDetailUnsupportedSite();
       return;
@@ -2712,7 +2723,7 @@
 
   async function commitDetailInput(input){
     if (!detailState || detailState.gen !== detailToken) return;
-    if (activeSite() !== 'いなべ') return;
+    if (!isDetailSupportedSite(activeSite())) return;
     var state = detailState;
     var o = parseInt(input.getAttribute('data-harvest-input-offset'), 10);
     var kg = parseManualHarvestInput(input.value);
