@@ -1221,12 +1221,26 @@
     var day = date.getDate();
     var rowIdx = (day + 3) - 1;
     var off = colOffset || 0;
-    return {
+    var plan = {
       'M': readCellNumber(json, rowIdx, 22 + off),
       'L': readCellNumber(json, rowIdx, 23 + off),
       '2L': readCellNumber(json, rowIdx, 24 + off),
       '袋': readCellNumber(json, rowIdx, 25 + off),
     };
+    // 受注計画（W〜Z）のM・L・2L・袋が4つとも空欄の日だけ、修正計画（S〜V＝受注計画の
+    // 4列左）の値に替える。1つでも入力があれば受注計画のまま（空欄のサイズは「－」）。
+    // 秀・優は修正計画に相当する元データが無いため、呼び出し側が revised を見て「－」にする
+    var allBlank = plan['M'] === null && plan['L'] === null && plan['2L'] === null && plan['袋'] === null;
+    if (allBlank) {
+      plan = {
+        'M': readCellNumber(json, rowIdx, 18 + off),
+        'L': readCellNumber(json, rowIdx, 19 + off),
+        '2L': readCellNumber(json, rowIdx, 20 + off),
+        '袋': readCellNumber(json, rowIdx, 21 + off),
+      };
+      plan.revised = true;
+    }
+    return plan;
   }
 
   // F列のサイズ表記を"・"/"/"/"*"で区切り、"L"という単語単体が
@@ -1724,6 +1738,8 @@
         var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
         var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache, siteCfg.salesColOffset);
         var gradePlan = gradeJson ? await fetchShipmentGradeForDate(gradeJson, d) : { '秀': null, '優': null };
+        // 修正計画の値を表示している日は、受注計画が未入力と分かるよう秀・優を「－」にする
+        if (plan && plan.revised) gradePlan = { '秀': null, '優': null };
         if (isStale()) return;
         ['M', 'L', '2L', '袋', '秀', '優'].forEach(function(size){
           var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
