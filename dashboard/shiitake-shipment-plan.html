@@ -894,7 +894,7 @@
 
   // 開いたときの状態を反映する。拠点はボタンの見た目（active）だけを切り替える（収穫見込（詳細）の
   // 読み込みは、本体の描画が終わった後のupdateHarvestStockDetail()が選ばれている拠点を見て行うため、
-  // 本体が未対応の拠点（南丹）ならそのままだと読み込み・保存・入力をしない（PR #515 の安全策）が働く）
+  // 本体が未対応の拠点ならそのままだと読み込み・保存・入力をしない（PR #515 の安全策）が働く）
   var initial = readStateFromSearch(location.search);
   // 基準日・実績日の初期値。日付の入力欄を既定値（今日・前日）にする下のスクリプトが、
   // この値があればそれで上書きする（日付の関係・選べる範囲・今日より先を選べない制限はそちらのまま）
@@ -953,12 +953,16 @@
   var HARVEST_TARGET_GID = '676064999'; // 各月の外部スプレッドシート内「収獲目標値」タブ（固定。URLにgidがあればそちらを使う）
   var STOCK_DASH = '－';
 
-  // パネル1〜3で対応している拠点ごとの設定。南丹は未対応のためここに無い
+  // パネル1〜3で対応している拠点ごとの設定。ここに無い拠点は
   // （SITE_DATA[site]が無い＝「準備中」扱いにする）。allocationGid＝「転写_秀優_判別」タブの
   // gid（在庫ファイルは拠点ごとに別ファイルなのでgidも別）、salesColOffset＝販売予実抽出シートの
   // 受注計画でいなべのW〜Z列(22〜25列目)から何列右にずれているか、orderGid＝販売抽出シート
   // (商品別)の拠点ごとの受注タブのgid、harvestUrlColumn＝「URL_収穫管理表」タブで読む見出し列名、
-  // dailyTotal＝拠点ごとの「転写」タブ（日別の収穫合計予測値）のファイルID・gid
+  // dailyTotal＝拠点ごとの日別の収穫合計予測値の取得先。{id, gid}なら「転写」タブ（年月の列×日番号の行）、
+  // {type:'monthlySheets', id, gids}なら月ごとのシート（日付・収穫見込の列。直近工数計画の南丹と同じ元）。
+  // 南丹だけ次の2つが違う：masterGid＝在庫ファイルの「マスターシート」タブのgid（あれば製品在庫を
+  // 品目ごとの「箱数×1cs重量」で計算する。無ければallocationGidの按分ルール）、
+  // gradeForecast:false＝収穫時点では秀・優に分けていないため、収穫予測・在庫予測の秀・優は「－」
   var SITE_DATA = {
     'いなべ': {
       allocationGid: '276290820', salesColOffset: 0, orderGid: '545062393',
@@ -969,6 +973,15 @@
       allocationGid: '272244694', salesColOffset: 28, orderGid: '1218802781',
       harvestUrlColumn: '群馬',
       dailyTotal: { id: '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y', gid: '1272257227' }, // 「2026.5群馬収穫計画」の「転写」タブ
+    },
+    '南丹': {
+      masterGid: '1337213550', salesColOffset: 56, orderGid: '24647903',
+      harvestUrlColumn: '南丹',
+      gradeForecast: false,
+      // 「2026年ファーム売上高・収穫量」の月ごとのシート。月が増えるたびに年月→gidを足す
+      // （直近工数計画のFORECAST_HARVEST_SOURCES['南丹']と同じ元。そちらは今は2026.10のみ）
+      dailyTotal: { type: 'monthlySheets', id: '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c',
+        gids: { '2026.10': '1061657376', '2026.11': '1898984985' } },
     },
   };
   // 詳細（収穫見込：手入力）のIIFEが、本体が対応している拠点の一覧を食い違いなく
@@ -1438,8 +1451,43 @@
   // 「転写」タブは当日〜8日後の間で使い回すため、呼び出し側からcacheを渡す
   // （cacheは呼び出しごとに新規に作られるため、拠点が変わっても前の拠点の内容を
   // 引き継がない＝拠点ごとに分かれている）
+  // 月ごとのシート（南丹）：見出し行（先頭10行以内で「日付」「収穫見込」の列がある行）の下から、
+  // "11/01(日)"形式の日付が一致する行の収穫見込を読む。その月のgidが未登録・見出しが無い・
+  // 日付が無い場合はnull
+  async function fetchMonthlySheetHarvestTotal(date, cache, dailyTotal){
+    var key = yearMonthKey(date);
+    var gid = dailyTotal.gids && dailyTotal.gids[key];
+    if (!gid) return null;
+    cache.monthly = cache.monthly || {};
+    if (!cache.monthly[key]) cache.monthly[key] = fetchCsvSheet(dailyTotal.id, gid);
+    var json = await cache.monthly[key];
+    var rows = (json.table && json.table.rows) || [];
+    var dateIdx = -1, kgIdx = -1, headerRow = -1;
+    for (var r = 0; r < Math.min(rows.length, 10) && headerRow < 0; r++) {
+      var cells = (rows[r] && rows[r].c) || [];
+      var d = -1, k = -1;
+      for (var c = 0; c < cells.length; c++) {
+        var t = cells[c] && cells[c].v != null ? String(cells[c].v).normalize('NFKC').replace(/\s/g, '') : '';
+        if (t === '日付') d = c;
+        if (t === '収穫見込') k = c;
+      }
+      if (d >= 0 && k >= 0) { dateIdx = d; kgIdx = k; headerRow = r; }
+    }
+    if (headerRow < 0) return null;
+    for (var i = headerRow + 1; i < rows.length; i++) {
+      var dc = rows[i] && rows[i].c && rows[i].c[dateIdx];
+      var m = dc && dc.v != null ? String(dc.v).trim().match(/^(\d{1,2})\/(\d{1,2})/) : null;
+      if (!m) continue;
+      if (parseInt(m[1], 10) === date.getMonth() + 1 && parseInt(m[2], 10) === date.getDate()) {
+        return readCellNumber(json, i, kgIdx);
+      }
+    }
+    return null;
+  }
+
   async function fetchDailyHarvestTotal(date, cache, dailyTotal){
     try {
+      if (dailyTotal.type === 'monthlySheets') return await fetchMonthlySheetHarvestTotal(date, cache, dailyTotal);
       if (!cache.json) {
         cache.json = await fetchCsvSheet(dailyTotal.id, dailyTotal.gid);
       }
@@ -1602,6 +1650,125 @@
 
   document.addEventListener('DOMContentLoaded', recomputeAllTotalRows);
 
+  /* ===================== 南丹の製品在庫（品目ごとの「箱数×1cs重量」） ===================== */
+  // 南丹の在庫ファイルは、集計行（M・L・2L製品在庫）の式が品目の行とずれていて使えない。
+  // 「椎茸在庫」タブの製品在庫の品目別の数量に、「マスターシート」タブの1cs重量を掛けて、
+  // サイズ別（M・L・2L・袋）と、Lの内訳の秀・優を計算する。品目の分け方：
+  //  ・受注タブにある品目は、受注タブの等級・サイズに合わせる（下のSTOCK_ITEM_OVERRIDES。
+  //    マスターシートと分け方が違うものだけ）
+  //  ・受注タブにない品目は、マスターシートの等級・サイズを使う
+  //  ・3Lは2L、袋①・袋②（規格外）でサイズが「―」のものは袋、サイズが2つの品目（L・M、L・2L）は50/50
+  //  ・サイズが「―」の秀・優（パック端数）は、サイズが分からないので当面どこにも入れない
+  var STOCK_ITEM_OVERRIDES = {
+    '秀袋200g(B-L)':        { grade: '優', size: 'L' }, // 受注タブでは「秀袋200g」はL列（等級は優として数える）
+    '秀袋200g(B-2L)':       { grade: '優', size: 'L' },
+    '秀袋200g(B-L、B-2L)':  { grade: '優', size: 'L' }, // マスターシートは「L・2L」
+    '秀袋200g単品':         { grade: '優', size: 'L' },
+    'ビック優バラパック':   { grade: '優', size: 'L' }, // 受注タブの「優バラパック」はL列。マスターシートは袋①・「―」
+    '優バラ1kg':            { grade: '優', size: 'L' }, // 受注タブの「優バラ1kg」はL列。マスターシートは袋①・「―」
+  };
+
+  // 在庫タブのセル（"9箱"・"80袋"・"12 パック"・"1.00kg"・空欄）を {qty, unit} にする。読めなければnull
+  function parseStockQuantity(text){
+    var t = String(text == null ? '' : text).normalize('NFKC').replace(/,/g, '').trim();
+    if (t === '') return null;
+    var m = t.match(/^(-?\d+(?:\.\d+)?)\s*(箱|袋|パック|kg|cs)?$/i);
+    if (!m) return { error: true, raw: String(text) };
+    var unit = m[2] ? m[2].toLowerCase() : '箱';
+    return { qty: parseFloat(m[1]), unit: unit === 'cs' ? '箱' : unit };
+  }
+
+  // マスターシートの等級・サイズ・梱包から、サイズの内訳 [{size, share, gradeL}] を返す。
+  // size＝M/L/2L/袋、share＝配分（サイズが2つなら0.5ずつ）、gradeL＝Lの内訳（秀・優）に数えるか。
+  // どこにも入れない品目は空の配列
+  function splitStockSizes(grade, sizeText, override){
+    if (override) { grade = override.grade; sizeText = override.size; }
+    var s = String(sizeText == null ? '' : sizeText).normalize('NFKC').trim();
+    if (s === '' || s === '―' || s === '-' || s === 'ー') {
+      return (grade === '袋①' || grade === '袋②') ? [{ size: '袋', share: 1, gradeL: false }] : [];
+    }
+    var tokens = s.split(/[・\/]/).map(function(t){ return t.trim(); }).filter(Boolean);
+    var out = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var tk = tokens[i];
+      var size = tk === '3L' ? '2L' : tk; // 3Lは受注計画の2L列に入っているので2Lに入れる
+      if (['M', 'L', '2L'].indexOf(size) === -1) return []; // S等は対象外
+      out.push({ size: size, share: 1 / tokens.length, gradeL: tk === 'L' && (grade === '秀' || grade === '優') });
+    }
+    return out;
+  }
+
+  // 南丹の製品在庫を計算する。stockJson＝「椎茸在庫」タブ、masterJson＝「マスターシート」タブ、
+  // colIdx＝日付の列。戻り値：{ sizes:{M,L,2L,袋}, grades:{秀,優}（Lの内訳）, mismatches, unknown, unparsed }。
+  // 製品在庫の品目の行が見つからなければnull。
+  // 同じ名前の品目は、出てくる順にマスターシートの同じ名前の行と対応させる（秀2L6が2行、など）。
+  // 在庫タブの方が行が多いときは最後のマスターシートの行を使い、mismatchesに残す
+  function computeNantanProductStock(stockJson, masterJson, colIdx){
+    var mrows = (masterJson && masterJson.table && masterJson.table.rows) || [];
+    var master = {};
+    for (var i = 1; i < mrows.length; i++) {
+      var mc = mrows[i] && mrows[i].c;
+      var name = mc && mc[0] && mc[0].v != null ? String(mc[0].v).trim() : '';
+      if (!name) continue;
+      var cell = function(k){ return mc[k] && mc[k].v != null ? String(mc[k].v).trim() : ''; };
+      var perCase = parseFloat(cell(7).replace(/,/g, ''));
+      var perCount = parseFloat(cell(5).replace(/,/g, ''));
+      (master[name] = master[name] || []).push({
+        grade: cell(2), size: cell(3), perCase: perCase, perPiece: perCase / ((perCount > 0) ? perCount : 1),
+      });
+    }
+    var rows = (stockJson && stockJson.table && stockJson.table.rows) || [];
+    var start = -1;
+    for (var r = 0; r < rows.length; r++) {
+      var c0 = rows[r] && rows[r].c && rows[r].c[0] && rows[r].c[0].v;
+      if (typeof c0 === 'string' && c0.indexOf('製品在庫') === 0 && c0.indexOf('箱数') !== -1) { start = r; break; }
+    }
+    if (start < 0) return null;
+    var sizes = { 'M': 0, 'L': 0, '2L': 0, '袋': 0 };
+    var grades = { '秀': 0, '優': 0 };
+    var seen = {}, stockCount = {}, unknown = [], unparsed = [];
+    for (var k = start; k < rows.length; k++) {
+      var c = rows[k] && rows[k].c;
+      var label = c && c[1] && c[1].v != null ? String(c[1].v).trim() : '';
+      if (!label) break; // 製品在庫の品目の並びはここで終わり
+      var nth = seen[label] = (seen[label] || 0);
+      seen[label] = nth + 1;
+      stockCount[label] = nth + 1;
+      var q = parseStockQuantity(c[colIdx] && c[colIdx].v);
+      if (q === null) continue;
+      var list = master[label];
+      if (q.error) { unparsed.push(label + '=' + q.raw); continue; }
+      if (!list) { if (q.qty !== 0) unknown.push(label); continue; }
+      var m = list[Math.min(nth, list.length - 1)];
+      var kg;
+      if (q.unit === 'kg') kg = q.qty;
+      else if (q.unit === '箱') kg = q.qty * m.perCase;
+      else kg = q.qty * m.perPiece; // 袋・パックは1個あたりの重さ
+      if (isNaN(kg)) { unparsed.push(label); continue; }
+      splitStockSizes(m.grade, m.size, STOCK_ITEM_OVERRIDES[label]).forEach(function(p){
+        sizes[p.size] += kg * p.share;
+        if (p.gradeL) grades[(STOCK_ITEM_OVERRIDES[label] || m).grade] += kg * p.share;
+      });
+    }
+    var mismatches = [];
+    Object.keys(stockCount).forEach(function(name){
+      if (master[name] && master[name].length !== stockCount[name]) {
+        mismatches.push({ name: name, stockCount: stockCount[name], masterCount: master[name].length });
+      }
+    });
+    function round1(v){ return Math.round(v * 10) / 10; }
+    Object.keys(sizes).forEach(function(s){ sizes[s] = round1(sizes[s]); });
+    Object.keys(grades).forEach(function(g){ grades[g] = round1(grades[g]); });
+    return { sizes: sizes, grades: grades, mismatches: mismatches, unknown: unknown, unparsed: unparsed };
+  }
+
+  window.__test = window.__test || {};
+  Object.assign(window.__test, {
+    computeNantanProductStock: computeNantanProductStock,
+    parseStockQuantity: parseStockQuantity,
+    splitStockSizes: splitStockSizes,
+  });
+
   // targetDate（基準日の前日。M・L・2L・袋の製品在庫・生在庫列は、既存のHTML構造上
   // data-offset="-1"の列に対応する）の年×選ばれている拠点から、「URL_在庫管理表」タブで
   // 椎茸在庫ファイルを特定し、その「椎茸在庫」タブから一致する日付列を探して、
@@ -1641,7 +1808,8 @@
         var rawRowIdx = findRowIndexByLabel(json, labels.raw);
         var productVal = readCellNumber(json, productRowIdx, colIdx);
         var rawVal = readCellNumber(json, rawRowIdx, colIdx);
-        if (cells[size].product) { cells[size].product.textContent = fmtStockNumber(productVal); applyZeroClass(cells[size].product, productVal); }
+        // 南丹の製品在庫は集計行の式が使えないため、下で品目ごとに計算して書き込む
+        if (cells[size].product && !siteCfg.masterGid) { cells[size].product.textContent = fmtStockNumber(productVal); applyZeroClass(cells[size].product, productVal); }
         if (cells[size].raw) { cells[size].raw.textContent = fmtStockNumber(rawVal); applyZeroClass(cells[size].raw, rawVal); }
       });
 
@@ -1667,10 +1835,27 @@
       // 秀/優の製品在庫：按分ルール（含む文字列・除外文字列・換算係数・加算先）を、
       // 拠点の設定（allocationGid）が指す「転写_秀優_判別」タブから取得し、
       // 椎茸在庫シートの該当ラベルを検索・集計する
-      var allocationRules = await fetchAllocationRules(stockInfo.sheetId, siteCfg.allocationGid);
-      if (isStale()) return;
-      var syuProduct = computeAllocatedValue(json, allocationRules, colIdx, '秀・製品在庫');
-      var yuuProduct = computeAllocatedValue(json, allocationRules, colIdx, '優・製品在庫');
+      var syuProduct, yuuProduct;
+      if (siteCfg.masterGid) {
+        // 南丹：品目ごとの「箱数×1cs重量」でサイズ別・秀優別（Lの内訳）の製品在庫を出す
+        var masterJson = await fetchCsvSheet(stockInfo.sheetId, siteCfg.masterGid);
+        if (isStale()) return;
+        var product = computeNantanProductStock(json, masterJson, colIdx);
+        if (product && (product.mismatches.length || product.unknown.length || product.unparsed.length)) {
+          console.warn('[南丹 製品在庫] マスターシートと在庫タブの品目が合わない:', product.mismatches, product.unknown, product.unparsed);
+        }
+        ['M', 'L', '2L', '袋'].forEach(function(size){
+          var v = product ? product.sizes[size] : null;
+          if (cells[size].product) { cells[size].product.textContent = fmtStockNumber(v); applyZeroClass(cells[size].product, v); }
+        });
+        syuProduct = product ? product.grades['秀'] : null;
+        yuuProduct = product ? product.grades['優'] : null;
+      } else {
+        var allocationRules = await fetchAllocationRules(stockInfo.sheetId, siteCfg.allocationGid);
+        if (isStale()) return;
+        syuProduct = computeAllocatedValue(json, allocationRules, colIdx, '秀・製品在庫');
+        yuuProduct = computeAllocatedValue(json, allocationRules, colIdx, '優・製品在庫');
+      }
       var gradeProductSyu = document.querySelector('[data-stock-product="秀"]');
       var gradeProductYuu = document.querySelector('[data-stock-product="優"]');
       if (gradeProductSyu) { gradeProductSyu.textContent = fmtStockNumber(syuProduct); applyZeroClass(gradeProductSyu, syuProduct); }
@@ -1758,6 +1943,14 @@
     }
   };
 
+  // 秀・優の見出し（"秀_40"のように比率を書き込んでいるもの）を元の「秀」「優」に戻す
+  function resetGradeLabels(attr){
+    ['秀', '優'].forEach(function(grade){
+      var el = document.querySelector('[' + attr + '="' + grade + '"]');
+      if (el) el.textContent = grade;
+    });
+  }
+
   function setTable2SiteNote(text){
     var el = document.getElementById('table2SiteNote');
     if (!el) return;
@@ -1765,8 +1958,8 @@
     el.hidden = !text;
   }
 
-  // 収穫予測（table2）は南丹が未対応（SITE_DATAに設定が無い）。南丹を選んでいるときは、
-  // いなべ・群馬の数字を出さないよう、すべて「－」にして見出し近くに注記する
+  // 収穫予測（table2）は、SITE_DATAに設定が無い拠点では未対応。その拠点を選んでいるときは、
+  // 他の拠点の数字を出さないよう、すべて「－」にして見出し近くに注記する
   function showHarvestForecastUnsupported(site){
     ['M', 'L', '2L', '袋'].forEach(function(size){
       var actualCell = document.querySelector('[data-harvest-actual="' + size + '"]');
@@ -1832,8 +2025,11 @@
       // Lの実績値・日別予測値に対してクライアント側で按分する
       // （新たな数式はスプレッドシート側に追加しない）
       var gradeRatios = { '秀': null, '優': null };
-      var panelRatios = await ratioJsonPromise;
-      if (panelRatios && panelRatios['収穫予測']) {
+      var panelRatios = (siteCfg.gradeForecast === false) ? null : await ratioJsonPromise;
+      if (siteCfg.gradeForecast === false) {
+        // 南丹は収穫時点では秀・優に分けていないため「－」にする（見出しの比率の表記も戻す）
+        resetGradeLabels('data-harvest-grade-label');
+      } else if (panelRatios && panelRatios['収穫予測']) {
         var syuRatio = panelRatios['収穫予測']['秀'];
         var yuuRatio = panelRatios['収穫予測']['優'];
         var syuLabelCell = document.querySelector('[data-harvest-grade-label="秀"]');
@@ -1913,7 +2109,7 @@
     el.hidden = !text;
   }
 
-  // 在庫予測（table3）は南丹が未対応（SITE_DATAに設定が無い）。南丹を選んでいるときは、
+  // 在庫予測（table3）は、SITE_DATAに設定が無い拠点では未対応。その拠点を選んでいるときは、
   // パネル1に実データが出ていてもそれを使って計算してしまわないよう、
   // すべて「－」にして見出し近くに注記する
   function showStockForecastUnsupported(site){
@@ -1974,8 +2170,12 @@
       // Lの在庫実績に掛ける（収穫予測の秀/優按分と同じ考え方）
       var gradeRatios = { '秀': null, '優': null };
       try {
-        var panelRatios = await fetchGradeRatios();
-        if (panelRatios && panelRatios['在庫予測']) {
+        var gradeOff = SITE_DATA[site].gradeForecast === false;
+        var panelRatios = gradeOff ? null : await fetchGradeRatios();
+        if (gradeOff) {
+          // 南丹は収穫予測の秀・優が「－」のため、在庫予測の秀・優も「－」にする
+          resetGradeLabels('data-stock-forecast-grade-label');
+        } else if (panelRatios && panelRatios['在庫予測']) {
           var syuRatio = panelRatios['在庫予測']['秀'];
           var yuuRatio = panelRatios['在庫予測']['優'];
           var syuLabelCell = document.querySelector('[data-stock-forecast-grade-label="秀"]');
@@ -2282,7 +2482,7 @@
   // まま入力すると、本体に表示されていない（「準備中」の）拠点の収穫見込（直近工数計画・
   // PR #503が使う実データ）を書き換えてしまう。これを防ぐため、本体が未対応の拠点の
   // ときは詳細の読み込み・保存・入力・数値表示を止める
-  var UNSUPPORTED_SITE_NOTE = 'この画面は現在いなべ・群馬のみ対応です。南丹の収穫見込は直近工数計画で入力してください。';
+  var UNSUPPORTED_SITE_NOTE = 'この拠点はこの画面に未対応です。収穫見込は直近工数計画で入力してください。';
 
   // 本体が対応している拠点の一覧（本体側のSITE_DATAと食い違わないよう、本体側のIIFEが
   // 公開したものを使う。公開されていない場合はいなべだけを対応とみなす）
