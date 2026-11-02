@@ -146,6 +146,17 @@ function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); retu
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 function toISO(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
+// 南丹が本体（SITE_DATA）に対応したため、「本体が未対応の拠点」の動作（PR #515 の安全策・「－」＋
+// 「◯◯は準備中です」の注記）の検証は、SITE_DATAから南丹の設定を取り除いたページ（未対応の拠点が
+// ある状態の再現）で行う。取り除けなかったとき（ページ側の書き方が変わったとき）はエラーで止める
+function removeNantanSiteData(src) {
+  const at = src.indexOf("masterGid: '1337213550'");
+  const start = src.lastIndexOf("'南丹': {", at);
+  const end = src.indexOf('};', at); // SITE_DATAの閉じ（南丹の設定の次の「};」）
+  if (at < 0 || start < 0 || end < 0) throw new Error('SITE_DATAから南丹の設定を取り除けませんでした');
+  return src.slice(0, start) + src.slice(end);
+}
+
 async function setupPage(browser, opts) {
   opts = opts || {};
   const baseline = new Date(2026, 10, 15); // 2026/11/15
@@ -162,7 +173,7 @@ async function setupPage(browser, opts) {
     const html = await res.text();
     const re = /var HARVEST_FORECAST_GAS_URL = '[^']*';/;
     if (!re.test(html)) throw new Error('HARVEST_FORECAST_GAS_URLの定義が見つからない');
-    const body = html.replace(re, "var HARVEST_FORECAST_GAS_URL = '" + (opts.noGas ? '' : FAKE_GAS_URL) + "';");
+    const body = (opts.nantanUnsupported ? removeNantanSiteData(html) : html).replace(re, "var HARVEST_FORECAST_GAS_URL = '" + (opts.noGas ? '' : FAKE_GAS_URL) + "';");
     await route.fulfill({ response: res, body });
   });
   await page.route(FAKE_GAS_URL + '**', async route => {
@@ -423,7 +434,7 @@ async function viewState(page) {
 
   console.log('=== ③表示状態（拠点・詳細の開閉）をURLのクエリに保ち、リロードしても同じ状態で開く ===');
   {
-    const { page, posts, loadQueries } = await setupPage(browser, { keepDetails: true });
+    const { page, posts, loadQueries } = await setupPage(browser, { nantanUnsupported: true, keepDetails: true });
     await settle(page);
     let st = await viewState(page);
     check('クエリが無いときは いなべ・詳細は閉じた状態', st.site === 'いなべ' && !st.harvestDetail && !st.stockDetail && (await page.evaluate(() => location.search)) === '', st);
@@ -449,7 +460,7 @@ async function viewState(page) {
     const note = await page.evaluate(() => document.getElementById('harvestDetailNote').textContent);
     const dash = await page.evaluate(() => document.querySelector('[data-harvest-detail="M"][data-harvest-detail-offset="0"]').textContent.trim());
     check('南丹の状態でリロードしても、GASへの収穫見込の読み込み・保存は送られず、入力欄は無効・詳細は「－」（PR #515 の安全策。対応拠点が増えた今は南丹だけに働く）',
-      loadQueries.length === loadsBefore && posts.length === postsBefore && st.inputDisabled && dash === '－' && note.includes('いなべ・群馬のみ対応'), { loads: loadQueries.length - loadsBefore, posts: posts.length - postsBefore, st, dash });
+      loadQueries.length === loadsBefore && posts.length === postsBefore && st.inputDisabled && dash === '－' && note.includes('未対応'), { loads: loadQueries.length - loadsBefore, posts: posts.length - postsBefore, st, dash });
     // いなべ・詳細を閉じた状態に戻してリロード
     await page.click('#siteToggle button[data-site="いなべ"]');
     await page.click('#harvestDetailSection > summary');
@@ -474,7 +485,7 @@ async function viewState(page) {
   {
     // 南丹をクエリで直接開く（リロードと同じ）
     // 南丹はパネル1〜3が「準備中」で数字が出ないため、本体の数字を待たない（skipDataWait）
-    const { page, posts, loadQueries } = await setupPage(browser, { keepDetails: true, skipDataWait: true, query: '?site=' + encodeURIComponent('南丹') + '&harvestDetail=open' });
+    const { page, posts, loadQueries } = await setupPage(browser, { nantanUnsupported: true, keepDetails: true, skipDataWait: true, query: '?site=' + encodeURIComponent('南丹') + '&harvestDetail=open' });
     await settle(page);
     await page.waitForTimeout(300);
     const st = await viewState(page);
@@ -512,7 +523,7 @@ async function viewState(page) {
       && pure.stateNone.site === 'いなべ' && !pure.stateNone.harvestDetail
       && pure.normal.site === '南丹' && pure.normal.harvestDetail, pure);
     // 実際に htmlpreview と同じ形のURLで開き、切り替え→リロード
-    const { page, loadQueries } = await setupPage(browser, { keepDetails: true, query: previewPrefix });
+    const { page, loadQueries } = await setupPage(browser, { nantanUnsupported: true, keepDetails: true, query: previewPrefix });
     await settle(page);
     let st = await viewState(page);
     check('htmlpreview形式のURL（状態のクエリなし）で開くと いなべ・詳細が閉じた状態', st.site === 'いなべ' && !st.harvestDetail && !st.stockDetail, st);
@@ -655,7 +666,7 @@ async function viewState(page) {
       ['?base=2026-11-10&actual=2026-11-08', '2026-11-10', '2026-11-08'], // 正しい値は両方使われる
     ];
     for (const [q, base, actual] of cases) {
-      const { page } = await setupPage(browser, { keepDetails: true, skipDataWait: true, query: q + '&site=' + encodeURIComponent('南丹') + '&stockDetail=open' });
+      const { page } = await setupPage(browser, { nantanUnsupported: true, keepDetails: true, skipDataWait: true, query: q + '&site=' + encodeURIComponent('南丹') + '&stockDetail=open' });
       await settle(page);
       const d = await page.evaluate(() => ({ base: document.getElementById('refDateInput').value, actual: document.getElementById('harvestRefDateInput').value }));
       const st = await viewState(page);

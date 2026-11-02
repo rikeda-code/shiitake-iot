@@ -204,10 +204,26 @@ function buildGunmaRawOrderCsv(dates, syuVal, yuuVal) {
 const baseline = new Date(2026, 9, 28);
 const stockDate = addDays(baseline, -1);
 
+// 南丹が本体（SITE_DATA）に対応したため、「本体が未対応の拠点」の動作（PR #515 の安全策・「－」＋
+// 「◯◯は準備中です」の注記）の検証は、SITE_DATAから南丹の設定を取り除いたページ（未対応の拠点が
+// ある状態の再現）で行う。取り除けなかったとき（ページ側の書き方が変わったとき）はエラーで止める
+async function emulateNantanUnsupported(page) {
+  await page.route(/shiitake-shipment-plan[.]html/, async route => {
+    const res = await route.fetch();
+    const src = await res.text();
+    const at = src.indexOf("masterGid: '1337213550'");
+    const start = src.lastIndexOf("'南丹': {", at);
+    const end = src.indexOf('};', at); // SITE_DATAの閉じ（南丹の設定の次の「};」）
+    if (at < 0 || start < 0 || end < 0) throw new Error('SITE_DATAから南丹の設定を取り除けませんでした');
+    await route.fulfill({ response: res, body: src.slice(0, start) + src.slice(end) });
+  });
+}
+
 async function setupPage(browser, opts) {
   opts = opts || {};
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   await fixTodayTo(page, 2026, 9, 28);
+  if (opts.nantanUnsupported) await emulateNantanUnsupported(page);
   page.on('pageerror', e => check('ページでエラーが出ない', false, e.message));
 
   await page.route('**/export**', async route => {
@@ -368,7 +384,7 @@ async function waitStable(page, sel, ms) {
     await page.close();
   }
   {
-    const page = await setupPage(browser, { query: '?site=' + encodeURIComponent('南丹') });
+    const page = await setupPage(browser, { nantanUnsupported: true, query: '?site=' + encodeURIComponent('南丹') });
     await page.waitForTimeout(800);
     check('南丹：table1(パネル1)は－', (await text(page, '[data-stock-product="M"]')) === '－');
     check('南丹：table1に「南丹は準備中です」の注記', (await text(page, '#table1SiteNote')) === '南丹は準備中です');

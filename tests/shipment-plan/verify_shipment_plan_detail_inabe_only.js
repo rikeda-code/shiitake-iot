@@ -191,6 +191,17 @@ function buildGunmaDailyTotalCsv(baseline) {
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 
+// 南丹が本体（SITE_DATA）に対応したため、「本体が未対応の拠点」の動作（PR #515 の安全策・「－」＋
+// 「◯◯は準備中です」の注記）の検証は、SITE_DATAから南丹の設定を取り除いたページ（未対応の拠点が
+// ある状態の再現）で行う。取り除けなかったとき（ページ側の書き方が変わったとき）はエラーで止める
+function removeNantanSiteData(src) {
+  const at = src.indexOf("masterGid: '1337213550'");
+  const start = src.lastIndexOf("'南丹': {", at);
+  const end = src.indexOf('};', at); // SITE_DATAの閉じ（南丹の設定の次の「};」）
+  if (at < 0 || start < 0 || end < 0) throw new Error('SITE_DATAから南丹の設定を取り除けませんでした');
+  return src.slice(0, start) + src.slice(end);
+}
+
 async function setupPage(browser, opts) {
   opts = opts || {};
   const baseline = new Date(2026, 10, 15); // 2026/11/15
@@ -204,7 +215,7 @@ async function setupPage(browser, opts) {
     const html = await res.text();
     const re = /var HARVEST_FORECAST_GAS_URL = '[^']*';/;
     if (!re.test(html)) throw new Error('HARVEST_FORECAST_GAS_URLの定義が見つからない');
-    const body = html.replace(re, "var HARVEST_FORECAST_GAS_URL = '" + FAKE_GAS_URL + "';");
+    const body = (opts.nantanUnsupported ? removeNantanSiteData(html) : html).replace(re, "var HARVEST_FORECAST_GAS_URL = '" + FAKE_GAS_URL + "';");
     await route.fulfill({ response: res, body });
   });
   await page.route(FAKE_GAS_URL + '**', async route => {
@@ -330,7 +341,7 @@ async function clickSite(page, site) {
 
   console.log('=== ④南丹は引き続き止まる（入力無効・数値－・新しい注記）===');
   {
-    const { page, posts } = await setupPage(browser, { loadValues: {} });
+    const { page, posts } = await setupPage(browser, { nantanUnsupported: true, loadValues: {} });
     await clickSite(page, '南丹');
     for (let o = 0; o < 9; o++) {
       check('入力欄offset' + o + 'が無効', await isDisabled(page, input(o)));
@@ -354,13 +365,13 @@ async function clickSite(page, site) {
     check('収穫予測の詳細の日別セルが全てM/L/秀/優/2L/袋×9日分すべて－', allHarvestDash);
     check('在庫予測の詳細の日別セルが全てM/L/秀/優/2L/袋×9日分すべて－', allStockDash);
     check('保存は行われていない', posts.length === 0);
-    check('新しい注記（いなべ・群馬のみ対応）が表示される', (await text(page, '#harvestDetailSaveStatus')).includes('この画面は現在いなべ・群馬のみ対応です。南丹の収穫見込は直近工数計画で入力してください。'));
+    check('新しい注記（いなべ・群馬のみ対応）が表示される', (await text(page, '#harvestDetailSaveStatus')).includes('この拠点はこの画面に未対応です。収穫見込は直近工数計画で入力してください。'));
     await page.close();
   }
 
   console.log('=== ⑤いなべ→群馬→南丹→いなべと切り替えると、それぞれの状態になり、古い読み込み・入力が残らない ===');
   {
-    const { page, loadQueries } = await setupPage(browser, { loadValuesBySite: { 'いなべ': { '2026-11-15': 300 }, '群馬': { '2026-11-15': 150 } } });
+    const { page, loadQueries } = await setupPage(browser, { nantanUnsupported: true, loadValuesBySite: { 'いなべ': { '2026-11-15': 300 }, '群馬': { '2026-11-15': 150 } } });
     check('いなべでは300kg→M=75.0が読み込まれている', (await text(page, detailCell('M', 0))) === '75.0');
 
     // コミット（change）前の入力中の値が、拠点切替で新しい拠点に残らないことも確認する
@@ -393,7 +404,7 @@ async function clickSite(page, site) {
   // なる）。この回帰確認は、新しい仕様（いなべの数字を出し続けない）に合わせて書き直した
   console.log('=== ⑥本体（table1・table2・table3）：群馬・南丹を選んでもいなべの数字を出し続けない（回帰） ===');
   {
-    const { page } = await setupPage(browser, { loadValues: {} });
+    const { page } = await setupPage(browser, { nantanUnsupported: true, loadValues: {} });
     const before = {
       t2: await text(page, mainHarvestCell('M', 0)),
       t3: await text(page, mainStockCell('M', 0)),
