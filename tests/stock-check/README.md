@@ -39,6 +39,7 @@ npx playwright install chromium
    node tests/stock-check/verify_stock_check_parse.js
    node tests/stock-check/verify_stock_check_screen.js
    node tests/stock-check/verify_stock_check_adjust_prep.js
+   node tests/stock-check/verify_stock_check_header.js
    ```
 
    各行末に `: OK` / `: NG` が出力され、最後に `すべてOK` / `NGあり` と `DONE` が表示されれば実行完了です（NGがあると終了コード1）。
@@ -51,6 +52,7 @@ npx playwright install chromium
 | `verify_stock_check_parse.js`（26件） | シートの読み取り：SOURCES（7〜11月＋開始在庫用の6月）・選べる月、見出し名で列を探すこと（7・8月と9月以降で列が違う／群馬の8月以前は行が1行下／いなべの在庫の表の別の「出荷実績」）→3拠点×8月・10月の全日の値が一致、セルの読み方（`1,103.1`・`170.20kg`・空欄・`#REF!`）、見出しが無いタブのエラー、移動表（規格ごとの重量・加工状況の引き継ぎ・「直接出荷」は在庫を動かさない側）、月と週の一覧（月をまたぐ週は開始日の月の下） |
 | `verify_stock_check_screen.js`（36件） | 画面：初期表示（南丹・直近3か月・両方・%）、表の列と行の並び、数字、暫定の行（薄く表示・バッジ）、差のグラフ（調整前・調整後の2本、kg/%切替、暫定は薄い色）と日別のグラフ、週/月/両方・拠点の切り替え、開始月・終了月、読めないタブの警告（読めた分は表示）、今日がSOURCESに無い月（12月）の注意、表のセルに `display:flex` を付けていないこと、スマホ幅で横にはみ出さないこと |
 | `verify_stock_check_adjust_prep.js`（19件） | 調整の入力は準備中：入力欄がすべて disabled、保存の通信（POSTなど）が1回も出ない・通信先はCSV取得とChart.jsだけ・HTMLに保存先GASのURLが無い、調整の一覧が空（0件・調整合計「－」）、調整の一覧を渡す口（`setAdjustments`）に値を渡すと表・日別・グラフが変わる（画面上の一時的な差し替えで、保存はしない） |
+| `verify_stock_check_header.js`（31件） | 画面上部：左にタイトル「在庫検証ダッシュボード」・右に拠点の切り替え・その下の枠に開始月/終了月/サイクル/グラフの単位。固定領域が position:sticky で画面の上に固定され、枠の下に2pxの罫線、スクロールで動くのは罫線より下だけ。**直近工数計画（work-hours-forecast.html）の同じ部品と、主な表示設定（色・余白・罫線・角丸・文字の大きさ・背景）が一致**すること（直近工数計画の見た目を変えたときは、このテストが NG になるので意図した変更か確認する）。スマホ（390×800・360×640・320×568）で固定部分が画面の高さの20〜30%以内・横にはみ出さない・ラベルが部品から離れない |
 
 ## 数字の根拠
 

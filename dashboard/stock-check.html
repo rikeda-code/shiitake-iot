@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>椎茸 在庫の検証</title>
+<title>在庫検証ダッシュボード</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root{
@@ -26,30 +26,101 @@
   html,body{margin:0;padding:0;}
   body{
     background:var(--paper);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(122,74,38,.06) 1px, transparent 0);
+    background-size: 22px 22px;
     color:var(--ink);
-    font-family:'Segoe UI','Hiragino Sans','Yu Gothic',sans-serif;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    -webkit-font-smoothing:antialiased;
     font-size:14px;
     line-height:1.5;
+    padding: 14px 18px 40px;
   }
-  header.page-head{padding:16px 20px 8px;}
-  header.page-head h1{margin:0;font-size:20px;color:var(--brown-deep);}
-  header.page-head p{margin:4px 0 0;color:var(--ink-soft);font-size:13px;}
-  main{padding:0 20px 40px;max-width:1500px;margin:0 auto;}
+  .wrap{ max-width:1180px; margin:0 auto; }
+
+  /* タイトル・拠点の切り替え・表示期間の枠を、ページ上端に固定する領域（直近工数計画ダッシュボード
+     work-hours-forecast.html の .sticky-head と同じ作り）。position:stickyは通常のフロー内に高さを
+     残すため、下に続くパネルの上端が隠れることはない。罫線より下だけがスクロールする */
+  .sticky-head{
+    position:sticky;
+    top:0;
+    z-index:10;
+    background:var(--paper);
+    padding-bottom:6px;
+    border-bottom:2px solid var(--brown);
+    margin-bottom:10px;
+  }
+  header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:8px;
+    flex-wrap:wrap;
+  }
+  h1{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-weight:700;
+    font-size:clamp(22px,3.2vw,30px);
+    margin:0;
+    color:var(--brown-deep);
+    letter-spacing:.02em;
+  }
+  .toggle-cluster{ display:flex; gap:10px; flex-wrap:wrap; }
+  .site-toggle{
+    display:flex;
+    gap:4px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:5px;
+    box-shadow: var(--shadow);
+  }
+  .site-toggle button{
+    padding:7px 14px;
+    border-radius:7px;
+    border:1px solid transparent;
+    background:transparent;
+    color:var(--ink-soft);
+    font-size:13.5px;
+    font-weight:600;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+    white-space:nowrap;
+  }
+  .site-toggle button.active{ background:var(--brown); color:#fff; }
+  .site-toggle button:hover:not(.active){ background:var(--amber-soft); }
+  /* 表示期間の枠（直近工数計画の .day-nav と同じ見た目）。中の切り替えは小さめの .site-toggle */
+  .day-nav{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:8px 10px;
+    box-shadow: var(--shadow);
+    flex-wrap:wrap;
+  }
+  .day-nav .label{ font-size:13px; color:var(--ink-soft); white-space:nowrap; }
+  .day-nav select{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size:14px; font-weight:700; color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:5px 8px; background:#fffef9;
+  }
+  .day-nav{ gap:8px 18px; }
+  .day-nav .pair{ display:flex; align-items:center; gap:8px; } /* ラベルと部品は1組（折り返しても離れない） */
+  .day-nav .site-toggle{ box-shadow:none; padding:3px; border-radius:8px; }
+  .day-nav .site-toggle button{ padding:4px 12px; font-size:13px; }
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:14px 16px;margin-top:14px;}
   .panel h2{margin:0 0 8px;font-size:15px;color:var(--brown-deep);}
-  .controls{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;}
-  .ctl label.cap{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:3px;}
-  .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff;}
-  .seg button{border:0;background:transparent;padding:6px 14px;font:inherit;cursor:pointer;color:var(--ink);border-right:1px solid var(--line);}
-  .seg button:last-child{border-right:0;}
-  .seg button.active{background:var(--brown);color:#fff;}
-  select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;}
   .note{font-size:12px;color:var(--ink-soft);margin:6px 0 0;}
   .warn{background:var(--amber-soft);border:1px solid #e2c777;border-radius:6px;padding:8px 12px;margin-top:10px;font-size:13px;}
   .loading{padding:24px;text-align:center;color:var(--ink-soft);}
   .table-wrap{overflow-x:auto;}
-  table.grid{border-collapse:collapse;width:100%;min-width:1180px;font-size:13px;}
-  table.grid th,table.grid td{border-bottom:1px solid var(--line-soft);padding:6px 8px;text-align:right;white-space:nowrap;}
+  table.grid{border-collapse:collapse;width:100%;min-width:1040px;font-size:13px;}
+  table.grid th,table.grid td{border-bottom:1px solid var(--line-soft);padding:6px 5px;text-align:right;white-space:nowrap;}
   table.grid th{background:#f3ead4;color:var(--brown-deep);font-weight:600;position:sticky;top:0;}
   table.grid th:first-child,table.grid td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;}
   table.grid th:first-child{background:#f3ead4;z-index:2;}
@@ -70,6 +141,7 @@
   .flagcell{color:#8a5a00;font-weight:600;}
   .chart-box{position:relative;height:320px;}
   .chart-box.small{height:280px;}
+  .chart-box canvas{max-width:100%;}
   .legend-note{font-size:12px;color:var(--ink-soft);margin-top:6px;}
   .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
   .form-grid label{font-size:12px;color:var(--ink-soft);display:block;margin-bottom:2px;}
@@ -77,33 +149,51 @@
   .prep{display:inline-block;background:#e8dfc7;border-radius:10px;padding:1px 10px;font-size:12px;margin-left:8px;color:var(--ink-soft);}
   button.disabled-btn{font:inherit;padding:6px 16px;border:1px solid var(--line);border-radius:6px;background:#ece7da;color:#9b9384;cursor:not-allowed;}
   ul.flaglist{margin:6px 0 0;padding-left:18px;font-size:13px;}
+  /* スマホ：固定する部分（タイトル＋拠点＋枠）が画面の大きな割合を占めないよう、余白と文字を小さくする */
   @media (max-width:640px){
-    header.page-head,main{padding-left:12px;padding-right:12px;}
+    body{ padding:6px 12px 40px; }
+    .sticky-head{ padding-bottom:4px; margin-bottom:8px; }
+    header{ gap:4px 8px; margin-bottom:5px; align-items:center; flex-wrap:nowrap; }
+    .title-block{ min-width:0; }
+    h1{ font-size:16px; letter-spacing:0; white-space:nowrap; }
+    .site-toggle{ padding:2px; gap:2px; }
+    .site-toggle button{ padding:4px 8px; font-size:12.5px; }
+    .day-nav{ padding:4px 6px; gap:3px 10px; }
+    .day-nav .pair{ gap:4px; }
+    .day-nav .label{ font-size:11.5px; }
+    .day-nav select{ font-size:12.5px; padding:2px 4px; }
+    .day-nav .site-toggle{ padding:2px; }
+    .day-nav .site-toggle button{ padding:2px 8px; font-size:12px; }
+    .sm-hide{ display:none; }
   }
 </style>
 </head>
 <body>
-<header class="page-head">
-  <h1>椎茸 在庫の検証</h1>
-  <p>サイクル（週・月）の「あるべき在庫」と、最終日に手入力した「実際の在庫」の差を見る画面です。差 ＝ 実際 − あるべき（マイナスは現物が少ない）。</p>
-</header>
-<main>
-  <section class="panel">
-    <div class="controls">
-      <div class="ctl"><label class="cap">拠点</label>
-        <div class="seg" id="siteSeg"></div></div>
-      <div class="ctl"><label class="cap">開始月</label><select id="startMonth"></select></div>
-      <div class="ctl"><label class="cap">終了月</label><select id="endMonth"></select></div>
-      <div class="ctl"><label class="cap">サイクル</label>
-        <div class="seg" id="kindSeg"></div></div>
-      <div class="ctl"><label class="cap">グラフの単位</label>
-        <div class="seg" id="unitSeg"></div></div>
+<div class="wrap">
+
+  <div class="sticky-head">
+    <header>
+      <div class="title-block">
+        <h1>在庫検証ダッシュボード</h1>
+      </div>
+      <div class="toggle-cluster">
+        <div class="site-toggle" id="siteSeg"></div>
+      </div>
+    </header>
+
+    <div class="day-nav">
+      <div class="pair"><span class="label">開始月</span><select id="startMonth"></select></div>
+      <div class="pair"><span class="label">終了月</span><select id="endMonth"></select></div>
+      <div class="pair"><span class="label">サイクル</span><div class="site-toggle" id="kindSeg"></div></div>
+      <div class="pair"><span class="label"><span class="sm-hide">グラフの</span>単位</span><div class="site-toggle" id="unitSeg"></div></div>
     </div>
-    <div id="msg"></div>
-  </section>
+  </div>
+
+  <div id="msg"></div>
 
   <section class="panel">
     <h2>① 差のグラフ（サイクルごと）</h2>
+    <p class="note" style="margin:0 0 6px;">サイクルの「あるべき在庫」と、最終日に手入力した「実際の在庫」の差です。差 ＝ 実際 − あるべき（マイナスは現物が少ない）。</p>
     <div class="chart-box"><canvas id="mainChart"></canvas></div>
     <div class="legend-note" id="mainChartNote"></div>
   </section>
@@ -146,7 +236,7 @@
       <li>合計在庫が空欄または0の日は、在庫が未入力として扱います。</li>
     </ul>
   </section>
-</main>
+</div>
 
 <script>
 (function(){
