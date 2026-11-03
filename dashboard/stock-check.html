@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>在庫検証ダッシュボード</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#2b2420;
+    --ink-soft:#5c5248;
+    --paper:#f7f2e7;
+    --panel:#fffdf8;
+    --line:#ddd0b6;
+    --line-soft:#ece2c9;
+    --brown:#7a4a26;
+    --brown-deep:#5a341a;
+    --amber-soft:#fbecc2;
+    --green:#3f6b4c;
+    --green-soft:#e3ede2;
+    --red:#b3402f;
+    --blue:#2f5f8f;
+    --shadow:0 1px 0 rgba(43,36,32,.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(122,74,38,.06) 1px, transparent 0);
+    background-size: 22px 22px;
+    color:var(--ink);
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    -webkit-font-smoothing:antialiased;
+    font-size:14px;
+    line-height:1.5;
+    padding: 14px 18px 40px;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; }
+
+  /* タイトル・拠点の切り替え・表示期間の枠を、ページ上端に固定する領域（直近工数計画ダッシュボード
+     work-hours-forecast.html の .sticky-head と同じ作り）。position:stickyは通常のフロー内に高さを
+     残すため、下に続くパネルの上端が隠れることはない。罫線より下だけがスクロールする */
+  .sticky-head{
+    position:sticky;
+    top:0;
+    z-index:10;
+    background:var(--paper);
+    padding-bottom:6px;
+    border-bottom:2px solid var(--brown);
+    margin-bottom:10px;
+  }
+  header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:8px;
+    flex-wrap:wrap;
+  }
+  h1{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-weight:700;
+    font-size:clamp(22px,3.2vw,30px);
+    margin:0;
+    color:var(--brown-deep);
+    letter-spacing:.02em;
+  }
+  .toggle-cluster{ display:flex; gap:10px; flex-wrap:wrap; }
+  .site-toggle{
+    display:flex;
+    gap:4px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:5px;
+    box-shadow: var(--shadow);
+  }
+  .site-toggle button{
+    padding:7px 14px;
+    border-radius:7px;
+    border:1px solid transparent;
+    background:transparent;
+    color:var(--ink-soft);
+    font-size:13.5px;
+    font-weight:600;
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+    white-space:nowrap;
+  }
+  .site-toggle button.active{ background:var(--brown); color:#fff; }
+  .site-toggle button:hover:not(.active){ background:var(--amber-soft); }
+  /* 表示期間の枠（直近工数計画の .day-nav と同じ見た目）。中の切り替えは小さめの .site-toggle */
+  .day-nav{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:8px 10px;
+    box-shadow: var(--shadow);
+    flex-wrap:wrap;
+  }
+  .day-nav .label{ font-size:13px; color:var(--ink-soft); white-space:nowrap; }
+  .day-nav select{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size:14px; font-weight:700; color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:5px 8px; background:#fffef9;
+  }
+  .day-nav{ gap:8px 18px; }
+  .day-nav .pair{ display:flex; align-items:center; gap:8px; } /* ラベルと部品は1組（折り返しても離れない） */
+  .day-nav .site-toggle{ box-shadow:none; padding:3px; border-radius:8px; }
+  .day-nav .site-toggle button{ padding:4px 12px; font-size:13px; }
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:14px 16px;margin-top:14px;}
+  .panel h2{margin:0 0 8px;font-size:15px;color:var(--brown-deep);}
+  .note{font-size:12px;color:var(--ink-soft);margin:6px 0 0;}
+  .warn{background:var(--amber-soft);border:1px solid #e2c777;border-radius:6px;padding:8px 12px;margin-top:10px;font-size:13px;}
+  .loading{padding:24px;text-align:center;color:var(--ink-soft);}
+  .table-wrap{overflow-x:auto;}
+  table.grid{border-collapse:collapse;width:100%;min-width:1040px;font-size:13px;}
+  table.grid th,table.grid td{border-bottom:1px solid var(--line-soft);padding:6px 5px;text-align:right;white-space:nowrap;}
+  table.grid th{background:#f3ead4;color:var(--brown-deep);font-weight:600;position:sticky;top:0;}
+  table.grid th:first-child,table.grid td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;}
+  table.grid th:first-child{background:#f3ead4;z-index:2;}
+  table.grid tr.month td{background:#f8f1de;font-weight:600;}
+  table.grid tr.month td:first-child{background:#f8f1de;}
+  table.grid tr.week td:first-child{padding-left:22px;}
+  table.grid tr.selectable{cursor:pointer;}
+  table.grid tr.selectable:hover td{background:#fbf6e8;}
+  table.grid tr.selected td,table.grid tr.selected:hover td{background:var(--green-soft);}
+  table.grid tr.selected td:first-child,table.grid tr.selected:hover td:first-child{background:var(--green-soft);}
+  table.grid tr.prov td{opacity:.55;}
+  table.grid tr.prov td:first-child{opacity:1;}
+  table.grid tr.prov td:first-child .lab{opacity:.55;}
+  .badge{display:inline-block;font-size:11px;border-radius:10px;padding:0 7px;margin-left:6px;background:#e8dfc7;color:var(--ink-soft);opacity:1;}
+  .neg{color:var(--red);}
+  .pos{color:var(--blue);}
+  .muted{color:var(--ink-soft);}
+  .flagcell{color:#8a5a00;font-weight:600;}
+  .chart-box{position:relative;height:320px;}
+  .chart-box.small{height:280px;}
+  .chart-box canvas{max-width:100%;}
+  .legend-note{font-size:12px;color:var(--ink-soft);margin-top:6px;}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+  .form-grid label{font-size:12px;color:var(--ink-soft);display:block;margin-bottom:2px;}
+  .form-grid input,.form-grid select{width:100%;font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:#f1ede2;color:#8c8478;}
+  .prep{display:inline-block;background:#e8dfc7;border-radius:10px;padding:1px 10px;font-size:12px;margin-left:8px;color:var(--ink-soft);}
+  button.disabled-btn{font:inherit;padding:6px 16px;border:1px solid var(--line);border-radius:6px;background:#ece7da;color:#9b9384;cursor:not-allowed;}
+  ul.flaglist{margin:6px 0 0;padding-left:18px;font-size:13px;}
+  /* スマホ：固定する部分（タイトル＋拠点＋枠）が画面の大きな割合を占めないよう、余白と文字を小さくする */
+  @media (max-width:640px){
+    body{ padding:6px 12px 40px; }
+    .sticky-head{ padding-bottom:4px; margin-bottom:8px; }
+    header{ gap:4px 8px; margin-bottom:5px; align-items:center; flex-wrap:nowrap; }
+    .title-block{ min-width:0; }
+    h1{ font-size:16px; letter-spacing:0; white-space:nowrap; }
+    .site-toggle{ padding:2px; gap:2px; }
+    .site-toggle button{ padding:4px 8px; font-size:12.5px; }
+    .day-nav{ padding:4px 6px; gap:3px 10px; }
+    .day-nav .pair{ gap:4px; }
+    .day-nav .label{ font-size:11.5px; }
+    .day-nav select{ font-size:12.5px; padding:2px 4px; }
+    .day-nav .site-toggle{ padding:2px; }
+    .day-nav .site-toggle button{ padding:2px 8px; font-size:12px; }
+    .sm-hide{ display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="sticky-head">
+    <header>
+      <div class="title-block">
+        <h1>在庫検証ダッシュボード</h1>
+      </div>
+      <div class="toggle-cluster">
+        <div class="site-toggle" id="siteSeg"></div>
+      </div>
+    </header>
+
+    <div class="day-nav">
+      <div class="pair"><span class="label">開始月</span><select id="startMonth"></select></div>
+      <div class="pair"><span class="label">終了月</span><select id="endMonth"></select></div>
+      <div class="pair"><span class="label">サイクル</span><div class="site-toggle" id="kindSeg"></div></div>
+      <div class="pair"><span class="label"><span class="sm-hide">グラフの</span>単位</span><div class="site-toggle" id="unitSeg"></div></div>
+    </div>
+  </div>
+
+  <div id="msg"></div>
+
+  <section class="panel">
+    <h2>① 差のグラフ（サイクルごと）</h2>
+    <p class="note" style="margin:0 0 6px;">サイクルの「あるべき在庫」と、最終日に手入力した「実際の在庫」の差です。差 ＝ 実際 − あるべき（マイナスは現物が少ない）。</p>
+    <div class="chart-box"><canvas id="mainChart"></canvas></div>
+    <div class="legend-note" id="mainChartNote"></div>
+  </section>
+
+  <section class="panel">
+    <h2>② 一覧表（行をクリックすると、下に日別のグラフが出ます）</h2>
+    <div class="table-wrap" id="tableWrap"><div class="loading">読み込み中…</div></div>
+    <p class="note">「暫定」の行は、最終日の在庫が未入力のため、最新の入力日までで計算した途中の値です（薄く表示）。率 ＝ 差 ÷ 期間の収穫量。</p>
+  </section>
+
+  <section class="panel" id="dailyPanel">
+    <h2 id="dailyTitle">③ 日別のグラフ</h2>
+    <div class="chart-box small"><canvas id="dailyChart"></canvas></div>
+    <div id="dailyFlags"></div>
+  </section>
+
+  <section class="panel">
+    <h2>④ 調整の入力<span class="prep">準備中</span></h2>
+    <p class="note" style="margin:0 0 10px;">調整の保存先を準備中のため、今は入力できません。＋はあるべき在庫を増やす、−は減らす調整です。</p>
+    <div class="form-grid">
+      <div><label>日付</label><input type="date" disabled></div>
+      <div><label>拠点</label><select disabled><option>いなべ</option><option>群馬</option><option>南丹</option></select></div>
+      <div><label>調整kg（＋−）</label><input type="number" disabled></div>
+      <div><label>区分</label><select disabled><option>サンプル・試食</option><option>廃棄の記録漏れ</option><option>棚卸修正</option><option>移動の記録漏れ</option><option>その他</option></select></div>
+      <div><label>理由（必須）</label><input type="text" disabled></div>
+      <div><label>入力者</label><input type="text" disabled></div>
+    </div>
+    <p style="margin:10px 0 0;"><button type="button" class="disabled-btn" disabled>調整を追加（準備中）</button></p>
+    <p class="note" id="adjCount"></p>
+  </section>
+
+  <section class="panel">
+    <h2>計算の前提</h2>
+    <ul class="note" style="margin:0;padding-left:18px;">
+      <li>あるべき在庫 ＝ 開始在庫（開始日の前日の合計在庫）− 出荷実績 + 収穫量 − 出荷場廃棄 − 規格外 + 移動で入った分 − 移動で出た分。</li>
+      <li>調整前の差 ＝ 実際の在庫 − あるべき在庫。調整後の差 ＝ 調整前の差 − 調整合計（調整が無いときは同じ値）。</li>
+      <li>移動は「○月対見込」の移動表。出元・行き先とも、その日に在庫が動く前提です。加工状況が「直接出荷」の行は在庫を動かしません。</li>
+      <li>週は月曜〜日曜。月をまたぐ週は、開始日の月の下に表示します。</li>
+      <li>要確認 ＝ 出荷・収穫・在庫が、拠点ごとの中央値の3倍を超える日、または空欄・0の日（いなべの日曜の出荷0は除く。今日以降は対象外）。</li>
+      <li>合計在庫が空欄または0の日は、在庫が未入力として扱います。</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ===================== 読み取り元（月が増えるたびに足す） ===================== */
+  // 「2026年ファーム売上高・収穫量」。拠点×月のタブ（gid）と、移動表がある「○月対見込」タブ（gid）。
+  // anchorOnly:true の月は、翌月の開始在庫（前月末の在庫）を読むためだけに使う（表示の月には選べない）。
+  var SALES_FILE_ID = '1VtDcGx7MLKJM4gkbgP0VAdkn6EpoIfOXhZVa3u80m2c';
+  var SOURCES = {
+    '2026-06': { anchorOnly: true, sites: { 'いなべ': '790288201', '群馬': '1365732734', '南丹': '1827976353' } },
+    '2026-07': { sites: { 'いなべ': '893422909',  '群馬': '449316865',  '南丹': '2085953171' }, taimi: '2010023692' },
+    '2026-08': { sites: { 'いなべ': '1717849701', '群馬': '1821704623', '南丹': '1035249366' }, taimi: '1072966250' },
+    '2026-09': { sites: { 'いなべ': '889530489',  '群馬': '1980683578', '南丹': '859682596' },  taimi: '1257806650' },
+    '2026-10': { sites: { 'いなべ': '131485865',  '群馬': '1913253722', '南丹': '1061657376' }, taimi: '156359832' },
+    '2026-11': { sites: { 'いなべ': '140203273',  '群馬': '60188881',   '南丹': '1898984985' }, taimi: '760891261' }
+  };
+  var SITES = ['いなべ', '群馬', '南丹'];
+  var OUTLIER_FACTOR = 3; // 中央値のこの倍数を超えたら要確認
+
+  /* ===================== 共通ユーティリティ ===================== */
+  // 簡易なRFC4180準拠CSVパーサー（shiitake-shipment-plan.htmlのparseCsv()と同じ考え方）
+  function parseCsv(text){
+    var rows = [], row = [], f = '', q = false;
+    for (var i = 0; i < text.length; i++){
+      var c = text[i];
+      if (q){
+        if (c === '"'){ if (text[i+1] === '"'){ f += '"'; i++; } else q = false; }
+        else f += c;
+      } else if (c === '"') q = true;
+      else if (c === ',') { row.push(f); f = ''; }
+      else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+      else if (c !== '\r') f += c;
+    }
+    if (f !== '' || row.length){ row.push(f); rows.push(row); }
+    return rows;
+  }
+  var csvCache = {};
+  // gviz/tq(sheet=名前指定)は古い内容を長時間キャッシュするため、gid指定のexportを使う
+  // （shiitake-shipment-plan.htmlのfetchCsvSheet()と同じ理由）
+  function fetchCsv(gid){
+    var url = 'https://docs.google.com/spreadsheets/d/' + SALES_FILE_ID + '/export?format=csv&gid=' + gid;
+    if (!csvCache[url]){
+      csvCache[url] = fetch(url, { cache: 'no-store' }).then(function(res){
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.text();
+      }).then(function(text){
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        return parseCsv(text);
+      });
+      csvCache[url].catch(function(){ delete csvCache[url]; });
+    }
+    return csvCache[url];
+  }
+  function normText(s){ return String(s == null ? '' : s).replace(/\s+/g, ''); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function pad2(n){ return (n < 10 ? '0' : '') + n; }
+  function isoOf(y, m, d){ return y + '-' + pad2(m) + '-' + pad2(d); }
+  function addDays(iso, n){
+    var d = new Date(Date.UTC(+iso.slice(0,4), +iso.slice(5,7) - 1, +iso.slice(8,10)));
+    d.setUTCDate(d.getUTCDate() + n);
+    return isoOf(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  }
+  function dowOf(iso){ return new Date(Date.UTC(+iso.slice(0,4), +iso.slice(5,7) - 1, +iso.slice(8,10))).getUTCDay(); } // 0=日
+  function daysInMonth(key){ return new Date(Date.UTC(+key.slice(0,4), +key.slice(5,7), 0)).getUTCDate(); }
+  function monthFirst(key){ return key + '-01'; }
+  function monthLast(key){ return key + '-' + pad2(daysInMonth(key)); }
+  function prevMonthKey(key){ return addDays(monthFirst(key), -1).slice(0, 7); }
+  function nextMonthKey(key){ return addDays(monthLast(key), 1).slice(0, 7); }
+  function md(iso){ return (+iso.slice(5,7)) + '/' + (+iso.slice(8,10)); }
+  function monthLabel(key){ return (+key.slice(0,4)) + '年' + (+key.slice(5,7)) + '月'; }
+  function todayIso(){
+    var d = new Date();
+    return isoOf(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  function median(a){
+    a = a.slice().sort(function(x, y){ return x - y; });
+    return a.length ? a[Math.floor(a.length / 2)] : 0;
+  }
+
+  /* ===================== シートの読み取り ===================== */
+  // セルを {v:数値}・{v:null, blank:true}（空欄）・{v:null, err:'元の文字'}（数値でない）にする
+  function cellVal(raw){
+    var s = String(raw == null ? '' : raw).trim();
+    if (s === '') return { v: null, blank: true };
+    var t = s.replace(/[,\s]/g, '').replace(/kg$/i, '');
+    if (t === '' || t === '-') return { v: null, blank: true };
+    var n = Number(t);
+    return isNaN(n) ? { v: null, err: s } : { v: n };
+  }
+
+  // 拠点×月のタブ（CSVの2次元配列）から、日別の出荷・収穫・在庫・廃棄・規格外を読む。
+  // 行・列の位置は固定せず見出し名で探す（月・拠点でずれるため。例：7・8月は出荷実績の列が違う）。
+  //   上の表：見出し行に「出荷実績」と「収穫量（合計）」がある行（先頭20行以内）
+  //   在庫の表：見出し行に「合計在庫」がある行
+  function parseSiteMonthTab(rows, monthKey){
+    var month = +monthKey.slice(5, 7);
+    var up = -1, st = -1, r, t;
+    for (r = 0; r < Math.min(20, rows.length); r++){
+      t = rows[r].map(normText);
+      if (t.indexOf('出荷実績') >= 0 && t.indexOf('収穫量（合計）') >= 0){ up = r; break; }
+    }
+    for (r = 0; r < rows.length; r++){
+      t = rows[r].map(normText);
+      if (t.indexOf('合計在庫') >= 0){ st = r; break; }
+    }
+    if (up < 0 || st < 0) throw new Error('見出しが見つかりません（' + monthKey + '）');
+    var hu = rows[up].map(normText), hs = rows[st].map(normText);
+    var cDate = hu.indexOf('日付'), cShip = hu.indexOf('出荷実績'), cHarv = hu.indexOf('収穫量（合計）');
+    var cDate2 = hs.indexOf('日付'), cStock = hs.indexOf('合計在庫'), cWaste = hs.indexOf('出荷場廃棄');
+    var cKik = hs.indexOf('規格外'); if (cKik < 0) cKik = hs.indexOf('出荷場規格外');
+    var days = {}, re = /^(\d{1,2})\/(\d{1,2})/, mm, k, i;
+    function at(row, c){ return c < 0 ? '' : (row[c] == null ? '' : row[c]); }
+    for (i = up + 1; i < up + 35 && i < rows.length; i++){
+      mm = re.exec(String(at(rows[i], cDate)).trim());
+      if (!mm || +mm[1] !== month) continue;
+      k = isoOf(+monthKey.slice(0, 4), month, +mm[2]);
+      days[k] = days[k] || {};
+      days[k].ship = cellVal(at(rows[i], cShip));
+      days[k].harv = cellVal(at(rows[i], cHarv));
+    }
+    for (i = st + 1; i < st + 35 && i < rows.length; i++){
+      mm = re.exec(String(at(rows[i], cDate2)).trim());
+      if (!mm || +mm[1] !== month) continue;
+      k = isoOf(+monthKey.slice(0, 4), month, +mm[2]);
+      days[k] = days[k] || {};
+      days[k].stock = cellVal(at(rows[i], cStock));
+      days[k].waste = cellVal(at(rows[i], cWaste));
+      days[k].kik = cellVal(at(rows[i], cKik));
+    }
+    return days;
+  }
+
+  // 「○月対見込」タブの移動表（見出し：日付・出荷元拠点・出荷先拠点・規格1〜3重量(kg)・規格1〜3加工状況）を読む。
+  // 加工状況が「直接出荷」の行は在庫を動かさないので、moves と分けて direct に入れる。
+  function parseMovementTable(rows, monthKey){
+    var year = +monthKey.slice(0, 4), moves = [], direct = [], h = -1, r, t;
+    for (r = 0; r < rows.length; r++){
+      t = rows[r].map(normText);
+      if (t.indexOf('出荷元拠点') >= 0 && t.indexOf('出荷先拠点') >= 0){ h = r; break; }
+    }
+    if (h < 0) return { moves: moves, direct: direct };
+    var hd = rows[h].map(normText);
+    var cDate = hd.indexOf('日付'), cFrom = hd.indexOf('出荷元拠点'), cTo = hd.indexOf('出荷先拠点');
+    var cW = [1,2,3].map(function(n){ return hd.indexOf('規格' + n + '重量(kg)'); });
+    var cS = [1,2,3].map(function(n){ return hd.indexOf('規格' + n + '加工状況'); });
+    var cSpec = [1,2,3].map(function(n){ return hd.indexOf('規格' + n); });
+    for (r = h + 1; r < rows.length; r++){
+      var row = rows[r];
+      var mm = /^(\d{1,2})\/(\d{1,2})/.exec(String(row[cDate] || '').trim());
+      if (!mm) continue;
+      var from = normText(row[cFrom]), to = normText(row[cTo]);
+      if (SITES.indexOf(from) < 0 || SITES.indexOf(to) < 0) continue;
+      var date = isoOf(year, +mm[1], +mm[2]);
+      var first = cS[0] >= 0 ? normText(row[cS[0]]) : '';
+      for (var i = 0; i < 3; i++){
+        if (cW[i] < 0) continue;
+        var w = cellVal(row[cW[i]]).v;
+        if (!w) continue;
+        var status = (cS[i] >= 0 ? normText(row[cS[i]]) : '') || first;
+        var rec = { date: date, from: from, to: to, kg: w, status: status, spec: cSpec[i] >= 0 ? normText(row[cSpec[i]]) : '' };
+        (status === '直接出荷' ? direct : moves).push(rec);
+      }
+    }
+    return { moves: moves, direct: direct };
+  }
+
+  /* ===================== 計算 ===================== */
+  function dayVal(days, d, f){
+    var o = days[d]; var c = o && o[f];
+    return c && c.v != null ? c.v : null;
+  }
+  // 合計在庫が空欄・0の日は「未入力」として扱う
+  function stockOf(days, d){
+    var v = dayVal(days, d, 'stock');
+    return v != null && v > 0 ? v : null;
+  }
+
+  // 要確認の日を {日付: [理由, ...]} で返す。基準は拠点ごと・指標ごとの中央値（0より大きい日）の3倍。
+  // 空欄・0・数値でない日も対象。いなべの日曜の出荷0は除く。today以降の日は対象外。
+  function computeFlags(site, days, today){
+    var res = {}, med = {};
+    var FIELDS = [['ship','出荷'], ['harv','収穫'], ['stock','在庫']];
+    FIELDS.forEach(function(F){
+      var vals = [];
+      Object.keys(days).forEach(function(d){
+        if (d >= today) return;
+        var v = dayVal(days, d, F[0]);
+        if (v != null && v > 0) vals.push(v);
+      });
+      med[F[0]] = median(vals);
+    });
+    Object.keys(days).sort().forEach(function(d){
+      if (d >= today) return;
+      FIELDS.forEach(function(F){
+        var c = days[d][F[0]];
+        if (!c) return;
+        var reason = null;
+        if (c.err) reason = F[1] + '：数値ではない値（' + c.err + '）';
+        else if (c.v == null) reason = F[1] + '：空欄';
+        else if (c.v === 0) reason = F[1] + '：0';
+        else if (med[F[0]] > 0 && c.v > OUTLIER_FACTOR * med[F[0]]) reason = F[1] + '：' + c.v + '（中央値' + med[F[0]] + 'の' + (c.v / med[F[0]]).toFixed(1) + '倍）';
+        if (reason && site === 'いなべ' && F[0] === 'ship' && c.v === 0 && dowOf(d) === 0) reason = null;
+        if (reason) (res[d] = res[d] || []).push(reason);
+      });
+    });
+    return res;
+  }
+
+  // 調整の一覧（② で保存先からつなぐ）：[{id, date:'2026-11-03', site, kg, category, reason, deleted}]
+  function isDeleted(a){ return a.deleted === true || String(a.deleted).toUpperCase() === 'TRUE'; }
+  // 拠点・期間（a〜e）に合う、削除されていない調整の合計。該当が無ければ sum は null（画面では「－」）
+  function sumAdjustments(adjustments, site, a, e){
+    var sum = 0, count = 0;
+    (adjustments || []).forEach(function(x){
+      if (!x || isDeleted(x) || x.site !== site || x.date < a || x.date > e) return;
+      var kg = Number(x.kg);
+      if (isNaN(kg)) return;
+      sum += kg; count++;
+    });
+    return { sum: count ? sum : null, count: count };
+  }
+  function movementSums(moves, site, a, e){
+    var inn = 0, out = 0;
+    (moves || []).forEach(function(m){
+      if (m.date < a || m.date > e) return;
+      if (m.to === site) inn += m.kg;
+      if (m.from === site) out += m.kg;
+    });
+    return { inn: inn, out: out };
+  }
+
+  // 1サイクル（a〜b）の計算。最終日bの在庫が未入力なら、在庫が入っている最新の日までの暫定値にする。
+  // status：'complete'（確定）／'provisional'（暫定）／'nostart'（開始在庫が無い）／'none'（在庫の入力が無い）
+  function computeCycle(site, days, a, b, moves, adjustments, flags){
+    var S0 = stockOf(days, addDays(a, -1));
+    var e = null, d;
+    if (stockOf(days, b) != null) e = b;
+    else for (d = b; d >= a; d = addDays(d, -1)){ if (stockOf(days, d) != null){ e = d; break; } }
+    if (e === null) return { status: 'none', a: a, b: b };
+    if (S0 === null) return { status: 'nostart', a: a, b: b, e: e };
+    var ship = 0, harv = 0, waste = 0, kik = 0, flagDays = [];
+    for (d = a; d <= e; d = addDays(d, 1)){
+      ship += dayVal(days, d, 'ship') || 0;
+      harv += dayVal(days, d, 'harv') || 0;
+      waste += dayVal(days, d, 'waste') || 0;
+      kik += dayVal(days, d, 'kik') || 0;
+      if (flags && flags[d]) flagDays.push(d);
+    }
+    var mv = movementSums(moves, site, a, e);
+    var adj = sumAdjustments(adjustments, site, a, e);
+    var S1 = stockOf(days, e);
+    var expected = S0 - ship + harv - waste - kik + mv.inn - mv.out;
+    var diffBefore = S1 - expected;
+    var diffAfter = diffBefore - (adj.sum || 0);
+    return {
+      status: e === b ? 'complete' : 'provisional', a: a, b: b, e: e,
+      S0: S0, S1: S1, ship: ship, harv: harv, waste: waste, kik: kik, movIn: mv.inn, movOut: mv.out,
+      expected: expected, diffBefore: diffBefore, adjSum: adj.sum, adjCount: adj.count, diffAfter: diffAfter,
+      rateBefore: harv > 0 ? diffBefore / harv : null, rateAfter: harv > 0 ? diffAfter / harv : null,
+      flagDays: flagDays
+    };
+  }
+
+  // 日別の「あるべき在庫」（開始在庫から毎日の増減を積み上げ）と「実際の在庫」
+  function computeDaily(site, days, a, e, moves, adjustments){
+    var S0 = stockOf(days, addDays(a, -1)), out = [], run = S0, d;
+    for (d = a; d <= e; d = addDays(d, 1)){
+      var mv = movementSums(moves, site, d, d);
+      var adj = sumAdjustments(adjustments, site, d, d);
+      if (run != null){
+        run = run - (dayVal(days, d, 'ship') || 0) + (dayVal(days, d, 'harv') || 0)
+          - (dayVal(days, d, 'waste') || 0) - (dayVal(days, d, 'kik') || 0) + mv.inn - mv.out + (adj.sum || 0);
+      }
+      out.push({ date: d, expected: run, actual: stockOf(days, d) });
+    }
+    return out;
+  }
+
+  // 表示する月（開始月〜終了月）と、開始日（月曜）がその範囲に入る週の一覧。
+  // 週は開始日の月の下に置く。返す配列は 月の行 → その月の週の行… の順。
+  function buildCycles(startKey, endKey){
+    var cycles = [], key = startKey;
+    var first = monthFirst(startKey), last = monthLast(endKey);
+    var weekStart = first;
+    while (dowOf(weekStart) !== 1) weekStart = addDays(weekStart, 1);
+    var weeksByMonth = {};
+    for (var w = weekStart; w <= last; w = addDays(w, 7)){
+      var mk = w.slice(0, 7);
+      (weeksByMonth[mk] = weeksByMonth[mk] || []).push(w);
+    }
+    while (key <= endKey){
+      cycles.push({ id: 'M:' + key, kind: 'month', label: monthLabel(key), a: monthFirst(key), b: monthLast(key), monthKey: key });
+      (weeksByMonth[key] || []).forEach(function(w){
+        var b = addDays(w, 6);
+        cycles.push({ id: 'W:' + w, kind: 'week', label: md(w) + '〜' + md(b), a: w, b: b, monthKey: key });
+      });
+      key = nextMonthKey(key);
+    }
+    return cycles;
+  }
+
+  // 選べる月：SOURCESに登録があり（anchorOnlyでない）、前月も登録されている月
+  function selectableMonths(){
+    return Object.keys(SOURCES).sort().filter(function(k){ return !SOURCES[k].anchorOnly && SOURCES[prevMonthKey(k)]; });
+  }
+
+  /* ===================== 調整の一覧（② で保存先につなぐ） ===================== */
+  // 今は保存先が無いので空の一覧を返す。② でここを保存先からの読み込みに差し替える。
+  function getAdjustments(){ return []; }
+
+  /* ===================== 画面 ===================== */
+  var state = {
+    site: '南丹', kind: 'both', unit: 'pct',
+    startKey: null, endKey: null,
+    adjustments: getAdjustments(),
+    data: null,        // { site: days }
+    moves: [], direct: [], failed: [],
+    rows: [], selected: null, token: 0
+  };
+  var mainChart = null, dailyChart = null;
+
+  function fmt(x, d){
+    if (x == null || isNaN(x)) return '－';
+    return x.toLocaleString('en-US', { minimumFractionDigits: d == null ? 1 : d, maximumFractionDigits: d == null ? 1 : d });
+  }
+  function signed(x, d){
+    if (x == null || isNaN(x)) return '－';
+    var s = fmt(Math.abs(x), d);
+    if (Math.round(x * 10) === 0) return s;
+    return (x > 0 ? '+' : '−') + s;
+  }
+  function pct(x){ if (x == null) return '－'; var s = (Math.abs(x) * 100).toFixed(1) + '%'; return Math.abs(x) < 0.0005 ? s : (x > 0 ? '+' : '−') + s; }
+  function cls(x){ return x == null ? '' : (Math.abs(x) < 0.05 ? '' : (x > 0 ? 'pos' : 'neg')); }
+
+  function loadMonths(){
+    // 表示の月＋前月（開始在庫）＋翌月（月をまたぐ週）のうち、SOURCESにあるもの
+    var keys = [], k = prevMonthKey(state.startKey);
+    var endNext = nextMonthKey(state.endKey);
+    while (k <= endNext){ if (SOURCES[k]) keys.push(k); k = nextMonthKey(k); }
+    return keys;
+  }
+
+  async function reload(){
+    var token = ++state.token;
+    document.getElementById('tableWrap').innerHTML = '<div class="loading">読み込み中…</div>';
+    var keys = loadMonths(), failed = [];
+    var data = {}, moves = [], direct = [];
+    SITES.forEach(function(s){ data[s] = {}; });
+    var jobs = [];
+    keys.forEach(function(key){
+      SITES.forEach(function(s){
+        jobs.push(fetchCsv(SOURCES[key].sites[s]).then(function(rows){
+          var days = parseSiteMonthTab(rows, key);
+          Object.keys(days).forEach(function(d){ data[s][d] = days[d]; });
+        }).catch(function(err){ failed.push(s + ' ' + monthLabel(key) + '：' + (err && err.message || err)); }));
+      });
+      if (SOURCES[key].taimi){
+        jobs.push(fetchCsv(SOURCES[key].taimi).then(function(rows){
+          var r = parseMovementTable(rows, key);
+          moves = moves.concat(r.moves); direct = direct.concat(r.direct);
+        }).catch(function(err){ failed.push(monthLabel(key) + '対見込（移動表）：' + (err && err.message || err)); }));
+      }
+    });
+    await Promise.all(jobs);
+    if (token !== state.token) return;
+    state.data = data; state.moves = moves; state.direct = direct; state.failed = failed;
+    render();
+  }
+
+  function buildRows(){
+    var site = state.site, days = (state.data && state.data[site]) || {}, today = todayIso();
+    var flags = computeFlags(site, days, today);
+    var cycles = buildCycles(state.startKey, state.endKey);
+    var rows = [];
+    cycles.forEach(function(c){
+      if (c.a > today) return; // まだ始まっていないサイクルは出さない
+      var r = computeCycle(site, days, c.a, c.b, state.moves, state.adjustments, flags);
+      rows.push({ cycle: c, r: r, flags: flags, days: days });
+    });
+    return rows;
+  }
+
+  function kindVisible(row){
+    return state.kind === 'both' || row.cycle.kind === state.kind;
+  }
+
+  function renderTable(){
+    var rows = state.rows.filter(kindVisible);
+    var h = '<table class="grid"><thead><tr>' +
+      '<th>期間</th><th>開始在庫</th><th>出荷</th><th>収穫</th><th>移動 入/出</th><th>廃棄+規格外</th><th>あるべき在庫</th><th>実際の在庫</th>' +
+      '<th>調整前の差</th><th>調整合計</th><th>調整後の差</th><th>率（前）</th><th>率（後）</th><th>要確認</th></tr></thead><tbody>';
+    rows.forEach(function(row){
+      var c = row.cycle, r = row.r;
+      var trCls = c.kind + (r.status === 'provisional' ? ' prov' : '') + (state.selected === c.id ? ' selected' : '');
+      if (r.status === 'complete' || r.status === 'provisional') trCls += ' selectable';
+      h += '<tr class="' + trCls + '" data-id="' + esc(c.id) + '"><td><span class="lab">' + esc(c.label) + '</span>' +
+        (r.status === 'provisional' ? '<span class="badge">暫定〜' + md(r.e) + '</span>' : '') + '</td>';
+      if (r.status === 'none' || r.status === 'nostart'){
+        h += '<td colspan="13" class="muted" style="text-align:left;">' +
+          (r.status === 'none' ? 'データなし（在庫の入力がありません）' : '開始在庫（' + md(addDays(c.a, -1)) + '）が未入力のため計算できません') + '</td></tr>';
+        return;
+      }
+      var flagTitle = r.flagDays.map(function(d){ return md(d) + ' ' + (row.flags[d] || []).join(' / '); }).join('\n');
+      h += '<td>' + fmt(r.S0) + '</td><td>' + fmt(r.ship) + '</td><td>' + fmt(r.harv, 0) + '</td>' +
+        '<td>' + fmt(r.movIn, 0) + ' / ' + fmt(r.movOut, 0) + '</td><td>' + fmt(r.waste + r.kik) + '</td>' +
+        '<td>' + fmt(r.expected) + '</td><td>' + fmt(r.S1) + '</td>' +
+        '<td class="' + cls(r.diffBefore) + '">' + signed(r.diffBefore) + '</td>' +
+        '<td>' + (r.adjSum == null ? '－' : signed(r.adjSum)) + '</td>' +
+        '<td class="' + cls(r.diffAfter) + '">' + signed(r.diffAfter) + '</td>' +
+        '<td class="' + cls(r.rateBefore) + '">' + pct(r.rateBefore) + '</td>' +
+        '<td class="' + cls(r.rateAfter) + '">' + pct(r.rateAfter) + '</td>' +
+        '<td' + (r.flagDays.length ? ' class="flagcell" title="' + esc(flagTitle) + '"' : '') + '>' + (r.flagDays.length ? '⚠' + r.flagDays.length + '日' : '') + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    document.getElementById('tableWrap').innerHTML = h;
+    Array.prototype.forEach.call(document.querySelectorAll('#tableWrap tr.selectable'), function(tr){
+      tr.addEventListener('click', function(){ selectRow(tr.getAttribute('data-id')); });
+    });
+  }
+
+  function destroy(ch){ if (ch){ try { ch.destroy(); } catch(e){} } return null; }
+
+  function renderMainChart(){
+    var rows = state.rows.filter(kindVisible).filter(function(x){ return x.r.status === 'complete' || x.r.status === 'provisional'; });
+    var note = document.getElementById('mainChartNote');
+    mainChart = destroy(mainChart);
+    if (typeof Chart === 'undefined'){ note.textContent = 'グラフを読み込めませんでした（表は表示されています）。'; return; }
+    var unitPct = state.unit === 'pct';
+    var labels = rows.map(function(x){ return (x.cycle.kind === 'month' ? '【月】' : '') + x.cycle.label + (x.r.status === 'provisional' ? '（暫定）' : ''); });
+    function v(x, which){
+      var val = unitPct ? (which === 'before' ? x.r.rateBefore : x.r.rateAfter) : (which === 'before' ? x.r.diffBefore : x.r.diffAfter);
+      return val == null ? null : (unitPct ? Math.round(val * 1000) / 10 : Math.round(val * 10) / 10);
+    }
+    var provA = function(x, hi){ return x.r.status === 'provisional' ? (hi ? 'rgba(122,74,38,.35)' : 'rgba(217,185,155,.35)') : (hi ? '#7a4a26' : '#d9b99b'); };
+    mainChart = new Chart(document.getElementById('mainChart'), {
+      type: 'bar',
+      data: { labels: labels, datasets: [
+        { label: '調整前の差', data: rows.map(function(x){ return v(x, 'before'); }), backgroundColor: rows.map(function(x){ return provA(x, false); }) },
+        { label: '調整後の差', data: rows.map(function(x){ return v(x, 'after'); }), backgroundColor: rows.map(function(x){ return provA(x, true); }) }
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        scales: { y: { title: { display: true, text: unitPct ? '差 ÷ 収穫量（%）' : '差（kg）' } }, x: { ticks: { maxRotation: 60, minRotation: 30 } } },
+        plugins: { legend: { position: 'top' } },
+        onClick: function(ev, els){ if (els && els.length){ var x = rows[els[0].index]; if (x) selectRow(x.cycle.id); } }
+      }
+    });
+    note.textContent = '0より下は、現物があるべき在庫より少ない（ロス）ことを表します。薄い棒は暫定です。棒をクリックすると、日別のグラフが出ます。';
+  }
+
+  function renderDaily(){
+    dailyChart = destroy(dailyChart);
+    var title = document.getElementById('dailyTitle'), box = document.getElementById('dailyFlags');
+    var row = state.rows.filter(function(x){ return x.cycle.id === state.selected; })[0];
+    if (!row || (row.r.status !== 'complete' && row.r.status !== 'provisional')){
+      title.textContent = '③ 日別のグラフ';
+      box.innerHTML = '<p class="note">一覧の行（または棒）を選ぶと、そのサイクルの日別の動きが出ます。</p>';
+      return;
+    }
+    title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + (row.cycle.kind === 'month' ? '（月）' : '（週）');
+    var daily = computeDaily(state.site, row.days, row.cycle.a, row.r.e, state.moves, state.adjustments);
+    if (typeof Chart !== 'undefined'){
+      dailyChart = new Chart(document.getElementById('dailyChart'), {
+        type: 'line',
+        data: { labels: daily.map(function(x){ return md(x.date); }), datasets: [
+          { label: 'あるべき在庫', data: daily.map(function(x){ return x.expected == null ? null : Math.round(x.expected * 10) / 10; }), borderDash: [6, 4], borderColor: '#3f6b4c', backgroundColor: '#3f6b4c', pointRadius: 2, tension: 0 },
+          { label: '実際の在庫', data: daily.map(function(x){ return x.actual == null ? null : Math.round(x.actual * 10) / 10; }), borderColor: '#7a4a26', backgroundColor: '#7a4a26', pointRadius: 3, tension: 0 }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { title: { display: true, text: '在庫（kg）' } } }, plugins: { legend: { position: 'top' } } }
+      });
+    }
+    var fl = row.r.flagDays;
+    box.innerHTML = fl.length
+      ? '<p class="note" style="margin-top:8px;">要確認の日（' + fl.length + '日）</p><ul class="flaglist">' +
+        fl.map(function(d){ return '<li>' + md(d) + '：' + esc((row.flags[d] || []).join(' / ')) + '</li>'; }).join('') + '</ul>'
+      : '<p class="note">このサイクルに要確認の日はありません。</p>';
+  }
+
+  function render(){
+    var msg = document.getElementById('msg'), h = '';
+    if (state.failed.length) h += '<div class="warn">読み込めなかったタブがあります：<br>' + state.failed.map(esc).join('<br>') + '</div>';
+    var latest = Object.keys(SOURCES).sort().filter(function(k){ return !SOURCES[k].anchorOnly; }).pop();
+    var tk = todayIso().slice(0, 7);
+    if (tk > latest) h += '<div class="warn">' + monthLabel(tk) + 'のタブが SOURCES に登録されていないため、' + monthLabel(latest) + 'までを表示します。</div>';
+    msg.innerHTML = h;
+    state.rows = buildRows();
+    document.getElementById('adjCount').textContent = '登録済みの調整：' + state.adjustments.filter(function(a){ return !isDeleted(a); }).length + '件';
+    renderTable();
+    renderMainChart();
+    renderDaily();
+  }
+
+  function selectRow(id){
+    state.selected = id;
+    renderTable();
+    renderDaily();
+  }
+
+  function seg(elId, items, current, onPick){
+    var el = document.getElementById(elId);
+    el.innerHTML = items.map(function(it){ return '<button type="button" data-v="' + esc(it[0]) + '" class="' + (it[0] === current ? 'active' : '') + '">' + esc(it[1]) + '</button>'; }).join('');
+    Array.prototype.forEach.call(el.querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){ onPick(b.getAttribute('data-v')); });
+    });
+  }
+  function drawControls(){
+    seg('siteSeg', SITES.map(function(s){ return [s, s]; }), state.site, function(v){ state.site = v; state.selected = null; drawControls(); if (state.data) render(); });
+    seg('kindSeg', [['week', '週'], ['month', '月'], ['both', '両方']], state.kind, function(v){ state.kind = v; drawControls(); render(); });
+    seg('unitSeg', [['kg', 'kg'], ['pct', '%']], state.unit, function(v){ state.unit = v; drawControls(); renderMainChart(); });
+    var months = selectableMonths();
+    function fill(id, cur){
+      var el = document.getElementById(id);
+      el.innerHTML = months.map(function(k){ return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + monthLabel(k) + '</option>'; }).join('');
+    }
+    fill('startMonth', state.startKey); fill('endMonth', state.endKey);
+  }
+
+  function init(){
+    var months = selectableMonths();
+    if (!months.length) return;
+    var tk = todayIso().slice(0, 7);
+    var endIdx = months.length - 1;
+    for (var i = months.length - 1; i >= 0; i--){ if (months[i] <= tk){ endIdx = i; break; } }
+    state.endKey = months[endIdx];
+    state.startKey = months[Math.max(0, endIdx - 2)]; // 初期表示は直近3か月
+    drawControls();
+    document.getElementById('startMonth').addEventListener('change', function(){
+      state.startKey = this.value;
+      if (state.endKey < state.startKey) state.endKey = state.startKey;
+      state.selected = null; drawControls(); reload();
+    });
+    document.getElementById('endMonth').addEventListener('change', function(){
+      state.endKey = this.value;
+      if (state.startKey > state.endKey) state.startKey = state.endKey;
+      state.selected = null; drawControls(); reload();
+    });
+    reload();
+  }
+
+  // テスト用に、計算の関数を公開する（画面の動作には使わない）。
+  // setAdjustments は画面上の一時的な差し替えのみ（保存はしない）。
+  window.__stockCheck = {
+    SOURCES: SOURCES, parseCsv: parseCsv, parseSiteMonthTab: parseSiteMonthTab, parseMovementTable: parseMovementTable,
+    computeFlags: computeFlags, computeCycle: computeCycle, computeDaily: computeDaily, sumAdjustments: sumAdjustments,
+    buildCycles: buildCycles, selectableMonths: selectableMonths, getAdjustments: getAdjustments,
+    setAdjustments: function(list){ state.adjustments = list || []; if (state.data) render(); },
+    getState: function(){ return state; }
+  };
+
+  init();
+})();
+</script>
+</body>
+</html>
