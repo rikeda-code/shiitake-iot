@@ -668,11 +668,12 @@
   // 'shiftData' ＝拠点シフト表（site-shift.html）が書き出す「ファーム勤務時間」の「シフト_データ」タブを読む
   // 切り替えるときは、その拠点の値を 'shiftData' にするだけでよい（栽培・出荷の両方が切り替わる）。
   // 確認用に、URLに ?laborSource=shiftData（または old）を付けると、この設定より優先して全拠点をそちらで読む
-  var LABOR_SOURCE_BY_SITE = { 'いなべ': 'old', '群馬': 'old', '南丹': 'old' };
+  var LABOR_SOURCE_BY_SITE = { 'いなべ': 'shiftData', '群馬': 'shiftData', '南丹': 'shiftData' };
   // 拠点ごとの切り替え日（'YYYY-MM-DD'）。'shiftData' にした拠点で、この日より前の日は旧の読み方、
   // この日以降はシフト_データを読む（表示する7日間の途中で切り替わるときは日ごとに組み合わせる）。
   // null（未定）のときは全部の日をシフト_データで読む
-  var LABOR_SWITCH_DATE_BY_SITE = { 'いなべ': '2026-11-11', '群馬': null, '南丹': null };
+  // 南丹は旧の勤務表（栽培）が 11/7 までのため 11/8 から
+  var LABOR_SWITCH_DATE_BY_SITE = { 'いなべ': '2026-11-11', '群馬': '2026-11-11', '南丹': '2026-11-08' };
   var LABOR_SOURCE_OVERRIDE = (function(){
     try {
       var v = new URLSearchParams(location.search).get('laborSource');

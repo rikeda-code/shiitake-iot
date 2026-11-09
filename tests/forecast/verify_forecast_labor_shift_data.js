@@ -114,15 +114,15 @@ async function rowTexts(page, attr) {
   let allOk = true;
   function check(name, cond, detail) { console.log(`  ${name}: ${cond ? 'OK' : 'NG'}${!cond && detail !== undefined ? '  ' + JSON.stringify(detail) : ''}`); if (!cond) allOk = false; }
 
-  console.log('=== ① 切り替えの設定は3拠点とも「旧」のまま。旧のままならシフト_データを読まない ===');
+  console.log('=== ① 切り替えの設定は3拠点とも shiftData。切り替え日より前の基準日ではシフト_データを読まない ===');
   {
     const log = [];
     const page = await openPage(browser, '?div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), SHIFT_DATA_CSV, log);
     const src = await page.evaluate(() => window.__test.LABOR_SOURCE_BY_SITE);
-    check('LABOR_SOURCE_BY_SITE が いなべ・群馬・南丹 とも old', src['いなべ'] === 'old' && src['群馬'] === 'old' && src['南丹'] === 'old', src);
+    check('LABOR_SOURCE_BY_SITE が いなべ・群馬・南丹 とも shiftData', src['いなべ'] === 'shiftData' && src['群馬'] === 'shiftData' && src['南丹'] === 'shiftData', src);
     const use = await page.evaluate(() => ['いなべ', '群馬', '南丹'].map(s => window.__test.useShiftDataLabor(s)));
-    check('useShiftDataLabor() が3拠点とも false', use.every(v => v === false), use);
-    check('栽培×いなべを開いてもシフト_データのタブを読みに行かない', log.length === 0, log);
+    check('useShiftDataLabor() が3拠点とも true', use.every(v => v === true), use);
+    check('基準日 11/2 の栽培×いなべ（7日間すべて切り替え日 11/11 より前）はシフト_データのタブを読みに行かない', log.length === 0, log);
     await page.close();
   }
 
@@ -270,29 +270,38 @@ async function rowTexts(page, attr) {
     await page.close();
   }
 
-  console.log('=== ⑧ 切り替え日：いなべは 2026-11-11 より前は旧、以降はシフト_データ（群馬・南丹は未定） ===');
+  console.log('=== ⑧ 切り替え日：いなべ・群馬は 2026-11-11、南丹は 2026-11-08。より前は旧、以降はシフト_データ ===');
   {
     const page = await openPage(browser, '', SHIFT_DATA_CSV);
     const r = await page.evaluate(() => {
       const T = window.__test;
       const sw = JSON.parse(JSON.stringify(T.LABOR_SWITCH_DATE_BY_SITE));
-      const oldMode = T.shiftDataStartOffset('いなべ', new Date(2026, 10, 8));
-      T.LABOR_SOURCE_BY_SITE['いなべ'] = 'shiftData';
-      T.LABOR_SOURCE_BY_SITE['群馬'] = 'shiftData';
-      return {
-        sw, oldMode,
+      const out = {
+        sw,
         b1108: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 8)),
         b1101: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 1)),
         b1111: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 11)),
-        gunma: T.shiftDataStartOffset('群馬', new Date(2026, 10, 2)),
+        gunma1108: T.shiftDataStartOffset('群馬', new Date(2026, 10, 8)),
+        nantan1105: T.shiftDataStartOffset('南丹', new Date(2026, 10, 5)),
+        nantan1101: T.shiftDataStartOffset('南丹', new Date(2026, 10, 1)),
       };
+      T.LABOR_SOURCE_BY_SITE['いなべ'] = 'old';
+      out.oldMode = T.shiftDataStartOffset('いなべ', new Date(2026, 10, 11));
+      T.LABOR_SOURCE_BY_SITE['いなべ'] = 'shiftData';
+      T.LABOR_SWITCH_DATE_BY_SITE['群馬'] = null;
+      out.noDate = T.shiftDataStartOffset('群馬', new Date(2026, 10, 2));
+      T.LABOR_SWITCH_DATE_BY_SITE['群馬'] = sw['群馬'];
+      return out;
     });
-    check('切り替え日の設定：いなべ 2026-11-11、群馬・南丹 未定(null)', r.sw['いなべ'] === '2026-11-11' && r.sw['群馬'] === null && r.sw['南丹'] === null, r.sw);
-    check('切り替えが old のあいだは切り替え日に関係なく旧（-1）', r.oldMode === -1, r.oldMode);
-    check('基準日 11/8：11/11（4日目＝番号3）からシフト_データ', r.b1108 === 3, r.b1108);
-    check('基準日 11/1：7日間すべて切り替え日より前なので旧（-1）', r.b1101 === -1, r.b1101);
-    check('基準日 11/11：全部シフト_データ（0）', r.b1111 === 0, r.b1111);
-    check('切り替え日が未定の群馬は全部シフト_データ（0）', r.gunma === 0, r.gunma);
+    check('切り替え日の設定：いなべ 2026-11-11、群馬 2026-11-11、南丹 2026-11-08', r.sw['いなべ'] === '2026-11-11' && r.sw['群馬'] === '2026-11-11' && r.sw['南丹'] === '2026-11-08', r.sw);
+    check('切り替えが old の拠点は切り替え日に関係なく旧（-1）', r.oldMode === -1, r.oldMode);
+    check('いなべ 基準日 11/8：11/11（4日目＝番号3）からシフト_データ', r.b1108 === 3, r.b1108);
+    check('いなべ 基準日 11/1：7日間すべて切り替え日より前なので旧（-1）', r.b1101 === -1, r.b1101);
+    check('いなべ 基準日 11/11：全部シフト_データ（0）', r.b1111 === 0, r.b1111);
+    check('群馬 基準日 11/8：11/11（番号3）からシフト_データ', r.gunma1108 === 3, r.gunma1108);
+    check('南丹 基準日 11/5：11/8（番号3）からシフト_データ', r.nantan1105 === 3, r.nantan1105);
+    check('南丹 基準日 11/1：7日間（〜11/7）すべて旧（-1）', r.nantan1101 === -1, r.nantan1101);
+    check('切り替え日が未定(null)の拠点は全部シフト_データ（0）', r.noDate === 0, r.noDate);
 
     const m = await page.evaluate(() => {
       const T = window.__test;
