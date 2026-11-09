@@ -178,7 +178,8 @@ async function shippingLaborDetailRows(page) {
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
       staticHandler([[NANTAN_SHIFT_SHEET_ID, SHIP_NANTAN_GID]], SHIP_NANTAN_CSV),
     ]);
-    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    // 切り替え日(南丹 11/8)以降は拠点シフト表を読むため、旧の勤務表のシートの範囲の確認は旧の読み方に固定して行う
+    await page.goto('http://localhost:8811/work-hours-forecast.html?laborSource=old', { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(500);
     await page.click('[data-business="出荷"]');
     await page.waitForTimeout(600);

@@ -390,7 +390,8 @@ async function shipLaborWarnings(page) {
       staticHandler([[STD_LABOR_HOURS_SHEET.id, STD_LABOR_HOURS_SHEET.gid]], buildStdLaborCsv([])),
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
-    await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+    // 切り替え日(いなべ 11/11)以降は拠点シフト表を読むため、旧のシフト表の「日付がありません」の確認は旧の読み方に固定して行う
+    await page.goto('http://localhost:8811/work-hours-forecast.html?laborSource=old', { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(500);
     await page.click('[data-business="出荷"]');
     await page.waitForTimeout(800);

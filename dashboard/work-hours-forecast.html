@@ -662,6 +662,53 @@
   // 拠点シフト表（site-shift.html）のGAS WebアプリURL。設定されていればこちらから実働時間を読み、
   // 空のときだけ上の旧シフト表（期間ごとのシート）を読む
   var SHIFT_GAS_URL = ''; // 反映は保留中。拠点シフト表のGAS URL: https://script.google.com/macros/s/AKfycbzVm0SzILDzMTPabtrxeYxJz5__APrMgb8Vt4Ga_VFLItC9QAVWooPcRjrlPuBGutgWvg/exec
+
+  // ── 標準労働時間の読み先の切り替え（拠点ごと）──────────────────
+  // 'old'       ＝今までどおり各拠点の勤務シフトのシートを読む（下のSHIFT_SHEET_*・FORECAST_SHIFT_SOURCES 等）
+  // 'shiftData' ＝拠点シフト表（site-shift.html）が書き出す「ファーム勤務時間」の「シフト_データ」タブを読む
+  // 切り替えるときは、その拠点の値を 'shiftData' にするだけでよい（栽培・出荷の両方が切り替わる）。
+  // 確認用に、URLに ?laborSource=shiftData（または old）を付けると、この設定より優先して全拠点をそちらで読む
+  var LABOR_SOURCE_BY_SITE = { 'いなべ': 'shiftData', '群馬': 'shiftData', '南丹': 'shiftData' };
+  // 拠点ごとの切り替え日（'YYYY-MM-DD'）。'shiftData' にした拠点で、この日より前の日は旧の読み方、
+  // この日以降はシフト_データを読む（表示する7日間の途中で切り替わるときは日ごとに組み合わせる）。
+  // null（未定）のときは全部の日をシフト_データで読む
+  // 南丹は旧の勤務表（栽培）が 11/7 までのため 11/8 から。群馬は旧の出荷場シートで 11/8〜11/10 に
+  // 判断できない空欄（次の月度のシートが未設定）があるため 11/8 から
+  var LABOR_SWITCH_DATE_BY_SITE = { 'いなべ': '2026-11-11', '群馬': '2026-11-08', '南丹': '2026-11-08' };
+  var LABOR_SOURCE_OVERRIDE = (function(){
+    try {
+      var v = new URLSearchParams(location.search).get('laborSource');
+      return (v === 'shiftData' || v === 'old') ? v : null;
+    } catch (e) { return null; }
+  })();
+  // シフト_データタブ（「標準労働時間」と同じファイル）。列は見出しの名前で探す（列の位置は使わない）
+  var SHIFT_DATA_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '889947728' };
+  // 必ず要る見出し。見つからないときは標準労働時間のパネルにエラーとして出す。
+  // キーは無くてもよい（無いときは氏名で人を見分ける）
+  var SHIFT_DATA_HEADERS = { date: '日付', site: '拠点', key: 'キー', name: '氏名', dept: '部門', shift: 'シフト', hours: '実働h' };
+  var SHIFT_DATA_REQUIRED = ['date', 'site', 'name', 'dept', 'shift', 'hours'];
+  // 拠点ごとの部門の振り分け（シフト_データの「部門」の値そのもの）。ここに無い部門
+  // （配送・配送・栽培・配送・出荷・生産部長・事務・営業・空欄など）の人は数えない
+  // （応援の印で栽培・出荷に回した時間だけは数える）。部門を足すときは、その拠点の配列に足す
+  // （例：群馬の出荷に配送・出荷の人も入れる → '群馬': { ..., '出荷': ['出荷', '配送・出荷'] }）
+  var SHIFT_DATA_DIV_DEPTS = {
+    'いなべ': { '栽培': ['栽培'], '出荷': ['出荷'] },
+    '群馬':   { '栽培': ['栽培'], '出荷': ['出荷'] },
+    '南丹':   { '栽培': ['栽培'], '出荷': ['出荷'] },
+  };
+  // 応援の印でも時間を数えない部門（拠点シフト表の NO_TALLY_DEPTS と同じ）
+  var SHIFT_DATA_NO_TALLY_DEPTS = ['生産部長'];
+  // 応援・配送の印（シフトの後ろに付く。例 '8:00-17:00栽培4h'）。拠点シフト表（site-shift.html）の
+  // SUPPORT_TAGS と同じ決まり：to＝時間を数える部門、share＝実働に対する割合、hours＝決まった時間（実働が短い日は実働まで）。
+  // 残りは本来の部門に数える。拠点シフト表側の印が増えたら、ここもそろえる
+  var SHIFT_DATA_SUPPORT_TAGS = {
+    '配送':     { to: '配送', share: 1 },
+    '半日配送': { to: '配送', share: 0.5 },
+    '栽培8h':   { to: '栽培', share: 1 },
+    '栽培4h':   { to: '栽培', hours: 4 },
+    '出荷8h':   { to: '出荷', share: 1 },
+    '出荷4h':   { to: '出荷', hours: 4 },
+  };
   // 収穫見込（手入力）の保存先GAS WebアプリURL（gas/harvest-forecast-webapp.gs）。
   // 空のあいだは入力欄を使えず、収穫工数は従来どおり収穫計画kgだけで計算する
   var HARVEST_FORECAST_GAS_URL = 'https://script.google.com/macros/s/AKfycbwZ3RlwF2Gh3aMLesUl6AOq5y5p7rbLF5OILYSmkGQ_2d-XExCoPTknJdBm7bOX7B8bNg/exec';
@@ -1902,6 +1949,323 @@
       warnings: Object.keys(warningSet),
       personBreakdown: personBreakdown,
     };
+  }
+
+  /* ===================== ③標準労働時間（拠点シフト表の「シフト_データ」） =====================
+     LABOR_SOURCE_BY_SITE が 'shiftData' の拠点だけで使う（'old' の拠点は下の各拠点の関数のまま）。
+     休憩は拠点シフト表のルールで計算済みの「実働h」をそのまま使い、こちらでは計算し直さない。
+     標準労働時間シートとの照合もしない */
+
+  // その拠点の標準労働時間を、シフト_データから読むかどうか
+  function useShiftDataLabor(site){
+    var mode = LABOR_SOURCE_OVERRIDE || LABOR_SOURCE_BY_SITE[site] || 'old';
+    return mode === 'shiftData' && !!SHIFT_DATA_DIV_DEPTS[site];
+  }
+
+  // 表示する7日間のうち、シフト_データで読み始める日の番号（0〜6）。全部の日が旧の読み方なら -1。
+  // 切り替え日（LABOR_SWITCH_DATE_BY_SITE）が未定(null)なら 0（全部の日をシフト_データで読む）
+  function shiftDataStartOffset(site, basisDate){
+    if (!useShiftDataLabor(site)) return -1;
+    var sw = LABOR_SWITCH_DATE_BY_SITE[site];
+    if (!sw) return 0;
+    for (var o = 0; o < DAY_COUNT; o++) {
+      if (toISO(addDays(basisDate, o)) >= sw) return o;
+    }
+    return -1;
+  }
+
+  // 旧の読み方の結果(oldRes)とシフト_データの結果(newRes)を、日の番号 k を境に組み合わせる。純粋関数。
+  // k より前の日は旧、k 以降は新の値を使う（失敗した方(null)の日は「－」）。人別内訳は、同じ名前
+  // （空白などを除いて同じ）なら1行にまとめる。旧の「－」の日の注記は、旧の日に「－」があるときだけ残す。
+  // 旧の注意・補足は、新の読み方の日のことだけを書いたものは出さない。
+  // 注意・補足には、どちらの読み方のものかが分かるよう頭に期間を付ける
+  function mergeLaborResults(oldRes, newRes, k, basisDate){
+    if (!oldRes && !newRes) return null;
+    var oldLabel = '旧の勤務表（〜' + fmtMD(addDays(basisDate, k - 1)) + '）：';
+    var newLabel = '拠点シフト表（' + fmtMD(addDays(basisDate, k)) + '〜）：';
+    var pickDay = function(field, o){
+      var src = o < k ? oldRes : newRes;
+      if (!src || !src[field]) return null;
+      var v = src[field][o];
+      return v === undefined ? null : v;
+    };
+    var perDayTotal = [], rawPerDayTotal = [], perDayAttendance = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      perDayTotal.push(pickDay('perDayTotal', o));
+      rawPerDayTotal.push(pickDay('rawPerDayTotal', o));
+      perDayAttendance.push(pickDay('perDayAttendance', o));
+    }
+    var personMap = {}, personOrder = [];
+    var addPersons = function(res, useDay){
+      ((res && res.personBreakdown) || []).forEach(function(p){
+        var dayHours = [], rawDayHours = [], any = false;
+        for (var o = 0; o < DAY_COUNT; o++) {
+          var ok = useDay(o);
+          var dh = ok && p.dayHours ? p.dayHours[o] : null;
+          var rh = ok && p.rawDayHours ? p.rawDayHours[o] : (ok ? dh : null);
+          dayHours.push(dh === undefined ? null : dh);
+          rawDayHours.push(rh === undefined ? null : rh);
+          if (ok && dh !== null && dh !== undefined) any = true;
+        }
+        if (!any) return;
+        var key = normalizeName(p.name);
+        var e = personMap[key];
+        if (!e) {
+          personMap[key] = { name: p.name, dept: p.dept, dayHours: dayHours, rawDayHours: rawDayHours };
+          personOrder.push(key);
+          return;
+        }
+        for (var j = 0; j < DAY_COUNT; j++) {
+          if (useDay(j)) { e.dayHours[j] = dayHours[j]; e.rawDayHours[j] = rawDayHours[j]; }
+        }
+        if (useDay(DAY_COUNT - 1)) e.dept = p.dept; // 部門は新しい方（シフト_データ）に合わせる
+      });
+    };
+    addPersons(oldRes, function(o){ return o < k; });
+    addPersons(newRes, function(o){ return o >= k; });
+    var oldHasDash = perDayTotal.slice(0, k).some(function(v){ return v === null; });
+    var label = function(list, prefix){ return (list || []).map(function(s){ return prefix + s; }); };
+    // 旧の注意・補足のうち、書かれている日付（M/D）がすべて新の読み方の日（k以降）のものは出さない
+    // （例：群馬の「判断できない空欄…：高山（11/8〜11/10）」は、11/8以降を拠点シフト表で読むなら関係ない）。
+    // 日付が書かれていないもの、7日間の外の日付や旧の日を含むものは残す
+    var offsetOfMD = function(m, d){
+      for (var o = 0; o < DAY_COUNT; o++) {
+        var dt = addDays(basisDate, o);
+        if (dt.getMonth() + 1 === m && dt.getDate() === d) return o;
+      }
+      return -1;
+    };
+    var onlyNewDays = function(s){
+      var re = /(\d{1,2})\/(\d{1,2})/g, mt, found = false;
+      while ((mt = re.exec(String(s))) !== null) {
+        found = true;
+        var o = offsetOfMD(parseInt(mt[1], 10), parseInt(mt[2], 10));
+        if (o < k) return false; // 旧の日、または7日間の外
+      }
+      return found;
+    };
+    var oldOnly = function(list){ return (list || []).filter(function(s){ return !onlyNewDays(s); }); };
+    return {
+      perDayTotal: perDayTotal,
+      rawPerDayTotal: rawPerDayTotal,
+      perDayAttendance: perDayAttendance,
+      warnings: label(oldOnly(oldRes && oldRes.warnings), oldLabel).concat(label(newRes && newRes.warnings, newLabel)),
+      personBreakdown: personOrder.map(function(key){ return personMap[key]; }),
+      notices: label(oldOnly(oldRes && oldRes.notices), oldLabel).concat(label(newRes && newRes.notices, newLabel)),
+      periodNotices: (oldHasDash ? label(oldRes && oldRes.periodNotices, oldLabel) : [])
+        .concat(label(newRes && newRes.periodNotices, newLabel)),
+    };
+  }
+
+  // 日付のセル（'2026-11-02'。'2026/11/2' の書き方も受け付ける）→ 'YYYY-MM-DD'。読めなければnull
+  function parseShiftDataIso(raw){
+    var s = String(raw == null ? '' : raw).normalize('NFKC').trim();
+    var m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (!m) return null;
+    return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
+  }
+
+  // シフト_データの生rows(gviz形式。1行目＝見出し)を解析する。純粋関数。
+  // 列は見出しの名前（SHIFT_DATA_HEADERS）で探し、必ず要る見出しが無ければエラーにする（画面にそのまま出る）
+  function parseShiftDataRows(rows){
+    rows = rows || [];
+    var header = rows[0] ? rows[0].c : [];
+    var idx = {};
+    Object.keys(SHIFT_DATA_HEADERS).forEach(function(k){
+      idx[k] = -1;
+      for (var i = 0; i < header.length; i++) {
+        var v = header[i] ? String(header[i].v == null ? '' : header[i].v).normalize('NFKC').trim() : '';
+        if (v === SHIFT_DATA_HEADERS[k]) { idx[k] = i; break; }
+      }
+    });
+    var missing = SHIFT_DATA_REQUIRED.filter(function(k){ return idx[k] < 0; })
+      .map(function(k){ return SHIFT_DATA_HEADERS[k]; });
+    if (missing.length) {
+      throw new Error('シフト_データのタブに「' + missing.join('」「') + '」の見出しが見つかりません（1行目の見出しを確認してください）');
+    }
+    var out = [];
+    for (var r = 1; r < rows.length; r++) {
+      var c = (rows[r] && rows[r].c) || [];
+      var cell = function(k){
+        var i = idx[k];
+        if (i < 0 || !c[i] || c[i].v === null || c[i].v === undefined) return '';
+        return String(c[i].v).trim();
+      };
+      var date = parseShiftDataIso(cell('date'));
+      var site = cell('site');
+      if (!date || !site) continue;
+      var name = cell('name');
+      var hoursRaw = cell('hours');
+      var h = parseFloat(hoursRaw.normalize('NFKC').replace(/,/g, ''));
+      out.push({
+        date: date, site: site, key: cell('key') || normalizeName(name), name: name,
+        dept: cell('dept'), shift: cell('shift'), hours: isNaN(h) ? null : h,
+      });
+    }
+    return out;
+  }
+
+  // シフトの後ろに付いた応援・配送の印（SHIFT_DATA_SUPPORT_TAGSの名前）。無ければ''
+  function shiftDataSupportTag(shift){
+    var m = String(shift || '').normalize('NFKC').trim().match(/(半日配送|配送|栽培8h|栽培4h|出荷8h|出荷4h)$/);
+    return m && SHIFT_DATA_SUPPORT_TAGS[m[1]] ? m[1] : '';
+  }
+
+  // 1人1日の実働時間を部門ごとの時間に分ける。純粋関数。戻り値 { '栽培': h, '出荷': h, '配送': h } の一部。
+  // 本来の部門は SHIFT_DATA_DIV_DEPTS[site] で決める（どこにも無い部門は本来の部門なし＝数えない）。
+  // 応援・配送の印がある日は、その分を行き先の部門に回す（行き先が本来の部門なら全部そのまま）
+  function splitShiftDataHours(site, dept, shift, hours){
+    var out = {};
+    if (!hours || SHIFT_DATA_NO_TALLY_DEPTS.indexOf(dept) !== -1) return out;
+    var conf = SHIFT_DATA_DIV_DEPTS[site] || {};
+    var home = null;
+    Object.keys(conf).forEach(function(div){ if (home === null && conf[div].indexOf(dept) !== -1) home = div; });
+    var t = SHIFT_DATA_SUPPORT_TAGS[shiftDataSupportTag(shift)];
+    var moved = 0;
+    if (t && t.to !== home) {
+      moved = t.hours ? Math.min(t.hours, hours) : hours * t.share;
+      out[t.to] = moved;
+    }
+    if (home !== null && hours - moved > 0) out[home] = hours - moved;
+    return out;
+  }
+
+  // シフト_データの行(parseShiftDataRows()の結果) x 拠点・部門(div)・基準日から、当日〜6日後の
+  // 標準労働時間合計・出勤人数・人別内訳を算出する。純粋関数。その拠点のデータがある期間
+  // （最初の日付〜最後の日付）の外の日は「－」(null)、期間内でその部門の人がいない日は0にする。
+  // fromIso（省略可。'YYYY-MM-DD'）を渡すと、その日より前の日は計算せず null にする（注記も出さない）。
+  // 切り替え日の前の日を旧の読み方で埋めるとき（mergeLaborResults()）に使う
+  function computeShiftDataLaborHours(records, site, div, basisDate, fromIso){
+    var siteRecs = (records || []).filter(function(r){ return r.site === site; });
+    var minIso = null, maxIso = null;
+    siteRecs.forEach(function(r){
+      if (minIso === null || r.date < minIso) minIso = r.date;
+      if (maxIso === null || r.date > maxIso) maxIso = r.date;
+    });
+    var isos = [], inRange = [], own = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var iso = toISO(addDays(basisDate, o));
+      isos.push(iso);
+      own.push(!fromIso || iso >= fromIso);
+      inRange.push(own[o] && minIso !== null && iso >= minIso && iso <= maxIso);
+    }
+    var zeroOrNull = function(){ return inRange.map(function(x){ return x ? 0 : null; }); };
+    var members = ((SHIFT_DATA_DIV_DEPTS[site] || {})[div]) || [];
+    var personMap = {}, personOrder = [], warningSet = {};
+
+    siteRecs.forEach(function(r){
+      var o = isos.indexOf(r.date);
+      if (o < 0 || !inRange[o]) return;
+      var isMember = members.indexOf(r.dept) !== -1;
+      if (r.hours === null && r.shift && isMember) {
+        warningSet['実働hが空欄のため0時間で計算：' + r.name + ' ' + fmtMD(addDays(basisDate, o)) + '（' + r.shift + '）'] = true;
+      }
+      var h = splitShiftDataHours(site, r.dept, r.shift, r.hours || 0)[div] || 0;
+      if (!isMember && !h) return;
+      if (!personMap[r.key]) {
+        personMap[r.key] = { name: r.name, dept: r.dept, support: false, rawDayHours: zeroOrNull() };
+        personOrder.push(r.key);
+      }
+      var entry = personMap[r.key];
+      if (!isMember) entry.support = true;
+      entry.rawDayHours[o] += h;
+    });
+
+    var perDayTotal = zeroOrNull(), perDayAttendance = zeroOrNull();
+    var personBreakdown = personOrder.map(function(key){
+      var p = personMap[key];
+      p.rawDayHours.forEach(function(h, o){
+        if (h === null) return;
+        perDayTotal[o] += h;
+        if (h > 0) perDayAttendance[o]++;
+      });
+      return {
+        name: p.name,
+        dept: p.support ? (p.dept || DASH) + '（応援）' : p.dept,
+        dayHours: p.rawDayHours.map(function(h){ return h === null ? null : Math.round(h * 10) / 10; }),
+        rawDayHours: p.rawDayHours,
+      };
+    });
+    var rawPerDayTotal = perDayTotal.slice();
+    perDayTotal = perDayTotal.map(function(v){ return v === null ? null : Math.round(v * 10) / 10; });
+
+    // データの無い期間の注記（続いた日はまとめる）
+    var periodNotices = [];
+    if (minIso === null) {
+      periodNotices.push('シフト_データに' + site + 'のシフトがありません');
+    } else {
+      var start = null, end = null;
+      var flush = function(){
+        if (start === null) return;
+        periodNotices.push('シフト_データにまだシフトが無い期間：' + fmtYMD(start)
+          + (sameDate(start, end) ? '' : '〜' + (end.getMonth() + 1) + '/' + end.getDate()));
+        start = null; end = null;
+      };
+      for (var k = 0; k < DAY_COUNT; k++) {
+        if (!own[k]) continue; // 切り替え日より前（旧の読み方の日）は注記しない
+        if (inRange[k]) { flush(); continue; }
+        var d = addDays(basisDate, k);
+        if (start === null) start = d;
+        end = d;
+      }
+      flush();
+    }
+
+    return {
+      perDayTotal: perDayTotal,
+      rawPerDayTotal: rawPerDayTotal,
+      perDayAttendance: perDayAttendance,
+      warnings: Object.keys(warningSet),
+      personBreakdown: personBreakdown,
+      notices: [],
+      periodNotices: periodNotices,
+    };
+  }
+
+  // シフト_データの読み込み（ページを開いている間は1回だけ読む。失敗したら次の描画で読み直す）
+  var shiftDataCache = null;
+  function fetchShiftDataRecords(){
+    if (!shiftDataCache) {
+      var p = fetchCsvSheet(SHIFT_DATA_SHEET.id, SHIFT_DATA_SHEET.gid)
+        .then(function(json){ return parseShiftDataRows(json.table.rows); });
+      p.catch(function(){ if (shiftDataCache === p) shiftDataCache = null; });
+      shiftDataCache = p;
+    }
+    return shiftDataCache;
+  }
+
+  async function fetchShiftDataLabor(site, div, basisDate, fromIso){
+    var records = await fetchShiftDataRecords();
+    return computeShiftDataLaborHours(records, site, div, basisDate, fromIso);
+  }
+
+  // 栽培の標準労働時間（旧の読み方。拠点ごとの関数を呼ぶ。エラーは各関数がパネルに出し、nullを返す）
+  function renderLaborOld(basisDate, site, gen){
+    return (site === '群馬') ? renderLaborGunma(basisDate, gen)
+      : (site === '南丹') ? renderLaborNantan(basisDate, gen)
+      : renderLabor(basisDate, gen);
+  }
+
+  // 栽培の標準労働時間。切り替えの設定（shiftDataStartOffset()）に合わせて、旧の読み方・シフト_データ・
+  // その組み合わせ（切り替え日が7日間の途中のとき）のどれかで読む
+  async function renderLaborForSite(basisDate, site, gen){
+    var k = shiftDataStartOffset(site, basisDate);
+    if (k < 0) return renderLaborOld(basisDate, site, gen);
+    var oldRes = null;
+    if (k > 0) {
+      oldRes = await renderLaborOld(basisDate, site, gen); // 失敗したときはパネルにエラーが出て null
+    } else {
+      showPanelError('laborError', null);
+    }
+    var newRes = null;
+    try {
+      newRes = await fetchShiftDataLabor(site, '栽培', basisDate, k > 0 ? toISO(addDays(basisDate, k)) : null);
+    } catch (err) {
+      console.error('[標準労働時間(シフト_データ)] 取得エラー:', err);
+      if (gen !== renderGeneration) return null;
+      showPanelError('laborError', err.message || String(err));
+    }
+    return k > 0 ? mergeLaborResults(oldRes, newRes, k, basisDate) : newRes;
   }
 
   /* ===================== ③標準労働時間（群馬：勤務表（収穫班）） =====================
@@ -3347,16 +3711,31 @@
     return computeNantanStandardLaborHours(sheets, basisDate);
   }
 
+  // 出荷の標準労働時間（旧の読み方）。失敗したときは例外を投げる
+  async function fetchShippingLaborOld(basisDate, site){
+    var dates = [];
+    for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
+    return (site === 'いなべ') ? await fetchShippingLaborInabe(basisDate)
+      : (site === '群馬') ? await fetchShippingLaborGunma(basisDate)
+      : (site === '南丹') ? await fetchShippingLaborNantan(basisDate)
+      : getShippingLaborSample(site, dates);
+  }
+
   async function renderShippingLabor(basisDate, site, gen){
     showPanelError('shipLaborError', null);
     try {
-      var dates = [];
-      for (var o = 0; o < DAY_COUNT; o++) dates.push(addDays(basisDate, o));
-      var result = (site === 'いなべ') ? await fetchShippingLaborInabe(basisDate)
-        : (site === '群馬') ? await fetchShippingLaborGunma(basisDate)
-        : (site === '南丹') ? await fetchShippingLaborNantan(basisDate)
-        : getShippingLaborSample(site, dates);
-      return result;
+      var k = shiftDataStartOffset(site, basisDate);
+      if (k < 0) return await fetchShippingLaborOld(basisDate, site);
+      if (k === 0) return await fetchShiftDataLabor(site, '出荷', basisDate);
+      // 切り替え日が7日間の途中：旧・新を別々に読み、片方が失敗しても読めた方の日は表示する
+      var oldRes = null, newRes = null, errors = [];
+      try { oldRes = await fetchShippingLaborOld(basisDate, site); }
+      catch (e) { console.error('[出荷標準労働時間(旧)] 取得エラー:', e); errors.push(e.message || String(e)); }
+      try { newRes = await fetchShiftDataLabor(site, '出荷', basisDate, toISO(addDays(basisDate, k))); }
+      catch (e) { console.error('[出荷標準労働時間(シフト_データ)] 取得エラー:', e); errors.push(e.message || String(e)); }
+      if (!oldRes && !newRes) throw new Error(errors.join('／'));
+      if (errors.length && gen === renderGeneration) showPanelError('shipLaborError', errors.join('／'));
+      return mergeLaborResults(oldRes, newRes, k, basisDate);
     } catch (err) {
       console.error('[出荷標準労働時間] 取得エラー:', err);
       if (gen !== renderGeneration) return null;
@@ -3994,9 +4373,7 @@
     var cultPromise = renderCultivation(basisDate, site, gen);
     var workPromise = cultPromise.then(function(cultResult){ return renderWork(basisDate, cultResult, site, gen); });
 
-    var laborPromise = (site === '群馬') ? renderLaborGunma(basisDate, gen)
-      : (site === '南丹') ? renderLaborNantan(basisDate, gen)
-      : renderLabor(basisDate, gen);
+    var laborPromise = renderLaborForSite(basisDate, site, gen);
 
     var results = await Promise.allSettled([workPromise, laborPromise]);
     if (gen !== renderGeneration) return; // 追い越されていたら、過不足の合成も描画しない
@@ -4138,6 +4515,18 @@
     FORECAST_SHIPPING_SHIFT_SOURCES: FORECAST_SHIPPING_SHIFT_SOURCES,
     fetchShippingLaborGunma: fetchShippingLaborGunma,
     fetchShippingLaborNantan: fetchShippingLaborNantan,
+    LABOR_SOURCE_BY_SITE: LABOR_SOURCE_BY_SITE,
+    LABOR_SWITCH_DATE_BY_SITE: LABOR_SWITCH_DATE_BY_SITE,
+    shiftDataStartOffset: shiftDataStartOffset,
+    mergeLaborResults: mergeLaborResults,
+    SHIFT_DATA_SHEET: SHIFT_DATA_SHEET,
+    SHIFT_DATA_DIV_DEPTS: SHIFT_DATA_DIV_DEPTS,
+    useShiftDataLabor: useShiftDataLabor,
+    parseShiftDataRows: parseShiftDataRows,
+    shiftDataSupportTag: shiftDataSupportTag,
+    splitShiftDataHours: splitShiftDataHours,
+    computeShiftDataLaborHours: computeShiftDataLaborHours,
+    fetchShiftDataLabor: fetchShiftDataLabor,
     extractShippingSheetIdGidFromUrl: extractShippingSheetIdGidFromUrl,
     parseShippingSalesUrlSheet: parseShippingSalesUrlSheet,
     SHIPPING_PRODUCT_CLASSIFICATION_RULES: SHIPPING_PRODUCT_CLASSIFICATION_RULES,

@@ -148,7 +148,9 @@ function countingHandler(idGidPairs, body, counter) {
 }
 
 async function gotoGunmaShipping(page) {
-  await page.goto('http://localhost:8811/work-hours-forecast.html', { waitUntil: 'networkidle', timeout: 30000 });
+  // このファイルは旧の出荷場シートの空欄の決まりを確かめるため、旧の読み方に固定して開く
+  // （群馬は切り替え日 11/8 以降を拠点シフト表で読むため、11/8〜11/10 を含む場面が旧の読み方にならない）
+  await page.goto('http://localhost:8811/work-hours-forecast.html?laborSource=old', { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(500);
   await page.click('[data-business="出荷"]');
   await page.waitForTimeout(800);
