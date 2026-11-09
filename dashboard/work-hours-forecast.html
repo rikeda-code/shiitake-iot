@@ -672,8 +672,9 @@
   // 拠点ごとの切り替え日（'YYYY-MM-DD'）。'shiftData' にした拠点で、この日より前の日は旧の読み方、
   // この日以降はシフト_データを読む（表示する7日間の途中で切り替わるときは日ごとに組み合わせる）。
   // null（未定）のときは全部の日をシフト_データで読む
-  // 南丹は旧の勤務表（栽培）が 11/7 までのため 11/8 から
-  var LABOR_SWITCH_DATE_BY_SITE = { 'いなべ': '2026-11-11', '群馬': '2026-11-11', '南丹': '2026-11-08' };
+  // 南丹は旧の勤務表（栽培）が 11/7 までのため 11/8 から。群馬は旧の出荷場シートで 11/8〜11/10 に
+  // 判断できない空欄（次の月度のシートが未設定）があるため 11/8 から
+  var LABOR_SWITCH_DATE_BY_SITE = { 'いなべ': '2026-11-11', '群馬': '2026-11-08', '南丹': '2026-11-08' };
   var LABOR_SOURCE_OVERRIDE = (function(){
     try {
       var v = new URLSearchParams(location.search).get('laborSource');
@@ -1976,6 +1977,7 @@
   // 旧の読み方の結果(oldRes)とシフト_データの結果(newRes)を、日の番号 k を境に組み合わせる。純粋関数。
   // k より前の日は旧、k 以降は新の値を使う（失敗した方(null)の日は「－」）。人別内訳は、同じ名前
   // （空白などを除いて同じ）なら1行にまとめる。旧の「－」の日の注記は、旧の日に「－」があるときだけ残す。
+  // 旧の注意・補足は、新の読み方の日のことだけを書いたものは出さない。
   // 注意・補足には、どちらの読み方のものかが分かるよう頭に期間を付ける
   function mergeLaborResults(oldRes, newRes, k, basisDate){
     if (!oldRes && !newRes) return null;
@@ -2023,13 +2025,33 @@
     addPersons(newRes, function(o){ return o >= k; });
     var oldHasDash = perDayTotal.slice(0, k).some(function(v){ return v === null; });
     var label = function(list, prefix){ return (list || []).map(function(s){ return prefix + s; }); };
+    // 旧の注意・補足のうち、書かれている日付（M/D）がすべて新の読み方の日（k以降）のものは出さない
+    // （例：群馬の「判断できない空欄…：高山（11/8〜11/10）」は、11/8以降を拠点シフト表で読むなら関係ない）。
+    // 日付が書かれていないもの、7日間の外の日付や旧の日を含むものは残す
+    var offsetOfMD = function(m, d){
+      for (var o = 0; o < DAY_COUNT; o++) {
+        var dt = addDays(basisDate, o);
+        if (dt.getMonth() + 1 === m && dt.getDate() === d) return o;
+      }
+      return -1;
+    };
+    var onlyNewDays = function(s){
+      var re = /(\d{1,2})\/(\d{1,2})/g, mt, found = false;
+      while ((mt = re.exec(String(s))) !== null) {
+        found = true;
+        var o = offsetOfMD(parseInt(mt[1], 10), parseInt(mt[2], 10));
+        if (o < k) return false; // 旧の日、または7日間の外
+      }
+      return found;
+    };
+    var oldOnly = function(list){ return (list || []).filter(function(s){ return !onlyNewDays(s); }); };
     return {
       perDayTotal: perDayTotal,
       rawPerDayTotal: rawPerDayTotal,
       perDayAttendance: perDayAttendance,
-      warnings: label(oldRes && oldRes.warnings, oldLabel).concat(label(newRes && newRes.warnings, newLabel)),
+      warnings: label(oldOnly(oldRes && oldRes.warnings), oldLabel).concat(label(newRes && newRes.warnings, newLabel)),
       personBreakdown: personOrder.map(function(key){ return personMap[key]; }),
-      notices: label(oldRes && oldRes.notices, oldLabel).concat(label(newRes && newRes.notices, newLabel)),
+      notices: label(oldOnly(oldRes && oldRes.notices), oldLabel).concat(label(newRes && newRes.notices, newLabel)),
       periodNotices: (oldHasDash ? label(oldRes && oldRes.periodNotices, oldLabel) : [])
         .concat(label(newRes && newRes.periodNotices, newLabel)),
     };

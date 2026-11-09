@@ -270,7 +270,7 @@ async function rowTexts(page, attr) {
     await page.close();
   }
 
-  console.log('=== ⑧ 切り替え日：いなべ・群馬は 2026-11-11、南丹は 2026-11-08。より前は旧、以降はシフト_データ ===');
+  console.log('=== ⑧ 切り替え日：いなべは 2026-11-11、群馬・南丹は 2026-11-08。より前は旧、以降はシフト_データ ===');
   {
     const page = await openPage(browser, '', SHIFT_DATA_CSV);
     const r = await page.evaluate(() => {
@@ -281,7 +281,8 @@ async function rowTexts(page, attr) {
         b1108: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 8)),
         b1101: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 1)),
         b1111: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 11)),
-        gunma1108: T.shiftDataStartOffset('群馬', new Date(2026, 10, 8)),
+        gunma1105: T.shiftDataStartOffset('群馬', new Date(2026, 10, 5)),
+        gunma1101: T.shiftDataStartOffset('群馬', new Date(2026, 10, 1)),
         nantan1105: T.shiftDataStartOffset('南丹', new Date(2026, 10, 5)),
         nantan1101: T.shiftDataStartOffset('南丹', new Date(2026, 10, 1)),
       };
@@ -293,12 +294,13 @@ async function rowTexts(page, attr) {
       T.LABOR_SWITCH_DATE_BY_SITE['群馬'] = sw['群馬'];
       return out;
     });
-    check('切り替え日の設定：いなべ 2026-11-11、群馬 2026-11-11、南丹 2026-11-08', r.sw['いなべ'] === '2026-11-11' && r.sw['群馬'] === '2026-11-11' && r.sw['南丹'] === '2026-11-08', r.sw);
+    check('切り替え日の設定：いなべ 2026-11-11、群馬 2026-11-08、南丹 2026-11-08', r.sw['いなべ'] === '2026-11-11' && r.sw['群馬'] === '2026-11-08' && r.sw['南丹'] === '2026-11-08', r.sw);
     check('切り替えが old の拠点は切り替え日に関係なく旧（-1）', r.oldMode === -1, r.oldMode);
     check('いなべ 基準日 11/8：11/11（4日目＝番号3）からシフト_データ', r.b1108 === 3, r.b1108);
     check('いなべ 基準日 11/1：7日間すべて切り替え日より前なので旧（-1）', r.b1101 === -1, r.b1101);
     check('いなべ 基準日 11/11：全部シフト_データ（0）', r.b1111 === 0, r.b1111);
-    check('群馬 基準日 11/8：11/11（番号3）からシフト_データ', r.gunma1108 === 3, r.gunma1108);
+    check('群馬 基準日 11/5：11/8（番号3）からシフト_データ', r.gunma1105 === 3, r.gunma1105);
+    check('群馬 基準日 11/1：7日間（〜11/7）すべて旧（-1）', r.gunma1101 === -1, r.gunma1101);
     check('南丹 基準日 11/5：11/8（番号3）からシフト_データ', r.nantan1105 === 3, r.nantan1105);
     check('南丹 基準日 11/1：7日間（〜11/7）すべて旧（-1）', r.nantan1101 === -1, r.nantan1101);
     check('切り替え日が未定(null)の拠点は全部シフト_データ（0）', r.noDate === 0, r.noDate);
@@ -320,8 +322,24 @@ async function rowTexts(page, attr) {
       const oldDash = JSON.parse(JSON.stringify(oldRes)); oldDash.perDayTotal[1] = null;
       const b = T.mergeLaborResults(oldDash, newRes, 3, basis);
       const c = T.mergeLaborResults(null, newRes, 3, basis);
-      return { a, b, c };
+      // 群馬の出荷場シートの補足と同じ書き方（「名前（M/D〜M/D）」「名前（M/D）」）
+      const withNotes = JSON.parse(JSON.stringify(oldRes));
+      withNotes.notices = [
+        '次の月度の勤務表がないため、出勤かどうか判断できない空欄を計上していません：高山（11/11〜11/13）（次の月度のシートを設定すると判断できます）',
+        '次の月度の勤務表がないため、出勤かどうか判断できない空欄を計上していません：平本（11/14）（次の月度のシートを設定すると判断できます）',
+        '勤務表で出勤かどうか判断できない空欄があるため計上していません：鈴木（11/9〜11/12）',
+        '標準労働時間シート未登録のため8h/日で計算：佐藤',
+        '次の月度まで休みの記載がないため、休みとして扱っています：田中（11/20）',
+      ];
+      withNotes.warnings = ['日付の書き方の確認：11/12'];
+      const d = T.mergeLaborResults(withNotes, newRes, 3, basis);
+      return { a, b, c, d };
     });
+    check('組み合わせ：旧の補足のうち、新の日（11/11〜）のことだけを書いたもの（高山 11/11〜11/13・平本 11/14）は出さない',
+      m.d.notices.length === 3 && !m.d.notices.some(s => /高山|平本/.test(s)), m.d.notices);
+    check('組み合わせ：旧の日を含むもの（鈴木 11/9〜11/12）・日付の無いもの（佐藤）・7日間の外の日付（田中 11/20）は残す',
+      ['鈴木', '佐藤', '田中'].every(n => m.d.notices.some(s => s.indexOf(n) !== -1 && s.indexOf('旧の勤務表（〜11/10）：') === 0)), m.d.notices);
+    check('組み合わせ：旧の注意（警告）も同じく、新の日のことだけなら出さない', m.d.warnings.length === 0, m.d.warnings);
     check('組み合わせ：11/8〜11/10 は旧、11/11〜は新の値', JSON.stringify(m.a.perDayTotal) === JSON.stringify([8, 5, 0, 8, 4, 0, null]) && JSON.stringify(m.a.perDayAttendance) === JSON.stringify([1, 1, 0, 1, 1, 0, null]), m.a);
     check('組み合わせ：同じ名前（空白違い）の人は人別内訳で1行にまとまる', m.a.personBreakdown.length === 1 && JSON.stringify(m.a.personBreakdown[0].dayHours) === JSON.stringify([8, 5, 0, 8, 4, 0, null]), m.a.personBreakdown);
     check('組み合わせ：旧の日に「－」が無ければ、旧の「日付がありません」の注記は出さない', m.a.periodNotices.length === 1 && m.a.periodNotices[0].indexOf('拠点シフト表（11/11〜）：') === 0, m.a.periodNotices);
