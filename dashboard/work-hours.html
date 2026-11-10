@@ -8517,7 +8517,9 @@ const PLANNER90T_WEEKS = [
   { from: '2026-11-09', to: '2026-11-15', 'いなべ': [6600, 5392, 3], '群馬': [6410, 5515, 4], '南丹': [4815, 4103, 2] },
   { from: '2026-11-16', to: '2026-11-22', 'いなべ': [6435, 5648, 4], '群馬': [6865, 5776, 4], '南丹': [4795, 4297, 3] },
   { from: '2026-11-23', to: '2026-11-29', 'いなべ': [6950, 5903, 4], '群馬': [6965, 6035, 5], '南丹': [4980, 4491, 3] },
-  { from: '2026-11-30', to: '2026-12-06', 'いなべ': [7260, 6159, 5], '群馬': [7430, 6298, 5], '南丹': [5510, 4685, 4] },
+  { from: '2026-11-30', to: '2026-12-06', 'いなべ': [7260, 6159, 5], '群馬': [7430, 6298, 5], '南丹': [5510, 4685, 4],
+    // 月をまたぐ週は月ごとの内訳も持つ（[収穫量kg, 出荷量kg]）。標準工数を収穫量・出荷量の比率で月から週へ配るときに使う
+    byMonth: { '2026/11': { 'いなべ': [980, 880], '群馬': [1260, 900], '南丹': [520, 669] }, '2026/12': { 'いなべ': [6280, 5279], '群馬': [6170, 5398], '南丹': [4990, 4016] } } },
   { from: '2026-12-07', to: '2026-12-13', 'いなべ': [7325, 6414, 6], '群馬': [7740, 6559, 5], '南丹': [5715, 4880, 5] },
   { from: '2026-12-14', to: '2026-12-20', 'いなべ': [7540, 6669, 6], '群馬': [7690, 6820, 6], '南丹': [5635, 5074, 5] },
   { from: '2026-12-21', to: '2026-12-27', 'いなべ': [10915, 9814, 5], '群馬': [10480, 9524, 5], '南丹': [8695, 7885, 4] },
@@ -8566,6 +8568,33 @@ function planCmpMonthlyToWeekHeadcount(monthly, months, week) {
   if (!days) return null;
   const r = Math.round(sum / days * 10) / 10;
   return r !== 0 ? r : null;
+}
+
+// 週(week)のうち、ある月(month、'2026/11'の形)に入る分の収穫量(k=0)・出荷量(k=1)を、sitesの合計で返す。
+// 月をまたぐ週は byMonth の内訳を使う（内訳が無い週は、週がまるごとその月に入るときだけ週の値を使う）
+function planCmpWeekVolumeInMonth(week, month, sites, k) {
+  const parts = planCmpWeekMonthParts(week);
+  return sites.reduce((s, site) => {
+    if (week.byMonth) return s + (((week.byMonth[month] || {})[site] || [])[k] || 0);
+    return s + (parts.length === 1 && parts[0].month === month ? ((week[site] || [])[k] || 0) : 0);
+  }, 0);
+}
+
+// 月ごとの標準工数（monthly、monthsと同じ並び）を、収穫量(k=0)または出荷量(k=1)の比率で週に配る。純粋関数。
+// 週の時間 ＝ Σ（その月の時間 × その週のうちその月の収穫量(出荷量) ÷ その月の収穫量(出荷量)の合計）。
+// 月の合計は変わらない（11・12月の週をすべて足すと月の値に戻る）。その月の量が0のときは日数で等分する
+function planCmpMonthlyToWeekByVolume(monthly, months, weeks, wi, sites, k) {
+  const week = weeks[wi];
+  let sum = 0, any = false;
+  planCmpWeekMonthParts(week).forEach(p => {
+    const mi = months.indexOf(p.month);
+    const v = mi >= 0 ? monthly[mi] : null;
+    if (typeof v !== 'number' || isNaN(v)) return;
+    const monthTotal = weeks.reduce((s, w) => s + planCmpWeekVolumeInMonth(w, p.month, sites, k), 0);
+    const share = monthTotal > 0 ? planCmpWeekVolumeInMonth(week, p.month, sites, k) / monthTotal : p.days / p.dim;
+    sum += v * share; any = true;
+  });
+  return any ? Math.round(sum * 10) / 10 : null;
 }
 
 function planCmpWeekLabel(week) {
@@ -10189,7 +10218,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
       <thead><tr>${head.map((h, i) => `<th style="${th}${i === 0 ? ';text-align:left' : ''}">${h}</th>`).join('')}</tr></thead>
       <tbody>${rows.map(r => line(r, false)).join('')}${line(tot, true)}</tbody></table>
       <div style="font-size:0.72rem;color:#8892a4;margin-top:6px;line-height:1.6">
-        実績工数・標準労働時間・標準工数は「比較（繁忙期見込み）＞拠点サマリ」と同じ計算の月の値を、週に入る日数で等分した値です（例：11/30〜12/6 ＝ 11月の1/30 ＋ 12月の6/31）。
+        実績工数・標準労働時間・標準工数は「比較（繁忙期見込み）＞拠点サマリ」と同じ計算の月の値を週に配った値です（月の合計は同じ）。
+        標準工数は、栽培の作業＝プランナーの収穫量の比率、出荷の作業＝出荷量の比率で配ります（収穫量・出荷量が多い週ほど多くなる）。
+        固定時間の作業（その他間接業・納品書・伝票作成など）・配送、実績工数・標準労働時間は日数で等分します（例：11/30〜12/6 ＝ 11月の1/30 ＋ 12月の6/31）。
         棒の人数（◯人・計◯人）は月の人数のまま（2か月にまたがる週は日数で重み付けした平均）。
         収穫量・出荷量・投入コンテナは収穫帯プランナー90t（下振れ版、2026/11/10時点の計画）の週別の値です。
         第1週は11/1〜11/8の8日、最後の週は12/28〜12/31の4日です。
@@ -10598,13 +10629,25 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
       const toWeekH = arr => WEEKS.map(w => planCmpMonthlyToWeekHours(arr || [], planMonths, w));
       const toWeekN = arr => arr ? WEEKS.map(w => planCmpMonthlyToWeekHeadcount(arr, planMonths, w)) : arr;
       const plannerSum = (w, k) => sitesToShow.reduce((s, site) => s + ((w[site] || [])[k] || 0), 0);
+      // 標準工数の作業区分ごとに、月から週への配り方を決める：
+      // 栽培（固定時間以外）＝収穫量の比率、出荷（固定時間以外）＝出荷量の比率、
+      // 固定時間（その他間接業・納品書など）と配送＝日数で等分
+      datasets.filter(ds => ds._stdGroup).forEach((ds, ri) => { ds._stdRow = allDivRows[ri]; });
+      const volumeKeyForRow = r => {
+        if (!r || r.col === 'fixedH') return null;
+        if (r.div === '栽培') return 0;
+        if (r.div === '出荷') return 1;
+        return null;
+      };
       datasets.forEach(ds => {
         if (ds._volumeLine) {
           ds.data = WEEKS.map(w => plannerSum(w, ds.label === DIV_METRIC['栽培'] ? 0 : 1) || null);
           ds.label = ds.label + '・プランナー90t';
           return;
         }
-        ds.data = toWeekH(ds.data);
+        const vk = ds._stdGroup ? volumeKeyForRow(ds._stdRow) : null;
+        ds.data = vk === null ? toWeekH(ds.data)
+          : WEEKS.map((_, wi) => planCmpMonthlyToWeekByVolume(ds.data || [], planMonths, WEEKS, wi, sitesToShow, vk));
         if (ds._segmentHeadcount) ds._segmentHeadcount = toWeekN(ds._segmentHeadcount);
         if (ds._stackTotalHeadcount) ds._stackTotalHeadcount = toWeekN(ds._stackTotalHeadcount);
       });
@@ -11212,7 +11255,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
         <div class="chart-section-label" style="flex-shrink:0">${weeklyMode ? '📊比較（週間 11〜12月）' : '📊比較（繁忙期見込み）'}／ ファーム勤務時間 &gt; 標準労働時間
           <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
         </div>
-        <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定${weeklyMode ? '　（①〜③は月の値を週の日数で等分）　④収穫量・出荷量＞収穫帯プランナー90t（週別）' : ''}</div>
+        <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定${weeklyMode ? '　（①②は月の値を日数で等分、③は栽培＝収穫量・出荷＝出荷量の比率で週に配分）　④収穫量・出荷量＞収穫帯プランナー90t（週別）' : ''}</div>
         <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0;${weeklyMode ? 'display:none' : ''}">表示月</span>
           <div style="position:relative;display:inline-block;${weeklyMode ? 'display:none' : ''}">
