@@ -2267,6 +2267,8 @@ function rerenderCurrentView() {
     renderStdHoursTab();
   } else if (activeMode === 'plancompare2') {
     renderPlanCompareTab2();
+  } else if (activeMode === 'plancompareweek') {
+    renderPlanCompareTab2({ weekly: true });
   } else if (activeMode === 'decplan') {
     renderDecPlanTab();
   }
@@ -2275,7 +2277,7 @@ function rerenderCurrentView() {
 
 /* ── Tabs ──────────────────────────────────────────────────────── */
 let activeGroup = 'jisseki'; // 'jisseki' | 'yojitsu' | 'settings'
-const YOJITSU_MODES = ['plan', 'planstdhours', 'plancompare2', 'decplan'];
+const YOJITSU_MODES = ['plan', 'planstdhours', 'plancompare2', 'plancompareweek', 'decplan'];
 // 「設定」グループ（絞り込みフィルターの対象外。今後ほかの設定タブもここに追加する）
 const SETTINGS_MODES = ['stdset'];
 
@@ -2454,6 +2456,12 @@ function renderSubTabs(bases) {
       {
         cls: 'plancompare2-tab', text: '📊 比較（繁忙期見込み）', mode: 'plancompare2',
         render: () => { renderPlanCompareTab2(); },
+      },
+      {
+        // 比較（繁忙期見込み）の週間版（11〜12月）。棒は月の値を週の日数で等分、
+        // 収穫量・出荷量は収穫帯プランナー90tの週別の値（PLANNER90T_WEEKS）
+        cls: 'plancompare2-tab plancompareweek-tab', text: '📊 比較（週間 11〜12月）', mode: 'plancompareweek',
+        render: () => { renderPlanCompareTab2({ weekly: true }); },
       },
       {
         cls: 'dec-plan-tab', text: '📅 26/12向け計画', mode: 'decplan',
@@ -8487,6 +8495,8 @@ function renderActiveTabContent(summarySubtab) {
     renderCompareSiteTab();
   } else if (activeMode === 'plancompare2') {
     renderPlanCompareTab2();
+  } else if (activeMode === 'plancompareweek') {
+    renderPlanCompareTab2({ weekly: true });
   } else if (activeMode === 'plan') {
     renderPlanTab();
   } else if (activeMode === 'planstdhours') {
@@ -8497,9 +8507,75 @@ function renderActiveTabContent(summarySubtab) {
   renderTransferAlerts();
 }
 
+/* ── 予実＞比較（週間 11〜12月）タブ用：収穫帯プランナー90t（下振れ版、
+   https://claude.ai/artifact/ELv5yfWCv9sTEZ8KhWMSNJ ）の週別の計画値（2026/11/10 時点）。
+   週の区切りはプランナーの②週間の表と同じ（月曜はじまり。11/1(日)は次の週にまとめる。
+   最後の週は12/31まで）。値は [収穫量kg, 出荷量kg, 投入コンテナ数]。プランナーの投入案は
+   「下振れ案」（11・12月 3拠点出荷 65t／90t）。プランナーを組み直したら、ここも差し替える ── */
+const PLANNER90T_WEEKS = [
+  { from: '2026-11-01', to: '2026-11-08', 'いなべ': [6840, 5600, 6], '群馬': [6695, 4353, 6], '南丹': [5585, 5438, 4] },
+  { from: '2026-11-09', to: '2026-11-15', 'いなべ': [6600, 5392, 3], '群馬': [6410, 5515, 4], '南丹': [4815, 4103, 2] },
+  { from: '2026-11-16', to: '2026-11-22', 'いなべ': [6435, 5648, 4], '群馬': [6865, 5776, 4], '南丹': [4795, 4297, 3] },
+  { from: '2026-11-23', to: '2026-11-29', 'いなべ': [6950, 5903, 4], '群馬': [6965, 6035, 5], '南丹': [4980, 4491, 3] },
+  { from: '2026-11-30', to: '2026-12-06', 'いなべ': [7260, 6159, 5], '群馬': [7430, 6298, 5], '南丹': [5510, 4685, 4] },
+  { from: '2026-12-07', to: '2026-12-13', 'いなべ': [7325, 6414, 6], '群馬': [7740, 6559, 5], '南丹': [5715, 4880, 5] },
+  { from: '2026-12-14', to: '2026-12-20', 'いなべ': [7540, 6669, 6], '群馬': [7690, 6820, 6], '南丹': [5635, 5074, 5] },
+  { from: '2026-12-21', to: '2026-12-27', 'いなべ': [10915, 9814, 5], '群馬': [10480, 9524, 5], '南丹': [8695, 7885, 4] },
+  { from: '2026-12-28', to: '2026-12-31', 'いなべ': [5050, 4207, 1], '群馬': [5250, 4082, 0], '南丹': [4260, 3379, 0] },
+];
+
+// 週（from〜to、'YYYY-MM-DD'）が各月に何日かかるかを返す。純粋関数。
+// 戻り値 [{ month: '2026/11'（planMonthsと同じ形）, days: その週のうちその月の日数, dim: その月の日数 }]
+function planCmpWeekMonthParts(week) {
+  const parts = {};
+  const [fy, fm, fd] = week.from.split('-').map(Number);
+  const [ty, tm, td] = week.to.split('-').map(Number);
+  const end = Date.UTC(ty, tm - 1, td);
+  for (let t = Date.UTC(fy, fm - 1, fd); t <= end; t += 864e5) {
+    const d = new Date(t);
+    const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
+    const key = `${y}/${m}`;
+    if (!parts[key]) parts[key] = { month: key, days: 0, dim: new Date(Date.UTC(y, m, 0)).getUTCDate() };
+    parts[key].days++;
+  }
+  return Object.values(parts);
+}
+
+// 月ごとの時間（monthly、months と同じ並び）を、週に入る日数で等分して週の時間にする。純粋関数。
+// 週の時間 ＝ Σ（その月の時間 × その週のうちその月の日数 ÷ その月の日数）。
+// 関係する月の値がすべて空(null)なら null
+function planCmpMonthlyToWeekHours(monthly, months, week) {
+  let sum = 0, any = false;
+  planCmpWeekMonthParts(week).forEach(p => {
+    const mi = months.indexOf(p.month);
+    const v = mi >= 0 ? monthly[mi] : null;
+    if (typeof v === 'number' && !isNaN(v)) { sum += v * p.days / p.dim; any = true; }
+  });
+  return any ? Math.round(sum * 10) / 10 : null;
+}
+
+// 人数（月の人数）を週の人数にする。人数は時間と違って週に等分しないので、
+// その週にかかる月の人数を日数で重み付けした平均にする（1つの月に収まる週はその月の人数のまま）
+function planCmpMonthlyToWeekHeadcount(monthly, months, week) {
+  let sum = 0, days = 0;
+  planCmpWeekMonthParts(week).forEach(p => {
+    const mi = months.indexOf(p.month);
+    const v = mi >= 0 ? monthly[mi] : null;
+    if (typeof v === 'number' && !isNaN(v)) { sum += v * p.days; days += p.days; }
+  });
+  if (!days) return null;
+  const r = Math.round(sum / days * 10) / 10;
+  return r !== 0 ? r : null;
+}
+
+function planCmpWeekLabel(week) {
+  const md = s => { const [, m, d] = s.split('-').map(Number); return `${m}/${d}`; };
+  return `${md(week.from)}〜${md(week.to)}`;
+}
+
 /* ── 予実・比較（繁忙期見込み）タブ: 予定標準工数 vs 実績工数（3拠点マージシートを
    使った未来月の標準/最大労働時間補完機能つき） ──────────────────────────── */
-function renderPlanCompareTab2() {
+function renderPlanCompareTab2(tabOpts) {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="loading">比較データを計算中...</div>';
   if (!allData) { main.innerHTML = '<div class="error-msg">勤務データが未ロードです</div>'; return; }
@@ -8515,14 +8591,17 @@ function renderPlanCompareTab2() {
       return null;
     }),
   ]).then(([planData, prodData, , mergeData]) => {
-    renderPlanCompareCharts2(planData, prodData, mergeData);
+    renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts);
   }).catch(e => {
     main.innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
   });
 }
 
-function renderPlanCompareCharts2(planData, prodData, mergeData) {
+function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
   const main = document.getElementById('main');
+  // 週間版（予実＞比較（週間 11〜12月）タブ）のときtrue。拠点サマリの計算をそのまま使い、
+  // 月の値を週の日数で等分して描く（renderSiteSummaryView(true)）
+  const weeklyMode = !!(tabOpts && tabOpts.weekly);
   const { months: planMonths, records: rawPlanRecords } = planData;
 
   // 境目（ACTUAL_CUTOFFと同じ、整理済み_Mの実データ最終月）以前の月は生産実績データ、
@@ -9407,7 +9486,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // 合算した拠点別サマリという性質上、「全拠点合計」ボタンは対象外とし、
   // いなべ/群馬/南丹の3拠点のみ表示する
   function siteTabBarHtml() {
-    const tabs = (planCmpSubtab === 'sitesummary' || planCmpSubtab === 'staffplan') ? availSites : SITE_TABS;
+    const tabs = weeklyMode ? SITE_TABS : (planCmpSubtab === 'sitesummary' || planCmpSubtab === 'staffplan') ? availSites : SITE_TABS;
     return tabs.map(t =>
       `<button class="plancmp2-site-tab${planCmpSiteTab === t ? ' active' : ''}" data-site="${t}"
         style="padding:4px 14px;border-radius:6px;border:1px solid ${planCmpSiteTab === t ? '#38bdf8' : '#3a3f5c'};background:${planCmpSiteTab === t ? '#38bdf8' : 'transparent'};color:${planCmpSiteTab === t ? '#0f1117' : '#8892a4'};font-size:0.8rem;cursor:pointer;font-weight:${planCmpSiteTab === t ? '600' : '400'}">${t}</button>`
@@ -9421,10 +9500,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (!el) return;
     // 'sitesummary'（拠点サマリ）・'staffplan'（要員計画）も拠点タブで選択中拠点を
     // 切り替えられるようにする
-    if (planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary' && planCmpSubtab !== 'staffplan') { el.style.display = 'none'; el.innerHTML = ''; return; }
+    if (!weeklyMode && planCmpSubtab !== 'site' && planCmpSubtab !== 'sitesummary' && planCmpSubtab !== 'staffplan') { el.style.display = 'none'; el.innerHTML = ''; return; }
     // 拠点サマリ・要員計画モードには「全拠点合計」が存在しないため、他モードから
     // 切り替えた直後にplanCmpSiteTabが「全拠点合計」のままだった場合は先頭拠点に切り替える
-    if ((planCmpSubtab === 'sitesummary' || planCmpSubtab === 'staffplan') && planCmpSiteTab === '全拠点合計') {
+    if (!weeklyMode && (planCmpSubtab === 'sitesummary' || planCmpSubtab === 'staffplan') && planCmpSiteTab === '全拠点合計') {
       planCmpSiteTab = availSites[0];
     }
     el.style.display = 'flex';
@@ -10087,19 +10166,64 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // チャート構造：実績工数／標準労働時間＋最大労働時間／予定標準工数（工程別）の
   // 3段積み上げ）を、栽培・出荷の区別なく1本のチャートに統合して表示する。
   // 実績工数のみ、栽培・出荷の内訳がわかるよう暖色系2色の2セグメントに分ける
-  function renderSiteSummaryView() {
+  // 予実＞比較（週間 11〜12月）タブの下の表。rowsはrenderSiteSummaryView(true)で作った週ごとの値
+  function renderPlanCmpWeekTable(rows) {
+    const el = document.getElementById('plancmpweek-table');
+    if (!el || !rows) return;
+    const f = v => (v == null || v === 0) ? '－' : Math.round(v).toLocaleString('ja-JP');
+    const th = 'padding:6px 10px;border-bottom:1px solid #3a3f5c;color:#8892a4;font-weight:600;white-space:nowrap;text-align:right';
+    const td = 'padding:5px 10px;border-bottom:1px solid #2a2f4a;white-space:nowrap;text-align:right';
+    const head = ['週', '日数', '実績工数(h)', '標準労働時間(h)', '標準工数(h)', '差（標準労働時間−標準工数）(h)', '収穫量(kg)', '出荷量(kg)', '投入コンテナ'];
+    const sum = k => rows.reduce((s, r) => s + (r[k] || 0), 0);
+    const tot = { label: '11〜12月 計', days: sum('days'), actual: sum('actual'), labor: sum('labor'), std: sum('std'), harvest: sum('harvest'), ship: sum('ship'), input: sum('input') };
+    const line = (r, bold) => {
+      const diff = r.labor && r.std ? r.labor - r.std : null;
+      const diffTxt = diff == null ? '－' : (diff >= 0 ? '+' : '') + Math.round(diff).toLocaleString('ja-JP');
+      const w = bold ? 'font-weight:700;border-top:2px solid #3a3f5c;' : '';
+      return `<tr><td style="${td};${w}text-align:left">${r.label}</td><td style="${td};${w}">${r.days}</td><td style="${td};${w}">${f(r.actual)}</td>
+        <td style="${td};${w}">${f(r.labor)}</td><td style="${td};${w}">${f(r.std)}</td>
+        <td style="${td};${w}color:${diff != null && diff < 0 ? '#f87171' : '#e2e8f0'}">${diffTxt}</td>
+        <td style="${td};${w}">${f(r.harvest)}</td><td style="${td};${w}">${f(r.ship)}</td><td style="${td};${w}">${r.input || r.input === 0 ? r.input : '－'}</td></tr>`;
+    };
+    el.innerHTML = `<table style="border-collapse:collapse;font-size:0.8rem;color:#e2e8f0;font-variant-numeric:tabular-nums">
+      <thead><tr>${head.map((h, i) => `<th style="${th}${i === 0 ? ';text-align:left' : ''}">${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => line(r, false)).join('')}${line(tot, true)}</tbody></table>
+      <div style="font-size:0.72rem;color:#8892a4;margin-top:6px;line-height:1.6">
+        実績工数・標準労働時間・標準工数は「比較（繁忙期見込み）＞拠点サマリ」と同じ計算の月の値を、週に入る日数で等分した値です（例：11/30〜12/6 ＝ 11月の1/30 ＋ 12月の6/31）。
+        棒の人数（◯人・計◯人）は月の人数のまま（2か月にまたがる週は日数で重み付けした平均）。
+        収穫量・出荷量・投入コンテナは収穫帯プランナー90t（下振れ版、2026/11/10時点の計画）の週別の値です。
+        第1週は11/1〜11/8の8日、最後の週は12/28〜12/31の4日です。
+      </div>`;
+  }
+
+  // weekly＝true：予実＞比較（週間 11〜12月）タブ。月の計算は拠点サマリとまったく同じに
+  // 全月分で行い、グラフを作る直前に、時間は週に入る日数で等分（planCmpMonthlyToWeekHours）、
+  // 人数は日数で重み付けした平均（planCmpMonthlyToWeekHeadcount）にして週の棒にする。
+  // 収穫量・出荷量の折れ線は収穫帯プランナー90tの週別の値（PLANNER90T_WEEKS）に差し替える
+  function renderSiteSummaryView(weekly) {
     const content = document.getElementById('compare2-content');
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
-    const vm = visMonths();
+    // 週間版は表示月の選択に関係なく全月で計算する（週に等分するとき11・12月以外の月も使わないが、
+    // 並びをplanMonthsとそろえておくため）。外側のsl/visMonthsはこの関数の中だけ置き換える
+    const sl = weekly ? (arr => arr.slice()) : (arr => arr.filter((_, i) => planCmpSelected.has(i)));
+    const vm = weekly ? planMonths.slice() : visMonths();
+    const WEEKS = PLANNER90T_WEEKS;
 
     let html = `<div id="plancmp2-newstaffalerts"></div><div class="schart-section">
-      <div class="schart-header">実績工数（業務区分別）</div>
-      ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
+      <div class="schart-header">${weekly ? '週別の工数（業務区分別）' : '実績工数（業務区分別）'}</div>
+      ${chartWrapHtml('plansitesum2-combined', weekly ? WEEKS.length : vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
-    html += `<div class="schart-section">
-      <div class="schart-header">実績工数（雇用区分別）</div>
-      ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
-    </div>`;
+    if (weekly) {
+      html += `<div class="schart-section">
+        <div class="schart-header">週別の表</div>
+        <div id="plancmpweek-table" style="overflow-x:auto"></div>
+      </div>`;
+    } else {
+      html += `<div class="schart-section">
+        <div class="schart-header">実績工数（雇用区分別）</div>
+        ${chartWrapHtml(`plansitesum2-${planCmpSiteTab}-emp`, vm.length, { heightPx: 320, inlineHeight: true, forceResponsive: true })}
+      </div>`;
+    }
     content.innerHTML = html;
 
     // 上段チャートの「栽培（実績）」「出荷（実績）」棒専用：画面上部の雇用形態
@@ -10468,8 +10592,37 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       tension: 0.3, yAxisID: 'y2', order: 0,
       _volumeLine: true, _unit: DIV_UNIT['出荷'],
     });
+    // 週間版：月の値を週に変換する（datasetsをその場で置き換える）
+    let chartLabels = vm, chartYMax = sharedMax, chartVolMax = volMax, weekRows = null;
+    if (weekly) {
+      const toWeekH = arr => WEEKS.map(w => planCmpMonthlyToWeekHours(arr || [], planMonths, w));
+      const toWeekN = arr => arr ? WEEKS.map(w => planCmpMonthlyToWeekHeadcount(arr, planMonths, w)) : arr;
+      const plannerSum = (w, k) => sitesToShow.reduce((s, site) => s + ((w[site] || [])[k] || 0), 0);
+      datasets.forEach(ds => {
+        if (ds._volumeLine) {
+          ds.data = WEEKS.map(w => plannerSum(w, ds.label === DIV_METRIC['栽培'] ? 0 : 1) || null);
+          ds.label = ds.label + '・プランナー90t';
+          return;
+        }
+        ds.data = toWeekH(ds.data);
+        if (ds._segmentHeadcount) ds._segmentHeadcount = toWeekN(ds._segmentHeadcount);
+        if (ds._stackTotalHeadcount) ds._stackTotalHeadcount = toWeekN(ds._stackTotalHeadcount);
+      });
+      chartLabels = WEEKS.map(planCmpWeekLabel);
+      const stackTotals = stack => WEEKS.map((_, wi) => datasets
+        .filter(ds => ds.type === 'bar' && ds.stack === stack)
+        .reduce((s, ds) => s + (ds.data[wi] > 0 ? ds.data[wi] : 0), 0));
+      const actualW = stackTotals('actual'), laborW = stackTotals('stdhours'), stdW = stackTotals('std');
+      chartYMax = computeSharedAxisMax([actualW, laborW, stdW], 100) || undefined;
+      chartVolMax = computeSharedAxisMax(datasets.filter(ds => ds._volumeLine).map(ds => ds.data.filter(v => v != null)), 1000) || undefined;
+      weekRows = WEEKS.map((w, wi) => ({
+        label: chartLabels[wi], days: planCmpWeekMonthParts(w).reduce((s, p) => s + p.days, 0),
+        actual: actualW[wi], labor: laborW[wi], std: stdW[wi],
+        harvest: plannerSum(w, 0), ship: plannerSum(w, 1), input: plannerSum(w, 2),
+      }));
+    }
     const siteSumCombinedChart = new Chart(ctx, {
-      data: { labels: vm, datasets },
+      data: { labels: chartLabels, datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
@@ -10499,13 +10652,23 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       plugins: [siteSummaryHeadcountLabelsPlugin()],
     });
     planCmpChartInstances['sitesum-combined'] = siteSumCombinedChart;
+    if (weekly) {
+      siteSumCombinedChart.options.scales.y.max = chartYMax;
+      siteSumCombinedChart.options.scales.y2.max = chartVolMax;
+      siteSumCombinedChart.update('none');
+    }
     // このグラフにもセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
     // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
-    fitSegmentLabelChartHeight(siteSumCombinedChart, [], sharedMax);
+    fitSegmentLabelChartHeight(siteSumCombinedChart, [], chartYMax);
     fitChartHeightForTooltip(siteSumCombinedChart);
     // 棒ごとの総合計ラベル（「計◯人」）がグラフ上端で切れないよう、必要なら
     // さらに高さを広げる（上の2つのfit呼び出しの後に実行し、今の高さより低くはしない）
-    fitChartHeightForHeadcountTotals(siteSumCombinedChart, sharedMax);
+    fitChartHeightForHeadcountTotals(siteSumCombinedChart, chartYMax);
+
+    if (weekly) {
+      renderPlanCmpWeekTable(weekRows);
+      return;
+    }
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
@@ -11029,7 +11192,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   function renderContent() {
     destroyCharts();
     renderSiteTabBarFixed();
-    if (planCmpSubtab === 'sitesummary') renderSiteSummaryView();
+    if (weeklyMode) renderSiteSummaryView(true);
+    else if (planCmpSubtab === 'sitesummary') renderSiteSummaryView();
     else if (planCmpSubtab === 'summary') renderSummaryView();
     else if (planCmpSubtab === 'table') renderTableView();
     else if (planCmpSubtab === 'staffplan') renderStaffPlanView();
@@ -11045,13 +11209,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   main.innerHTML = `
     <div class="compare-shell panel-fit-content">
       <div class="compare-header-row" style="flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
-        <div class="chart-section-label" style="flex-shrink:0">📊比較（繁忙期見込み）／ ファーム勤務時間 &gt; 標準労働時間
+        <div class="chart-section-label" style="flex-shrink:0">${weeklyMode ? '📊比較（週間 11〜12月）' : '📊比較（繁忙期見込み）'}／ ファーム勤務時間 &gt; 標準労働時間
           <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
         </div>
-        <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定</div>
+        <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定${weeklyMode ? '　（①〜③は月の値を週の日数で等分）　④収穫量・出荷量＞収穫帯プランナー90t（週別）' : ''}</div>
         <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0">表示月</span>
-          <div style="position:relative;display:inline-block">
+          <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0;${weeklyMode ? 'display:none' : ''}">表示月</span>
+          <div style="position:relative;display:inline-block;${weeklyMode ? 'display:none' : ''}">
             <button id="plancmp2-dd-btn" style="display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;border:1px solid #3a3f5c;background:#1a1f35;color:#e2e8f0;font-size:0.8rem;cursor:pointer;min-width:160px;justify-content:space-between">
               <span id="plancmp2-dd-label">全月選択中</span>
               <span style="font-size:0.6rem">▼</span>
@@ -11066,7 +11230,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
           </div>
           <div id="plancmp2-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap"></div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;${weeklyMode ? 'display:none' : ''}">
           <div class="transfer-toggle" id="plancmp2-subtabs">
             <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点・業務別</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'sitesummary' ? ' active' : ''}" data-tab="sitesummary">拠点サマリ</button>
