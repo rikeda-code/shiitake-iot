@@ -144,6 +144,7 @@
     #summary-transfer-alerts .transfer-alert-box { margin: 12px 0; }
     #comparesite-stdhours-alerts .transfer-alert-box, #comparesite-changeC-alerts .transfer-alert-box, #summarystdhours-changeC-alerts .transfer-alert-box, #plancmp2-changeC-alerts .transfer-alert-box, #decplan-changeC-alerts .transfer-alert-box { margin: 0; }
     #plancmp2-sitealerts .transfer-alert-box { margin: 0; }
+    #plancmp2-newstaffalerts .transfer-alert-box { margin: 0 0 8px; }
     .transfer-alert-box {
       margin: 16px 32px 0;
       background: rgba(250,204,21,0.08);
@@ -2219,6 +2220,25 @@ function renderPlanCompareStdHoursTierAlerts(alerts) {
     </div>`;
 }
 
+// 「予実＞比較（繁忙期見込み）＞拠点サマリ・要員計画」専用：B=2（新規要員）で
+// 標準労働時間シートの行が見つからない人・R列が空欄の人の注意（collectNewStaffMergeRowAlerts()）
+function renderPlanCompareNewStaffAlerts(alerts) {
+  const target = document.getElementById('plancmp2-newstaffalerts');
+  if (!target) return;
+  if (!alerts || !alerts.length) { target.innerHTML = ''; return; }
+
+  const icon = alertsCollapsed ? '▶' : '▼';
+  const listStyle = alertsCollapsed ? ' style="display:none"' : '';
+  target.innerHTML = `
+    <div class="transfer-alert-box">
+      <div class="transfer-alert-title" onclick="toggleTransferAlerts()">
+        <span class="transfer-alert-toggle-icon">${icon}</span>
+        <span>⚠ 新規要員の標準労働時間が取れません（${alerts.length}件）</span>
+      </div>
+      <ul class="transfer-alert-list"${listStyle}>${alerts.map(a => `<li>${a.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')}</ul>
+    </div>`;
+}
+
 // トグル切替時に、現在表示中のタブ・サブタブだけを再描画する
 function rerenderCurrentView() {
   if (activeMode === 'site') {
@@ -3979,6 +3999,92 @@ function collectCrossSheetAttributeAlerts(employees, adjustRecords, mergeRows) {
   });
 
   return alerts;
+}
+
+// ── 予実＞比較（繁忙期見込み）の未来月「標準労働時間」棒：対象者の振り分け ──────
+// 判定は整理済み_Mの登録内容（B列・I列）と、実績が入っている最後の月（締まった月、
+// cutoffYm＝YYYYMM）だけで行う。各人の実績の有無は見ない。
+//  - B=1：既存の要員（青）
+//  - B=2：I列の月が締まった（startYm <= cutoffYm）→ 既存の要員（青）
+//         I列の月がまだ締まっていない、またはI列が空欄 → 新規要員（黄）
+//  - B=3：既存の要員（青）。I列の月が最後に在籍する月で、翌月からは棒に出さない
+//         （この減算はretiredByYmで行う）
+//  - それ以外（0・8・9・空欄など）：棒に出さない（null）
+// 新規要員（採用計画）の薄い黄色。入社決定（#fbbf24）と同じ黄色系で明るさだけ変え、
+// 緑の「増減」（#4ade80）とは色味で見分けられるようにする
+const NEW_STAFF_PLANNED_COLOR = '#fde68a';
+function futureStaffRole(e, cutoffYm) {
+  if (e.flag === 1 || e.flag === 3) return 'existing';
+  if (e.flag === 2) return (e.startYm != null && cutoffYm != null && e.startYm <= cutoffYm) ? 'existing' : 'newStaff';
+  return null;
+}
+
+// 新規要員（黄）を、H列の名前で「採用計画」「入社決定」に分ける。前後の空白を除いて
+// 先頭2文字が「予定」なら採用計画（planned）、それ以外は入社決定（decided）
+function newStaffKindByName(name) {
+  return String(name ?? '').trim().startsWith('予定') ? 'planned' : 'decided';
+}
+
+// 指定月(ym)がその人の在籍期間（入社の月〜最後に在籍する月）に入るか。緑の「増減」を
+// 在籍期間だけに絞るために使う。新規要員（黄）はI列の月から、B=3はI列の月まで。
+// I列が空欄の場合は期間の端が無いものとして扱う（黄・青の扱いと同じ）
+function isInFutureTenure(e, ym, cutoffYm) {
+  const role = futureStaffRole(e, cutoffYm);
+  if (role === null) return false;
+  if (role === 'newStaff') return e.startYm == null || e.startYm <= ym;
+  if (e.flag === 3) return e.startYm == null || ym <= e.startYm;
+  return true;
+}
+
+// 新規要員（黄）の月別時間を、合計・入社決定・採用計画の3つで返す。items＝[{e,row}]
+// （rowは標準労働時間シートの対応行。見つからない場合はnullで0hとして扱う）
+function sumNewStaffByYmSplit(items, monthYms) {
+  const r1 = v => Math.round(v * 10) / 10;
+  const hoursOf = ({ row }) => (row ? row.stdHours : 0);
+  const out = { newStaffByYm: {}, newStaffDecidedByYm: {}, newStaffPlannedByYm: {} };
+  (monthYms || []).forEach(ym => {
+    const eligible = items.filter(({ e }) => e.startYm == null || e.startYm <= ym);
+    if (!eligible.length) return;
+    const total = r1(eligible.reduce((s, x) => s + hoursOf(x), 0));
+    out.newStaffByYm[ym] = total;
+    const decided = eligible.filter(({ e }) => newStaffKindByName(e.name) === 'decided');
+    const planned = eligible.filter(({ e }) => newStaffKindByName(e.name) === 'planned');
+    const decidedHours = r1(decided.reduce((s, x) => s + hoursOf(x), 0));
+    if (decided.length) out.newStaffDecidedByYm[ym] = decidedHours;
+    // 採用計画は「合計−入社決定」で求め、2本を積んだ高さが合計（今までの1本の高さ）と
+    // 小数1桁まで一致するようにする（別々に四捨五入すると0.1hずれることがある）
+    if (planned.length) out.newStaffPlannedByYm[ym] = r1(total - (decided.length ? decidedHours : 0));
+  });
+  return out;
+}
+
+// 緑の「増減」（標準労働時間シートのT列以降の月別列）を、在籍期間内の月だけ合計する。
+// items＝[{e,row}]（rowがnullの人は値が無いため除外）。値が1つも無い月はキーを作らない
+function sumDeltaByYmInTenure(items, monthYms, cutoffYm) {
+  const out = {};
+  (monthYms || []).forEach(ym => {
+    let sum = 0, any = false;
+    items.forEach(({ e, row }) => {
+      if (!row || !isInFutureTenure(e, ym, cutoffYm)) return;
+      const v = row.maxByYm[ym];
+      if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; }
+    });
+    if (any) out[ym] = Math.round(sum * 10) / 10;
+  });
+  return out;
+}
+
+// B=2の人のうち、標準労働時間シートで見つからない人・R列が空欄の人の注意文を返す。
+// items＝[{e,row}]。拠点サマリ・要員計画の注意の欄に出す
+function collectNewStaffMergeRowAlerts(items) {
+  return (items || [])
+    .filter(({ e, row }) => e.flag === 2 && (!row || row.stdHoursOriginallyEmpty))
+    .map(({ e, row }) => {
+      const where = `拠点：${e.base}、業務区分：${e.workType}`;
+      return row
+        ? `新規要員の時間が取れません：${e.name}さん（${where}）は標準労働時間シートのR列（標準労働時間）が空欄です（0hとして集計、人数には数えます）`
+        : `新規要員の時間が取れません：${e.name}さん（${where}）は標準労働時間シートに見つかりません（0hとして集計、人数には数えます）`;
+    });
 }
 
 // 整理済み_MでB=2（新規要員・追加待ち）かつ開始月（startYm）が解釈できない従業員、
@@ -8509,12 +8615,36 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const out = {};
       mergeData.monthYms.forEach(ym => {
         let sum = 0, any = false;
-        items.forEach(a => { const v = a[field][ym]; if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; } });
+        items.forEach(a => { const v = (a[field] || {})[ym]; if (typeof v === 'number' && !isNaN(v)) { sum += v; any = true; } });
         if (any) out[ym] = Math.round(sum * 10) / 10;
       });
       return out;
     };
-    return { stdTotalB1, newStaffByYm: sumByYmField('newStaffByYm'), retiredByYm: sumByYmField('retiredByYm'), deltaByYm: sumByYmField('deltaByYm') };
+    return {
+      stdTotalB1, newStaffByYm: sumByYmField('newStaffByYm'),
+      newStaffDecidedByYm: sumByYmField('newStaffDecidedByYm'), newStaffPlannedByYm: sumByYmField('newStaffPlannedByYm'),
+      retiredByYm: sumByYmField('retiredByYm'), deltaByYm: sumByYmField('deltaByYm'),
+    };
+  }
+
+  // 未来月の対象者の振り分け（futureStaffRole()、トップレベル）を、このタブの締まった月
+  // （ACTUAL_CUTOFF）で行う。8つの集計関数（threeSiteMergeAgg・ByTier、および
+  // 3拠点サマリ・拠点サマリ・要員計画の雇用形態フィルタ版）が共通で使う
+  function isFutureExistingStaff(e) { return futureStaffRole(e, ACTUAL_CUTOFF) === 'existing'; }
+  function isFuturePendingNewStaff(e) { return futureStaffRole(e, ACTUAL_CUTOFF) === 'newStaff'; }
+  function threeSiteMergeNewStaffByYmSplit(items) { return sumNewStaffByYmSplit(items, mergeData.monthYms); }
+  function threeSiteMergeDeltaByYmInTenure(items) { return sumDeltaByYmInTenure(items, mergeData.monthYms, ACTUAL_CUTOFF); }
+  // 拠点サマリ・要員計画の注意の欄用：表示中の拠点・業務区分・雇用形態フィルタに該当する
+  // B=2の人と、標準労働時間シートの対応行（見つからなければnull）の組を返す
+  function threeSiteMergeNewStaffAlertItems(targetDivs, sites) {
+    if (!mergeData) return [];
+    const items = [];
+    targetDivs.forEach(div => sites.forEach(site => {
+      applyEmpTypeFilter(allData.employees.filter(e =>
+        stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== '' && e.flag === 2))
+        .forEach(e => items.push({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
+    }));
+    return items;
   }
 
   // renderSiteView()内のローカル関数findMergeRowと同じロジック（拠点(e.base)・
@@ -8536,14 +8666,16 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
   // （例：他担当の営業等）のため、B列の値に関わらず対象者から除外する（変更B・
   // 段階2の追加修正）。各対象者に対応する標準労働時間シート側の行はfindStdHoursMergeRowInDiv()
   // で検索し、そのstdHoursを使う（対応行が見つからない場合は0として扱う）。
-  // - stdTotalB1：整理済み_M側でflag===1（稼働）の従業員の、対応行stdHours合計（固定値）
-  // - newStaffByYm：整理済み_M側でflag===2（新規要員・追加待ち）の従業員のうち、
-  //   e.startYm（整理済み_M側の開始月）が未設定またはその月以前の従業員だけを対象に、
-  //   月ごとに対応行stdHoursを合計したもの（開始月を境に対象者が増えるため、月によって
-  //   値が変わる）
-  // - deltaByYm：T列以降（スタッフMの増減のみ）をflag===1・flag===2両方の対象者に
-  //   対応する行を対象に合計したもの（threeSiteMergeAggFromRows()自体は変更なし。
-  //   対応行が見つからなかった従業員はここでは除外する）
+  // 対象者の振り分けはfutureStaffRole()（トップレベル）を締まった月（ACTUAL_CUTOFF）で行う。
+  // - stdTotalB1：既存の要員（B=1・B=3、およびI列の月が締まったB=2）の、対応行stdHours合計
+  // - newStaffByYm：新規要員（I列の月がまだ締まっていないB=2）のうち、e.startYm（整理済み_M
+  //   側の開始月）が未設定またはその月以前の従業員だけを対象に、月ごとに対応行stdHoursを
+  //   合計したもの（開始月を境に対象者が増えるため、月によって値が変わる）。
+  //   newStaffDecidedByYm・newStaffPlannedByYmはその内訳（H列の名前の先頭が「予定」なら
+  //   採用計画、それ以外は入社決定。sumNewStaffByYmSplit()）
+  // - deltaByYm：T列以降（スタッフMの増減のみ）を、既存の要員・新規要員それぞれの在籍期間
+  //   （新規要員は開始月から、B=3は最後に在籍する月まで。isInFutureTenure()）の月だけ
+  //   合計したもの（対応行が見つからなかった従業員はここでは除外する）
   function threeSiteMergeAgg(div, site) {
     if (!mergeData) return null;
     const emps = allData.employees.filter(e =>
@@ -8552,8 +8684,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
     // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
     // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
-    const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
-    const newStaffMatched = emps.filter(e => e.flag === 2);
+    const matched = emps.filter(isFutureExistingStaff);
+    const newStaffMatched = emps.filter(isFuturePendingNewStaff);
     const retiringMatched = emps.filter(e => e.flag === 3);
     if (!matched.length && !newStaffMatched.length) return null;
 
@@ -8562,21 +8694,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
     const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-    const newStaffByYm = {};
-    mergeData.monthYms.forEach(ym => {
-      const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-      if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-    });
+    const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffWithRow);
     const retiredByYm = {};
     mergeData.monthYms.forEach(ym => {
       const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
       if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
     });
 
-    const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
-    const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
-    const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-    return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+    return { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedWithRow, ...newStaffWithRow]) };
   }
 
   // 「拠点・業務別」「拠点サマリ」「3拠点サマリ」「表」の標準労働時間棒（過去月）に
@@ -8809,9 +8934,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
     // （matchedWithRowに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
     // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
-    const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
+    const matchedWithRow = emps.filter(isFutureExistingStaff)
       .map(e => ({ e, row: findStdHoursMergeRowForEmployee(mergeData.rows, e) })).filter(x => x.row);
-    const newStaffWithRow = emps.filter(e => e.flag === 2)
+    const newStaffWithRow = emps.filter(isFuturePendingNewStaff)
       .map(e => ({ e, row: findStdHoursMergeRowForEmployee(mergeData.rows, e) })).filter(x => x.row);
     const retiringWithRow = emps.filter(e => e.flag === 3)
       .map(e => ({ e, row: findStdHoursMergeRowForEmployee(mergeData.rows, e) })).filter(x => x.row);
@@ -8822,18 +8947,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
       if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
       const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-      const newStaffByYm = {};
-      mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-      });
+      const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffMatchedTier);
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
         const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
       });
-      const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-      result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      result[tier] = { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedTier, ...newStaffMatchedTier]) };
     });
     return result;
   }
@@ -8892,10 +9012,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     if (ym <= ACTUAL_CUTOFF || !aggByTier) return null;
     const total = ['lower', 'fulltime', 'parttime'].reduce((s, tier) => {
       const tierAgg = aggByTier[tier];
-      const v = tierAgg ? tierAgg[field][ym] : undefined;
+      const v = tierAgg ? (tierAgg[field] || {})[ym] : undefined;
       return s + (typeof v === 'number' ? v : 0);
     }, 0);
-    if (field === 'newStaffByYm') return total > 0 ? Math.round(total * 10) / 10 : null;
+    // newStaffByYm・newStaffDecidedByYm・newStaffPlannedByYm（新規要員）は合計>0の月のみ
+    if (field.startsWith('newStaff')) return total > 0 ? Math.round(total * 10) / 10 : null;
     return total !== 0 ? Math.round(total * 10) / 10 : null;
   }
 
@@ -8926,14 +9047,24 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       backgroundColor: baseColor + opacity, borderColor: baseColor, borderWidth: 0,
       stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHoursTier: tier,
     }));
+    // opts.splitNewStaff（拠点サマリ・要員計画のみ）：新規要員を「入社決定」（下・濃い黄）と
+    // 「採用計画」（上・薄い黄）の2本に分ける。Chart.jsの積み上げは配列の順に下から
+    // 積まれるため、入社決定→採用計画の順に並べる。他のタブは今までどおり1本（1色）
+    const newStaffBars = opts.splitNewStaff
+      ? [
+        { kind: 'decided', label: `新規要員（入社決定）${suffix}`, field: 'newStaffDecidedByYm', color: newStaffColor },
+        { kind: 'planned', label: `新規要員（採用計画）${suffix}`, field: 'newStaffPlannedByYm', color: opts.newStaffPlannedColor || NEW_STAFF_PLANNED_COLOR },
+      ]
+      : [{ kind: null, label: `新規要員（開始済み）${suffix}`, field: 'newStaffByYm', color: newStaffColor }];
     return [
       ...tierBars,
-      {
-        type: 'bar', label: `新規要員（開始済み）${suffix}`,
-        data: planMonths.map((_, mi) => threeSiteMergeAggregatedNewStaffOrDeltaByTier(aggByTier, mi, 'newStaffByYm')),
-        backgroundColor: newStaffColor, borderColor: newStaffColor, borderWidth: 0,
+      ...newStaffBars.map(({ kind, label, field, color }) => ({
+        type: 'bar', label,
+        data: planMonths.map((_, mi) => threeSiteMergeAggregatedNewStaffOrDeltaByTier(aggByTier, mi, field)),
+        backgroundColor: color, borderColor: color, borderWidth: 0,
         stack, yAxisID: 'y', order: 1, _threeSiteMergeStdHours: true,
-      },
+        ...(kind ? { _newStaffKind: kind } : {}),
+      })),
       {
         type: 'bar', label: `増減${suffix}`,
         data: planMonths.map((_, mi) => threeSiteMergeAggregatedNewStaffOrDeltaByTier(aggByTier, mi, 'deltaByYm')),
@@ -9711,8 +9842,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
       // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
       // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
-      const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
-      const newStaffMatched = emps.filter(e => e.flag === 2);
+      const matched = emps.filter(isFutureExistingStaff);
+      const newStaffMatched = emps.filter(isFuturePendingNewStaff);
       const retiringMatched = emps.filter(e => e.flag === 3);
       if (!matched.length && !newStaffMatched.length) return null;
 
@@ -9721,21 +9852,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
       const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-      const newStaffByYm = {};
-      mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-      });
+      const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffWithRow);
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
         const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
 
-      const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
-      const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
-      const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-      return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      return { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedWithRow, ...newStaffWithRow]) };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
@@ -9749,9 +9873,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
+      const matchedWithRow = emps.filter(isFutureExistingStaff)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
-      const newStaffWithRow = emps.filter(e => e.flag === 2)
+      const newStaffWithRow = emps.filter(isFuturePendingNewStaff)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const retiringWithRow = emps.filter(e => e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
@@ -9762,18 +9886,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
         const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-        const newStaffByYm = {};
-        mergeData.monthYms.forEach(ym => {
-          const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-        });
+        const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffMatchedTier);
         const retiredByYm = {};
         mergeData.monthYms.forEach(ym => {
           const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
           if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
-        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-        result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+        result[tier] = { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedTier, ...newStaffMatchedTier]) };
       });
       return result;
     }
@@ -9973,7 +10092,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
     const vm = visMonths();
 
-    let html = `<div class="schart-section">
+    let html = `<div id="plancmp2-newstaffalerts"></div><div class="schart-section">
       <div class="schart-header">実績工数（業務区分別）</div>
       ${chartWrapHtml('plansitesum2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
@@ -10050,8 +10169,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
       // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
       // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
-      const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
-      const newStaffMatched = emps.filter(e => e.flag === 2);
+      const matched = emps.filter(isFutureExistingStaff);
+      const newStaffMatched = emps.filter(isFuturePendingNewStaff);
       const retiringMatched = emps.filter(e => e.flag === 3);
       if (!matched.length && !newStaffMatched.length) return null;
 
@@ -10060,21 +10179,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
       const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-      const newStaffByYm = {};
-      mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-      });
+      const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffWithRow);
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
         const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
 
-      const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
-      const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
-      const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-      return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      return { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedWithRow, ...newStaffWithRow]) };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
@@ -10088,9 +10200,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
+      const matchedWithRow = emps.filter(isFutureExistingStaff)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
-      const newStaffWithRow = emps.filter(e => e.flag === 2)
+      const newStaffWithRow = emps.filter(isFuturePendingNewStaff)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const retiringWithRow = emps.filter(e => e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
@@ -10101,18 +10213,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
         const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-        const newStaffByYm = {};
-        mergeData.monthYms.forEach(ym => {
-          const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-        });
+        const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffMatchedTier);
         const retiredByYm = {};
         mergeData.monthYms.forEach(ym => {
           const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
           if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
-        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-        result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+        result[tier] = { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedTier, ...newStaffMatchedTier]) };
       });
       return result;
     }
@@ -10123,7 +10230,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // （stdTotalB1・newStaffByYm・deltaByYmとも両div分の合計、ティアごとに合算）
     const siteForAgg = sitesToShow.length > 1 ? null : sitesToShow[0];
     const mergedAggByTier = mergeThreeSiteMergeAggByTierAcrossDivs(divs.map(div => threeSiteMergeAggByTierFilteredByEmpType(div, siteForAgg)));
-    const stdHoursDs = threeSiteMergeStdHoursDatasetsByTier(mergedAggByTier, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
+    const stdHoursDs = threeSiteMergeStdHoursDatasetsByTier(mergedAggByTier, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）', splitNewStaff: true } : { stack: 'stdhours', splitNewStaff: true });
+    // B=2（新規要員）で標準労働時間シートの行が見つからない人・R列が空欄の人を注意の欄に出す
+    renderPlanCompareNewStaffAlerts(collectNewStaffMergeRowAlerts(threeSiteMergeNewStaffAlertItems(divs, sitesToShow)));
     const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotalByTier(mergedAggByTier, divs, siteForAgg, mi)));
 
     // 軸のMAX値専用：業務区分（栽培/出荷/配送）・雇用形態のチェック状態に関わらず、
@@ -10221,8 +10330,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     //   （findStdHoursMergeRowInDiv()と同じ照合方法）。段は、社員+実習生は常にlower、
     //   アルバイトは照合できた行のM列/Q列からtierForMergeRow()で判定する
     //   （findStdHoursMergeRowInDiv()で既に照合済みのため、ここでrowが無いことはない）
-    // - 未来月：在籍者（threeSiteMergeAgg()のmatched＝flag===1・3のうち、retiredByYmと
-    //   同じ条件で退職予定月以降を除いた人）のうち、標準労働時間シートの行と照合できた人
+    // - 未来月：在籍者（threeSiteMergeAgg()のmatched＝isFutureExistingStaff()：B=1・B=3、
+    //   およびI列の月が締まったB=2。B=3はretiredByYmと同じ条件で、最後に在籍する月の
+    //   翌月から除く）のうち、標準労働時間シートの行と照合できた人
     //   （段の判定に必要なため。照合できない人は変更前の合計にも実質寄与しない想定の
     //   稀なケースとして段には数えない）
     function stdHoursHeadcountByTierForMi(mi) {
@@ -10256,7 +10366,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
             const emps = applyEmpTypeFilter(allData.employees.filter(e =>
               stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== ''));
             emps.forEach(e => {
-              if (!(e.flag === 1 || e.flag === 3)) return;
+              if (!isFutureExistingStaff(e)) return;
               if (e.flag === 3 && e.startYm != null && e.startYm < ym) return;
               addTierFor(e, findStdHoursMergeRowInDiv(mergeData.rows, div, e));
             });
@@ -10266,9 +10376,11 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       return counts;
     }
     const stdHoursHeadcountByTier = sl(planMonths.map((_, mi) => stdHoursHeadcountByTierForMi(mi)));
-    // 新規要員（開始済み、黄）：未来月のみ。newStaffByYmと同じ条件（開始月が
-    // 未設定、またはその月以前）の人数
-    function newStaffHeadcountForMi(mi) {
+    // 新規要員（黄）：未来月のみ。newStaffByYmと同じ条件（isFuturePendingNewStaff()＝
+    // I列の月がまだ締まっていないB=2で、開始月が未設定またはその月以前）の人数。
+    // kind（'decided'＝入社決定／'planned'＝採用計画）を渡すとその分だけ数える。
+    // 標準労働時間シートで見つからない人・R列が空欄の人も数える（注意の欄に名前を出す）
+    function newStaffHeadcountForMi(mi, kind) {
       if (!mergeData) return null;
       const ym = mnum(planMonths[mi]);
       if (ym <= ACTUAL_CUTOFF) return null;
@@ -10277,12 +10389,17 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         sitesToShow.forEach(site => {
           const emps = applyEmpTypeFilter(allData.employees.filter(e =>
             stdHoursMergeDivForWorkType(e.workType) === div && e.base === site && (e.prj || '').trim() !== ''));
-          count += emps.filter(e => e.flag === 2 && (e.startYm == null || e.startYm <= ym)).length;
+          count += emps.filter(e => isFuturePendingNewStaff(e) && (e.startYm == null || e.startYm <= ym)
+            && (kind == null || newStaffKindByName(e.name) === kind)).length;
         });
       });
       return count > 0 ? count : null;
     }
     const newStaffHeadcount = sl(planMonths.map((_, mi) => newStaffHeadcountForMi(mi)));
+    const newStaffHeadcountByKind = {
+      decided: sl(planMonths.map((_, mi) => newStaffHeadcountForMi(mi, 'decided'))),
+      planned: sl(planMonths.map((_, mi) => newStaffHeadcountForMi(mi, 'planned'))),
+    };
     // 増減（緑）：残業時間として扱い、人数換算＝増減の時間÷（8h×その月の暦の
     // 全日数）。stdHoursDs自身が持つ「増減」データセットの値（hours）をそのまま使う
     const deltaHoursDs = stdHoursDs.find(ds => ds.label && ds.label.startsWith('増減'));
@@ -10323,7 +10440,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       if (ds._threeSiteMergeStdHoursTier) {
         const tier = ds._threeSiteMergeStdHoursTier;
         extra._segmentHeadcount = stdHoursHeadcountByTier.map(c => (c ? c[tier] : null));
-      } else if (ds.label && ds.label.startsWith('新規要員')) extra._segmentHeadcount = newStaffHeadcount;
+      } else if (ds._newStaffKind) extra._segmentHeadcount = newStaffHeadcountByKind[ds._newStaffKind];
+      else if (ds.label && ds.label.startsWith('新規要員')) extra._segmentHeadcount = newStaffHeadcount;
       else if (ds.label && ds.label.startsWith('増減')) extra._segmentHeadcount = deltaHeadcount;
       if (di === 0) extra._stackTotalHeadcount = stdHoursTotalHeadcount;
       datasets.push({ ...ds, data: sl(ds.data), ...extra });
@@ -10454,7 +10572,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     const sitesToShow = planCmpSiteTab === '全拠点合計' ? availSites : [planCmpSiteTab];
     const vm = visMonths();
 
-    let html = `<div class="schart-section">
+    let html = `<div id="plancmp2-newstaffalerts"></div><div class="schart-section">
       <div class="schart-header">実績工数（業務区分別）</div>
       ${chartWrapHtml('planstaffplan2-combined', vm.length, { heightPx: 650, inlineHeight: true, forceResponsive: true })}
     </div>`;
@@ -10531,8 +10649,8 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       // flag===3（退職予定）は、現時点ではflag===1と同様に在籍者としてカウント対象
       // （matchedに含める）。ただし退職予定月（e.startYm＝retireYm）以降は
       // retiredByYm（月ごとに変動する減算バケット、newStaffByYmと対称）で除外する
-      const matched = emps.filter(e => e.flag === 1 || e.flag === 3);
-      const newStaffMatched = emps.filter(e => e.flag === 2);
+      const matched = emps.filter(isFutureExistingStaff);
+      const newStaffMatched = emps.filter(isFuturePendingNewStaff);
       const retiringMatched = emps.filter(e => e.flag === 3);
       if (!matched.length && !newStaffMatched.length) return null;
 
@@ -10541,21 +10659,14 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const retiringWithRow = retiringMatched.map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) }));
 
       const stdTotalB1 = Math.round(matchedWithRow.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-      const newStaffByYm = {};
-      mergeData.monthYms.forEach(ym => {
-        const eligible = newStaffWithRow.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-        if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
-      });
+      const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffWithRow);
       const retiredByYm = {};
       mergeData.monthYms.forEach(ym => {
         const retired = retiringWithRow.filter(({ e }) => e.startYm != null && e.startYm < ym);
         if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + (row ? row.stdHours : 0), 0) * 10) / 10;
       });
 
-      const matchedRows = matchedWithRow.map(x => x.row).filter(Boolean);
-      const newStaffRows = newStaffWithRow.map(x => x.row).filter(Boolean);
-      const deltaCombined = threeSiteMergeAggFromRows([...matchedRows, ...newStaffRows]);
-      return { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+      return { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedWithRow, ...newStaffWithRow]) };
     }
 
     // threeSiteMergeAggFilteredByEmpType()のティア版：雇用形態フィルタ適用後の
@@ -10569,9 +10680,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
       const emps = applyEmpTypeFilter(allData.employees.filter(e =>
         stdHoursMergeDivForWorkType(e.workType) === div && (site == null || e.base === site)
         && (e.prj || '').trim() !== ''));
-      const matchedWithRow = emps.filter(e => e.flag === 1 || e.flag === 3)
+      const matchedWithRow = emps.filter(isFutureExistingStaff)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
-      const newStaffWithRow = emps.filter(e => e.flag === 2)
+      const newStaffWithRow = emps.filter(isFuturePendingNewStaff)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
       const retiringWithRow = emps.filter(e => e.flag === 3)
         .map(e => ({ e, row: findStdHoursMergeRowInDiv(mergeData.rows, div, e) })).filter(x => x.row);
@@ -10582,18 +10693,13 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
         const retiringMatchedTier = retiringWithRow.filter(({ row }) => tierForMergeRow(row) === tier);
         if (!matchedTier.length && !newStaffMatchedTier.length) { result[tier] = null; return; }
         const stdTotalB1 = Math.round(matchedTier.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-        const newStaffByYm = {};
-        mergeData.monthYms.forEach(ym => {
-          const eligible = newStaffMatchedTier.filter(({ e }) => e.startYm == null || e.startYm <= ym);
-          if (eligible.length) newStaffByYm[ym] = Math.round(eligible.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
-        });
+        const newStaffSplit = threeSiteMergeNewStaffByYmSplit(newStaffMatchedTier);
         const retiredByYm = {};
         mergeData.monthYms.forEach(ym => {
           const retired = retiringMatchedTier.filter(({ e }) => e.startYm != null && e.startYm < ym);
           if (retired.length) retiredByYm[ym] = Math.round(retired.reduce((s, { row }) => s + row.stdHours, 0) * 10) / 10;
         });
-        const deltaCombined = threeSiteMergeAggFromRows([...matchedTier.map(x => x.row), ...newStaffMatchedTier.map(x => x.row)]);
-        result[tier] = { stdTotalB1, newStaffByYm, retiredByYm, deltaByYm: deltaCombined ? deltaCombined.maxTotalByYm : {} };
+        result[tier] = { stdTotalB1, ...newStaffSplit, retiredByYm, deltaByYm: threeSiteMergeDeltaByYmInTenure([...matchedTier, ...newStaffMatchedTier]) };
       });
       return result;
     }
@@ -10604,7 +10710,9 @@ function renderPlanCompareCharts2(planData, prodData, mergeData) {
     // （stdTotalB1・newStaffByYm・deltaByYmとも両div分の合計、ティアごとに合算）
     const siteForAgg = sitesToShow.length > 1 ? null : sitesToShow[0];
     const mergedAggByTier = mergeThreeSiteMergeAggByTierAcrossDivs(divs.map(div => threeSiteMergeAggByTierFilteredByEmpType(div, siteForAgg)));
-    const stdHoursDs = threeSiteMergeStdHoursDatasetsByTier(mergedAggByTier, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）' } : { stack: 'stdhours' });
+    const stdHoursDs = threeSiteMergeStdHoursDatasetsByTier(mergedAggByTier, divs, siteForAgg, sitesToShow.length > 1 ? { stack: 'stdhours', labelSuffix: '（3拠点合計）', splitNewStaff: true } : { stack: 'stdhours', splitNewStaff: true });
+    // B=2（新規要員）で標準労働時間シートの行が見つからない人・R列が空欄の人を注意の欄に出す
+    renderPlanCompareNewStaffAlerts(collectNewStaffMergeRowAlerts(threeSiteMergeNewStaffAlertItems(divs, sitesToShow)));
     const stdHoursTotals = sl(planMonths.map((_, mi) => threeSiteMergeStdHoursTotalByTier(mergedAggByTier, divs, siteForAgg, mi)));
 
     // 要員不足（標準工数−標準労働時間）：未来月かつ差分がプラスの月のみ、標準労働時間
