@@ -252,6 +252,7 @@
       <li>移動は「○月対見込」の移動表。出元・行き先とも、その日に在庫が動く前提です。加工状況が「直接出荷」の行は在庫を動かしません。</li>
       <li>週は月曜〜日曜。月をまたぐ週は、開始日の月の下に表示します。</li>
       <li>日は、開始在庫 ＝ 前日の合計在庫、実際の在庫 ＝ その日の合計在庫。前日の在庫が未入力の日は計算できません。累計の差は開始日から数えます。日次の差を週・月の分だけ足すと、週・月の差と同じになります（途中の日の在庫がすべて入っている場合）。</li>
+      <li>選んだ拠点・サイクル・期間・グラフの単位は、ページの URL の後ろに残ります。F5（再読み込み）をしても同じ表示になり、その URL を送れば相手にも同じ表示が開きます。</li>
       <li>要確認 ＝ 出荷・収穫・在庫が、拠点ごとの中央値の3倍を超える日、または空欄・0の日（いなべの日曜の出荷0は除く。今日以降は対象外）。</li>
       <li>合計在庫が空欄または0の日は、在庫が未入力として扱います。</li>
     </ul>
@@ -806,9 +807,11 @@
 
   function render(){
     // サイクル「日」に入った直後：終了日＝在庫の入力がある最新の日、開始日＝そこから30日間（「30日」と同じ）
+    // （URL に開始日だけが正しく残っていたときは、その開始日のまま終了日だけを決める）
     if (state.kind === 'day' && !state.dayTo){
       var b = dayBounds(), last = latestStockDay(state.data && state.data[state.site], b) || b.max;
-      setDayRange(addDays(last, -(DAY_SPAN_DEFAULT - 1)), last, 'to');
+      if (state.dayFrom) setDayRange(state.dayFrom, last, 'from');
+      else setDayRange(addDays(last, -(DAY_SPAN_DEFAULT - 1)), last, 'to');
       return;
     }
     var msg = document.getElementById('msg'), h = '';
@@ -909,6 +912,68 @@
     }
     fill('startMonth', state.startKey); fill('endMonth', state.endKey);
     drawDayRange();
+    writeUrl();
+  }
+
+  /* ===================== 表示の状態を URL に残す ===================== */
+  // F5 の後も同じ表示にするため、選びなおすたびに URL の後ろ（?site=inabe&kind=day&unit=kg&from=…&to=…）を書き換える。
+  // history.replaceState で書き換えるので履歴は増えず、ブラウザの「戻る」では前のページに戻る。
+  // 残すもの：拠点・サイクル・グラフの単位・期間（週・月・すべて＝start/end の月、日＝from/to の日）、
+  //   「日」のときは「日」に入る前の開始月・終了月・単位（pstart/pend/punit）。一覧でクリックした行は残さない。
+  // 「7日・14日・30日」のボタンは開始日・終了日から決まるので、日付だけを残せば戻る。
+  var SITE_CODES = { 'いなべ': 'inabe', '群馬': 'gunma', '南丹': 'nantan' };
+  var KINDS = ['day', 'week', 'month', 'both'], UNITS = ['kg', 'pct'];
+  var URL_KEYS = ['site', 'kind', 'unit', 'start', 'end', 'from', 'to', 'pstart', 'pend', 'punit'];
+
+  function writeUrl(){
+    try {
+      var p = new URLSearchParams(location.search);
+      URL_KEYS.forEach(function(k){ p.delete(k); });  // ほかの項目（あれば）はそのまま残す
+      p.set('site', SITE_CODES[state.site]); p.set('kind', state.kind); p.set('unit', state.unit);
+      if (state.kind === 'day'){
+        if (state.dayFrom && state.dayTo){ p.set('from', state.dayFrom); p.set('to', state.dayTo); }
+        if (state.dayPrev){ p.set('pstart', state.dayPrev.startKey); p.set('pend', state.dayPrev.endKey); p.set('punit', state.dayPrev.unit); }
+      } else if (state.startKey && state.endKey){
+        p.set('start', state.startKey); p.set('end', state.endKey);
+      }
+      var url = location.pathname + '?' + p.toString() + location.hash;
+      if (url !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', url);
+    } catch (e) { console.warn('[表示状態] URL を書き換えられませんでした:', e); }
+  }
+
+  // URL から表示の状態を読む。おかしな値（知らない拠点名・範囲外の月など）は、その項目だけ最初の設定にする。
+  // 日付は選べる範囲（dayBounds）の端に合わせる。def：最初の設定の開始月・終了月
+  function readUrl(def){
+    var p;
+    try { p = new URLSearchParams(location.search); } catch (e) { return; }
+    var months = selectableMonths();
+    function month(v, d){ return months.indexOf(v) >= 0 ? v : d; }
+    function unit(v, d){ return UNITS.indexOf(v) >= 0 ? v : d; }
+    function day(v){  // 'YYYY-MM-DD' で、実在する日だけ
+      return (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && addDays(v, 0) === v) ? v : null;
+    }
+    function range(s, e){ s = month(s, def.startKey); e = month(e, def.endKey); return s > e ? [e, e] : [s, e]; }
+
+    for (var s in SITE_CODES){ if (SITE_CODES[s] === p.get('site')) state.site = s; }
+    if (KINDS.indexOf(p.get('kind')) >= 0) state.kind = p.get('kind');
+    var isDay = state.kind === 'day';
+    state.unit = unit(p.get('unit'), isDay ? 'kg' : 'pct');  // 「日」に入ったときの単位は kg
+    if (!isDay){
+      var r = range(p.get('start'), p.get('end'));
+      state.startKey = r[0]; state.endKey = r[1];
+      return;
+    }
+    var pr = range(p.get('pstart'), p.get('pend'));
+    state.dayPrev = { startKey: pr[0], endKey: pr[1], unit: unit(p.get('punit'), 'pct') };
+    var b = dayBounds(), f = day(p.get('from')), t = day(p.get('to'));
+    if (f) f = clampDay(f, b);
+    if (t) t = clampDay(t, b);
+    if (f && t && f > t) f = t;
+    if (t && !f) f = clampDay(addDays(t, -(DAY_SPAN_DEFAULT - 1)), b);
+    state.dayFrom = f; state.dayTo = t;
+    // 終了日が無いときは、在庫の入力がある最新の日を探すため最後の選べる月を読み、render() で決める
+    if (t){ state.startKey = f.slice(0, 7); state.endKey = t.slice(0, 7); }
+    else state.startKey = state.endKey = b.max.slice(0, 7);
   }
 
   function init(){
@@ -919,6 +984,7 @@
     for (var i = months.length - 1; i >= 0; i--){ if (months[i] <= tk){ endIdx = i; break; } }
     state.endKey = months[endIdx];
     state.startKey = months[Math.max(0, endIdx - 2)]; // 初期表示は直近3か月
+    readUrl({ startKey: state.startKey, endKey: state.endKey });  // F5 の前の選択（URL に残したもの）があれば戻す
     drawControls();
     document.getElementById('startMonth').addEventListener('change', function(){
       state.startKey = this.value;
