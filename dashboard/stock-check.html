@@ -148,6 +148,42 @@
   .pos{color:var(--blue);}
   .muted{color:var(--ink-soft);}
   .flagcell{color:#8a5a00;font-weight:600;}
+
+  /* ===================== セル範囲選択・集計帯（直近工数計画 work-hours-forecast.html と同じ） ===================== */
+  /* 選べるセル：ドラッグ中にブラウザ既定の文字選択（青い反転）が起きないようにする。
+     月の行・選んだ行の背景と見分けがつく専用の背景色(.cell-selected)を重ねる */
+  table.grid td.selectable-cell{ cursor:cell; -webkit-user-select:none; user-select:none; }
+  table.grid td.selectable-cell.cell-selected{
+    background:#bfe0fb !important;
+    box-shadow:inset 0 0 0 1px #2f6fa8;
+  }
+  /* 下の集計帯の分だけ、ページ下端に余白を確保する */
+  body.has-agg-bar{ padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
+  .agg-bar{
+    display:none;
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    background:var(--brown-deep); color:#fff;
+    padding:3px 18px calc(3px + env(safe-area-inset-bottom));
+    gap:4px 16px; align-items:center; flex-wrap:wrap;
+    box-shadow:0 -2px 10px rgba(0,0,0,.2);
+    font-size:13.5px; line-height:1.3;
+  }
+  .agg-bar.show{ display:flex; }
+  .agg-bar .agg-item{ display:flex; gap:4px; align-items:baseline; white-space:nowrap; }
+  .agg-bar .agg-item .k{ opacity:.8; font-size:11.5px; }
+  .agg-bar .agg-item .v{ font-weight:700; font-variant-numeric:tabular-nums; }
+  .agg-bar .agg-warn{ color:#ffd479; font-weight:600; white-space:nowrap; font-size:12px; }
+  .agg-bar .agg-clear{
+    margin-left:auto; padding:2px 10px; border-radius:6px;
+    border:1px solid rgba(255,255,255,.45); background:transparent; color:#fff;
+    font-size:11.5px; line-height:1.3; cursor:pointer;
+  }
+  .agg-bar .agg-clear:hover{ background:rgba(255,255,255,.12); }
+  @media (max-width:640px){
+    /* 1行に収まらずボタン・注意表示が折り返して2行になる場合があるため、帯本体より少し広めに確保する */
+    body.has-agg-bar{ padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+    .agg-bar{ font-size:12px; padding:3px 12px calc(3px + env(safe-area-inset-bottom)); }
+  }
   .chart-box{position:relative;height:320px;}
   .chart-box.small{height:280px;}
   .chart-box canvas{max-width:100%;}
@@ -253,10 +289,23 @@
       <li>週は月曜〜日曜。月をまたぐ週は、開始日の月の下に表示します。</li>
       <li>日は、開始在庫 ＝ 前日の合計在庫、実際の在庫 ＝ その日の合計在庫。前日の在庫が未入力の日は計算できません。累計の差は開始日から数えます。日次の差を週・月の分だけ足すと、週・月の差と同じになります（途中の日の在庫がすべて入っている場合）。</li>
       <li>選んだ拠点・サイクル・期間・グラフの単位は、ページの URL の後ろに残ります。F5（再読み込み）をしても同じ表示になり、その URL を送れば相手にも同じ表示が開きます。</li>
-      <li>要確認 ＝ 出荷・収穫・在庫が、拠点ごとの中央値の3倍を超える日、または空欄・0の日（いなべの日曜の出荷0は除く。今日以降は対象外）。</li>
+      <li>②の一覧の数字（開始在庫〜調整後の差・累計の差）は、マウスでドラッグして選ぶと画面の下に合計・平均・個数・最小・最大が出ます（Shift で範囲、Ctrl（⌘）で追加、スマホはタップで追加・解除、Esc で解除）。合計は表示の数字を丸める前の値で計算します。</li>
+      <li>要確認 ＝出荷・収穫・在庫が、拠点ごとの中央値の3倍を超える日、または空欄・0の日（いなべの日曜の出荷0は除く。今日以降は対象外）。</li>
       <li>合計在庫が空欄または0の日は、在庫が未入力として扱います。</li>
     </ul>
   </section>
+</div>
+
+<div id="aggBar" class="agg-bar" role="status">
+  <span class="agg-item"><span class="k">合計</span><span class="v" id="aggSum">－</span></span>
+  <span class="agg-item"><span class="k">平均</span><span class="v" id="aggAvg">－</span></span>
+  <span class="agg-item"><span class="k">個数</span><span class="v" id="aggCount">0</span></span>
+  <span class="agg-item"><span class="k">最小</span><span class="v" id="aggMin">－</span></span>
+  <span class="agg-item"><span class="k">最大</span><span class="v" id="aggMax">－</span></span>
+  <span class="agg-warn" id="aggWarnUnit" style="display:none;">単位が混在しています</span>
+  <span class="agg-warn" id="aggWarnMonthWeek" style="display:none;">月と週の行を両方含むため、二重に数えている可能性があります</span>
+  <span class="agg-warn" id="aggWarnCum" style="display:none;">累計の差と日次の差を両方含むため、二重に数えている可能性があります</span>
+  <button type="button" class="agg-clear" id="aggClearBtn">選択を解除</button>
 </div>
 
 <script>
@@ -639,6 +688,7 @@
 
   async function reload(){
     var token = ++state.token;
+    clearCellSelection(); // 表を消すので、セルの選択も消す
     document.getElementById('tableWrap').innerHTML = '<div class="loading">読み込み中…</div>';
     var keys = loadMonths(), failed = [];
     var data = {}, moves = [], direct = [];
@@ -717,23 +767,43 @@
         return;
       }
       var flagTitle = r.flagDays.map(function(d){ return md(d) + ' ' + (row.flags[d] || []).join(' / '); }).join('\n');
-      h += '<td>' + fmt(r.S0) + '</td><td>' + fmt(r.ship) + '</td><td>' + fmt(r.harv, 0) + '</td>' +
-        '<td>' + moveMark(row) + fmt(r.movIn, 0) + ' / ' + fmt(r.movOut, 0) + '</td><td>' + fmt(r.waste + r.kik) + '</td>' +
-        '<td>' + fmt(r.expected) + '</td><td>' + fmt(r.S1) + '</td>' +
-        '<td class="' + cls(r.diffBefore) + '">' + signed(r.diffBefore) + '</td>' +
-        '<td>' + (r.adjSum == null ? '－' : signed(r.adjSum)) + '</td>' +
-        '<td class="' + cls(r.diffAfter) + '">' + signed(r.diffAfter) + '</td>' +
+      var cb = row.cum && row.cum.diffBefore, ca = row.cum && row.cum.diffAfter;
+      // 数字のセルは選んで集計できる（selCell）。移動・率・要確認は選べない
+      h += selCell(1, r.S0, fmt(r.S0)) + selCell(2, r.ship, fmt(r.ship)) + selCell(3, r.harv, fmt(r.harv, 0), { int: true }) +
+        '<td>' + moveMark(row) + fmt(r.movIn, 0) + ' / ' + fmt(r.movOut, 0) + '</td>' + selCell(5, r.waste + r.kik, fmt(r.waste + r.kik)) +
+        selCell(6, r.expected, fmt(r.expected)) + selCell(7, r.S1, fmt(r.S1)) +
+        selCell(8, r.diffBefore, signed(r.diffBefore), { cls: cls(r.diffBefore), group: 'diff' }) +
+        selCell(9, r.adjSum, r.adjSum == null ? '－' : signed(r.adjSum)) +
+        selCell(10, r.diffAfter, signed(r.diffAfter), { cls: cls(r.diffAfter), group: 'diff' }) +
         '<td class="' + cls(r.rateBefore) + '">' + pct(r.rateBefore) + '</td>' +
         '<td class="' + cls(r.rateAfter) + '">' + pct(r.rateAfter) + '</td>' +
-        (isDay ? '<td class="' + cls(row.cum && row.cum.diffBefore) + '">' + signed(row.cum && row.cum.diffBefore) + '</td>' +
-          '<td class="' + cls(row.cum && row.cum.diffAfter) + '">' + signed(row.cum && row.cum.diffAfter) + '</td>' : '') +
+        (isDay ? selCell(13, cb, signed(cb), { cls: cls(cb), group: 'cum' }) + selCell(14, ca, signed(ca), { cls: cls(ca), group: 'cum' }) : '') +
         '<td' + (r.flagDays.length ? ' class="flagcell" title="' + esc(flagTitle) + '"' : '') + '>' + (r.flagDays.length ? '⚠' + r.flagDays.length + '日' : '') + '</td></tr>';
     });
     h += '</tbody></table>';
+    clearCellSelection(); // 表を描き直すので、セルの選択は消す
     document.getElementById('tableWrap').innerHTML = h;
     Array.prototype.forEach.call(document.querySelectorAll('#tableWrap tr.selectable'), function(tr){
-      tr.addEventListener('click', function(){ selectRow(tr.getAttribute('data-id')); });
+      tr.addEventListener('click', function(e){
+        // 数字のセルでは、動かさずにクリックしたとき（とスマホのタップ）だけグラフを替える。
+        // ドラッグ・Shift＋クリック・Ctrl（⌘）＋クリックは選択だけ。
+        // （同じ行の中でドラッグすると click は行（tr）に届くので、届いた先ではなく直前の操作で決める。
+        //   lastGesture は数字のセルで押したときだけ入り、それ以外の所で押すと null になる）
+        var g = lastGesture; lastGesture = null;
+        if (g && (g.moved || g.mod)) return;
+        selectRow(tr.getAttribute('data-id'));
+      });
     });
+  }
+
+  // 選べるセル。data-raw に丸める前の値を持たせる（値が無い「－」のセルは data-raw を付けず、集計に入れない）。
+  // opts.int：整数で表示する列（収穫）、opts.cls：色の class、opts.group：'diff'（日次の差）／'cum'（累計の差）
+  function selCell(col, raw, text, opts){
+    opts = opts || {};
+    var ok = raw != null && !isNaN(raw);
+    return '<td class="selectable-cell' + (opts.cls ? ' ' + opts.cls : '') + '" data-sel-col="' + col + '" data-unit="kg"' +
+      ' data-numfmt="' + (opts.int ? 'int' : 'dec1') + '"' + (opts.group ? ' data-group="' + opts.group + '"' : '') +
+      (ok ? ' data-raw="' + raw + '"' : '') + '>' + text + '</td>';
   }
 
   function destroy(ch){ if (ch){ try { ch.destroy(); } catch(e){} } return null; }
@@ -827,11 +897,182 @@
     renderDaily();
   }
 
+  // 行を選ぶ（③のグラフを替える）。表は描き直さず印だけ付け替える（選んだセルを消さないため）
   function selectRow(id){
     state.selected = id;
-    renderTable();
+    Array.prototype.forEach.call(document.querySelectorAll('#tableWrap tbody tr'), function(tr){
+      tr.classList.toggle('selected', tr.getAttribute('data-id') === id);
+    });
     renderDaily();
   }
+
+  /* ===================== セル範囲選択・集計（操作）：直近工数計画（work-hours-forecast.html）と同じ ===================== */
+  // 表の数字のセル(.selectable-cell)を範囲選択すると、画面下に合計・平均・個数・最小・最大を出す。
+  // ドラッグで四角い範囲、Shift＋クリックで前のセルからの範囲、Ctrl(⌘)で今の選択に足す。
+  // スマートフォンではタップのたびに選択に足す・外す。Esc・表の外のクリック・「選択を解除」で消す。
+  // 表を描き直したとき（拠点・サイクル・期間の切り替え）と、グラフの単位を替えたときに選択を消す。
+  // セルの選択は URL に残さない。
+  var cellSelection = new Set(); // 選んでいる <td> の集まり
+  var lastAnchorCell = null;      // Shift＋クリックで範囲の起点にするセル
+  var dragState = null;           // ドラッグ中だけ使う
+  var lastGesture = null;         // 直前のマウス操作（動かしたか・Shift/Ctrl か）。行のクリックでグラフを替えるかに使う
+
+  function cellRowCol(cell){
+    var tr = cell.closest('tr'), tbody = tr ? tr.parentElement : null, table = cell.closest('table');
+    if (!tr || !tbody || !table) return null;
+    var row = Array.prototype.indexOf.call(tbody.children, tr), col = Number(cell.getAttribute('data-sel-col'));
+    if (row < 0 || isNaN(col)) return null;
+    return { table: table, tbody: tbody, row: row, col: col };
+  }
+  // anchorCell から currentCell までの四角い範囲の、選べるセル（選べない列・行は飛ばす）
+  function cellsInRect(anchorCell, currentCell){
+    var a = cellRowCol(anchorCell), b = cellRowCol(currentCell);
+    if (!a) return [];
+    if (!b || a.table !== b.table) return [anchorCell];
+    var r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row), c0 = Math.min(a.col, b.col), c1 = Math.max(a.col, b.col);
+    var out = [];
+    for (var r = r0; r <= r1; r++){
+      var tr = a.tbody.children[r];
+      if (!tr) continue;
+      for (var c = c0; c <= c1; c++){
+        var cell = tr.querySelector('.selectable-cell[data-sel-col="' + c + '"]');
+        if (cell) out.push(cell);
+      }
+    }
+    return out;
+  }
+  function clearCellSelection(){
+    if (!cellSelection.size && !lastAnchorCell){ updateSelectionVisuals(); return; }
+    cellSelection = new Set(); lastAnchorCell = null; dragState = null;
+    updateSelectionVisuals();
+  }
+  function toggleCellInSelection(cell){
+    if (cellSelection.has(cell)) cellSelection.delete(cell); else cellSelection.add(cell);
+    lastAnchorCell = cell;
+    updateSelectionVisuals();
+  }
+  // 収穫（整数の列）だけを選んだときは整数・3桁区切り、それ以外は小数1桁・3桁区切り。
+  // 平均は常に小数1桁（丸める前の値で集計してから1回だけ丸める）
+  function fmtAggValue(v, allInt){
+    if (v == null || isNaN(v)) return '－';
+    return allInt ? Math.round(v).toLocaleString('ja-JP') : Number(v).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+  function fmtAggAverage(v){
+    if (v == null || isNaN(v)) return '－';
+    return Number(v).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+  // 選んだセルの集計。data-raw の無いセル（「－」）は計算にも個数にも入れない。
+  // monthWeek：月の行と週の行を両方含む（「すべて」のとき）、cumDiff：累計の差と日次の差を両方含む（日のとき）
+  function computeSelectionAggregation(cells){
+    var nums = [], units = {}, allInt = true, hasMonth = false, hasWeek = false, hasCum = false, hasDiff = false;
+    cells.forEach(function(cell){
+      var tr = cell.closest('tr');
+      if (tr && tr.classList.contains('month')) hasMonth = true;
+      if (tr && tr.classList.contains('week')) hasWeek = true;
+      var g = cell.getAttribute('data-group');
+      if (g === 'cum') hasCum = true;
+      if (g === 'diff') hasDiff = true;
+      var raw = cell.getAttribute('data-raw');
+      if (raw === null || raw === '') return;
+      var n = Number(raw);
+      if (isNaN(n)) return;
+      nums.push(n);
+      var unit = cell.getAttribute('data-unit');
+      if (unit) units[unit] = true;
+      if (cell.getAttribute('data-numfmt') !== 'int') allInt = false;
+    });
+    var count = nums.length, sum = count ? nums.reduce(function(a, b){ return a + b; }, 0) : null;
+    return {
+      count: count, sum: sum, avg: count ? sum / count : null,
+      min: count ? Math.min.apply(null, nums) : null, max: count ? Math.max.apply(null, nums) : null,
+      allInt: allInt, mixedUnit: Object.keys(units).length > 1,
+      monthWeek: state.kind === 'both' && hasMonth && hasWeek,
+      cumDiff: state.kind === 'day' && hasCum && hasDiff,
+    };
+  }
+  function updateAggBar(){
+    var bar = document.getElementById('aggBar');
+    if (!bar) return;
+    var cells = Array.from(cellSelection);
+    if (!cells.length){ bar.classList.remove('show'); document.body.classList.remove('has-agg-bar'); return; }
+    var agg = computeSelectionAggregation(cells);
+    document.getElementById('aggSum').textContent = fmtAggValue(agg.sum, agg.allInt);
+    document.getElementById('aggAvg').textContent = fmtAggAverage(agg.avg);
+    document.getElementById('aggCount').textContent = String(agg.count);
+    document.getElementById('aggMin').textContent = fmtAggValue(agg.min, agg.allInt);
+    document.getElementById('aggMax').textContent = fmtAggValue(agg.max, agg.allInt);
+    document.getElementById('aggWarnUnit').style.display = agg.mixedUnit ? '' : 'none';
+    document.getElementById('aggWarnMonthWeek').style.display = agg.monthWeek ? '' : 'none';
+    document.getElementById('aggWarnCum').style.display = agg.cumDiff ? '' : 'none';
+    bar.classList.add('show');
+    document.body.classList.add('has-agg-bar');
+  }
+  function updateSelectionVisuals(){
+    document.querySelectorAll('.cell-selected').forEach(function(c){ if (!cellSelection.has(c)) c.classList.remove('cell-selected'); });
+    cellSelection.forEach(function(c){ c.classList.add('cell-selected'); });
+    updateAggBar();
+  }
+
+  // タッチ操作の後にブラウザが送る合成のマウスイベントを、新しいクリックとして扱わない
+  var lastTouchEndAt = 0;
+  document.addEventListener('mousedown', function(e){
+    if (e.button !== 0) return; // 左クリックのみ
+    if (Date.now() - lastTouchEndAt < 800) return;
+    var cell = e.target.closest && e.target.closest('.selectable-cell');
+    if (!cell){
+      lastGesture = null;
+      if (!e.target.closest('.agg-bar')) clearCellSelection();
+      return;
+    }
+    e.preventDefault(); // ドラッグ中に文字の選択（青い反転）が起きないようにする
+    var additive = e.ctrlKey || e.metaKey;
+    var extendFromAnchor = e.shiftKey && lastAnchorCell;
+    var anchor = extendFromAnchor ? lastAnchorCell : cell;
+    var base = additive ? new Set(cellSelection) : new Set();
+    if (e.shiftKey && !additive) base = new Set(); // Shift だけのときは選択を置き換える
+    dragState = { anchor: anchor, base: base, keepAnchor: !!extendFromAnchor, start: cell };
+    lastGesture = { moved: false, mod: !!(e.shiftKey || additive) };
+    cellSelection = new Set(base);
+    cellsInRect(anchor, cell).forEach(function(c){ cellSelection.add(c); });
+    if (!extendFromAnchor) lastAnchorCell = cell;
+    updateSelectionVisuals();
+  });
+  document.addEventListener('mousemove', function(e){
+    if (!dragState) return;
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    var cell = el && el.closest && el.closest('.selectable-cell');
+    if (!cell) return;
+    if (cell !== dragState.start && lastGesture) lastGesture.moved = true; // 別のセルまで動かした＝ドラッグ
+    cellSelection = new Set(dragState.base);
+    cellsInRect(dragState.anchor, cell).forEach(function(c){ cellSelection.add(c); });
+    updateSelectionVisuals();
+  });
+  document.addEventListener('mouseup', function(){ dragState = null; });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') clearCellSelection(); });
+
+  // スマートフォン・タブレット：タップのたびに選択に足す・外す（行のグラフも替える：tr の click で）。
+  // 表のスクロール（指でなぞる操作）と区別するため、動きが小さいときだけタップとして扱う
+  var touchStartCell = null, touchStartPos = null;
+  document.addEventListener('touchstart', function(e){
+    var t = e.touches[0];
+    if (!t) return;
+    lastGesture = null; // タップの後の click では、グラフを替える
+    var el = document.elementFromPoint(t.clientX, t.clientY);
+    var cell = el && el.closest && el.closest('.selectable-cell');
+    touchStartCell = cell || null;
+    touchStartPos = cell ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', function(e){
+    lastTouchEndAt = Date.now();
+    if (!touchStartCell || !touchStartPos){ touchStartCell = null; touchStartPos = null; return; }
+    var t = e.changedTouches[0];
+    if (t){
+      var dx = Math.abs(t.clientX - touchStartPos.x), dy = Math.abs(t.clientY - touchStartPos.y);
+      if (dx < 10 && dy < 10) toggleCellInSelection(touchStartCell);
+    }
+    touchStartCell = null; touchStartPos = null;
+  }, { passive: true });
+  document.getElementById('aggClearBtn').addEventListener('click', clearCellSelection);
 
   function seg(elId, items, current, onPick){
     var el = document.getElementById(elId);
@@ -904,7 +1145,7 @@
   function drawControls(){
     seg('siteSeg', SITES.map(function(s){ return [s, s]; }), state.site, function(v){ state.site = v; state.selected = null; drawControls(); if (state.data) render(); });
     seg('kindSeg', [['day', '日'], ['week', '週'], ['month', '月'], ['both', 'すべて']], state.kind, setKind);
-    seg('unitSeg', [['kg', 'kg'], ['pct', '%']], state.unit, function(v){ state.unit = v; drawControls(); renderMainChart(); });
+    seg('unitSeg', [['kg', 'kg'], ['pct', '%']], state.unit, function(v){ state.unit = v; clearCellSelection(); drawControls(); renderMainChart(); });
     var months = selectableMonths();
     function fill(id, cur){
       var el = document.getElementById(id);
