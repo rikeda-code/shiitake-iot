@@ -113,6 +113,12 @@
   .day-nav .pair{ display:flex; align-items:center; gap:8px; } /* ラベルと部品は1組（折り返しても離れない） */
   .day-nav .site-toggle{ box-shadow:none; padding:3px; border-radius:8px; }
   .day-nav .site-toggle button{ padding:4px 12px; font-size:13px; }
+  .day-nav input[type="date"]{
+    font-family: Meiryo, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size:14px; font-weight:700; color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:4px 6px; background:#fffef9;
+  }
+  #dayRange{ display:contents; } /* サイクル「日」のときだけ中身（開始日・終了日・期間）を作る。中の .pair は枠の部品として並ぶ */
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:14px 16px;margin-top:14px;}
   .panel h2{margin:0 0 8px;font-size:15px;color:var(--brown-deep);}
   .note{font-size:12px;color:var(--ink-soft);margin:6px 0 0;}
@@ -122,11 +128,14 @@
   table.grid{border-collapse:collapse;width:100%;min-width:1040px;font-size:13px;}
   table.grid th,table.grid td{border-bottom:1px solid var(--line-soft);padding:6px 5px;text-align:right;white-space:nowrap;}
   table.grid th{background:#f3ead4;color:var(--brown-deep);font-weight:600;position:sticky;top:0;}
-  table.grid th:first-child,table.grid td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;}
+  /* 横スクロールで左に固定するのは期間（日付）の列だけ。背景を塗り、右端に区切り線（border-collapse では
+     固定した列の罫線が一緒に動かないため、内側の影で引く）を付けて、後ろの列が透けたり重なって見えないようにする */
+  table.grid th:first-child,table.grid td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;box-shadow:inset -1px 0 0 var(--line);}
   table.grid th:first-child{background:#f3ead4;z-index:2;}
   table.grid tr.month td{background:#f8f1de;font-weight:600;}
   table.grid tr.month td:first-child{background:#f8f1de;}
   table.grid tr.week td:first-child{padding-left:22px;}
+  .mv{cursor:help;margin-right:4px;}
   table.grid tr.selectable{cursor:pointer;}
   table.grid tr.selectable:hover td{background:#fbf6e8;}
   table.grid tr.selected td,table.grid tr.selected:hover td{background:var(--green-soft);}
@@ -162,9 +171,17 @@
     .day-nav .pair{ gap:4px; }
     .day-nav .label{ font-size:11.5px; }
     .day-nav select{ font-size:12.5px; padding:2px 4px; }
+    .day-nav input[type="date"]{ font-size:12.5px; padding:1px 3px; }
     .day-nav .site-toggle{ padding:2px; }
     .day-nav .site-toggle button{ padding:2px 8px; font-size:12px; }
     .sm-hide{ display:none; }
+  }
+  /* 320px前後の狭い画面：サイクル（日・週・月・すべて）と単位を1段に収めるため、ボタンの左右の余白を詰める */
+  @media (max-width:340px){
+    .day-nav{ gap:3px 8px; }
+    .day-nav .site-toggle button{ padding:2px 5px; }
+    .day-nav input[type="date"]{ padding:1px 2px; font-size:12px; }
+    .xs-hide{ display:none; }
   }
 </style>
 </head>
@@ -182,8 +199,9 @@
     </header>
 
     <div class="day-nav">
-      <div class="pair"><span class="label">開始月</span><select id="startMonth"></select></div>
-      <div class="pair"><span class="label">終了月</span><select id="endMonth"></select></div>
+      <div class="pair" id="startMonthPair"><span class="label">開始月</span><select id="startMonth"></select></div>
+      <div class="pair" id="endMonthPair"><span class="label">終了月</span><select id="endMonth"></select></div>
+      <div id="dayRange"></div>
       <div class="pair"><span class="label">サイクル</span><div class="site-toggle" id="kindSeg"></div></div>
       <div class="pair"><span class="label"><span class="sm-hide">グラフの</span>単位</span><div class="site-toggle" id="unitSeg"></div></div>
     </div>
@@ -202,6 +220,7 @@
     <h2>② 一覧表（行をクリックすると、下に日別のグラフが出ます）</h2>
     <div class="table-wrap" id="tableWrap"><div class="loading">読み込み中…</div></div>
     <p class="note">「暫定」の行は、最終日の在庫が未入力のため、最新の入力日までで計算した途中の値です（薄く表示）。率 ＝ 差 ÷ 期間の収穫量。</p>
+    <p class="note">サイクル「日」：前日の在庫からその日の在庫までの差です（在庫が未入力の日は出しません）。表示期間は開始日・終了日で選びます（「7日」「14日」「30日」は終了日から遡って開始日を入れます）。「移動 入/出」の 🚚 はその日に移動がある印です（マウスを乗せると内訳）。累計の差 ＝ 開始日からその日までの差（日次の差を足したものと同じ）。行をクリックすると、その日を含む週の日別のグラフが出ます。</p>
   </section>
 
   <section class="panel" id="dailyPanel">
@@ -232,6 +251,7 @@
       <li>調整前の差 ＝ 実際の在庫 − あるべき在庫。調整後の差 ＝ 調整前の差 − 調整合計（調整が無いときは同じ値）。</li>
       <li>移動は「○月対見込」の移動表。出元・行き先とも、その日に在庫が動く前提です。加工状況が「直接出荷」の行は在庫を動かしません。</li>
       <li>週は月曜〜日曜。月をまたぐ週は、開始日の月の下に表示します。</li>
+      <li>日は、開始在庫 ＝ 前日の合計在庫、実際の在庫 ＝ その日の合計在庫。前日の在庫が未入力の日は計算できません。累計の差は開始日から数えます。日次の差を週・月の分だけ足すと、週・月の差と同じになります（途中の日の在庫がすべて入っている場合）。</li>
       <li>要確認 ＝ 出荷・収穫・在庫が、拠点ごとの中央値の3倍を超える日、または空欄・0の日（いなべの日曜の出荷0は除く。今日以降は対象外）。</li>
       <li>合計在庫が空欄または0の日は、在庫が未入力として扱います。</li>
     </ul>
@@ -539,6 +559,41 @@
     return cycles;
   }
 
+  // サイクル「日」の一覧（開始日〜終了日の毎日）。見出しは「11/3（火）」。
+  // 月（'2026-10'）を渡したときは、開始月の初日〜終了月の末日
+  var DOW_JA = '日月火水木金土';
+  function dayLabel(iso){ return md(iso) + '（' + DOW_JA.charAt(dowOf(iso)) + '）'; }
+  function buildDayCycles(from, to){
+    var cycles = [], first = from.length === 7 ? monthFirst(from) : from, last = to.length === 7 ? monthLast(to) : to;
+    for (var d = first; d <= last; d = addDays(d, 1)){
+      cycles.push({ id: 'D:' + d, kind: 'day', label: dayLabel(d), a: d, b: d, monthKey: d.slice(0, 7) });
+    }
+    return cycles;
+  }
+  // その日を含む週（月曜〜日曜）
+  function weekOf(iso){ var a = addDays(iso, -((dowOf(iso) + 6) % 7)); return { a: a, b: addDays(a, 6) }; }
+  // その日に、この拠点に入った・出た移動
+  function movesOn(moves, site, d){
+    return (moves || []).filter(function(m){ return m.date === d && (m.to === site || m.from === site); });
+  }
+
+  // サイクル「日」で選べる日の範囲：データがある月（選べる月）の初日〜最後の月の末日（今日より先は選べない）
+  function dayBounds(){
+    var months = selectableMonths(), t = todayIso();
+    if (!months.length) return { min: t, max: t };
+    var max = monthLast(months[months.length - 1]);
+    return { min: monthFirst(months[0]), max: max < t ? max : t };
+  }
+  function clampDay(d, b){ return d < b.min ? b.min : (d > b.max ? b.max : d); }
+  // 在庫の入力がある最新の日（読み込んだデータのうち、選べる範囲の中）
+  function latestStockDay(days, b){
+    var best = null;
+    Object.keys(days || {}).forEach(function(d){
+      if (d >= b.min && d <= b.max && stockOf(days, d) != null && (best === null || d > best)) best = d;
+    });
+    return best;
+  }
+
   // 選べる月：SOURCESに登録があり（anchorOnlyでない）、前月も登録されている月
   function selectableMonths(){
     return Object.keys(SOURCES).sort().filter(function(k){ return !SOURCES[k].anchorOnly && SOURCES[prevMonthKey(k)]; });
@@ -550,8 +605,9 @@
 
   /* ===================== 画面 ===================== */
   var state = {
-    site: '南丹', kind: 'both', unit: 'pct',
-    startKey: null, endKey: null,
+    site: '南丹', kind: 'both', unit: 'pct',  // kind：day／week／month／both（すべて＝月と週）
+    startKey: null, endKey: null, dayPrev: null,
+    dayFrom: null, dayTo: null, loadedKeys: '',  // サイクル「日」の開始日・終了日（'2026-10-04'）、読み込み済みの月
     adjustments: getAdjustments(),
     data: null,        // { site: days }
     moves: [], direct: [], failed: [],
@@ -603,6 +659,7 @@
     });
     await Promise.all(jobs);
     if (token !== state.token) return;
+    state.loadedKeys = keys.join(',');
     state.data = data; state.moves = moves; state.direct = direct; state.failed = failed;
     render();
   }
@@ -610,25 +667,43 @@
   function buildRows(){
     var site = state.site, days = (state.data && state.data[site]) || {}, today = todayIso();
     var flags = computeFlags(site, days, today);
-    var cycles = buildCycles(state.startKey, state.endKey);
+    var isDay = state.kind === 'day';
+    var cycles = isDay ? buildDayCycles(state.dayFrom, state.dayTo) : buildCycles(state.startKey, state.endKey);
+    var from = state.dayFrom;
     var rows = [];
     cycles.forEach(function(c){
       if (c.a > today) return; // まだ始まっていないサイクルは出さない
       var r = computeCycle(site, days, c.a, c.b, state.moves, state.adjustments, flags);
-      rows.push({ cycle: c, r: r, flags: flags, days: days });
+      if (c.kind === 'day' && r.status === 'none') return; // 在庫の入力が無い日は出さない
+      var row = { cycle: c, r: r, flags: flags, days: days };
+      if (c.kind === 'day'){
+        row.moves = movesOn(state.moves, site, c.a);
+        // 累計の差：開始日からこの日までを1つの期間として計算（日次の差の合計と同じ）
+        var cum = computeCycle(site, days, from, c.a, state.moves, state.adjustments, null);
+        row.cum = cum.status === 'complete' ? cum : null;
+      }
+      rows.push(row);
     });
     return rows;
   }
 
   function kindVisible(row){
-    return state.kind === 'both' || row.cycle.kind === state.kind;
+    return state.kind === 'both' ? row.cycle.kind !== 'day' : row.cycle.kind === state.kind;
+  }
+
+  // 移動のある日の印（「移動 入/出」の列に置く。期間の列の幅を変えないため）。マウスを乗せると内訳
+  function moveMark(row){
+    if (!row.moves || !row.moves.length) return '';
+    var tip = row.moves.map(function(m){ return m.from + '→' + m.to + ' ' + (m.spec ? m.spec + ' ' : '') + fmt(m.kg) + 'kg'; }).join('\n');
+    return '<span class="mv" title="' + esc(tip) + '">🚚</span>';
   }
 
   function renderTable(){
-    var rows = state.rows.filter(kindVisible);
+    var rows = state.rows.filter(kindVisible), isDay = state.kind === 'day';
     var h = '<table class="grid"><thead><tr>' +
       '<th>期間</th><th>開始在庫</th><th>出荷</th><th>収穫</th><th>移動 入/出</th><th>廃棄+規格外</th><th>あるべき在庫</th><th>実際の在庫</th>' +
-      '<th>調整前の差</th><th>調整合計</th><th>調整後の差</th><th>率（前）</th><th>率（後）</th><th>要確認</th></tr></thead><tbody>';
+      '<th>調整前の差</th><th>調整合計</th><th>調整後の差</th><th>率（前）</th><th>率（後）</th>' +
+      (isDay ? '<th>累計の差（前）</th><th>累計の差（後）</th>' : '') + '<th>要確認</th></tr></thead><tbody>';
     rows.forEach(function(row){
       var c = row.cycle, r = row.r;
       var trCls = c.kind + (r.status === 'provisional' ? ' prov' : '') + (state.selected === c.id ? ' selected' : '');
@@ -636,19 +711,21 @@
       h += '<tr class="' + trCls + '" data-id="' + esc(c.id) + '"><td><span class="lab">' + esc(c.label) + '</span>' +
         (r.status === 'provisional' ? '<span class="badge">暫定〜' + md(r.e) + '</span>' : '') + '</td>';
       if (r.status === 'none' || r.status === 'nostart'){
-        h += '<td colspan="13" class="muted" style="text-align:left;">' +
+        h += '<td colspan="' + (isDay ? 15 : 13) + '" class="muted" style="text-align:left;">' +
           (r.status === 'none' ? 'データなし（在庫の入力がありません）' : '開始在庫（' + md(addDays(c.a, -1)) + '）が未入力のため計算できません') + '</td></tr>';
         return;
       }
       var flagTitle = r.flagDays.map(function(d){ return md(d) + ' ' + (row.flags[d] || []).join(' / '); }).join('\n');
       h += '<td>' + fmt(r.S0) + '</td><td>' + fmt(r.ship) + '</td><td>' + fmt(r.harv, 0) + '</td>' +
-        '<td>' + fmt(r.movIn, 0) + ' / ' + fmt(r.movOut, 0) + '</td><td>' + fmt(r.waste + r.kik) + '</td>' +
+        '<td>' + moveMark(row) + fmt(r.movIn, 0) + ' / ' + fmt(r.movOut, 0) + '</td><td>' + fmt(r.waste + r.kik) + '</td>' +
         '<td>' + fmt(r.expected) + '</td><td>' + fmt(r.S1) + '</td>' +
         '<td class="' + cls(r.diffBefore) + '">' + signed(r.diffBefore) + '</td>' +
         '<td>' + (r.adjSum == null ? '－' : signed(r.adjSum)) + '</td>' +
         '<td class="' + cls(r.diffAfter) + '">' + signed(r.diffAfter) + '</td>' +
         '<td class="' + cls(r.rateBefore) + '">' + pct(r.rateBefore) + '</td>' +
         '<td class="' + cls(r.rateAfter) + '">' + pct(r.rateAfter) + '</td>' +
+        (isDay ? '<td class="' + cls(row.cum && row.cum.diffBefore) + '">' + signed(row.cum && row.cum.diffBefore) + '</td>' +
+          '<td class="' + cls(row.cum && row.cum.diffAfter) + '">' + signed(row.cum && row.cum.diffAfter) + '</td>' : '') +
         '<td' + (r.flagDays.length ? ' class="flagcell" title="' + esc(flagTitle) + '"' : '') + '>' + (r.flagDays.length ? '⚠' + r.flagDays.length + '日' : '') + '</td></tr>';
     });
     h += '</tbody></table>';
@@ -697,26 +774,43 @@
       box.innerHTML = '<p class="note">一覧の行（または棒）を選ぶと、そのサイクルの日別の動きが出ます。</p>';
       return;
     }
-    title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + (row.cycle.kind === 'month' ? '（月）' : '（週）');
-    var daily = computeDaily(state.site, row.days, row.cycle.a, row.r.e, state.moves, state.adjustments);
+    // 日の行は、その日を含む週（月曜〜日曜。在庫が入っている最新の日まで）のグラフを出す
+    var isDay = row.cycle.kind === 'day', a = row.cycle.a, e = row.r.e, fl = row.r.flagDays, pick = null;
+    if (isDay){
+      pick = row.cycle.a;
+      var wk = weekOf(pick);
+      var wr = computeCycle(state.site, row.days, wk.a, wk.b, state.moves, state.adjustments, row.flags);
+      a = wk.a; e = wr.e || pick;
+      fl = wr.flagDays || [];
+      title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + 'を含む週 ' + md(wk.a) + '〜' + md(wk.b);
+    } else {
+      title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + (row.cycle.kind === 'month' ? '（月）' : '（週）');
+    }
+    var daily = computeDaily(state.site, row.days, a, e, state.moves, state.adjustments);
+    var radius = function(base){ return daily.map(function(x){ return x.date === pick ? base + 3 : base; }); };
     if (typeof Chart !== 'undefined'){
       dailyChart = new Chart(document.getElementById('dailyChart'), {
         type: 'line',
-        data: { labels: daily.map(function(x){ return md(x.date); }), datasets: [
-          { label: 'あるべき在庫', data: daily.map(function(x){ return x.expected == null ? null : Math.round(x.expected * 10) / 10; }), borderDash: [6, 4], borderColor: '#3f6b4c', backgroundColor: '#3f6b4c', pointRadius: 2, tension: 0 },
-          { label: '実際の在庫', data: daily.map(function(x){ return x.actual == null ? null : Math.round(x.actual * 10) / 10; }), borderColor: '#7a4a26', backgroundColor: '#7a4a26', pointRadius: 3, tension: 0 }
+        data: { labels: daily.map(function(x){ return isDay ? dayLabel(x.date) : md(x.date); }), datasets: [
+          { label: 'あるべき在庫', data: daily.map(function(x){ return x.expected == null ? null : Math.round(x.expected * 10) / 10; }), borderDash: [6, 4], borderColor: '#3f6b4c', backgroundColor: '#3f6b4c', pointRadius: radius(2), tension: 0 },
+          { label: '実際の在庫', data: daily.map(function(x){ return x.actual == null ? null : Math.round(x.actual * 10) / 10; }), borderColor: '#7a4a26', backgroundColor: '#7a4a26', pointRadius: radius(3), tension: 0 }
         ] },
         options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { title: { display: true, text: '在庫（kg）' } } }, plugins: { legend: { position: 'top' } } }
       });
     }
-    var fl = row.r.flagDays;
     box.innerHTML = fl.length
       ? '<p class="note" style="margin-top:8px;">要確認の日（' + fl.length + '日）</p><ul class="flaglist">' +
         fl.map(function(d){ return '<li>' + md(d) + '：' + esc((row.flags[d] || []).join(' / ')) + '</li>'; }).join('') + '</ul>'
-      : '<p class="note">このサイクルに要確認の日はありません。</p>';
+      : '<p class="note">' + (isDay ? 'この週' : 'このサイクル') + 'に要確認の日はありません。</p>';
   }
 
   function render(){
+    // サイクル「日」に入った直後：終了日＝在庫の入力がある最新の日、開始日＝そこから30日間（「30日」と同じ）
+    if (state.kind === 'day' && !state.dayTo){
+      var b = dayBounds(), last = latestStockDay(state.data && state.data[state.site], b) || b.max;
+      setDayRange(addDays(last, -(DAY_SPAN_DEFAULT - 1)), last, 'to');
+      return;
+    }
     var msg = document.getElementById('msg'), h = '';
     if (state.failed.length) h += '<div class="warn">読み込めなかったタブがあります：<br>' + state.failed.map(esc).join('<br>') + '</div>';
     var latest = Object.keys(SOURCES).sort().filter(function(k){ return !SOURCES[k].anchorOnly; }).pop();
@@ -743,9 +837,70 @@
       b.addEventListener('click', function(){ onPick(b.getAttribute('data-v')); });
     });
   }
+  // サイクルの切り替え。「日」に入るときは、開始月・終了月の欄を開始日・終了日の欄に替え、グラフの単位を kg にする
+  // （期間は読み込み後に render() で決める：在庫の入力がある最新の日まで30日間）。
+  // 「日」から出るときは、開始月・終了月と単位を「日」に入る前に戻す。
+  var DAY_SPAN_DEFAULT = 30;
+  function setKind(v){
+    if (v === state.kind) return;
+    var wasDay = state.kind === 'day', months = false;
+    if (v === 'day'){
+      state.dayPrev = { startKey: state.startKey, endKey: state.endKey, unit: state.unit };
+      state.unit = 'kg';
+      state.dayFrom = state.dayTo = null;
+      // 在庫の入力がある最新の日を探すため、まず最後の選べる月（今日の月まで）を読む
+      var lastKey = dayBounds().max.slice(0, 7);
+      if (state.startKey !== lastKey || state.endKey !== lastKey){ state.startKey = state.endKey = lastKey; months = true; }
+    } else if (wasDay && state.dayPrev){
+      var p = state.dayPrev;
+      state.unit = p.unit;
+      if (p.startKey !== state.startKey || p.endKey !== state.endKey){ state.startKey = p.startKey; state.endKey = p.endKey; months = true; }
+      state.dayPrev = null; state.dayFrom = state.dayTo = null;
+    }
+    if (v === 'day' || wasDay) state.selected = null;
+    state.kind = v;
+    drawControls();
+    if (months) reload(); else if (state.data) render();
+  }
+
+  // サイクル「日」の期間を決める。選べる範囲に収め、開始日＞終了日になったら、changed（'from'／'to'）でない側を合わせる。
+  // 読み込む月（開始在庫用の前月を含む）は startKey・endKey で決まるので、それも合わせる。
+  function setDayRange(from, to, changed){
+    var b = dayBounds();
+    from = clampDay(from, b); to = clampDay(to, b);
+    if (from > to){ if (changed === 'from') to = from; else from = to; }
+    state.dayFrom = from; state.dayTo = to;
+    state.startKey = from.slice(0, 7); state.endKey = to.slice(0, 7);
+    state.selected = null;
+    drawControls();
+    if (state.data && state.loadedKeys === loadMonths().join(',')) render(); else reload();
+  }
+
+  function drawDayRange(){
+    var box = document.getElementById('dayRange'), isDay = state.kind === 'day';
+    document.getElementById('startMonthPair').style.display = isDay ? 'none' : '';
+    document.getElementById('endMonthPair').style.display = isDay ? 'none' : '';
+    if (!isDay){ box.innerHTML = ''; return; }
+    var b = dayBounds(), f = state.dayFrom || '', t = state.dayTo || '';
+    var span = (f && t) ? Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1 : 0;
+    box.innerHTML =
+      '<div class="pair"><span class="label">開始<span class="xs-hide">日</span></span><input type="date" id="dayFrom" min="' + b.min + '" max="' + b.max + '" value="' + f + '"></div>' +
+      '<div class="pair"><span class="label">終了<span class="xs-hide">日</span></span><input type="date" id="dayTo" min="' + b.min + '" max="' + b.max + '" value="' + t + '"></div>' +
+      '<div class="pair"><span class="label">期間</span><div class="site-toggle" id="spanSeg">' +
+      [7, 14, 30].map(function(n){ return '<button type="button" data-v="' + n + '" class="' + (span === n ? 'active' : '') + '">' + n + '日</button>'; }).join('') + '</div></div>';
+    document.getElementById('dayFrom').addEventListener('change', function(){ if (this.value) setDayRange(this.value, state.dayTo || this.value, 'from'); });
+    document.getElementById('dayTo').addEventListener('change', function(){ if (this.value) setDayRange(state.dayFrom || this.value, this.value, 'to'); });
+    Array.prototype.forEach.call(box.querySelectorAll('#spanSeg button'), function(btn){
+      btn.addEventListener('click', function(){
+        var to = state.dayTo || b.max;
+        setDayRange(addDays(to, -(+btn.getAttribute('data-v') - 1)), to, 'to');
+      });
+    });
+  }
+
   function drawControls(){
     seg('siteSeg', SITES.map(function(s){ return [s, s]; }), state.site, function(v){ state.site = v; state.selected = null; drawControls(); if (state.data) render(); });
-    seg('kindSeg', [['week', '週'], ['month', '月'], ['both', '両方']], state.kind, function(v){ state.kind = v; drawControls(); render(); });
+    seg('kindSeg', [['day', '日'], ['week', '週'], ['month', '月'], ['both', 'すべて']], state.kind, setKind);
     seg('unitSeg', [['kg', 'kg'], ['pct', '%']], state.unit, function(v){ state.unit = v; drawControls(); renderMainChart(); });
     var months = selectableMonths();
     function fill(id, cur){
@@ -753,6 +908,7 @@
       el.innerHTML = months.map(function(k){ return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + monthLabel(k) + '</option>'; }).join('');
     }
     fill('startMonth', state.startKey); fill('endMonth', state.endKey);
+    drawDayRange();
   }
 
   function init(){
@@ -782,7 +938,7 @@
   window.__stockCheck = {
     SOURCES: SOURCES, parseCsv: parseCsv, parseSiteMonthTab: parseSiteMonthTab, parseMovementTable: parseMovementTable,
     computeFlags: computeFlags, computeCycle: computeCycle, computeDaily: computeDaily, sumAdjustments: sumAdjustments,
-    buildCycles: buildCycles, selectableMonths: selectableMonths, getAdjustments: getAdjustments,
+    buildCycles: buildCycles, buildDayCycles: buildDayCycles, weekOf: weekOf, dayBounds: dayBounds, selectableMonths: selectableMonths, getAdjustments: getAdjustments,
     setAdjustments: function(list){ state.adjustments = list || []; if (state.data) render(); },
     getState: function(){ return state; }
   };
