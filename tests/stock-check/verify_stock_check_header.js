@@ -70,7 +70,7 @@ function collect(page, sel) {
   check('① タイトルは「在庫検証ダッシュボード」（ページのタイトルも同じ）', st.title === '在庫検証ダッシュボード' && st.docTitle === '在庫検証ダッシュボード', [st.title, st.docTitle]);
   check('① 拠点の切り替え（いなべ・群馬・南丹）が、タイトルの右（右端そろえ）にある', JSON.stringify(st.siteBtns) === JSON.stringify(['いなべ', '群馬', '南丹']) && st.toggleLeft > st.titleRight && Math.abs(st.toggleRight - st.wrapRight) < 2, st);
   check('① その下の枠に 開始月・終了月・サイクル・グラフの単位（固定領域の中）', st.navInHead && st.navTop >= st.headerBottom && JSON.stringify(st.labels) === JSON.stringify(['開始月', '終了月', 'サイクル', 'グラフの単位']) && st.ctl.every(Boolean), st);
-  check('① 枠の中の選択肢：サイクル（週・月・両方）・単位（kg・%）', JSON.stringify(st.kindBtns) === JSON.stringify(['週', '月', '両方']) && JSON.stringify(st.unitBtns) === JSON.stringify(['kg', '%']), [st.kindBtns, st.unitBtns]);
+  check('① 枠の中の選択肢：サイクル（日・週・月・すべて）・単位（kg・%）', JSON.stringify(st.kindBtns) === JSON.stringify(['日', '週', '月', 'すべて']) && JSON.stringify(st.unitBtns) === JSON.stringify(['kg', '%']), [st.kindBtns, st.unitBtns]);
 
   // ② 固定
   const fx = await page.evaluate(() => {
