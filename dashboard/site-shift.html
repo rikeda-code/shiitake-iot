@@ -102,7 +102,7 @@ td.cell.in-sel { background: var(--sel-soft); }
 td.cell.cursor { box-shadow: inset 0 0 0 2px var(--sel); }
 /* 氏名：クリックで行を選ぶ。つかんで上下にドラッグすると並び順を変える */
 .grid tbody td.name[data-r] { cursor: grab; }
-.grid tbody td.name.row-sel { background: var(--sel-soft); }
+.grid tbody td.name.row-sel { background: linear-gradient(var(--sel-soft), var(--sel-soft)), var(--surface); }
 body.row-dragging, body.row-dragging .grid tbody td { cursor: grabbing; }
 .grid tr.drop-before > td { box-shadow: inset 0 3px 0 var(--sel); }
 .grid tr.drop-after > td { box-shadow: inset 0 -3px 0 var(--sel); }
