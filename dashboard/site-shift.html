@@ -110,7 +110,7 @@ body.row-dragging, body.row-dragging .grid tbody td { cursor: grabbing; }
 .sort-dialog .sort-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .sort-dialog .sort-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 /* フィルハンドル：選んだ範囲の右下の四角。ドラッグすると同じ内容を広げる */
-.fill-handle { position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; background: var(--sel); border: 1.5px solid var(--surface); z-index: 3; cursor: crosshair; }
+.fill-handle { position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; background: var(--sel); border: 1.5px solid var(--surface); z-index: 1; cursor: crosshair; }
 td.cell.fill-prev { box-shadow: inset 0 0 0 1px var(--sel); background-image: repeating-linear-gradient(135deg, var(--sel-soft) 0 4px, transparent 4px 8px); }
 body.filling, body.filling td.cell { cursor: crosshair; }
 td.cell.bad { color: var(--sun); text-decoration: wavy underline; }
