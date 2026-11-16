@@ -194,6 +194,25 @@
   .prep{display:inline-block;background:#e8dfc7;border-radius:10px;padding:1px 10px;font-size:12px;margin-left:8px;color:var(--ink-soft);}
   button.disabled-btn{font:inherit;padding:6px 16px;border:1px solid var(--line);border-radius:6px;background:#ece7da;color:#9b9384;cursor:not-allowed;}
   ul.flaglist{margin:6px 0 0;padding-left:18px;font-size:13px;}
+  /* 画面の切り替え（差の検証／ギャップの内訳） */
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:2px 0 0;}
+  .tabs button{font-family:inherit;font-size:14px;font-weight:600;padding:7px 16px;border:1px solid var(--line);border-bottom:none;border-radius:8px 8px 0 0;background:#efe6d0;color:var(--ink-soft);cursor:pointer;margin-bottom:-1px;}
+  .tabs button.active{background:var(--panel);color:var(--brown-deep);border-bottom:1px solid var(--panel);}
+  .view[hidden]{display:none;}
+  .gap-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:4px;}
+  .gap-card{border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;background:#fffef9;}
+  .gap-card h3{margin:0 0 4px;font-size:14px;color:var(--brown-deep);}
+  .gap-card .big{font-size:20px;font-weight:700;}
+  .gap-card .rowline{display:flex;justify-content:space-between;gap:8px;font-size:13px;}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+  .coef-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;}
+  .coef-grid fieldset{border:1px solid var(--line-soft);border-radius:8px;padding:8px 12px;margin:0;background:#fffef9;}
+  .coef-grid legend{font-weight:700;color:var(--brown-deep);font-size:13px;padding:0 4px;}
+  .coef-grid label{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;margin:4px 0;}
+  .coef-grid input{width:84px;font:inherit;text-align:right;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;}
+  .coef-grid .src{font-size:11.5px;color:var(--ink-soft);margin:4px 0 0;}
+  button.plain-btn{font:inherit;font-size:13px;padding:5px 14px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer;}
+  button.plain-btn:hover{background:var(--amber-soft);}
   /* スマホ：固定する部分（タイトル＋拠点＋枠）が画面の大きな割合を占めないよう、余白と文字を小さくする */
   @media (max-width:640px){
     body{ padding:6px 12px 40px; }
@@ -243,8 +262,14 @@
     </div>
   </div>
 
+  <nav class="tabs" id="viewTabs">
+    <button type="button" data-v="diff" class="active">差の検証</button>
+    <button type="button" data-v="gap">ギャップの内訳</button>
+  </nav>
+
   <div id="msg"></div>
 
+  <div class="view" id="viewDiff">
   <section class="panel">
     <h2>① 差のグラフ（サイクルごと）</h2>
     <p class="note" style="margin:0 0 6px;">サイクルの「あるべき在庫」と、最終日に手入力した「実際の在庫」の差です。差 ＝ 実際 − あるべき（マイナスは現物が少ない）。</p>
@@ -294,6 +319,48 @@
       <li>合計在庫が空欄または0の日は、在庫が未入力として扱います。</li>
     </ul>
   </section>
+  </div>
+
+  <div class="view" id="viewGap" hidden>
+  <section class="panel">
+    <h2>⑤ ギャップの内訳（拠点比較・表示期間の合計）</h2>
+    <p class="note" style="margin:0 0 6px;">ギャップ（実際の在庫 − あるべき在庫、調整後）のうち、水分減少と製品の過積載で説明できる割合です。残りは、まだ理由がわからない分です。</p>
+    <div class="gap-cards" id="gapCards"></div>
+    <div class="chart-box small" style="margin-top:12px;"><canvas id="gapSiteChart"></canvas></div>
+    <div class="legend-note" id="gapSiteNote"></div>
+  </section>
+
+  <section class="panel">
+    <h2 id="gapCycleTitle">⑥ サイクルごとの内訳</h2>
+    <div class="chart-box"><canvas id="gapCycleChart"></canvas></div>
+    <div class="legend-note" id="gapCycleNote"></div>
+  </section>
+
+  <section class="panel">
+    <h2>⑦ 内訳の一覧</h2>
+    <div class="table-wrap" id="gapTableWrap"><div class="loading">読み込み中…</div></div>
+    <p class="note">マイナスは在庫を減らす向きです。過積載がマイナスの規格（規定より軽く詰めた分）は、そのまま差し引いています。</p>
+  </section>
+
+  <section class="panel">
+    <h2>⑧ 係数（測定値から）</h2>
+    <p class="note" style="margin:0 0 8px;">数字を書きかえると、その場でグラフと表に反映されます（保存はしません。再読み込みで測定値に戻ります）。</p>
+    <div class="coef-grid" id="coefGrid"></div>
+    <p style="margin:10px 0 0;"><button type="button" class="plain-btn" id="coefReset">測定値に戻す</button></p>
+  </section>
+
+  <section class="panel">
+    <h2>内訳の計算の前提</h2>
+    <ul class="note" style="margin:0;padding-left:18px;">
+      <li>水分減少 ＝ 前日の実際の在庫 × 1日あたりの水分減少率 を、サイクルの日数分足したもの（在庫が未入力の日は、直前に入力された在庫を使います）。</li>
+      <li>1日あたりの水分減少率 ＝ 3日間の累計減少率 ÷ 3（4規格 L優・L秀・M優・M秀の合計重量で計算）。</li>
+      <li>過積載 ＝ 出荷実績 × 過積載率。いなべ・群馬の過積載率は、出荷重量計測表の（箱・パックの重さを引いた）実重量 ÷ 規定重量 − 1 を、出荷重量で加重したもの。南丹は、パック重量測定表の実測平均 ÷ 商品重量 − 1 を規格で平均したもの。</li>
+      <li>説明できない残り ＝ ギャップ − 水分減少 − 過積載。</li>
+      <li>割合 ＝ それぞれ ÷ ギャップの大きさ。ギャップが0以上（現物が多い）のサイクルは、割合を出しません。</li>
+      <li>拠点比較は、表示期間の各月（暫定を含む）を合計したものです。</li>
+    </ul>
+  </section>
+  </div>
 </div>
 
 <div id="aggBar" class="agg-bar" role="status">
@@ -326,6 +393,39 @@
   };
   var SITES = ['いなべ', '群馬', '南丹'];
   var OUTLIER_FACTOR = 3; // 中央値のこの倍数を超えたら要確認
+
+  /* ===================== ギャップの内訳の係数（測定値） ===================== */
+  // 水分（moist3）：「しいたけ_パック重量測定表_各規格20個_まとめ.xlsx」（Drive 1Q64s1_5lutW5sYLrkN3UhkhG8kevNr93）の
+  //   「水分減少_サマリ」3日目・累計減少率（4規格の合計重量、%）。いなべ Q25、群馬 Q51、南丹 Q77。1日あたりはこれを÷3。
+  // 過積載（items）：
+  //   いなべ：「【いなべ】出荷重量計測表」（1LNUYA5wcr21H_EwqCg5SeIT2JMRCxC-SCHio1tQgkYs）データベース、2026/11/12〜11/14。
+  //   群馬  ：「【群馬】出荷重量計測表」（1GliWGZdz0uLWHeSlU9nu3vZN3PFUintOQPNgu1Crq8I）データベース、2026/11/01〜11/15。
+  //     規格ごとに [商品名, 正味の実重量kg, 規定重量kg]。正味 ＝ 重量 − 箱数×箱の重さ − パック数×パック・袋の重さ
+  //     （重さは各ファイルの集計表(基準値ベース)の表）。規定 ＝ パック数 × 基準設定のg。過積載率 ＝ Σ正味 ÷ Σ規定 − 1（出荷重量で加重）。
+  //     混載・バラ・規格外・パック数の無い行・正味÷規定が0.7〜1.6を外れる行（入力ミスとみなす）は除く。
+  //     群馬で基準設定にgが無い商品は、池田さんの指定（2026-11-16）：A5 100g、A6・A8 130g、B5 80g、BCパック 75g、2L6-8 200g。
+  //     A3・B8 はgが未確認のため除く。パックの重さは 90c 0.005kg（2L6-8 は黒パック 0.007kg）。
+  //   南丹：パック重量測定表（2026-11-03 測定、各規格20個）の [規格, 平均g, 商品重量g]。出荷量が無いので規格の単純平均。
+  //   2026-11-16 に読み取り。
+  var GAP_MEASURED = {
+    'いなべ': { moist3: 8.351, weighted: true, overSrc: '出荷重量計測表 11/12〜11/14（出荷重量で加重）',
+      items: [['優L6', 476.8, 425.7], ['袋200g', 312.9, 320.0], ['秀L6', 304.5, 304.2], ['優2L8', 175.0, 145.4], ['秀M8', 164.5, 167.7], ['秀2L4', 72.9, 91.0], ['優M8', 44.2, 46.2], ['秀2L8', 42.0, 37.0], ['優3L6', 34.1, 25.2], ['秀3L6', 14.3, 11.2], ['優2L7', 9.1, 8.0]] },
+    '群馬':   { moist3: 9.003, weighted: true, overSrc: '出荷重量計測表 11/1〜11/15（出荷重量で加重。A3・B8はgが未確認のため除外）',
+      items: [['2L6-8', 1696.3, 1562.0], ['袋150g', 1200.0, 1145.2], ['袋200g', 1188.6, 1133.0], ['A6', 1078.5, 990.6], ['B5', 1008.9, 765.6], ['BCパック', 307.4, 222.8], ['A8', 271.0, 260.0], ['袋220g', 221.5, 220.0], ['袋100g', 130.0, 120.0], ['A5', 17.5, 15.0]] },
+    '南丹':   { moist3: 7.468, weighted: false, overSrc: 'パック重量測定表 11/3（各規格20個の平均、規格の単純平均）',
+      items: [['秀M8', 145.2, 130], ['優M8', 135.6, 110], ['秀L6', 138.2, 130], ['優L6', 144.25, 110], ['秀2L4', 127.7, 130], ['優2L4', 119.5, 110]] }
+  };
+  function measuredCoef(site){
+    var m = GAP_MEASURED[site], over;
+    if (m.weighted){
+      var a = 0, b = 0;
+      m.items.forEach(function(p){ a += p[1]; b += p[2]; });
+      over = a / b - 1;
+    } else {
+      over = m.items.reduce(function(s, p){ return s + (p[1] / p[2] - 1); }, 0) / m.items.length;
+    }
+    return { moist: m.moist3 / 100 / 3, over: over };
+  }
 
   /* ===================== 共通ユーティリティ ===================== */
   // 簡易なRFC4180準拠CSVパーサー（shiitake-shipment-plan.htmlのparseCsv()と同じ考え方）
@@ -586,6 +686,42 @@
     return out;
   }
 
+  // 水分減少（kg、正の数）：a〜e の各日に、前日の実際の在庫 × 1日あたりの減少率 を足す。
+  // 在庫が未入力の日は、直前に入力された在庫を使う。開始在庫も無いあいだは数えない。
+  function moistureLoss(days, a, e, rate){
+    var base = stockOf(days, addDays(a, -1)), sum = 0;
+    for (var d = a; d <= e; d = addDays(d, 1)){
+      if (base != null) sum += base * rate;
+      var s = stockOf(days, d);
+      if (s != null) base = s;
+    }
+    return sum;
+  }
+
+  // 1サイクルのギャップの内訳。r は computeCycle の結果、coef は {moist:1日あたり, over:過積載率}。
+  // water・over・rest は在庫への影響（マイナス＝在庫を減らす）。gap = water + over + rest。
+  // 割合（shareX）はギャップがマイナスのときだけ出す（ギャップの大きさに対する割合）。
+  function computeGap(days, r, coef){
+    if (!r || (r.status !== 'complete' && r.status !== 'provisional')) return null;
+    var water = -moistureLoss(days, r.a, r.e, coef.moist);
+    var over = -r.ship * coef.over;
+    var gap = r.diffAfter;
+    var rest = gap - water - over;
+    var L = gap < 0 ? -gap : null;
+    return {
+      gap: gap, water: water, over: over, rest: rest,
+      shareWater: L ? -water / L : null, shareOver: L ? -over / L : null, shareRest: L ? -rest / L : null
+    };
+  }
+  function addGap(t, g){
+    if (!g) return t;
+    if (!t) t = { gap: 0, water: 0, over: 0, rest: 0 };
+    t.gap += g.gap; t.water += g.water; t.over += g.over; t.rest += g.rest;
+    var L = t.gap < 0 ? -t.gap : null;
+    t.shareWater = L ? -t.water / L : null; t.shareOver = L ? -t.over / L : null; t.shareRest = L ? -t.rest / L : null;
+    return t;
+  }
+
   // 表示する月（開始月〜終了月）と、開始日（月曜）がその範囲に入る週の一覧。
   // 週は開始日の月の下に置く。返す配列は 月の行 → その月の週の行… の順。
   function buildCycles(startKey, endKey){
@@ -661,9 +797,12 @@
     adjustments: getAdjustments(),
     data: null,        // { site: days }
     moves: [], direct: [], failed: [],
-    rows: [], selected: null, token: 0
+    rows: [], selected: null, token: 0,
+    tab: 'diff',
+    coef: { 'いなべ': measuredCoef('いなべ'), '群馬': measuredCoef('群馬'), '南丹': measuredCoef('南丹') }
   };
-  var mainChart = null, dailyChart = null;
+  var mainChart = null, dailyChart = null, gapSiteChart = null, gapCycleChart = null;
+  var GAP_COLORS = { water: '#2f5f8f', over: '#d08a2c', rest: '#bfae96', gap: '#5a341a' };
 
   function fmt(x, d){
     if (x == null || isNaN(x)) return '－';
@@ -715,8 +854,8 @@
     render();
   }
 
-  function buildRows(){
-    var site = state.site, days = (state.data && state.data[site]) || {}, today = todayIso();
+  function buildRows(siteArg){
+    var site = siteArg || state.site, days = (state.data && state.data[site]) || {}, today = todayIso();
     var flags = computeFlags(site, days, today);
     var isDay = state.kind === 'day';
     var cycles = isDay ? buildDayCycles(state.dayFrom, state.dayTo) : buildCycles(state.startKey, state.endKey);
@@ -875,6 +1014,174 @@
       : '<p class="note">' + (isDay ? 'この週' : 'このサイクル') + 'に要確認の日はありません。</p>';
   }
 
+  /* ===================== ギャップの内訳（タブ） ===================== */
+  function isCalc(row){ return row.r.status === 'complete' || row.r.status === 'provisional'; }
+  function gapRowsOf(site){
+    var rows = site === state.site ? state.rows : buildRows(site);
+    return rows.map(function(row){
+      return { cycle: row.cycle, r: row.r, g: isCalc(row) ? computeGap(row.days, row.r, state.coef[site]) : null };
+    });
+  }
+  // 拠点ごとの表示期間合計（月の行を足す。サイクル「日」のときは日の行を足す）
+  function siteTotals(){
+    var out = {}, unitKind = state.kind === 'day' ? 'day' : 'month';
+    SITES.forEach(function(s){
+      var t = null, prov = false;
+      gapRowsOf(s).forEach(function(x){
+        if (x.cycle.kind !== unitKind || !x.g) return;
+        t = addGap(t, x.g);
+        if (x.r.status === 'provisional') prov = true;
+      });
+      out[s] = { t: t, prov: prov };
+    });
+    return out;
+  }
+  function sharePct(x){ return x == null ? '－' : Math.round(x * 100) + '%'; }
+
+  function renderGapCards(tot){
+    var h = '';
+    SITES.forEach(function(s){
+      var t = tot[s].t;
+      h += '<div class="gap-card"><h3>' + esc(s) + (tot[s].prov ? '<span class="badge">暫定を含む</span>' : '') + '</h3>';
+      if (!t){ h += '<p class="note">計算できるサイクルがありません。</p></div>'; return; }
+      h += '<div class="rowline"><span>ギャップ</span><span class="big ' + cls(t.gap) + '">' + signed(t.gap) + ' kg</span></div>';
+      [['water', '水分減少', 'shareWater'], ['over', '過積載', 'shareOver'], ['rest', '説明できない残り', 'shareRest']].forEach(function(k){
+        h += '<div class="rowline"><span><span class="sw" style="background:' + GAP_COLORS[k[0]] + '"></span>' + k[1] + '</span>' +
+          '<span>' + signed(t[k[0]]) + ' kg　<b>' + sharePct(t[k[2]]) + '</b></span></div>';
+      });
+      if (t.gap >= 0) h += '<p class="note">ギャップがプラス（現物が多い）のため、割合は出していません。</p>';
+      h += '</div>';
+    });
+    document.getElementById('gapCards').innerHTML = h;
+  }
+
+  function renderGapSiteChart(tot){
+    gapSiteChart = destroy(gapSiteChart);
+    var note = document.getElementById('gapSiteNote');
+    if (typeof Chart === 'undefined'){ note.textContent = 'グラフを読み込めませんでした（数字は上に表示しています）。'; return; }
+    var sites = SITES.filter(function(s){ return tot[s].t && tot[s].t.gap < 0; });
+    var labels = sites.map(function(s){ return s + '（' + signed(tot[s].t.gap, 0) + 'kg）'; });
+    function ds(key, label, sk){
+      return { label: label, backgroundColor: GAP_COLORS[key],
+        data: sites.map(function(s){ var v = tot[s].t[sk]; return v == null ? null : Math.round(v * 1000) / 10; }),
+        kg: sites.map(function(s){ return tot[s].t[key]; }) };
+    }
+    gapSiteChart = new Chart(document.getElementById('gapSiteChart'), {
+      type: 'bar',
+      data: { labels: labels, datasets: [ds('water', '水分減少', 'shareWater'), ds('over', '過積載', 'shareOver'), ds('rest', '説明できない残り', 'shareRest')] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false,
+        scales: { x: { stacked: true, title: { display: true, text: 'ギャップに占める割合（%）' } }, y: { stacked: true } },
+        plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: function(c){ return c.dataset.label + '：' + c.parsed.x + '%（' + signed(c.dataset.kg[c.dataIndex]) + 'kg）'; } } } }
+      }
+    });
+    var skipped = SITES.filter(function(s){ return sites.indexOf(s) < 0; });
+    note.textContent = '棒の長さの合計が100%（＝ギャップ全体）です。水分減少と過積載で100%を超えると、残りがマイナスになります（説明できる分のほうが大きい）。' +
+      (skipped.length ? '　' + skipped.join('・') + 'は、ギャップがプラスか計算できないため、グラフから外しています。' : '');
+  }
+
+  function renderGapCycleChart(grows){
+    gapCycleChart = destroy(gapCycleChart);
+    var note = document.getElementById('gapCycleNote');
+    document.getElementById('gapCycleTitle').textContent = '⑥ サイクルごとの内訳：' + state.site;
+    if (typeof Chart === 'undefined'){ note.textContent = 'グラフを読み込めませんでした（表は表示されています）。'; return; }
+    var unitPct = state.unit === 'pct';
+    var rows = grows.filter(function(x){ return x.g && kindVisible(x); });
+    var labels = rows.map(function(x){ return (x.cycle.kind === 'month' ? '【月】' : '') + x.cycle.label + (x.r.status === 'provisional' ? '（暫定）' : ''); });
+    function val(x, key, sk){
+      if (unitPct){ var s = x.g[sk]; return s == null ? null : Math.round(s * 1000) / 10; }
+      return Math.round(x.g[key] * 10) / 10;
+    }
+    var sets = [['water', '水分減少', 'shareWater'], ['over', '過積載', 'shareOver'], ['rest', '説明できない残り', 'shareRest']].map(function(k){
+      return { type: 'bar', label: k[1], stack: 'parts', order: 1, backgroundColor: GAP_COLORS[k[0]], data: rows.map(function(x){ return val(x, k[0], k[2]); }) };
+    });
+    if (!unitPct){
+      sets.push({ type: 'line', label: 'ギャップ（実際 − あるべき）', stack: 'gap', data: rows.map(function(x){ return Math.round(x.g.gap * 10) / 10; }),
+        order: 0, borderColor: '#fff', borderWidth: 2, backgroundColor: GAP_COLORS.gap, showLine: false, pointRadius: 8, pointHoverRadius: 9, pointStyle: 'rectRot' });
+    }
+    gapCycleChart = new Chart(document.getElementById('gapCycleChart'), {
+      type: 'bar',
+      data: { labels: labels, datasets: sets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        scales: { x: { stacked: true, ticks: { maxRotation: 60, minRotation: 30 } },
+          y: { stacked: true, title: { display: true, text: unitPct ? 'ギャップに占める割合（%）' : '在庫への影響（kg）' } } },
+        plugins: { legend: { position: 'top' } }
+      }
+    });
+    note.textContent = unitPct
+      ? '各サイクルのギャップを100%として、水分減少・過積載・残りの割合を積み上げています。ギャップがプラスのサイクルは空欄です。単位は上の「グラフの単位」で切り替えます。'
+      : '3つの棒を積み上げると、◆のギャップと同じになります。0より下は在庫を減らす向きです。単位は上の「グラフの単位」で切り替えます。';
+  }
+
+  function renderGapTable(grows){
+    var rows = grows.filter(kindVisible);
+    var h = '<table class="grid"><thead><tr><th>期間</th><th>出荷</th><th>ギャップ（調整後）</th><th>水分減少</th><th>過積載</th><th>説明できない残り</th>' +
+      '<th>水分 %</th><th>過積載 %</th><th>残り %</th></tr></thead><tbody>';
+    rows.forEach(function(x){
+      var c = x.cycle;
+      h += '<tr class="' + c.kind + (x.r.status === 'provisional' ? ' prov' : '') + '"><td><span class="lab">' + esc(c.label) + '</span>' +
+        (x.r.status === 'provisional' ? '<span class="badge">暫定〜' + md(x.r.e) + '</span>' : '') + '</td>';
+      if (!x.g){ h += '<td colspan="8" class="muted" style="text-align:left;">計算できません（在庫の入力が足りません）</td></tr>'; return; }
+      var g = x.g;
+      h += '<td>' + fmt(x.r.ship) + '</td><td class="' + cls(g.gap) + '">' + signed(g.gap) + '</td>' +
+        '<td class="' + cls(g.water) + '">' + signed(g.water) + '</td><td class="' + cls(g.over) + '">' + signed(g.over) + '</td>' +
+        '<td class="' + cls(g.rest) + '">' + signed(g.rest) + '</td>' +
+        '<td>' + sharePct(g.shareWater) + '</td><td>' + sharePct(g.shareOver) + '</td><td>' + sharePct(g.shareRest) + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    document.getElementById('gapTableWrap').innerHTML = h;
+  }
+
+  function renderCoef(){
+    var h = '';
+    SITES.forEach(function(s){
+      var c = state.coef[s], m = GAP_MEASURED[s];
+      h += '<fieldset><legend>' + esc(s) + '</legend>' +
+        '<label>水分減少（%／日）<input type="number" step="0.01" data-site="' + esc(s) + '" data-k="moist" value="' + (Math.round(c.moist * 10000) / 100) + '"></label>' +
+        '<label>過積載率（%）<input type="number" step="0.1" data-site="' + esc(s) + '" data-k="over" value="' + (Math.round(c.over * 1000) / 10) + '"></label>' +
+        '<p class="src">水分：3日間の累計 −' + m.moist3.toFixed(2) + '%（÷3）。過積載：' + esc(m.overSrc) + '。規格別：' +
+        m.items.map(function(p){ var v = (p[1] / p[2] - 1) * 100; return esc(p[0]) + ' ' + (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) + '%'; }).join('、') + '</p></fieldset>';
+    });
+    var el = document.getElementById('coefGrid');
+    el.innerHTML = h;
+    Array.prototype.forEach.call(el.querySelectorAll('input'), function(inp){
+      inp.addEventListener('change', function(){
+        var v = Number(inp.value);
+        if (inp.value === '' || isNaN(v)){ renderCoef(); return; }
+        state.coef[inp.getAttribute('data-site')][inp.getAttribute('data-k')] = v / 100;
+        renderGap(true);
+      });
+    });
+  }
+
+  function renderGap(keepCoef){
+    if (!state.data) return;
+    var tot = siteTotals(), grows = gapRowsOf(state.site);
+    renderGapCards(tot);
+    renderGapSiteChart(tot);
+    renderGapCycleChart(grows);
+    renderGapTable(grows);
+    if (!keepCoef) renderCoef();
+  }
+
+  function showTab(v){
+    state.tab = v === 'gap' ? 'gap' : 'diff';
+    document.getElementById('viewDiff').hidden = state.tab !== 'diff';
+    document.getElementById('viewGap').hidden = state.tab !== 'gap';
+    Array.prototype.forEach.call(document.querySelectorAll('#viewTabs button'), function(b){
+      b.className = b.getAttribute('data-v') === state.tab ? 'active' : '';
+    });
+    writeUrl();
+    if (!state.data) return;
+    if (state.tab === 'gap') renderGap(); else { renderMainChart(); renderDaily(); }
+  }
+
+  // タブ（?tab=gap）。ほかの表示の状態は writeUrl()／readUrl() が URL に残す
+  function readTabFromUrl(){
+    try { return new URLSearchParams(location.search).get('tab') === 'gap' ? 'gap' : 'diff'; } catch (e) { return 'diff'; }
+  }
+
   function render(){
     // サイクル「日」に入った直後：終了日＝在庫の入力がある最新の日、開始日＝そこから30日間（「30日」と同じ）
     // （URL に開始日だけが正しく残っていたときは、その開始日のまま終了日だけを決める）
@@ -895,6 +1202,7 @@
     renderTable();
     renderMainChart();
     renderDaily();
+    if (state.tab === 'gap') renderGap();
   }
 
   // 行を選ぶ（③のグラフを替える）。表は描き直さず印だけ付け替える（選んだセルを消さないため）
@@ -1145,7 +1453,7 @@
   function drawControls(){
     seg('siteSeg', SITES.map(function(s){ return [s, s]; }), state.site, function(v){ state.site = v; state.selected = null; drawControls(); if (state.data) render(); });
     seg('kindSeg', [['day', '日'], ['week', '週'], ['month', '月'], ['both', 'すべて']], state.kind, setKind);
-    seg('unitSeg', [['kg', 'kg'], ['pct', '%']], state.unit, function(v){ state.unit = v; clearCellSelection(); drawControls(); renderMainChart(); });
+    seg('unitSeg', [['kg', 'kg'], ['pct', '%']], state.unit, function(v){ state.unit = v; clearCellSelection(); drawControls(); if (state.tab === 'gap'){ if (state.data) renderGap(true); } else renderMainChart(); });
     var months = selectableMonths();
     function fill(id, cur){
       var el = document.getElementById(id);
@@ -1164,7 +1472,7 @@
   // 「7日・14日・30日」のボタンは開始日・終了日から決まるので、日付だけを残せば戻る。
   var SITE_CODES = { 'いなべ': 'inabe', '群馬': 'gunma', '南丹': 'nantan' };
   var KINDS = ['day', 'week', 'month', 'both'], UNITS = ['kg', 'pct'];
-  var URL_KEYS = ['site', 'kind', 'unit', 'start', 'end', 'from', 'to', 'pstart', 'pend', 'punit'];
+  var URL_KEYS = ['site', 'kind', 'unit', 'start', 'end', 'from', 'to', 'pstart', 'pend', 'punit', 'tab'];
 
   function writeUrl(){
     try {
@@ -1177,6 +1485,7 @@
       } else if (state.startKey && state.endKey){
         p.set('start', state.startKey); p.set('end', state.endKey);
       }
+      if (state.tab === 'gap') p.set('tab', 'gap');  // ギャップの内訳タブ
       var url = location.pathname + '?' + p.toString() + location.hash;
       if (url !== location.pathname + location.search + location.hash) history.replaceState(history.state, '', url);
     } catch (e) { console.warn('[表示状態] URL を書き換えられませんでした:', e); }
@@ -1226,7 +1535,16 @@
     state.endKey = months[endIdx];
     state.startKey = months[Math.max(0, endIdx - 2)]; // 初期表示は直近3か月
     readUrl({ startKey: state.startKey, endKey: state.endKey });  // F5 の前の選択（URL に残したもの）があれば戻す
+    state.tab = readTabFromUrl();  // drawControls() が URL を書き直す前に、タブの指定を読む
     drawControls();
+    Array.prototype.forEach.call(document.querySelectorAll('#viewTabs button'), function(b){
+      b.addEventListener('click', function(){ showTab(b.getAttribute('data-v')); });
+    });
+    showTab(state.tab);
+    document.getElementById('coefReset').addEventListener('click', function(){
+      SITES.forEach(function(s){ state.coef[s] = measuredCoef(s); });
+      if (state.data) renderGap();
+    });
     document.getElementById('startMonth').addEventListener('change', function(){
       state.startKey = this.value;
       if (state.endKey < state.startKey) state.endKey = state.startKey;
@@ -1245,6 +1563,7 @@
   window.__stockCheck = {
     SOURCES: SOURCES, parseCsv: parseCsv, parseSiteMonthTab: parseSiteMonthTab, parseMovementTable: parseMovementTable,
     computeFlags: computeFlags, computeCycle: computeCycle, computeDaily: computeDaily, sumAdjustments: sumAdjustments,
+    moistureLoss: moistureLoss, computeGap: computeGap, measuredCoef: measuredCoef, GAP_MEASURED: GAP_MEASURED,
     buildCycles: buildCycles, buildDayCycles: buildDayCycles, weekOf: weekOf, dayBounds: dayBounds, selectableMonths: selectableMonths, getAdjustments: getAdjustments,
     setAdjustments: function(list){ state.adjustments = list || []; if (state.data) render(); },
     getState: function(){ return state; }
