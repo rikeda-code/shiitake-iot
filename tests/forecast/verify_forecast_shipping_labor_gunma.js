@@ -325,6 +325,8 @@ async function setFakeNextPeriodGid(page, periodKey, gid) {
       staticHandler([[DB_SHARE_SHEET_ID, STD_WORK_HOURS_GID]], buildStdWorkHoursCsv()),
     ]);
     await gotoGunmaShipping(page);
+    // 2026.11 のgidは本番では設定済み。この場面は「次の月度が未設定」を確かめるため、ここだけ外す
+    await page.evaluate(() => { delete window.__test.FORECAST_SHIPPING_SHIFT_SOURCES['群馬'].gids['2026.11']; });
     // 基準日〜6日後(7日分)=11/4〜11/10にする(旧仕様の基準日11/3〜11/10の8日分から、
     // 表示が7日になった分だけ1日後ろにずらし、11/10までの同じ検証内容を保つ)
     await setBasisDate(page, '2026-11-04'); // offset0-6 = 11/4〜11/10
