@@ -31,7 +31,7 @@ const { check, near } = H;
   check('① 群馬 水分 9.003%÷3 ＝ 3.001%/日', near(coef.g.moist, 0.03001, 0.00002), coef.g.moist);
   check('① 南丹 水分 7.468%÷3 ＝ 2.489%/日', near(coef.n.moist, 0.02489, 0.00002), coef.n.moist);
   check('① いなべ 過積載 ≒ +4.3%（出荷重量計測表 11/12〜11/14、出荷重量で加重。マイナスの規格込み）', near(coef.i.over, 0.04344, 0.0001), coef.i.over);
-  check('① 群馬 過積載 ≒ +10.7%（出荷重量計測表 11/1〜11/15、出荷重量で加重。A5・A6・A8・B5・BCパックを含む）', near(coef.g.over, 0.10654, 0.0001), coef.g.over);
+  check('① 群馬 過積載 ≒ +10.4%（出荷重量計測表 11/1〜11/15、出荷重量で加重。A3・A5・A6・A8・B5・B8・BCパックを含む）', near(coef.g.over, 0.10379, 0.0001), coef.g.over);
   check('① 南丹 過積載 ≒ +13.2%', near(coef.n.over, 0.1321, 0.0005), coef.n.over);
 
   // ② 計算（南丹10月で、内訳を手で計算した値と比べる）
