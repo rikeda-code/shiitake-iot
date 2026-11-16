@@ -40,6 +40,7 @@ npx playwright install chromium
    node tests/stock-check/verify_stock_check_screen.js
    node tests/stock-check/verify_stock_check_adjust_prep.js
    node tests/stock-check/verify_stock_check_header.js
+   node tests/stock-check/verify_stock_check_gap.js
    ```
 
    各行末に `: OK` / `: NG` が出力され、最後に `すべてOK` / `NGあり` と `DONE` が表示されれば実行完了です（NGがあると終了コード1）。
@@ -53,6 +54,7 @@ npx playwright install chromium
 | `verify_stock_check_screen.js`（36件） | 画面：初期表示（南丹・直近3か月・両方・%）、表の列と行の並び、数字、暫定の行（薄く表示・バッジ）、差のグラフ（調整前・調整後の2本、kg/%切替、暫定は薄い色）と日別のグラフ、週/月/両方・拠点の切り替え、開始月・終了月、読めないタブの警告（読めた分は表示）、今日がSOURCESに無い月（12月）の注意、表のセルに `display:flex` を付けていないこと、スマホ幅で横にはみ出さないこと |
 | `verify_stock_check_adjust_prep.js`（19件） | 調整の入力は準備中：入力欄がすべて disabled、保存の通信（POSTなど）が1回も出ない・通信先はCSV取得とChart.jsだけ・HTMLに保存先GASのURLが無い、調整の一覧が空（0件・調整合計「－」）、調整の一覧を渡す口（`setAdjustments`）に値を渡すと表・日別・グラフが変わる（画面上の一時的な差し替えで、保存はしない） |
 | `verify_stock_check_header.js`（31件） | 画面上部：左にタイトル「在庫検証ダッシュボード」・右に拠点の切り替え・その下の枠に開始月/終了月/サイクル/グラフの単位。固定領域が position:sticky で画面の上に固定され、枠の下に2pxの罫線、スクロールで動くのは罫線より下だけ。**直近工数計画（work-hours-forecast.html）の同じ部品と、主な表示設定（色・余白・罫線・角丸・文字の大きさ・背景）が一致**すること（直近工数計画の見た目を変えたときは、このテストが NG になるので意図した変更か確認する）。スマホ（390×800・360×640・320×568）で固定部分が画面の高さの20〜30%以内・横にはみ出さない・ラベルが部品から離れない |
+| `verify_stock_check_gap.js`（31件） | 「ギャップの内訳」タブ：係数（水分＝3日累計÷3、過積載＝いなべ・群馬は出荷重量計測表で加重・南丹はパック重量測定表の規格平均）、内訳の計算（水分＝前日の在庫×率の合計、過積載＝出荷×率、残り＝ギャップ−水分−過積載、割合の合計100%、ギャップがプラスなら割合なし）、タブの切り替え・拠点比較のカードと横棒・サイクルのグラフ（kg/%）・一覧表、係数の書きかえと「測定値に戻す」、URLの指定（`?site=gunma&...&tab=gap`）、スマホ幅、書き込みの通信が無いこと |
 
 ## 数字の根拠
 
