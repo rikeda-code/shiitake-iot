@@ -91,7 +91,7 @@ const LEGACY_VALUE_MAP = {
 };
 // 拠点ごとの呼び名の対応（旧シフト表の書き方 → 整理済み_Mの氏名）。名字だけで1人に決まる人は書かなくてよい
 const LEGACY_SITE_ALIASES = {
-  '群馬': { 'ソー': 'SAW MIN HTET', 'SAW': 'SAW MIN HTET', 'デスタ': 'DESTA', 'レフィン': 'REVIN' },
+  '群馬': { 'ソー': 'SAW MIN HTET', 'SAW': 'SAW MIN HTET', 'デスタ': 'DESTA', 'レフィン': 'REVIN', 'ティエン': 'PHAM VAN TIEN' },
 };
 
 const DATA_HEADERS = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
