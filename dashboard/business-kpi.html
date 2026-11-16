@@ -167,6 +167,29 @@
   .badge-bad  { background: #fee2e2; color: #b91c1c; }
   .alert-empty { padding: 16px; color: var(--muted); font-size: 0.85rem; }
 
+  /* ── コンテナごとの帯（南丹 要因分析） ── */
+  .band-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.74rem; color: var(--muted); margin: 6px 0 4px; align-items: center; }
+  .band-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .band-legend i { display: inline-block; width: 18px; height: 10px; border-radius: 3px; }
+  .band-legend i.ongoing { background: repeating-linear-gradient(45deg, #9ca3af 0 3px, #e5e7eb 3px 6px); }
+  .band-legend i.line60 { width: 0; height: 12px; border-left: 2px dashed #6b7280; border-radius: 0; }
+  .band-site { margin-top: 14px; }
+  .band-site-title { font-size: 0.85rem; font-weight: 700; border-left: 4px solid; padding-left: 8px; margin-bottom: 4px; }
+  .band-row { display: grid; grid-template-columns: 112px 1fr 128px; align-items: center; height: 17px; font-size: 0.7rem; }
+  .band-row:hover { background: #f7f8fa; }
+  .band-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; text-align: right; }
+  .band-label small { color: var(--muted); }
+  .band-label em { font-style: normal; color: #7c3aed; font-weight: 700; margin-left: 2px; }
+  .band-track { position: relative; height: 100%; border-left: 1px solid var(--border); }
+  .band-bar { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; background: var(--c); }
+  .band-bar.ongoing { background: repeating-linear-gradient(45deg, var(--c) 0 4px, transparent 4px 7px); border: 1px solid var(--c); }
+  .band-60 { position: absolute; top: 0; bottom: 0; border-left: 2px dashed #9ca3af; }
+  .band-val { padding-left: 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .band-val small { color: var(--muted); }
+  .band-axis { height: 18px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .band-axis span { position: absolute; transform: translateX(-50%); top: 2px; font-size: 0.68rem; }
+  @media (max-width: 640px) { .band-row { grid-template-columns: 84px 1fr 96px; } }
+
   /* ── グラフ拡大モーダル ── */
   .zoom-modal { display: none; position: fixed; inset: 0; background: rgba(15,17,23,0.55); z-index: 1000; align-items: center; justify-content: center; padding: 20px; }
   .zoom-modal.open { display: flex; }
@@ -1345,6 +1368,9 @@ function renderNantanAnalysis() {
         <div>もう一つは <strong>冬（25年10〜12月）に投入したコンテナが低い</strong>こと。南丹は ${A.nantan.startM['25/10'][0]}／${A.nantan.startM['25/11'][0]}／${A.nantan.startM['25/12'][0]}g で、同じ時期のいなべ（${A.inabe.startM['25/10'][0]}／${A.inabe.startM['25/11'][0]}／${A.inabe.startM['25/12'][0]}g）を大きく下回る。群馬も同じ時期は低い。
         この時期の南丹の平均栽培日数は ${A.nantan.startM['25/10'][1]}〜${A.nantan.startM['25/12'][1]}日で、いなべの25年12月投入（${A.inabe.startM['25/12'][1]}日）より短い。</div>
         <div>試算：南丹の54日目（平均的に切り上げる時期、${at('nantan', 54)}g）以降に、いなべと同じ伸び（54→90日目で +${at('inabe', 90) - at('inabe', 54)}g）が取れれば、南丹は約 ${at('nantan', 54) + at('inabe', 90) - at('inabe', 54)}g/菌床 になる。ただし群馬は長く続けても60日目以降の伸びが小さい（+${at('gunma', 90) - at('gunma', 60)}g）ので、日数を延ばすだけでなく2回目以降の発生を取れるかが条件になる。</div>
+        <div>26年7〜10月投入のコンテナ（下の帯）で見ると、早く切り上げている点は同じ（60日以上続けたのは南丹 40本中4本、いなべ 35本中28本、群馬 26本中16本）。
+        ただしこの期間の1菌床当たり収穫量は南丹 606g・いなべ 558g・群馬 674g で、南丹が一番低いわけではない（いなべは8月の自社菌床が 227〜392g）。
+        南丹の低さは、主に25年10〜12月に投入した分によるもの。</div>
       </div>
     </section>
 
@@ -1370,6 +1396,28 @@ function renderNantanAnalysis() {
         <div class="chart-wrap" onclick="openZoom('nt-days')"><canvas id="nt-days"></canvas></div>
       </div>
     </div>
+
+    <section>
+      <div class="section-title">コンテナごとの栽培期間と最終の1菌床当たり収穫量<span class="sub">26年7〜10月に投入したコンテナ（2026/11/17 時点）</span></div>
+      <div class="panel">
+        <div class="period-tabs" id="band-mode" style="margin-top:0">
+          <button class="site-tab" data-mode="elapsed" onclick="setBandMode('elapsed')">投入からの日数でそろえる</button>
+          <button class="site-tab" data-mode="date" onclick="setBandMode('date')">カレンダーの日付</button>
+        </div>
+        <div class="band-legend">
+          帯の色＝1菌床当たり収穫量：
+          ${BAND_BINS.map(b => `<span><i style="background:${b.color}"></i>${b.label}</span>`).join('')}
+          <span><i class="ongoing"></i>栽培中（右端は今日）</span>
+          <span id="band-legend-line"></span>
+        </div>
+        <div id="band-summary"></div>
+        <div id="band-chart"></div>
+        <div class="panel-sub" style="margin-top:10px;line-height:1.7">
+          帯の右の数字＝栽培日数・最終の1菌床当たり収穫量（栽培中はその時点の値）。号機の後ろの（ ）は投入日、「自」は自社菌床。
+          元データ：各拠点「26/○○担当号機収穫管理」の号機別サマリー。
+        </div>
+      </div>
+    </section>
 
     <section>
       <div class="section-title">拠点比較表</div>
@@ -1416,6 +1464,77 @@ function renderNantanAnalysis() {
   ]));
   chart('nt-days', '栽培開始月ごとの 平均栽培日数(日)', id => drawCombo(id, months,
     cols.map(s => ({ label: s.name, data: months.map(m => A[s.key].startM[m][1]), color: s.color, type: 'bar', axis: 'y' }))));
+  renderBands();
+}
+
+// ── コンテナごとの帯（26年7〜10月投入） ──
+// 2026/11/17 時点の控え。各拠点「26/○○担当号機収穫管理」の号機別サマリーから、栽培開始日が 7/1〜10/31 の行。
+// [号機, ロット名, 投入日, 収穫終了日(栽培中は null), 栽培日数, 菌床数, 1菌床当たり収穫量(g)]
+const BAND_ASOF = '11/17';
+const CONTAINER_BANDS = {"inabe":[["11","七河L3","7/1","9/21",82,1640,602],["12","七河L3","7/3","9/22",81,880,616],["43","七河L3","7/7","10/3",88,2520,588],["36","七河L3","7/9","10/6",89,2520,535],["16","七河L3","7/14","9/20",68,2520,606],["27","七河L3","7/15","9/27",74,1260,606],["23","七河L3","7/21","10/5",76,2520,574],["34","七河L3","7/22","9/29",69,2300,596],["40","七河L3","7/23","9/29",68,220,605],["13","七河L3","7/27","9/25",60,2520,608],["7","七河L3","7/29","9/30",63,1260,605],["28","七河L3","8/4","10/6",63,2520,448],["29","自社菌床","8/4","10/12",69,1757,272],["30","自社菌床","8/5","10/12",68,800,232],["8","自社菌床","8/6","10/14",69,1872,227],["3","自社菌床","8/7","10/16",70,2520,392],["35","七河L3","8/10","11/15",97,2520,444],["38","七河L3","8/11","10/28",78,2520,372],["39","七河L3","8/12","10/31",80,1260,372],["4","七河L3","8/17","10/22",66,2520,566],["9","七河L3","8/18","11/9",83,2520,545],["14","七河L3","8/20","11/5",77,2520,520],["15","七河L3","8/22","11/8",78,2520,513],["2","七河L3","8/24","10/17",54,2520,687],["10","七河L3","8/24","10/25",62,980,605],["1","自社菌床","8/26","10/18",53,2520,704],["46","自社菌床","8/31","10/23",53,2520,663],["48","自社菌床","9/2","11/1",60,2520,520],["47","自社菌床","9/4",null,74,2520,577],["21","七河L3","9/8","11/12",65,2520,667],["17","七河L3","9/9","11/9",61,2520,651],["32","七河L3","9/14","11/15",62,2520,607],["5","七河L3","9/17","10/29",42,2520,608],["19","七河L3","9/18","11/12",55,2520,653],["16","七河L3","9/21","11/15",55,2520,678],["11","七河L3","9/22",null,56,2520,643],["12","七河L3","9/24",null,54,2520,608],["13","七河L3","9/26",null,52,2520,679],["27","七河L3","9/29",null,49,2520,698],["34","七河L3","9/30","11/14",45,2520,721],["40","七河L3","9/30",null,48,2520,653],["7","七河L3","10/5",null,43,2520,498],["42","七河L3","10/6",null,42,2520,570],["23","自社菌床","10/7",null,41,2520,539],["36","自社菌床","10/8",null,40,2520,448],["28","七河L3","10/12",null,36,2520,363],["29","七河L3","10/13",null,35,2520,440],["30","七河L3","10/14",null,34,2520,400],["8","七河L3","10/15",null,33,2520,470],["3","七河L3","10/19",null,29,2520,423],["1","七河L3","10/20",null,28,1760,526],["2","七河L3","10/20",null,28,2520,479],["4","七河L3","10/26",null,22,2520,367],["10","七河L3","10/27",null,21,2520,314],["46","七河L3","10/28",null,20,2520,374],["5","七河L3","10/30",null,18,1260,313]],"gunma":[["7","七河L3","7/5","9/19",76,1260,663],["3-13","七河L3","7/7","9/7",62,1260,680],["3-16","七河L3","7/12","9/18",68,2520,691],["9","七河L3","7/14","9/19",67,2520,661],["3-4","七河L3","7/15","9/29",76,1260,656],["3-17","七河L3","7/19","9/19",62,2520,741],["17","七河L3","7/21","9/27",68,2520,763],["3-3","七河L3","7/26","9/26",62,2520,708],["2","七河L3","7/27","9/29",64,1260,692],["3-6","七河L3","7/28","9/25",59,2520,743],["3-11","七河L3","8/2","9/25",54,2520,716],["3-9","七河L3","8/4","10/17",74,2520,642],["14","七河L3","8/9","10/4",56,2520,589],["3-5","七河L3","8/10","10/17",68,2520,632],["15","七河L3","8/11","10/5",55,1260,617],["3-14","七河L3","8/16","10/22",67,2520,578],["3-1","七河L3","8/23","10/23",61,1260,678],["3-15","七河L3","8/24","10/24",61,1260,682],["8","七河L3","8/30","11/16",78,1349,652],["3-10","七河L3","8/31","10/29",59,950,610],["3-12","七河L3","9/6","11/4",59,2520,634],["3-8","七河L3","9/8","11/3",56,2520,657],["3-13","七河L3","9/13","11/8",56,2520,722],["5","七河L3","9/14","11/13",60,2520,652],["3-16","七河L3","9/20","11/10",51,2520,707],["10","七河L3","9/21",null,57,2520,689],["3-17","七河L3","9/27",null,51,2520,703],["7","七河L3","9/28",null,50,2520,639],["3-3","七河L3","9/30","11/12",43,2520,683],["9","七河L3","10/4",null,44,2520,671],["14","七河L3","10/5",null,43,2520,730],["3-6","七河L3","10/6",null,42,2520,612],["15","七河L3","10/7",null,41,2520,671],["3-4","七河L3","10/11",null,37,2183,536],["3-11","七河L3","10/12",null,36,2183,507],["6","七河L3","10/14",null,34,2184,540],["3-9","七河L3","10/18",null,30,2520,358],["17","七河L3","10/19",null,29,2520,444],["3-5","七河L3","10/20",null,28,2520,415],["1","七河L3","10/25",null,23,2520,394],["3-14","七河L3","10/26",null,22,2520,335]],"nantan":[["3-4","自社菌床","7/1","8/10",40,1260,618],["3-6","自社菌床","7/2","9/9",69,1260,607],["2-6","自社菌床","7/6","8/22",47,1680,609],["9","自社菌床","7/8","8/20",43,420,651],["2-7","自社菌床","7/8","8/25",48,1680,606],["2-8","七河L3","7/13","9/9",58,2520,636],["1-2","自社菌床","7/14","9/9",57,1260,626],["1-5","自社菌床","7/17","9/22",67,2520,606],["1-1","自社菌床","7/21","9/9",50,1428,619],["2","自社菌床","7/22","9/5",45,420,637],["3","自社菌床","7/23","9/9",48,672,683],["1-4","自社菌床","7/27","9/24",59,2520,615],["1-6","自社菌床","7/27","9/27",62,2520,604],["1-9","自社菌床","7/28","10/5",69,2520,622],["1-7","自社菌床","8/4","9/30",57,2520,604],["2-2","自社菌床","8/5","9/28",54,1296,267],["2-4","自社菌床","8/5","9/28",54,1297,359],["5","七河L3","8/10","10/3",54,840,618],["1-8","自社菌床","8/11","10/3",53,2520,486],["3-5","自社菌床","8/11","10/3",53,1680,481],["4","七河L3","8/17","10/10",54,840,621],["2-1","七河L3","8/17","10/10",54,1680,614],["2-3","七河L3","8/19","10/10",52,2520,603],["6","七河L3","8/24","10/10",47,840,614],["2-5","七河L3","8/24","10/6",43,1680,615],["2-6","自社菌床","8/26","10/18",53,2520,671],["9","自社菌床","8/27","10/24",58,440,720],["2-7","自社菌床","8/31","10/18",48,1680,650],["3-8","七河L3","8/31","10/24",54,840,627],["3-3","自社菌床","9/2","10/24",52,2520,617],["2","自社菌床","9/7","10/24",47,840,606],["3-4","自社菌床","9/7","10/31",54,1680,627],["3-6","七河L3","9/10","10/31",51,2520,625],["3","七河L3","9/14","10/24",40,804,625],["1-1","七河L3","9/14","10/31",47,1470,624],["1-2","七河L3","9/16","10/31",45,1506,615],["2-8","七河L3","9/21","11/6",46,2520,658],["1-5","七河L3","9/23","11/6",44,2520,645],["1-4","七河L3","9/25","11/6",42,2520,642],["1-6","七河L3","9/28","11/8",41,2520,658],["1-7","七河L3","10/1",null,47,2520,612],["1-8","七河L3","10/5",null,43,2520,602],["1-9","七河L3","10/6",null,42,2520,588],["2-5","自社菌床","10/8",null,40,2520,530],["3-5","自社菌床","10/9",null,39,2240,482],["4","七河L3","10/12",null,36,880,451],["2-1","七河L3","10/12",null,36,2520,428],["2-2","七河L3","10/13",null,35,2520,412],["5","七河L3","10/14",null,34,880,418],["2-3","七河L3","10/15",null,33,2520,324],["6","七河L3","10/19",null,29,1260,421],["2-4","七河L3","10/19",null,29,2520,440],["2-6","七河L3","10/20",null,28,2520,387],["2-7","七河L3","10/22",null,26,2520,367],["3-7","七河L3","10/23",null,25,2520,403],["2","七河L3","10/26",null,22,1260,312],["3-1","七河L3","10/26",null,22,2520,308],["3-2","七河L3","10/27",null,21,2520,344],["3-3","七河L3","10/29",null,19,2520,266]]};
+const BAND_BINS = [
+  { min: 650, color: '#15803d', label: '650g以上' },
+  { min: 600, color: '#65a30d', label: '600〜649g' },
+  { min: 500, color: '#eab308', label: '500〜599g' },
+  { min: 0,   color: '#dc2626', label: '500g未満' },
+];
+const BAND_YEAR = 2026;
+const BAND_DAY_MS = 86400000;
+let bandMode = 'elapsed';
+function setBandMode(m) { bandMode = m; renderBands(); }
+function bandColor(g) { return BAND_BINS.find(b => g >= b.min).color; }
+function bandDate(md) { const [m, d] = md.split('/').map(Number); return Date.UTC(BAND_YEAR, m - 1, d); }
+
+function renderBands() {
+  const el = document.getElementById('band-chart');
+  if (!el) return;
+  document.querySelectorAll('#band-mode .site-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === bandMode));
+  const elapsed = bandMode === 'elapsed';
+  // 横軸：日数モードは 0〜100日、日付モードは 7/1〜今日
+  const x0 = elapsed ? 0 : bandDate('7/1');
+  const x1 = elapsed ? 100 : bandDate(BAND_ASOF);
+  const pos = v => Math.max(0, Math.min(100, (v - x0) / (x1 - x0) * 100));
+  const ticks = elapsed
+    ? [0, 20, 40, 60, 80, 100].map(v => ({ v, label: `${v}日` }))
+    : ['7/1', '8/1', '9/1', '10/1', '11/1'].map(md => ({ v: bandDate(md), label: md }));
+  document.getElementById('band-legend-line').innerHTML = elapsed ? '<i class="line60"></i>60日目' : '';
+
+  // 拠点ごとの集計（栽培を終えたコンテナ）
+  const stat = k => {
+    const done = CONTAINER_BANDS[k].filter(r => r[3]);
+    const beds = done.reduce((s, r) => s + r[5], 0);
+    return {
+      n: done.length, on: CONTAINER_BANDS[k].length - done.length,
+      days: done.length ? (done.reduce((s, r) => s + r[4], 0) / done.length).toFixed(1) : '—',
+      ge60: done.filter(r => r[4] >= 60).length,
+      g: beds ? Math.round(done.reduce((s, r) => s + r[6] * r[5], 0) / beds) : null,
+    };
+  };
+  document.getElementById('band-summary').innerHTML = `<div class="table-wrap" style="margin:6px 0 14px"><table>
+    <thead><tr><th>拠点</th><th class="num">収穫を終えた本数</th><th class="num">平均栽培日数</th><th class="num">60日以上続けた本数</th><th class="num">1菌床当たり収穫量（終えた分）</th><th class="num">栽培中</th></tr></thead>
+    <tbody>${SITES.map(s => { const t = stat(s.key); return `<tr><td>${s.name}</td><td class="num">${t.n}本</td><td class="num">${t.days}日</td>
+      <td class="num">${t.ge60}本（${t.n ? Math.round(t.ge60 / t.n * 100) : 0}%）</td><td class="num">${fmt(t.g)}g</td><td class="num">${t.on}本</td></tr>`; }).join('')}</tbody>
+  </table></div>`;
+
+  const axis = `<div class="band-row band-axis"><div class="band-label"></div><div class="band-track">
+    ${ticks.map(t => `<span style="left:${pos(t.v)}%${pos(t.v) >= 99 ? ';transform:translateX(-100%)' : ''}">${t.label}</span>`).join('')}</div><div class="band-val"></div></div>`;
+  el.innerHTML = SITES.map(s => {
+    const rows = CONTAINER_BANDS[s.key].map(r => {
+      const [no, lot, st, en, days, beds, g] = r;
+      const a = elapsed ? 0 : bandDate(st);
+      const b = elapsed ? days : (en ? bandDate(en) : bandDate(BAND_ASOF));
+      const left = pos(a), width = Math.max(0.6, pos(b) - left);
+      const self = lot === '自社菌床' ? '<em>自</em>' : '';
+      const tip = `${s.name} ${no}（${st}投入・${lot}・${fmt(beds)}本）${en ? `${en}終了` : '栽培中'}／${days}日／${g}g`;
+      return `<div class="band-row" title="${tip}">
+        <div class="band-label">${no}<small>（${st}）</small>${self}</div>
+        <div class="band-track">${elapsed ? `<div class="band-60" style="left:${pos(60)}%"></div>` : ''}
+          <div class="band-bar${en ? '' : ' ongoing'}" style="left:${left}%;width:${width}%;--c:${bandColor(g)}"></div></div>
+        <div class="band-val">${days}日 <b style="color:${bandColor(g)}">${g}g</b>${en ? '' : ' <small>栽培中</small>'}</div>
+      </div>`;
+    }).join('');
+    return `<div class="band-site"><div class="band-site-title" style="border-color:${s.color}">${s.name}（${CONTAINER_BANDS[s.key].length}本）</div>${axis}${rows}</div>`;
+  }).join('');
 }
 
 // ────────────────────────────────────────────────────────────────
