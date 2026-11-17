@@ -19,6 +19,23 @@ const { chromium } = require('playwright');
 function csvCell(v) { if (v === null || v === undefined) return ''; const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function csvRow(cells) { return cells.map(csvCell).join(','); }
 function toCsvText(rows) { return '﻿' + rows.map(csvRow).join('\r\n') + '\r\n'; }
+// 販売予実抽出シートの月タブ（実際のシートと同じ形）。1〜3行目＝見出し（拠点・版・販売形態/サイズ）、
+// 4行目以降＝日別（A4＝「日付」・B列＝日）、最後に「合計」行。1拠点28列（販売形態の側の月初・修正・受注 →
+// サイズの側の月初・修正・受注（M・L・2L・袋）→ 出荷実績）で、いなべ・群馬・南丹の順（2026.11タブの形）。
+// 数字は rows[(日+3)-1][列] に置く（いなべの受注計画＝W〜Z列(22〜25)、群馬は+28列、南丹は+56列）
+function salesPlanMonthRows(maxDay) {
+  const FORMS = ['買取', '市場', '委託', '全体'], SIZES = ['M', 'L', '2L', '袋'];
+  const GROUPS = [['月初計画', FORMS], ['修正計画', FORMS], ['受注計画', FORMS], ['月初計画', SIZES], ['修正計画', SIZES], ['受注計画', SIZES], ['出荷実績', FORMS]];
+  const head = [['', '拠点'], ['', '版'], ['', '販売形態/サイズ']];
+  ['いなべ', '群馬', '南丹'].forEach(site => GROUPS.forEach(([ver, names]) => names.forEach((n, k) => {
+    head[0].push(site); head[1].push(k === 0 ? ver : ''); head[2].push(n);
+  })));
+  const width = head[0].length; // 86列
+  const rows = head;
+  for (let day = 1; day <= maxDay; day++) { const r = new Array(width).fill(''); r[0] = day === 1 ? '日付' : ''; r[1] = String(day); rows.push(r); }
+  const total = new Array(width).fill(''); total[1] = '合計'; rows.push(total);
+  return rows;
+}
 function fixTodayTo(page, y, m, d) {
   return page.addInitScript(([y, m, d]) => {
     const FIXED = new Date(y, m, d, 9, 0, 0).getTime();
@@ -57,11 +74,7 @@ function buildSalesIndexCsv(baseline) {
 // 月シート。修正計画=S〜V列(18〜21)・受注計画=W〜Z列(22〜25)に、群馬は+28列。
 // valuesByDay={ day: { revised: [M,L,2L,袋], order: [M,L,2L,袋] } }（無い側は空欄）
 function buildMonthCsv(maxDay, valuesByDay, colOffset) {
-  const width = 54;
-  const rows = [];
-  for (let i = 0; i <= maxDay + 3; i++) rows.push(new Array(width).fill(''));
-  rows[1][18 + colOffset] = '修正計画';
-  rows[1][22 + colOffset] = '受注計画';
+  const rows = salesPlanMonthRows(maxDay);
   Object.keys(valuesByDay).forEach(dayStr => {
     const idx = (Number(dayStr) + 3) - 1;
     const v = valuesByDay[dayStr];
