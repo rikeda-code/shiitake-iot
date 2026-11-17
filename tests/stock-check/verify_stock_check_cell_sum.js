@@ -5,7 +5,8 @@
 // 確かめること：
 //  ① いなべ・日・11/8〜11/10 の「収穫」3セルをドラッグ：合計 2,000・平均 666.7・個数 3・最小 598・最大 750
 //  ② 合計は丸める前の値（data-raw）：四角い範囲の合計が画面の計算の関数の値と同じ。調整 0.04kg×3日は表示「0.0」でも合計 0.1
-//  ③ 選べない列（移動・率・要確認・期間）と「計算できません」の行は選ばれない。「－」のセル（調整合計が無い日）は数えない
+//  ③ 率（前）・率（後）も選べる（% の値で集計し、率だけなら % を付ける。kg と混ざると「単位が混在」）。
+//     選べない列（移動・要確認・期間）と「計算できません」の行は選ばれない。「－」のセル（調整合計が無い日）は数えない
 //  ④ Shift＋クリックで範囲、Ctrl（⌘）＋クリック・ドラッグで追加
 //  ⑤ 動かさずにクリックするとグラフ（③日別）が替わる。ドラッグ・Shift・Ctrl では替わらない
 //  ⑥ 二重に数える注意：「すべて」で月と週の行を両方、日で累計の差と日次の差を両方選んだときだけ
@@ -136,9 +137,21 @@ const rawOf = (page, day) => page.evaluate(day => {
   // ③ 選べない列・「－」のセル
   await drag(page, td(D8, 8), td(D10, 15));
   p = await picked(page); b = await bar(page);
-  check('③ 調整前の差〜要確認の四角：列 8・9・10・13・14 だけ（率 11・12、要確認 15 は入らない）', cols(p).join() === '8,9,10,13,14' && p.length === 15, cols(p));
-  check('③ 調整合計の「－」（調整が無い日）は数えない：個数 12', b.count === '12', b);
-  for (const [name, i] of [['期間', 0], ['移動 入/出', 4], ['率（前）', 11], ['率（後）', 12], ['要確認', 15]]) {
+  check('③ 調整前の差〜要確認の四角：列 8〜14（率 11・12 も入る。要確認 15 は入らない）', cols(p).join() === '8,9,10,11,12,13,14' && p.length === 21, cols(p));
+  check('③ 調整合計の「－」（調整が無い日）は数えない：個数 18', b.count === '18', b);
+  check('③ kg の列と率（%）の列を両方 → 「単位が混在しています」・値に % は付けない', b.warnUnit && b.sum.indexOf('%') < 0, b);
+  // 率の2列だけ：% の値（率×100）で集計し、値に % を付ける。率＝差÷収穫（調整が無いので 前＝後）
+  await drag(page, td(D8, 11), td(D10, 12));
+  p = await picked(page); b = await bar(page);
+  const rates = raws.map(r => r.diffBefore / r.harv * 100), rates2 = rates.concat(rates);
+  const rSum = rates2.reduce((a, v) => a + v, 0);
+  check('③ 率（前）・率（後）の 3日×2列：6セル（列 11・12）', p.length === 6 && cols(p).join() === '11,12', cols(p));
+  check('③ 率の合計・平均・最小・最大は % の値（' + rates.map(v => v.toFixed(1)).join(' / ') + '）で、% を付けて出す',
+    b.sum === fmt1(rSum) + '%' && b.avg === fmt1(rSum / 6) + '%' && b.count === '6' &&
+    b.min === fmt1(Math.min(...rates2)) + '%' && b.max === fmt1(Math.max(...rates2)) + '%' && !b.warnUnit, [b, rates]);
+  const shownRate = await page.evaluate(sel => document.querySelector(sel).textContent, td(D10, 11));
+  check('③ 11/10 の率（前）の表示（' + shownRate + '）と集計の最小が同じ値', shownRate.replace('−', '-') === b.min, [shownRate, b.min]);
+  for (const [name, i] of [['期間', 0], ['移動 入/出', 4], ['要確認', 15]]) {
     await clickCell(page, td(D9, i));
     check('③ ' + name + 'の列をクリックしても選ばれない（選択は消える）', (await picked(page)).length === 0 && !(await bar(page)).show);
   }

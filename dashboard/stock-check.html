@@ -907,15 +907,15 @@
       }
       var flagTitle = r.flagDays.map(function(d){ return md(d) + ' ' + (row.flags[d] || []).join(' / '); }).join('\n');
       var cb = row.cum && row.cum.diffBefore, ca = row.cum && row.cum.diffAfter;
-      // 数字のセルは選んで集計できる（selCell）。移動・率・要確認は選べない
+      // 数字のセルは選んで集計できる（selCell）。率は % の値（例 −1.3）で集計する。移動・要確認は選べない
       h += selCell(1, r.S0, fmt(r.S0)) + selCell(2, r.ship, fmt(r.ship)) + selCell(3, r.harv, fmt(r.harv, 0), { int: true }) +
         '<td>' + moveMark(row) + fmt(r.movIn, 0) + ' / ' + fmt(r.movOut, 0) + '</td>' + selCell(5, r.waste + r.kik, fmt(r.waste + r.kik)) +
         selCell(6, r.expected, fmt(r.expected)) + selCell(7, r.S1, fmt(r.S1)) +
         selCell(8, r.diffBefore, signed(r.diffBefore), { cls: cls(r.diffBefore), group: 'diff' }) +
         selCell(9, r.adjSum, r.adjSum == null ? '－' : signed(r.adjSum)) +
         selCell(10, r.diffAfter, signed(r.diffAfter), { cls: cls(r.diffAfter), group: 'diff' }) +
-        '<td class="' + cls(r.rateBefore) + '">' + pct(r.rateBefore) + '</td>' +
-        '<td class="' + cls(r.rateAfter) + '">' + pct(r.rateAfter) + '</td>' +
+        selCell(11, r.rateBefore == null ? null : r.rateBefore * 100, pct(r.rateBefore), { cls: cls(r.rateBefore), pct: true }) +
+        selCell(12, r.rateAfter == null ? null : r.rateAfter * 100, pct(r.rateAfter), { cls: cls(r.rateAfter), pct: true }) +
         (isDay ? selCell(13, cb, signed(cb), { cls: cls(cb), group: 'cum' }) + selCell(14, ca, signed(ca), { cls: cls(ca), group: 'cum' }) : '') +
         '<td' + (r.flagDays.length ? ' class="flagcell" title="' + esc(flagTitle) + '"' : '') + '>' + (r.flagDays.length ? '⚠' + r.flagDays.length + '日' : '') + '</td></tr>';
     });
@@ -937,10 +937,11 @@
 
   // 選べるセル。data-raw に丸める前の値を持たせる（値が無い「－」のセルは data-raw を付けず、集計に入れない）。
   // opts.int：整数で表示する列（収穫）、opts.cls：色の class、opts.group：'diff'（日次の差）／'cum'（累計の差）
+  // opts.pct：率の列（data-unit="%"、data-raw は % の値＝率×100）
   function selCell(col, raw, text, opts){
     opts = opts || {};
     var ok = raw != null && !isNaN(raw);
-    return '<td class="selectable-cell' + (opts.cls ? ' ' + opts.cls : '') + '" data-sel-col="' + col + '" data-unit="kg"' +
+    return '<td class="selectable-cell' + (opts.cls ? ' ' + opts.cls : '') + '" data-sel-col="' + col + '" data-unit="' + (opts.pct ? '%' : 'kg') + '"' +
       ' data-numfmt="' + (opts.int ? 'int' : 'dec1') + '"' + (opts.group ? ' data-group="' + opts.group + '"' : '') +
       (ok ? ' data-raw="' + raw + '"' : '') + '>' + text + '</td>';
   }
@@ -1216,6 +1217,7 @@
 
   /* ===================== セル範囲選択・集計（操作）：直近工数計画（work-hours-forecast.html）と同じ ===================== */
   // 表の数字のセル(.selectable-cell)を範囲選択すると、画面下に合計・平均・個数・最小・最大を出す。
+  // 率（前）・率（後）も選べる（% の値で集計し、率だけを選んだときは値に % を付ける）。
   // ドラッグで四角い範囲、Shift＋クリックで前のセルからの範囲、Ctrl(⌘)で今の選択に足す。
   // スマートフォンではタップのたびに選択に足す・外す。Esc・表の外のクリック・「選択を解除」で消す。
   // 表を描き直したとき（拠点・サイクル・期間の切り替え）と、グラフの単位を替えたときに選択を消す。
@@ -1294,6 +1296,7 @@
       count: count, sum: sum, avg: count ? sum / count : null,
       min: count ? Math.min.apply(null, nums) : null, max: count ? Math.max.apply(null, nums) : null,
       allInt: allInt, mixedUnit: Object.keys(units).length > 1,
+      allPct: Object.keys(units).length === 1 && units['%'] === true,
       monthWeek: state.kind === 'both' && hasMonth && hasWeek,
       cumDiff: state.kind === 'day' && hasCum && hasDiff,
     };
@@ -1304,11 +1307,13 @@
     var cells = Array.from(cellSelection);
     if (!cells.length){ bar.classList.remove('show'); document.body.classList.remove('has-agg-bar'); return; }
     var agg = computeSelectionAggregation(cells);
-    document.getElementById('aggSum').textContent = fmtAggValue(agg.sum, agg.allInt);
-    document.getElementById('aggAvg').textContent = fmtAggAverage(agg.avg);
+    // 率の列だけを選んだときは値の後ろに % を付ける（kg と混ざるときは付けず「単位が混在しています」を出す）
+    var sfx = function(t){ return agg.allPct && t !== '－' ? t + '%' : t; };
+    document.getElementById('aggSum').textContent = sfx(fmtAggValue(agg.sum, agg.allInt));
+    document.getElementById('aggAvg').textContent = sfx(fmtAggAverage(agg.avg));
     document.getElementById('aggCount').textContent = String(agg.count);
-    document.getElementById('aggMin').textContent = fmtAggValue(agg.min, agg.allInt);
-    document.getElementById('aggMax').textContent = fmtAggValue(agg.max, agg.allInt);
+    document.getElementById('aggMin').textContent = sfx(fmtAggValue(agg.min, agg.allInt));
+    document.getElementById('aggMax').textContent = sfx(fmtAggValue(agg.max, agg.allInt));
     document.getElementById('aggWarnUnit').style.display = agg.mixedUnit ? '' : 'none';
     document.getElementById('aggWarnMonthWeek').style.display = agg.monthWeek ? '' : 'none';
     document.getElementById('aggWarnCum').style.display = agg.cumDiff ? '' : 'none';
