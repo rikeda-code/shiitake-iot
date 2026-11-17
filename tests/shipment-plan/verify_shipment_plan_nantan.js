@@ -22,6 +22,23 @@ const { chromium } = require('playwright');
 
 function csvCell(v) { if (v === null || v === undefined) return ''; const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function toCsvText(rows) { return '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n'; }
+// 販売予実抽出シートの月タブ（実際のシートと同じ形）。1〜3行目＝見出し（拠点・版・販売形態/サイズ）、
+// 4行目以降＝日別（A4＝「日付」・B列＝日）、最後に「合計」行。1拠点28列（販売形態の側の月初・修正・受注 →
+// サイズの側の月初・修正・受注（M・L・2L・袋）→ 出荷実績）で、いなべ・群馬・南丹の順（2026.11タブの形）。
+// 数字は rows[(日+3)-1][列] に置く（いなべの受注計画＝W〜Z列(22〜25)、群馬は+28列、南丹は+56列）
+function salesPlanMonthRows(maxDay) {
+  const FORMS = ['買取', '市場', '委託', '全体'], SIZES = ['M', 'L', '2L', '袋'];
+  const GROUPS = [['月初計画', FORMS], ['修正計画', FORMS], ['受注計画', FORMS], ['月初計画', SIZES], ['修正計画', SIZES], ['受注計画', SIZES], ['出荷実績', FORMS]];
+  const head = [['', '拠点'], ['', '版'], ['', '販売形態/サイズ']];
+  ['いなべ', '群馬', '南丹'].forEach(site => GROUPS.forEach(([ver, names]) => names.forEach((n, k) => {
+    head[0].push(site); head[1].push(k === 0 ? ver : ''); head[2].push(n);
+  })));
+  const width = head[0].length; // 86列
+  const rows = head;
+  for (let day = 1; day <= maxDay; day++) { const r = new Array(width).fill(''); r[0] = day === 1 ? '日付' : ''; r[1] = String(day); rows.push(r); }
+  const total = new Array(width).fill(''); total[1] = '合計'; rows.push(total);
+  return rows;
+}
 function fixTodayTo(page, y, m, d) {
   return page.addInitScript(([y, m, d]) => {
     const FIXED = new Date(y, m, d, 9, 0, 0).getTime();
@@ -233,9 +250,7 @@ function buildSalesIndexCsv() {
 // 販売予実抽出シートの月シート：南丹の受注計画（M・L・2L・袋）はCA〜CD列（78〜81）、修正計画はBW〜BZ列（74〜77）。
 // 11/2：受注計画あり（実データ 3.9・205.4・34.8・118.5）／11/3：受注計画が全部空欄で修正計画あり（55.0・221.0・82.7・203.3）
 function buildOrderMonthCsv() {
-  const width = 86;
-  const rows = [];
-  for (let i = 0; i < 40; i++) rows.push(new Array(width).fill(''));
+  const rows = salesPlanMonthRows(30);
   const set = (day, startCol, vals) => vals.forEach((v, k) => { rows[(day + 3) - 1][startCol + k] = v; });
   set(2, 78, [3.9, 205.4, 34.8, 118.5]);
   set(3, 74, [55.0, 221.0, 82.7, 203.3]);

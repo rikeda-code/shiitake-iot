@@ -209,6 +209,7 @@
   }
   .panel-head .note{ font-size:12.5px; color:var(--ink-soft); }
   .panel-head h2 .site-note{ font-weight:400; color:var(--red); }
+  .panel-head h2 .site-note + .site-note{ margin-left:8px; } /* 在庫の注意と出荷予定の注意が両方出たとき */
 
   .table-scroll{ overflow-x:auto; }
 
@@ -420,7 +421,7 @@
   <!-- ============ 出荷予定 ============ -->
   <section class="panel">
     <div class="panel-head">
-      <h2>在庫 ・ 出荷予定<span class="note site-note" id="table1SiteNote" hidden></span></h2>
+      <h2>在庫 ・ 出荷予定<span class="note site-note" id="table1SiteNote" hidden></span><span class="note site-note" id="table1ShipmentNote" hidden></span></h2>
       <div class="panel-head-right">
         <span class="note">単位：kg　/　当日〜8日後の出荷予定</span>
         <div class="day-nav day-nav-compact">
@@ -955,8 +956,7 @@
 
   // パネル1〜3で対応している拠点ごとの設定。ここに無い拠点は
   // （SITE_DATA[site]が無い＝「準備中」扱いにする）。allocationGid＝「転写_秀優_判別」タブの
-  // gid（在庫ファイルは拠点ごとに別ファイルなのでgidも別）、salesColOffset＝販売予実抽出シートの
-  // 受注計画でいなべのW〜Z列(22〜25列目)から何列右にずれているか、orderGid＝販売抽出シート
+  // gid（在庫ファイルは拠点ごとに別ファイルなのでgidも別）、orderGid＝販売抽出シート
   // (商品別)の拠点ごとの受注タブのgid、harvestUrlColumn＝「URL_収穫管理表」タブで読む見出し列名、
   // dailyTotal＝拠点ごとの日別の収穫合計予測値の取得先。{id, gid}なら「転写」タブ（年月の列×日番号の行）、
   // {type:'monthlySheets', id, gids}なら月ごとのシート（日付・収穫見込の列。直近工数計画の南丹と同じ元）。
@@ -965,17 +965,17 @@
   // gradeForecast:false＝収穫時点では秀・優に分けていないため、収穫予測・在庫予測の秀・優は「－」
   var SITE_DATA = {
     'いなべ': {
-      allocationGid: '276290820', salesColOffset: 0, orderGid: '545062393',
+      allocationGid: '276290820', orderGid: '545062393',
       harvestUrlColumn: 'いなべ',
       dailyTotal: { id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' }, // 「2026.5いなべ収穫計画」の「転写」タブ
     },
     '群馬': {
-      allocationGid: '272244694', salesColOffset: 28, orderGid: '1218802781',
+      allocationGid: '272244694', orderGid: '1218802781',
       harvestUrlColumn: '群馬',
       dailyTotal: { id: '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y', gid: '1272257227' }, // 「2026.5群馬収穫計画」の「転写」タブ
     },
     '南丹': {
-      masterGid: '1337213550', salesColOffset: 56, orderGid: '24647903',
+      masterGid: '1337213550', orderGid: '24647903',
       harvestUrlColumn: '南丹',
       gradeForecast: false,
       // 「2026年ファーム売上高・収穫量」の月ごとのシート。月が増えるたびに年月→gidを足す
@@ -1220,40 +1220,112 @@
     return d.getFullYear() + '.' + (d.getMonth() + 1);
   }
 
-  // 指定日・指定拠点の受注計画（M/L/2L/袋のサイズ別内訳）を取得する。列番号は
-  // いなべのW〜Z列（0始まりで22〜25）を基準に、拠点のcolOffset（いなべ=0、群馬=28）を
-  // 足して読む。月シートはmonthCacheに保存して使い回し、同じ月を何度も取得しない
-  async function fetchOrderPlanForDate(sheetIndex, date, monthCache, colOffset){
+  // 販売予実抽出シートの月タブで読むサイズ。3Lは列が無い月もあるので、無くても見出し不足にしない
+  // （3Lは読むだけで、画面にはまだ出さない。列とデータがそろってから別の対応で行を足す）
+  var SALES_PLAN_SIZES = ['M', 'L', '2L', '3L', '袋'];
+  var SALES_PLAN_REQUIRED_SIZES = ['M', 'L', '2L', '袋'];
+  var SALES_PLAN_VERSIONS = ['受注計画', '修正計画'];
+
+  function salesHeaderText(cell){
+    if (!cell || cell.v === null || cell.v === undefined) return '';
+    return String(cell.v).normalize('NFKC').replace(/\s/g, '');
+  }
+
+  // 月タブの1〜3行目の見出し（1行目＝拠点・2行目＝版・3行目＝販売形態/サイズ）から、
+  // 列ごとの「拠点 × 版 × サイズ」の対応表を作る。列の位置は一切決め打ちしない。
+  //  ・1行目・2行目が空欄の列は左の値を引き継ぐ（セルの結合で空欄になるため。2026.10タブの形）。
+  //    拠点が変わったら版は引き継がない
+  //  ・3行目が M・L・2L・3L・袋 の列だけを使う（買取・市場・委託・全体の列＝販売形態の側と
+  //    出荷実績は使わない）。そのため出荷実績の列の有無（1拠点24列・28列）や3Lの追加（31列）に
+  //    関係なく同じ処理で読める
+  //  ・日付の行は2列目（B列）が1〜31の行。「合計」の行などは日付として読まない
+  // 戻り値：{ cols: {拠点: {版: {サイズ: 列番号}}}, dayRows: {日: 行番号} }
+  function buildSalesPlanLayout(json){
+    var rows = (json && json.table && json.table.rows) || [];
+    var cells = function(i){ return (rows[i] && rows[i].c) || []; };
+    var siteRow = cells(0), verRow = cells(1), sizeRow = cells(2);
+    var width = Math.max(siteRow.length, verRow.length, sizeRow.length);
+    var cols = {};
+    var site = '', ver = '';
+    for (var j = 2; j < width; j++) { // A列＝「日付」、B列＝見出しの名前（拠点・版・販売形態/サイズ）
+      var s = salesHeaderText(siteRow[j]);
+      if (s && s !== site) { site = s; ver = ''; }
+      var v = salesHeaderText(verRow[j]);
+      if (v) ver = v;
+      var size = salesHeaderText(sizeRow[j]);
+      if (!site || !ver || SALES_PLAN_SIZES.indexOf(size) === -1) continue;
+      cols[site] = cols[site] || {};
+      cols[site][ver] = cols[site][ver] || {};
+      if (cols[site][ver][size] === undefined) cols[site][ver][size] = j;
+    }
+    var dayRows = {};
+    for (var i = 3; i < rows.length; i++) {
+      var t = salesHeaderText(cells(i)[1]);
+      if (!/^\d{1,2}$/.test(t)) continue;
+      var day = parseInt(t, 10);
+      if (day >= 1 && day <= 31 && dayRows[day] === undefined) dayRows[day] = i;
+    }
+    return { cols: cols, dayRows: dayRows };
+  }
+
+  // 月タブ（json）から、指定拠点・指定日の出荷予定（M/L/2L/3L/袋）を読む。
+  // 受注計画のサイズ別がすべて空欄（3Lを含む）の日だけ、修正計画の値に替える。1つでも入力が
+  // あれば受注計画のまま（空欄のサイズは「－」）。秀・優は修正計画に相当する元データが無いため、
+  // 呼び出し側が revised を見て「－」にする。
+  // 拠点・版（受注計画／修正計画）・サイズ（M・L・2L・袋）・日付の行が見つからないときは、
+  // 決め打ちの列番号には戻さず { error: 理由 } を返す（呼び出し側が「－」と注意を出す）
+  function readSalesPlan(json, site, day){
+    if (!json.__salesPlanLayout) json.__salesPlanLayout = buildSalesPlanLayout(json);
+    var layout = json.__salesPlanLayout;
+    var siteCols = layout.cols[site];
+    if (!siteCols) return { error: site + 'の見出しが見つかりません' };
+    for (var k = 0; k < SALES_PLAN_VERSIONS.length; k++) {
+      var ver = SALES_PLAN_VERSIONS[k];
+      if (!siteCols[ver]) return { error: site + 'の' + ver + 'の見出しが見つかりません' };
+      var missing = SALES_PLAN_REQUIRED_SIZES.filter(function(size){ return siteCols[ver][size] === undefined; });
+      if (missing.length) return { error: site + 'の' + ver + '（' + missing.join('・') + '）の見出しが見つかりません' };
+    }
+    var rowIdx = layout.dayRows[day];
+    if (rowIdx === undefined) return { error: day + '日の行が見つかりません' };
+    function readVersion(ver){
+      var plan = {};
+      SALES_PLAN_SIZES.forEach(function(size){
+        var colIdx = siteCols[ver][size];
+        plan[size] = colIdx === undefined ? null : readCellNumber(json, rowIdx, colIdx);
+      });
+      return plan;
+    }
+    var plan = readVersion('受注計画');
+    var allBlank = SALES_PLAN_SIZES.every(function(size){ return plan[size] === null; });
+    if (allBlank) {
+      plan = readVersion('修正計画');
+      plan.revised = true;
+    }
+    return plan;
+  }
+
+  // 指定日・指定拠点の出荷予定（受注計画、空欄なら修正計画のサイズ別内訳）を取得する。
+  // 月シートはmonthCacheに保存して使い回し、同じ月を何度も取得しない。
+  // 見出しが見つからないときは { error: 'シート判別の年月（例：2026.12）：理由' } を返す
+  async function fetchOrderPlanForDate(sheetIndex, date, monthCache, site){
     var key = yearMonthKey(date);
     var gid = sheetIndex[key];
     if (!gid) return null;
     if (!monthCache[key]) {
       monthCache[key] = await fetchCsvSheet(SALES_SHEET_ID, gid);
     }
-    var json = monthCache[key];
-    var day = date.getDate();
-    var rowIdx = (day + 3) - 1;
-    var off = colOffset || 0;
-    var plan = {
-      'M': readCellNumber(json, rowIdx, 22 + off),
-      'L': readCellNumber(json, rowIdx, 23 + off),
-      '2L': readCellNumber(json, rowIdx, 24 + off),
-      '袋': readCellNumber(json, rowIdx, 25 + off),
-    };
-    // 受注計画（W〜Z）のM・L・2L・袋が4つとも空欄の日だけ、修正計画（S〜V＝受注計画の
-    // 4列左）の値に替える。1つでも入力があれば受注計画のまま（空欄のサイズは「－」）。
-    // 秀・優は修正計画に相当する元データが無いため、呼び出し側が revised を見て「－」にする
-    var allBlank = plan['M'] === null && plan['L'] === null && plan['2L'] === null && plan['袋'] === null;
-    if (allBlank) {
-      plan = {
-        'M': readCellNumber(json, rowIdx, 18 + off),
-        'L': readCellNumber(json, rowIdx, 19 + off),
-        '2L': readCellNumber(json, rowIdx, 20 + off),
-        '袋': readCellNumber(json, rowIdx, 21 + off),
-      };
-      plan.revised = true;
-    }
+    var plan = readSalesPlan(monthCache[key], site, date.getDate());
+    if (plan.error) plan.error = key + '：' + plan.error;
     return plan;
+  }
+
+  // 出荷予定の読み取りの注意（販売予実抽出シートの見出しが見つからないとき）。
+  // 在庫の注意（table1SiteNote）とは別の場所に出す（在庫側の処理が消してしまわないように）
+  function setShipmentPlanNote(text){
+    var el = document.getElementById('table1ShipmentNote');
+    if (!el) return;
+    el.textContent = text || '';
+    el.hidden = !text;
   }
 
   // F列のサイズ表記を"・"/"/"/"*"で区切り、"L"という単語単体が
@@ -1767,6 +1839,8 @@
     computeNantanProductStock: computeNantanProductStock,
     parseStockQuantity: parseStockQuantity,
     splitStockSizes: splitStockSizes,
+    buildSalesPlanLayout: buildSalesPlanLayout,
+    readSalesPlan: readSalesPlan,
   });
 
   // targetDate（基準日の前日。M・L・2L・袋の製品在庫・生在庫列は、既存のHTML構造上
@@ -1884,13 +1958,15 @@
   // 「当日出荷予定〜7日後出荷予定」列を「販売予実抽出シート」から直接取得する。
   // refDateは基準日（当日、オフセット無し）。updateStockLiveDataに渡す
   // addDays(ref,-1)（基準日の前日）とは別物なので取り違えないよう注意。
-  // 列番号（M/L/2L/袋）・受注タブのgid（秀/優）は拠点ごとの設定（SITE_DATA）に従う
+  // M/L/2L/袋の列は月タブの見出しから拠点名で探す（readSalesPlan）。受注タブのgid（秀/優）は
+  // 拠点ごとの設定（SITE_DATA）に従う
   var shipmentForecastRequestToken = 0;
   window.updateShipmentForecast = async function(refDate){
     var myToken = ++shipmentForecastRequestToken;
     function isStale(){ return myToken !== shipmentForecastRequestToken; }
     var site = activeSite();
     var siteCfg = SITE_DATA[site];
+    setShipmentPlanNote('');
     try {
       if (!siteCfg) { dashShipmentCells(); return; }
       var sheetIndex = await fetchSalesSheetIndex();
@@ -1919,9 +1995,16 @@
       }));
       if (isStale()) return;
 
+      var planErrors = [];
       for (var offset = 0; offset <= 8; offset++) {
         var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + offset);
-        var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache, siteCfg.salesColOffset);
+        var plan = await fetchOrderPlanForDate(sheetIndex, d, monthCache, site);
+        // 見出しが見つからない日は、決め打ちの列で読まずに M・L・2L・袋を「－」にして注意を出す
+        // （秀・優は販売抽出シート（商品別）の受注タブから読むので、そのまま表示する）
+        if (plan && plan.error) {
+          if (planErrors.indexOf(plan.error) === -1) planErrors.push(plan.error);
+          plan = null;
+        }
         var gradePlan = gradeJson ? await fetchShipmentGradeForDate(gradeJson, d) : { '秀': null, '優': null };
         // 修正計画の値を表示している日は、受注計画が未入力と分かるよう秀・優を「－」にする
         if (plan && plan.revised) gradePlan = { '秀': null, '優': null };
@@ -1933,6 +2016,10 @@
           cell.textContent = fmtStockNumber(v);
           applyZeroClass(cell, v);
         });
+      }
+      if (planErrors.length) {
+        console.warn('[出荷予定] 販売予実抽出シートの見出しが見つかりません:', planErrors);
+        setShipmentPlanNote('販売予実抽出シート ' + planErrors.join('／') + '（出荷予定を「－」にしています）');
       }
     } catch (err) {
       console.error('[出荷予定] 取得エラー:', err);
