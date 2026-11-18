@@ -119,9 +119,9 @@ async function rowTexts(page, attr) {
     const log = [];
     const page = await openPage(browser, '?div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), SHIFT_DATA_CSV, log);
     const src = await page.evaluate(() => window.__test.LABOR_SOURCE_BY_SITE);
-    check('LABOR_SOURCE_BY_SITE が いなべ・南丹 は shiftData、群馬は old（11/16に旧へ戻した）', src['いなべ'] === 'shiftData' && src['群馬'] === 'old' && src['南丹'] === 'shiftData', src);
+    check('LABOR_SOURCE_BY_SITE が いなべ・群馬・南丹 とも shiftData', src['いなべ'] === 'shiftData' && src['群馬'] === 'shiftData' && src['南丹'] === 'shiftData', src);
     const use = await page.evaluate(() => ['いなべ', '群馬', '南丹'].map(s => window.__test.useShiftDataLabor(s)));
-    check('useShiftDataLabor() が いなべ・群馬・南丹 の順に true・false・true', use[0] === true && use[1] === false && use[2] === true, use);
+    check('useShiftDataLabor() が3拠点とも true', use.every(v => v === true), use);
     check('基準日 11/2 の栽培×いなべ（7日間すべて切り替え日 11/11 より前）はシフト_データのタブを読みに行かない', log.length === 0, log);
     await page.close();
   }
@@ -276,9 +276,6 @@ async function rowTexts(page, attr) {
     const r = await page.evaluate(() => {
       const T = window.__test;
       const sw = JSON.parse(JSON.stringify(T.LABOR_SWITCH_DATE_BY_SITE));
-      // 群馬は設定上 old に戻しているが、切り替え日の計算はshiftDataのときの動きを確かめる
-      const gunmaSrc = T.LABOR_SOURCE_BY_SITE['群馬'];
-      T.LABOR_SOURCE_BY_SITE['群馬'] = 'shiftData';
       const out = {
         sw,
         b1108: T.shiftDataStartOffset('いなべ', new Date(2026, 10, 8)),
@@ -295,7 +292,6 @@ async function rowTexts(page, attr) {
       T.LABOR_SWITCH_DATE_BY_SITE['群馬'] = null;
       out.noDate = T.shiftDataStartOffset('群馬', new Date(2026, 10, 2));
       T.LABOR_SWITCH_DATE_BY_SITE['群馬'] = sw['群馬'];
-      T.LABOR_SOURCE_BY_SITE['群馬'] = gunmaSrc;
       return out;
     });
     check('切り替え日の設定：いなべ 2026-11-11、群馬 2026-11-08、南丹 2026-11-08', r.sw['いなべ'] === '2026-11-11' && r.sw['群馬'] === '2026-11-08' && r.sw['南丹'] === '2026-11-08', r.sw);
