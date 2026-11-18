@@ -121,6 +121,7 @@ function doPost(e) {
   const req = JSON.parse(e.postData.contents);
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  let failed = false;
   try {
     requireAccess_(postSites_(req), req.idToken, true);
     switch (req.action) {
@@ -138,10 +139,17 @@ function doPost(e) {
       default: return json_({ status: 'error', message: '不明なactionです' });
     }
   } catch (err) {
+    failed = true;
     return json_({ status: 'error', message: String(err && err.message || err) });
   } finally {
     if (['addMember', 'retire', 'undoRetire', 'changeDept', 'setJoinDate', 'changeOrg', 'cancelJoin'].indexOf(req.action) >= 0) clearMemberCache_();
+    // 書き込みをシートに確定させてから順番待ちを解く（次の人が書き込み前の内容を読んで、行が重複するのを防ぐ）。
+    // flush で失敗しても順番待ちは必ず解く。成功として返すはずだったときだけ、flush の失敗をエラーとして返す
+    // （すでにエラーのときは、元のエラーをそのまま返す）
+    let flushErr = null;
+    try { SpreadsheetApp.flush(); } catch (err) { flushErr = err; }
     lock.releaseLock();
+    if (flushErr && !failed) return json_({ status: 'error', message: String(flushErr && flushErr.message || flushErr) });
   }
 }
 

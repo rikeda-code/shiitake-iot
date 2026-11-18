@@ -58,7 +58,8 @@ const context = {
   CacheService: { getScriptCache: () => ({ get: k => store[k] || null, put: (k, v) => { store[k] = v; }, remove: k => { delete store[k]; } }) },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ setMimeType: () => JSON.parse(s) }) },
-  SpreadsheetApp: {}, PropertiesService: {}, Logger: { log() {} },
+  // doPost が順番待ちを解く前に SpreadsheetApp.flush() を呼ぶため、何もしない flush を置く
+  SpreadsheetApp: { flush() {} }, PropertiesService: {}, Logger: { log() {} },
   console,
 };
 vm.createContext(context);

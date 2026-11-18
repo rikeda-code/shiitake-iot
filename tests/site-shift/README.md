@@ -24,4 +24,5 @@ node tests/site-shift/verify_gas_legacy_mirror.js   # 旧シフト表へのバ�
 node tests/site-shift/verify_gas_master_write.js    # 整理済み_Mへの書き込み（月度・F列の自動判定・行の探し方）
 node tests/site-shift/verify_gas_access.js          # 閲覧・編集できる人（idToken と Firestore の名簿で判定）
 node tests/site-shift/verify_gas_org_change.js      # 組織内の変更(changeOrg)・入社取消(cancelJoin)・行の見分け方・書き込み失敗時のエラー表示
+node tests/site-shift/verify_gas_post_flush.js      # doPost：順番待ちを解く前に SpreadsheetApp.flush()（成功・エラー・flush自体の失敗のとき）
 ```
