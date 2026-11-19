@@ -681,8 +681,16 @@
       return (v === 'shiftData' || v === 'old') ? v : null;
     } catch (e) { return null; }
   })();
-  // シフト_データタブ（「標準労働時間」と同じファイル）。列は見出しの名前で探す（列の位置は使わない）
-  var SHIFT_DATA_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '889947728' };
+  // 拠点シフト表のシフトの保存先：DB共有_拠点シフト_データ の期間ごとのタブ SD_YYYYMM
+  // （YYYYMM は期間＝月度 11日〜翌月10日 の始まりの年月。SD_202611 ＝ 2026/11/11〜12/10）。
+  // どのタブを読むかは「期間一覧」タブ（見出し：タブ名・開始日・終了日・gid）で調べる。
+  // SD タブの列は見出しの名前で探す（列の位置は使わない）
+  var SHIFT_DATA_SS_ID = '1h71qF-SAp8VJZl4TimbFrikmXAbMod4w_iEA_Yziaq8';
+  // 期間一覧タブの gid。12/9 の setup（拠点シフト表の GAS）で決まる gid を入れる（例：'123456789'）。
+  // 空のあいだは、栽培・出荷のパネルに「期間一覧の gid が未設定です」と出して計算しない
+  var SHIFT_PERIOD_LIST_GID = '';
+  var SHIFT_PERIOD_LIST_HEADERS = { tab: 'タブ名', gid: 'gid' }; // 期間一覧で使う見出し（開始日・終了日は読まない）
+  var SHIFT_PERIOD_TAB_PREFIX = 'SD_';
   // 必ず要る見出し。見つからないときは標準労働時間のパネルにエラーとして出す。
   // キーは無くてもよい（無いときは氏名で人を見分ける）。
   // 部門の列は参考の記録として読むだけで、計算には使わない（部門は下の整理済み_Mから引く）ので必須にしない
@@ -2311,26 +2319,96 @@
     };
   }
 
-  // シフト_データと整理済み_Mの読み込み（ページを開いている間は1回だけ読む。失敗したら次の描画で読み直す）。
-  // 部門は整理済み_Mから引くので、整理済み_Mを読めないときはエラーにする（シフト_データの部門の列に戻して計算しない）
-  var shiftDataCache = null;
-  function fetchShiftDataRecords(){
-    if (!shiftDataCache) {
-      var p = Promise.all([
-        fetchCsvSheet(SHIFT_DATA_SHEET.id, SHIFT_DATA_SHEET.gid)
-          .then(function(json){ return parseShiftDataRows(json.table.rows); }),
-        fetchCsvSheet(SHIFT_MASTER_SHEET.id, SHIFT_MASTER_SHEET.gid)
-          .catch(function(e){ throw new Error('整理済み_Mを読めませんでした（' + (e && e.message || e) + '）。部門を引けないため、標準労働時間を計算できません'); })
-          .then(function(json){ return parseShiftMasterRows(json.table.rows); }),
-      ]).then(function(res){ return applyShiftMasterDepts(res[0], res[1]); });
-      p.catch(function(){ if (shiftDataCache === p) shiftDataCache = null; });
-      shiftDataCache = p;
+  // 期間一覧の生rows(gviz形式。1行目＝見出し)から、タブ名→gid の表を作る。純粋関数。
+  // 列は見出しの名前（SHIFT_PERIOD_LIST_HEADERS）で探し、無ければエラーにする（画面にそのまま出る）
+  function parseShiftPeriodList(rows){
+    rows = rows || [];
+    var header = rows[0] ? rows[0].c : [];
+    var idx = {};
+    Object.keys(SHIFT_PERIOD_LIST_HEADERS).forEach(function(k){
+      idx[k] = -1;
+      for (var i = 0; i < header.length; i++) {
+        var v = header[i] ? String(header[i].v == null ? '' : header[i].v).normalize('NFKC').trim() : '';
+        if (v === SHIFT_PERIOD_LIST_HEADERS[k]) { idx[k] = i; break; }
+      }
+    });
+    var missing = Object.keys(SHIFT_PERIOD_LIST_HEADERS).filter(function(k){ return idx[k] < 0; })
+      .map(function(k){ return SHIFT_PERIOD_LIST_HEADERS[k]; });
+    if (missing.length) {
+      throw new Error('拠点シフト_データの期間一覧に「' + missing.join('」「') + '」の見出しが見つかりません（1行目の見出しを確認してください）。標準労働時間を計算できません');
     }
-    return shiftDataCache;
+    var out = {};
+    for (var r = 1; r < rows.length; r++) {
+      var c = (rows[r] && rows[r].c) || [];
+      var cell = function(i){ return c[i] && c[i].v != null ? String(c[i].v).normalize('NFKC').trim() : ''; };
+      var tab = cell(idx.tab), gid = cell(idx.gid).replace(/,/g, '');
+      if (tab && /^\d+$/.test(gid) && !out[tab]) out[tab] = gid;
+    }
+    return out;
+  }
+  // 期間（'YYYY-MM'。月度の始まりの年月）→ タブ名 'SD_YYYYMM'
+  function shiftPeriodTabName(ym){ return SHIFT_PERIOD_TAB_PREFIX + ym.replace('-', ''); }
+  // 基準日から6日後まで（fromIso があればその日から）にかかる期間（1つか2つ）。古い順
+  function shiftPeriodsForWeek(basisDate, fromIso){
+    var out = [];
+    for (var o = 0; o < DAY_COUNT; o++) {
+      var iso = toISO(addDays(basisDate, o));
+      if (fromIso && iso < fromIso) continue;
+      var ym = shiftMonthDegreeOf(iso);
+      if (out.indexOf(ym) === -1) out.push(ym);
+    }
+    return out;
+  }
+
+  // 期間一覧・SD タブ・整理済み_Mの読み込み（ページを開いている間は、期間一覧と整理済み_Mは1回だけ、
+  // SD タブは gid ごとに1回だけ読む。基準日を変えたときは、まだ読んでいないタブだけを読む。失敗したら次の描画で読み直す）。
+  // 期間一覧にまだ無い期間は「行なし」として扱う（その日は「－」になり、「まだシフトが無い期間」の注記が出る）。
+  // 部門は整理済み_Mから引くので、整理済み_Mを読めないときはエラーにする（SD タブの部門の列に戻して計算しない）
+  var shiftLoadCache = {};
+  function cachedShiftLoad(name, load){
+    if (!shiftLoadCache[name]) {
+      var p = load();
+      p.catch(function(){ if (shiftLoadCache[name] === p) delete shiftLoadCache[name]; });
+      shiftLoadCache[name] = p;
+    }
+    return shiftLoadCache[name];
+  }
+  async function fetchShiftDataRecords(basisDate, fromIso){
+    if (!SHIFT_PERIOD_LIST_GID) {
+      throw new Error('期間一覧の gid が未設定です（work-hours-forecast.html の SHIFT_PERIOD_LIST_GID）。標準労働時間を計算できません');
+    }
+    var masterP = cachedShiftLoad('master', function(){
+      return fetchCsvSheet(SHIFT_MASTER_SHEET.id, SHIFT_MASTER_SHEET.gid)
+        .catch(function(e){ throw new Error('整理済み_Mを読めませんでした（' + (e && e.message || e) + '）。部門を引けないため、標準労働時間を計算できません'); })
+        .then(function(json){ return parseShiftMasterRows(json.table.rows); });
+    });
+    masterP.catch(function(){}); // 下で await する（ここでは「処理されないエラー」にしない）
+    var list = await cachedShiftLoad('list', function(){
+      return fetchCsvSheet(SHIFT_DATA_SS_ID, SHIFT_PERIOD_LIST_GID)
+        .catch(function(e){ throw new Error('拠点シフト_データの期間一覧を読めませんでした（' + (e && e.message || e) + '）。標準労働時間を計算できません'); })
+        .then(function(json){ return parseShiftPeriodList(json.table.rows); });
+    });
+    var tabs = shiftPeriodsForWeek(basisDate, fromIso).map(shiftPeriodTabName)
+      .filter(function(name){ return !!list[name]; });
+    var parts = await Promise.all(tabs.map(function(name){
+      var gid = list[name];
+      return cachedShiftLoad('gid:' + gid, function(){
+        return fetchCsvSheet(SHIFT_DATA_SS_ID, gid)
+          .catch(function(e){ throw new Error(name + 'のタブを読めませんでした（' + (e && e.message || e) + '）'); })
+          .then(function(json){
+            try { return parseShiftDataRows(json.table.rows); }
+            catch (e) { throw new Error(name + '：' + (e && e.message || e)); }
+          });
+      });
+    }));
+    var master = await masterP;
+    var records = [];
+    parts.forEach(function(rows){ rows.forEach(function(r){ records.push(Object.assign({}, r)); }); });
+    return applyShiftMasterDepts(records, master);
   }
 
   async function fetchShiftDataLabor(site, div, basisDate, fromIso){
-    var records = await fetchShiftDataRecords();
+    var records = await fetchShiftDataRecords(basisDate, fromIso);
     return computeShiftDataLaborHours(records, site, div, basisDate, fromIso);
   }
 
@@ -4614,7 +4692,10 @@
     LABOR_SWITCH_DATE_BY_SITE: LABOR_SWITCH_DATE_BY_SITE,
     shiftDataStartOffset: shiftDataStartOffset,
     mergeLaborResults: mergeLaborResults,
-    SHIFT_DATA_SHEET: SHIFT_DATA_SHEET,
+    SHIFT_DATA_SS_ID: SHIFT_DATA_SS_ID,
+    parseShiftPeriodList: parseShiftPeriodList,
+    shiftPeriodTabName: shiftPeriodTabName,
+    shiftPeriodsForWeek: shiftPeriodsForWeek,
     SHIFT_DATA_DIV_DEPTS: SHIFT_DATA_DIV_DEPTS,
     useShiftDataLabor: useShiftDataLabor,
     parseShiftDataRows: parseShiftDataRows,

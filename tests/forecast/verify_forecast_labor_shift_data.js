@@ -1,5 +1,6 @@
-// 標準労働時間を拠点シフト表の「シフト_データ」タブ（ファーム勤務時間）から読む機能の検証。
-// モックは実際のシフト_データと同じ形にする：1行目＝見出し「日付,拠点,キー,氏名,部門,シフト,実働h,更新日時」、
+// 標準労働時間を拠点シフト表のシフト（DB共有_拠点シフト_データ の期間ごとのタブ SD_YYYYMM）から読む機能の検証。
+// 「期間一覧」タブ（見出し：タブ名・開始日・終了日・gid）でタブの gid を調べ、基準日の7日間にかかる期間のタブだけを読む。
+// モックは実際の SD タブと同じ形にする：1行目＝見出し「日付,拠点,キー,氏名,部門,シフト,実働h,更新日時」、
 // 日付は '2026-11-02'、キーは氏名から空白を除いたもの、シフトは '8:00-17:00'・'休'・'8:00-17:00栽培4h' など、
 // 実働hは拠点シフト表のルール（拘束5時間以上で休憩1時間）で計算済みの数字の文字列
 const { chromium } = require('playwright');
@@ -19,9 +20,43 @@ function fixTodayTo(page, y, m, d) {
   }, [y, m, d]);
 }
 
+// 整理済み_M はファーム勤務時間のまま（SHIFT_DATA_ID は整理済み_Mのファイル。名前は今までのまま）
 const SHIFT_DATA_ID = '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0';
-const SHIFT_DATA_GID = '889947728';
+// シフトの読み先：DB共有_拠点シフト_データ
+const SD_ID = '1h71qF-SAp8VJZl4TimbFrikmXAbMod4w_iEA_Yziaq8';
+const LIST_GID = '777000111'; // テストの中で work-hours-forecast.html の SHIFT_PERIOD_LIST_GID に入れる gid
+// 期間一覧に載っているタブ（既定）。SD_202612 は載っていない（まだ無い期間）
+const SD_TABS = { 'SD_202610': '766660912', 'SD_202611': '1138634192' };
 const HEADER = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
+// 期間（月度：11日〜翌月10日。開始月で呼ぶ）
+function periodOf(iso) {
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); if (!m) return null;
+  let y = +m[1], mo = +m[2]; if (+m[3] <= 10) { mo--; if (mo < 1) { mo = 12; y--; } }
+  return `SD_${y}${String(mo).padStart(2, '0')}`;
+}
+function parseCsvText(text) {
+  text = text.replace(/^﻿/, '');
+  const rows = []; let row = [], field = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; } else field += ch; continue; }
+    if (ch === '"') q = true; else if (ch === ',') { row.push(field); field = ''; } else if (ch === '\r') { } else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; } else field += ch;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+// シフトの CSV（1行目＝見出し）を、日付（1列目）の期間ごとの SD タブの CSV に分ける（どのタブにも同じ見出し）
+function splitToTabs(csv) {
+  const rows = parseCsvText(csv); const head = rows[0]; const out = {};
+  rows.slice(1).forEach(r => { const t = periodOf(r[0]); if (!t) return; (out[t] = out[t] || []).push(r); });
+  Object.keys(SD_TABS).forEach(t => { out[t] = out[t] || []; });
+  return Object.fromEntries(Object.entries(out).map(([t, rs]) => [t, toCsvText([head].concat(rs))]));
+}
+// 期間一覧（実際の形：見出し タブ名・開始日・終了日・gid、日付は yyyy-MM-dd の文字列）
+function listCsv(tabs) {
+  const range = t => { const y = +t.slice(3, 7), m = +t.slice(7, 9); const ny = m === 12 ? y + 1 : y, nm = m === 12 ? 1 : m + 1; return [`${y}-${String(m).padStart(2, '0')}-11`, `${ny}-${String(nm).padStart(2, '0')}-10`]; };
+  return toCsvText([['タブ名', '開始日', '終了日', 'gid']].concat(Object.keys(tabs).map(t => [t].concat(range(t), [tabs[t]]))));
+}
 
 // 1人1日1行。[日付, 拠点, 氏名, 部門, シフト, 実働h]
 function rec(date, site, name, dept, shift, hours) {
@@ -86,17 +121,33 @@ const MASTER_PEOPLE = [
 ];
 const MASTER_CSV = toMasterCsv(MASTER_PEOPLE);
 
-// extra：ほかに返すシート [{ id, gid, body }]（旧のシフト表など）。{ id, gid, abort: true } はつながらない（読めない）ことにする。
-// 整理済み_M は extra に無ければ MASTER_CSV を返す
-async function setupRoutes(page, body, log, extra) {
+// body：シフトの CSV（1行目＝見出し）。日付の期間ごとに分けて、期間一覧に載っている SD タブとして返す。
+// extra：ほかに返すシート [{ id, gid, body }]（旧のシフト表・期間一覧の差し替えなど）。{ id, gid, abort: true } はつながらない（読めない）ことにする。
+// 整理済み_M は extra に無ければ MASTER_CSV を、期間一覧は extra に無ければ listCsv(SD_TABS) を返す。
+// opt.noGid：work-hours-forecast.html の SHIFT_PERIOD_LIST_GID を空のまま（入れない）にする
+async function setupRoutes(page, body, log, extra, opt) {
+  opt = opt || {};
+  await page.route('**/work-hours-forecast.html*', async route => {
+    const res = await route.fetch();
+    let html = await res.text();
+    if (!opt.noGid) {
+      if (html.indexOf("var SHIFT_PERIOD_LIST_GID = '';") === -1) throw new Error('SHIFT_PERIOD_LIST_GID の行が見つかりません');
+      html = html.replace("var SHIFT_PERIOD_LIST_GID = '';", `var SHIFT_PERIOD_LIST_GID = '${LIST_GID}';`);
+    }
+    await route.fulfill({ response: res, body: html });
+  });
+  const tabs = splitToTabs(body);
   await page.route('**/export**', async route => {
     const url = decodeURIComponent(route.request().url());
-    if (url.includes(SHIFT_DATA_ID) && url.includes(`gid=${SHIFT_DATA_GID}`)) {
+    const hit = (extra || []).find(x => url.includes(x.id) && url.split('gid=')[1] === String(x.gid));
+    if (!hit && url.includes(SD_ID)) {
       if (log) log.push(url);
-      await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body });
+      const gid = url.split('gid=')[1];
+      if (gid === LIST_GID) { await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: listCsv(SD_TABS) }); return; }
+      const name = Object.keys(SD_TABS).find(t => SD_TABS[t] === gid);
+      await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: name ? tabs[name] : '﻿\r\n' });
       return;
     }
-    const hit = (extra || []).find(x => url.includes(x.id) && url.includes(`gid=${x.gid}`));
     if (hit) {
       if (log) log.push(url);
       if (hit.abort) { await route.abort('failed'); return; }
@@ -114,11 +165,11 @@ async function setupRoutes(page, body, log, extra) {
   await page.route('https://script.google.com/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok","items":[]}' }));
 }
 
-async function openPage(browser, query, body, log, extra, today) {
+async function openPage(browser, query, body, log, extra, today, opt) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   const t = today || [2026, 10, 2]; // 既定は 今日＝2026/11/2(月)。基準日の初期値もこの日
   await fixTodayTo(page, t[0], t[1], t[2]);
-  await setupRoutes(page, body, log, extra);
+  await setupRoutes(page, body, log, extra, opt);
   await page.goto('http://localhost:8811/work-hours-forecast.html' + query, { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(1500);
   return page;
@@ -424,7 +475,7 @@ async function rowTexts(page, attr) {
     // 画面：今日＝11/2。7日間すべて切り替え日より前なので、laborSource=shiftData でもシフト_データを読まない
     const log = [];
     const page = await openPage(browser, '?laborSource=shiftData&div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), SHIFT_DATA_CSV, log);
-    check('基準日 11/2 のいなべは切り替え日より前なのでシフト_データを読まない', !log.some(u => u.includes(`gid=${SHIFT_DATA_GID}`)), log);
+    check('基準日 11/2 のいなべは切り替え日より前なので拠点シフト_データ（期間一覧・SD タブ）を読まない', !log.some(u => u.includes(SD_ID)), log);
     await page.close();
   }
 
@@ -522,6 +573,100 @@ async function rowTexts(page, attr) {
       await page.waitForTimeout(1500);
       const serr = await page.evaluate(() => document.getElementById('shipLaborError').textContent.trim());
       check(`出荷（${cs.label}）：パネルにエラーが出る`, serr.indexOf('整理済み_M') !== -1, serr);
+      const st = await rowTexts(page, 'data-shiplabor-total-offset');
+      check(`出荷（${cs.label}）：合計は「－」のまま`, st.every(v => v === '－'), st);
+      await page.close();
+    }
+  }
+
+  console.log('=== ⑪ 読み先：期間一覧で gid を調べ、7日間にかかる SD タブだけを読む ===');
+  {
+    // いなべ：11/18〜11/24（SD_202611 だけ）、12/8〜12/10（SD_202611）・12/11〜（SD_202612：期間一覧に無い）
+    const P_ROWS = [
+      rec('2026-11-08', 'いなべ', '栽培 一郎', '栽培', '8:00-17:00', '8'),   // SD_202610
+      rec('2026-11-18', 'いなべ', '栽培 一郎', '栽培', '8:00-17:00', '8'),   // SD_202611
+      rec('2026-11-19', 'いなべ', '栽培 一郎', '栽培', '9:00-14:00', '4'),
+      rec('2026-11-24', 'いなべ', '出荷 花子', '出荷', '8:00-17:00', '8'),
+      rec('2026-12-08', 'いなべ', '栽培 一郎', '栽培', '8:00-17:00', '8'),
+      rec('2026-12-10', 'いなべ', '栽培 一郎', '栽培', '8:00-12:00', '4'),
+      rec('2026-12-11', 'いなべ', '栽培 一郎', '栽培', '8:00-17:00', '8'),   // SD_202612（期間一覧に無いので読まない）
+    ];
+    const CSV = toCsvText([HEADER].concat(P_ROWS));
+    const log = [];
+    const page = await openPage(browser, '', CSV, log);
+    const sdReads = () => log.filter(u => u.includes(SD_ID)).map(u => { const g = u.split('gid=')[1]; return g === LIST_GID ? '期間一覧' : (Object.keys(SD_TABS).find(t => SD_TABS[t] === g) || g); });
+    log.length = 0;
+    const a = await page.evaluate(async () => (await window.__test.fetchShiftDataLabor('いなべ', '栽培', new Date(2026, 10, 18))).perDayTotal);
+    check('基準日 11/18（7日間が SD_202611 に収まる）：期間一覧と SD_202611 だけを読む', JSON.stringify(sdReads()) === JSON.stringify(['期間一覧', 'SD_202611']), sdReads());
+    check('基準日 11/18：栽培の合計 8/4/0/0/0/0/0', JSON.stringify(a) === JSON.stringify([8, 4, 0, 0, 0, 0, 0]), a);
+    log.length = 0;
+    const b = await page.evaluate(async () => (await window.__test.fetchShiftDataLabor('いなべ', '栽培', new Date(2026, 10, 20))).perDayTotal);
+    check('基準日を 11/20 に変える（同じ SD_202611）：読み直さない（期間一覧も読まない）', sdReads().length === 0, sdReads());
+    check('基準日 11/20：栽培の合計は覚えているタブから計算（11/20〜11/26 は栽培の人がいないので 0）', JSON.stringify(b) === JSON.stringify([0, 0, 0, 0, 0, 0, 0]), b);
+    log.length = 0;
+    const c = await page.evaluate(async () => {
+      const r = await window.__test.fetchShiftDataLabor('いなべ', '栽培', new Date(2026, 10, 8));
+      return { t: r.perDayTotal, n: r.periodNotices };
+    });
+    check('基準日 11/8（11/8〜11/10 は SD_202610、11/11〜11/14 は SD_202611）：SD_202610 だけ足りない分を読む', JSON.stringify(sdReads()) === JSON.stringify(['SD_202610']), sdReads());
+    check('基準日 11/8：2つのタブの行をつなげて計算（11/8 は 8）', c.t[0] === 8, c);
+    log.length = 0;
+    const d = await page.evaluate(async () => {
+      const r = await window.__test.fetchShiftDataLabor('いなべ', '栽培', new Date(2026, 11, 8));
+      return { t: r.perDayTotal, n: r.periodNotices };
+    });
+    check('基準日 12/8（SD_202612 は期間一覧に無い）：新しく読むタブは無い', sdReads().length === 0, sdReads());
+    check('基準日 12/8：12/8〜12/10 は SD_202611 から（8/0/4）、12/11〜12/14 は「－」（SD_202612 の行は読まない）', JSON.stringify(d.t) === JSON.stringify([8, 0, 4, null, null, null, null]), d.t);
+    check('基準日 12/8：「まだシフトが無い期間：2026/12/11〜12/14」の注記', d.n.length === 1 && d.n[0].indexOf('まだシフトが無い期間') !== -1 && d.n[0].indexOf('2026/12/11〜12/14') !== -1, d.n);
+    const p = await page.evaluate(() => {
+      const T = window.__test;
+      return {
+        tab: T.shiftPeriodTabName('2026-11'),
+        w1118: T.shiftPeriodsForWeek(new Date(2026, 10, 18)), w1108: T.shiftPeriodsForWeek(new Date(2026, 10, 8)),
+        w1108from: T.shiftPeriodsForWeek(new Date(2026, 10, 8), '2026-11-11'),
+        w0107: T.shiftPeriodsForWeek(new Date(2027, 0, 7)),
+        list: T.parseShiftPeriodList([['gid', 'タブ名', '開始日', '終了日'], ['1,138,634,192', 'SD_202611', '2026-11-11', '2026-12-10'], ['', 'SD_202612', '', ''], ['766660912', 'SD_202610', '', '']].map(r => ({ c: r.map(v => ({ v })) }))),
+      };
+    });
+    check('タブ名：2026-11 → SD_202611', p.tab === 'SD_202611', p.tab);
+    check('7日間にかかる期間：11/18 は [2026-11]、11/8 は [2026-10, 2026-11]、1/7 は [2026-12, 2027-01]', JSON.stringify(p.w1118) === '["2026-11"]' && JSON.stringify(p.w1108) === '["2026-10","2026-11"]' && JSON.stringify(p.w0107) === '["2026-12","2027-01"]', p);
+    check('切り替え日（fromIso）より前の日の期間は読まない（11/8 から 11/11 以降だけなら [2026-11]）', JSON.stringify(p.w1108from) === '["2026-11"]', p.w1108from);
+    check('期間一覧は見出しの名前で列を探す（列の順番が違っても読める。gid の桁区切りは外す。gid が空の行は無いものとする）', JSON.stringify(p.list) === JSON.stringify({ 'SD_202611': '1138634192', 'SD_202610': '766660912' }), p.list);
+    await page.close();
+
+    // 画面：基準日 12/8 のいなべ（期間一覧に無い期間は「－」と注記）
+    const page2 = await openPage(browser, '?div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), CSV, null, null, [2026, 11, 8]);
+    const totals = await rowTexts(page2, 'data-labor-total-offset');
+    check('画面 基準日 12/8：栽培の合計 8.0/0.0/4.0/－/－/－/－', JSON.stringify(totals) === JSON.stringify(['8.0', '0.0', '4.0', '－', '－', '－', '－']), totals);
+    const note = await page2.evaluate(() => document.getElementById('laborPeriodNotices').textContent);
+    check('画面 基準日 12/8：「まだシフトが無い期間：2026/12/11〜12/14」の注記が出る', note.indexOf('まだシフトが無い期間') !== -1 && note.indexOf('2026/12/11〜12/14') !== -1, note);
+    const err = await page2.evaluate(() => document.getElementById('laborError').textContent.trim());
+    check('画面 基準日 12/8：エラーは出ない', err === '', err);
+    await page2.close();
+  }
+
+  console.log('=== ⑫ 画面：期間一覧の見出しが無いとき・期間一覧の gid が空のとき、パネルにエラーを出して計算しない ===');
+  {
+    const cases = [
+      { label: '期間一覧の見出しが無い', extra: [{ id: SD_ID, gid: LIST_GID, body: toCsvText([['名前', 'ID'], ['SD_202611', SD_TABS['SD_202611']]]) }], word: ['期間一覧', '「タブ名」「gid」の見出しが見つかりません'] },
+      { label: '期間一覧の gid が空', opt: { noGid: true }, word: ['期間一覧の gid が未設定です'] },
+    ];
+    for (const cs of cases) {
+      const log = [];
+      const page = await openPage(browser, '?div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), SHIFT_DATA_CSV, log, cs.extra, [2026, 10, 18], cs.opt);
+      const err = await page.evaluate(() => document.getElementById('laborError').textContent.trim());
+      check(`栽培（${cs.label}）：パネルにエラーが出る`, cs.word.every(w => err.indexOf(w) !== -1), err);
+      const totals = await rowTexts(page, 'data-labor-total-offset');
+      check(`栽培（${cs.label}）：合計は「－」のまま`, totals.every(v => v === '－'), totals);
+      if (cs.opt && cs.opt.noGid) {
+        check(`（${cs.label}）：拠点シフト_データのファイルも、古いシフト_データ（gid 889947728）も読まない`, !log.some(u => u.includes(SD_ID) || u.includes('gid=889947728')), log);
+      } else {
+        check(`（${cs.label}）：SD タブは読まない`, !log.some(u => u.includes(SD_ID) && !u.endsWith(`gid=${LIST_GID}`)), log);
+      }
+      await page.click('#businessToggle button[data-business="出荷"]');
+      await page.waitForTimeout(1500);
+      const serr = await page.evaluate(() => document.getElementById('shipLaborError').textContent.trim());
+      check(`出荷（${cs.label}）：パネルにエラーが出る`, cs.word.every(w => serr.indexOf(w) !== -1), serr);
       const st = await rowTexts(page, 'data-shiplabor-total-offset');
       check(`出荷（${cs.label}）：合計は「－」のまま`, st.every(v => v === '－'), st);
       await page.close();
