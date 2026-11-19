@@ -341,7 +341,8 @@ function sameBar(bar, exp) { return bar.sum === exp.sum && bar.avg === exp.avg &
         userSelect: getComputedStyle(document.querySelector('#table1 tbody td.selectable-cell')).userSelect,
       };
     });
-    check('table1・table2・table3の数字のセル（7行×11列）はすべて選べる', r.t1[0] === 77 && r.t1[1] === 77 && r.t2[0] === 77 && r.t3[0] === 77, r);
+    // table1は2Lの内訳（2L・3L）の2行を足して9行（M・L・秀・優・2L・内訳2L・内訳3L・袋・合計）
+    check('table1（9行×11列）・table2・table3（7行×11列）の数字のセルはすべて選べる', r.t1[0] === 99 && r.t1[1] === 99 && r.t2[0] === 77 && r.t3[0] === 77, r);
     check('在庫予測の詳細（7行×11列）はすべて選べる、収穫予測の詳細は合計の行の入力欄9つ以外の68セルが選べる', r.d3[0] === 77 && r.d2[0] === 68 && r.d2[1] === 77, r);
     check('見出し（サイズ名・列見出しの<th>）と入力欄のセルは選べない', r.th === 0 && r.inputCount === 9 && r.inputCells === 0, r);
     check('選べるセルは文字選択されない（user-select:none）', r.userSelect === 'none', r.userSelect);
@@ -479,7 +480,7 @@ function sameBar(bar, exp) { return bar.sum === exp.sum && bar.avg === exp.avg &
     await page.click('#aggClearBtn');
     await dragCells(page, 'table1', 0, 3, 0, 4);
     check('サイズの行だけなら合計の行の注意は出ない', !(await barState(page)).warnTotal);
-    await clickCell(page, 'table1', 6, 3, ['Control']);
+    await clickCell(page, 'table1', 8, 3, ['Control']); // 合計の行（2Lの内訳の2行を足したので8行目）
     bar = await barState(page);
     check('合計の行と各サイズの行を一緒に選ぶと二重計上の注意が出る', bar.warnTotal && !bar.warnUnit && !bar.warnGrade, bar);
     await page.click('#aggClearBtn');

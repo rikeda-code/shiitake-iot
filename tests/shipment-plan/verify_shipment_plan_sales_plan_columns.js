@@ -261,21 +261,21 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   {
     const expect = {
       '群馬': [
-        ['11.0', '1012.1', '13.0', '15.0'], // 11/28 受注計画（カンマ付き）
-        [D, D, D, D],                       // 11/29 3Lだけ入力 → 受注計画のまま（3Lは画面に出さない）
-        ['21.0', '22.0', '23.0', '25.0'],   // 11/30 修正計画
+        ['11.0', '1012.1', '27.0', '15.0'], // 11/28 受注計画（カンマ付き）。2Lの行は2L＋3L（13＋14）
+        [D, D, '7.0', D],                   // 11/29 3Lだけ入力 → 受注計画のまま。2Lの行は3Lの7だけ
+        ['21.0', '22.0', '47.0', '25.0'],   // 11/30 修正計画（2L＋3L＝23＋24）
         ['41.0', '42.0', '43.0', '44.0'],   // 12/1 受注計画（24列）
         ['51.0', '52.0', '53.0', '54.0'],   // 12/2 修正計画（24列）
         [D, D, D, D], [D, D, D, D], [D, D, D, D],
         ['61.0', '62.0', '63.0', '64.0'],   // 12/6
       ],
       '南丹': [
-        ['31.0', '32.0', '33.0', '35.0'], [D, D, D, D], [D, D, D, D],
+        ['31.0', '32.0', '67.0', '35.0'], [D, D, D, D], [D, D, D, D], // 11/28 2L＋3L＝33＋34
         ['71.0', '72.0', '73.0', '74.0'], ['81.0', '82.0', '83.0', '84.0'],
         [D, D, D, D], [D, D, D, D], [D, D, D, D], [D, D, D, D],
       ],
       'いなべ': [
-        ['1.0', '2.0', '3.0', '5.0'], [D, D, D, D], [D, D, D, D],
+        ['1.0', '2.0', '7.0', '5.0'], [D, D, D, D], [D, D, D, D], // 11/28 2L＋3L＝3＋4
         ['101.0', '102.0', '103.0', '104.0'],
         [D, D, D, D], [D, D, D, D], [D, D, D, D], [D, D, D, D], [D, D, D, D],
       ],
@@ -289,9 +289,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       const ok = same(got, expect[site]);
       check(`${site}：11/28〜12/6 の出荷予定（M・L・2L・袋）が見出しどおりの列の値`, ok, got);
       if (site === '群馬') {
-        check('群馬 11/29：3Lだけ入力がある日は修正計画（91〜94）に替えない', same(got[1], [D, D, D, D]), got[1]);
-        const hidden3L = await page.evaluate(() => document.querySelectorAll('[data-shipment="3L"]').length);
-        check('3Lは読むが画面には出さない（3Lの行が無い）', hidden3L === 0, hidden3L);
+        check('群馬 11/29：3Lだけ入力がある日は修正計画（91〜94）に替えない（2Lの行は3Lの7.0、ほかは「－」）', same(got[1], [D, D, '7.0', D]), got[1]);
+        // 3Lは2Lの内訳の行（sub3L）に出る（11/28：内訳2L＝13.0・内訳3L＝14.0）
+        const sub = await page.evaluate(() => ['sub2L', 'sub3L'].map(k => document.querySelector('[data-shipment="' + k + '"][data-shipment-offset="0"]').textContent.trim()));
+        check('3Lは2Lの内訳の行に出る（11/28：内訳2L 13.0・内訳3L 14.0）', same(sub, ['13.0', '14.0']), sub);
       }
       const note = await shipmentNote(page);
       check(`${site}：見出しがそろっているので出荷予定の注意は出ない`, note && note.hidden && note.text === '', note);
@@ -306,7 +307,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await waitShipment(page, '11.0');
     const got = [];
     for (let o = 0; o <= 8; o++) got.push(await shipmentRow(page, o));
-    check('11月の日（11/28）はそのまま表示', same(got[0], ['11.0', '1012.1', '13.0', '15.0']), got[0]);
+    check('11月の日（11/28）はそのまま表示（2Lの行は2L＋3L）', same(got[0], ['11.0', '1012.1', '27.0', '15.0']), got[0]);
     check('12月の日（12/1〜12/6）は M・L・2L・袋 が「－」（列番号で読まない）', got.slice(3).every(r => same(r, [D, D, D, D])), got.slice(3));
     const note = await shipmentNote(page);
     check('出荷予定の注意が出る（2026.12・群馬の受注計画（袋）の見出しが見つからない）', note && !note.hidden &&
