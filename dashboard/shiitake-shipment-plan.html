@@ -494,6 +494,15 @@
             <th class="sticky-1">2L</th>
             <td data-stock-product="2L">－</td><td data-stock-raw="2L">－</td><td class="today-col" data-shipment="2L" data-shipment-offset="0">－</td><td data-shipment="2L" data-shipment-offset="1">－</td><td data-shipment="2L" data-shipment-offset="2">－</td><td data-shipment="2L" data-shipment-offset="3">－</td><td data-shipment="2L" data-shipment-offset="4">－</td><td class="zero" data-shipment="2L" data-shipment-offset="5">－</td><td data-shipment="2L" data-shipment-offset="6">－</td><td data-shipment="2L" data-shipment-offset="7">－</td><td data-shipment="2L" data-shipment-offset="8">－</td>
           </tr>
+          <!-- 2Lの内訳（2L・3L）。表示だけで、合計の行・在庫予測には使わない（.grade-rowは合計から除外） -->
+          <tr class="grade-row" data-row-label="内訳2L">
+            <th class="sticky-1">2L</th>
+            <td data-stock-product="sub2L">－</td><td data-stock-raw="sub2L">－</td><td class="today-col" data-shipment="sub2L" data-shipment-offset="0">－</td><td data-shipment="sub2L" data-shipment-offset="1">－</td><td data-shipment="sub2L" data-shipment-offset="2">－</td><td data-shipment="sub2L" data-shipment-offset="3">－</td><td data-shipment="sub2L" data-shipment-offset="4">－</td><td data-shipment="sub2L" data-shipment-offset="5">－</td><td data-shipment="sub2L" data-shipment-offset="6">－</td><td data-shipment="sub2L" data-shipment-offset="7">－</td><td data-shipment="sub2L" data-shipment-offset="8">－</td>
+          </tr>
+          <tr class="grade-row" data-row-label="内訳3L">
+            <th class="sticky-1">3L</th>
+            <td data-stock-product="sub3L">－</td><td data-stock-raw="sub3L">－</td><td class="today-col" data-shipment="sub3L" data-shipment-offset="0">－</td><td data-shipment="sub3L" data-shipment-offset="1">－</td><td data-shipment="sub3L" data-shipment-offset="2">－</td><td data-shipment="sub3L" data-shipment-offset="3">－</td><td data-shipment="sub3L" data-shipment-offset="4">－</td><td data-shipment="sub3L" data-shipment-offset="5">－</td><td data-shipment="sub3L" data-shipment-offset="6">－</td><td data-shipment="sub3L" data-shipment-offset="7">－</td><td data-shipment="sub3L" data-shipment-offset="8">－</td>
+          </tr>
           <tr>
             <th class="sticky-1">袋</th>
             <td data-stock-product="袋">－</td><td data-stock-raw="袋">－</td><td class="today-col" data-shipment="袋" data-shipment-offset="0">－</td><td data-shipment="袋" data-shipment-offset="1">－</td><td data-shipment="袋" data-shipment-offset="2">－</td><td data-shipment="袋" data-shipment-offset="3">－</td><td data-shipment="袋" data-shipment-offset="4">－</td><td class="zero" data-shipment="袋" data-shipment-offset="5">－</td><td data-shipment="袋" data-shipment-offset="6">－</td><td data-shipment="袋" data-shipment-offset="7">－</td><td data-shipment="袋" data-shipment-offset="8">－</td>
@@ -962,16 +971,31 @@
   // {type:'monthlySheets', id, gids}なら月ごとのシート（日付・収穫見込の列。直近工数計画の南丹と同じ元）。
   // 南丹だけ次の2つが違う：masterGid＝在庫ファイルの「マスターシート」タブのgid（あれば製品在庫を
   // 品目ごとの「箱数×1cs重量」で計算する。無ければallocationGidの按分ルール）、
+  // productBreakdown2L＝パネル1の2Lの内訳（「2L」「3L」の行）の製品在庫の品目と係数（南丹は無し。品目の計算から出す）、
   // gradeForecast:false＝収穫時点では秀・優に分けていないため、収穫予測・在庫予測の秀・優は「－」
   var SITE_DATA = {
     'いなべ': {
       allocationGid: '276290820', orderGid: '545062393',
       harvestUrlColumn: 'いなべ',
+      // 2Lの内訳（パネル1の「2L」「3L」の行の製品在庫）。在庫ファイルの「2L製品在庫」の式
+      // （2026/10/1〜：(優2L8＋優3L6)×2.8＋(秀2L8＋秀3L6)×3.08）と同じ品目・係数で、2L・3Lに分けて集計する
+      productBreakdown2L: {
+        '2L': [['秀2L8', 3.08], ['優2L8', 2.8]],
+        '3L': [['秀3L6', 3.08], ['優3L6', 2.8]],
+      },
       dailyTotal: { id: '1B7XEllKSlCEfkBPmNf_fvAz48I6XvMS3hfT_Dy4w_Tw', gid: '1164843574' }, // 「2026.5いなべ収穫計画」の「転写」タブ
     },
     '群馬': {
       allocationGid: '272244694', orderGid: '1218802781',
       harvestUrlColumn: '群馬',
+      // 2Lの内訳：在庫ファイルの「2L製品在庫」の式（2026/10/1〜）と同じ品目・係数。
+      // 3Lの商品が無いので、3Lは空の一覧（＝「－」）
+      productBreakdown2L: {
+        '2L': [['2L4 (30入り)', 4], ['A2L6-8（10入り)', 2], ['A2L6-8（12入り)', 2.4], ['A2L6-8（14入り)', 2.8],
+          ['A2L6-8（20入り)', 4], ['B2L6-8（12入り)', 2.4], ['B2L6-8（14入り)', 2.8],
+          ['2Lバラ（3kg)', 3], ['2Lバラ（5kg)', 5], ['2Lバラ（8kg)', 8]],
+        '3L': [],
+      },
       dailyTotal: { id: '1iZK3xgGkPhXTlnx_DGunW8YQ8bZZFE-r_5Si513r46Y', gid: '1272257227' }, // 「2026.5群馬収穫計画」の「転写」タブ
     },
     '南丹': {
@@ -1609,6 +1633,52 @@
     return any ? Math.round(total * 10) / 10 : null;
   }
 
+  // 2Lの内訳（パネル1の「2L」「3L」の行）の製品在庫を、在庫タブの品目の行（B列の名前が完全に一致する
+  // 最初の行）の数量×係数で集計する。breakdown＝SITE_DATAのproductBreakdown2L。
+  // 一覧が空（その拠点に無い）、または一覧の品目の行が見つからないときはnull（「－」）。
+  // 親の2L（2L製品在庫）と和が合わない日があっても補正しない
+  function computeProductBreakdown2L(json, colIdx, breakdown){
+    var rows = (json && json.table && json.table.rows) || [];
+    var norm = function(t){ return String(t == null ? '' : t).normalize('NFKC').replace(/\s/g, ''); };
+    function findItemRow(name){
+      var want = norm(name);
+      for (var i = 0; i < rows.length; i++) {
+        var c = rows[i] && rows[i].c;
+        if (c && c[1] && norm(c[1].v) === want) return i;
+      }
+      return -1;
+    }
+    var out = {};
+    ['2L', '3L'].forEach(function(sub){
+      var items = (breakdown && breakdown[sub]) || [];
+      if (!items.length) { out[sub] = null; return; }
+      var sum = 0, missing = [];
+      items.forEach(function(it){
+        var r = findItemRow(it[0]);
+        if (r < 0) { missing.push(it[0]); return; }
+        var v = readCellNumber(json, r, colIdx); // "7箱" のような表記も数字の部分を読む。空欄は0
+        if (v !== null) sum += v * it[1];
+      });
+      if (missing.length) {
+        console.warn('[2Lの内訳] 在庫タブに品目の行が見つかりません（' + sub + '）:', missing);
+        out[sub] = null;
+        return;
+      }
+      out[sub] = Math.round(sum * 100) / 100;
+    });
+    return out;
+  }
+
+  // 2Lの内訳の行（「2L」「3L」）の製品在庫・生在庫のセルに書く。生在庫は3拠点とも分けていないので常に「－」
+  function setStockBreakdownCells(product2L, product3L){
+    [['sub2L', product2L], ['sub3L', product3L]].forEach(function(p){
+      var productCell = document.querySelector('[data-stock-product="' + p[0] + '"]');
+      var rawCell = document.querySelector('[data-stock-raw="' + p[0] + '"]');
+      if (productCell) { productCell.textContent = fmtStockNumber(p[1]); applyZeroClass(productCell, p[1]); }
+      if (rawCell) { rawCell.textContent = STOCK_DASH; rawCell.classList.remove('zero'); }
+    });
+  }
+
   function fmtStockNumber(v){
     return v === null ? STOCK_DASH : (Math.round(v * 10) / 10).toFixed(1);
   }
@@ -1656,6 +1726,7 @@
     var gradeProductYuu = document.querySelector('[data-stock-product="優"]');
     if (gradeProductSyu) { gradeProductSyu.textContent = STOCK_DASH; gradeProductSyu.classList.remove('zero'); }
     if (gradeProductYuu) { gradeProductYuu.textContent = STOCK_DASH; gradeProductYuu.classList.remove('zero'); }
+    setStockBreakdownCells(null, null);
   }
 
   function parseTotalCellNumber(text){
@@ -1760,12 +1831,17 @@
       return (grade === '袋①' || grade === '袋②') ? [{ size: '袋', share: 1, gradeL: false }] : [];
     }
     var tokens = s.split(/[・\/]/).map(function(t){ return t.trim(); }).filter(Boolean);
+    // 2Lの内訳（パネル1の「2L」「3L」の行）：サイズが3Lだけの品目は3L、2Lと3Lが混ざった品目
+    // （2L・3L）やL・2Lの2L側は2L（混ざった品目は半分にせず2Lに入れる）
+    var only3L = tokens.every(function(t){ return t === '3L'; });
     var out = [];
     for (var i = 0; i < tokens.length; i++) {
       var tk = tokens[i];
       var size = tk === '3L' ? '2L' : tk; // 3Lは受注計画の2L列に入っているので2Lに入れる
       if (['M', 'L', '2L'].indexOf(size) === -1) return []; // S等は対象外
-      out.push({ size: size, share: 1 / tokens.length, gradeL: tk === 'L' && (grade === '秀' || grade === '優') });
+      var part = { size: size, share: 1 / tokens.length, gradeL: tk === 'L' && (grade === '秀' || grade === '優') };
+      if (size === '2L') part.sub = only3L ? '3L' : '2L';
+      out.push(part);
     }
     return out;
   }
@@ -1798,6 +1874,7 @@
     if (start < 0) return null;
     var sizes = { 'M': 0, 'L': 0, '2L': 0, '袋': 0 };
     var grades = { '秀': 0, '優': 0 };
+    var breakdown2L = { '2L': 0, '3L': 0 }; // 2Lの内訳（表示だけ。sizes['2L']＝この2つの和）
     var seen = {}, stockCount = {}, unknown = [], unparsed = [];
     for (var k = start; k < rows.length; k++) {
       var c = rows[k] && rows[k].c;
@@ -1819,6 +1896,7 @@
       if (isNaN(kg)) { unparsed.push(label); continue; }
       splitStockSizes(m.grade, m.size, STOCK_ITEM_OVERRIDES[label]).forEach(function(p){
         sizes[p.size] += kg * p.share;
+        if (p.sub) breakdown2L[p.sub] += kg * p.share;
         if (p.gradeL) grades[(STOCK_ITEM_OVERRIDES[label] || m).grade] += kg * p.share;
       });
     }
@@ -1831,7 +1909,8 @@
     function round1(v){ return Math.round(v * 10) / 10; }
     Object.keys(sizes).forEach(function(s){ sizes[s] = round1(sizes[s]); });
     Object.keys(grades).forEach(function(g){ grades[g] = round1(grades[g]); });
-    return { sizes: sizes, grades: grades, mismatches: mismatches, unknown: unknown, unparsed: unparsed };
+    Object.keys(breakdown2L).forEach(function(k){ breakdown2L[k] = round1(breakdown2L[k]); });
+    return { sizes: sizes, grades: grades, breakdown2L: breakdown2L, mismatches: mismatches, unknown: unknown, unparsed: unparsed };
   }
 
   window.__test = window.__test || {};
@@ -1841,6 +1920,7 @@
     splitStockSizes: splitStockSizes,
     buildSalesPlanLayout: buildSalesPlanLayout,
     readSalesPlan: readSalesPlan,
+    computeProductBreakdown2L: computeProductBreakdown2L,
   });
 
   // targetDate（基準日の前日。M・L・2L・袋の製品在庫・生在庫列は、既存のHTML構造上
@@ -1924,11 +2004,16 @@
         });
         syuProduct = product ? product.grades['秀'] : null;
         yuuProduct = product ? product.grades['優'] : null;
+        // 2Lの内訳：サイズが3Lだけの品目→3L、それ以外の2Lの品目（2L・3Lが混ざった品目を含む）→2L
+        setStockBreakdownCells(product ? product.breakdown2L['2L'] : null, product ? product.breakdown2L['3L'] : null);
       } else {
         var allocationRules = await fetchAllocationRules(stockInfo.sheetId, siteCfg.allocationGid);
         if (isStale()) return;
         syuProduct = computeAllocatedValue(json, allocationRules, colIdx, '秀・製品在庫');
         yuuProduct = computeAllocatedValue(json, allocationRules, colIdx, '優・製品在庫');
+        // 2Lの内訳：品目ごとの数量×（在庫ファイルの「2L製品在庫」の式と同じ）係数
+        var breakdown = computeProductBreakdown2L(json, colIdx, siteCfg.productBreakdown2L);
+        setStockBreakdownCells(breakdown['2L'], breakdown['3L']);
       }
       var gradeProductSyu = document.querySelector('[data-stock-product="秀"]');
       var gradeProductYuu = document.querySelector('[data-stock-product="優"]');
@@ -1947,7 +2032,7 @@
   };
 
   function dashShipmentCells(){
-    ['M', '2L', '袋', 'L', '秀', '優'].forEach(function(size){
+    ['M', '2L', 'sub2L', 'sub3L', '袋', 'L', '秀', '優'].forEach(function(size){
       for (var offset = 0; offset <= 8; offset++) {
         var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
         if (cell) { cell.textContent = STOCK_DASH; cell.classList.remove('zero'); }
@@ -2009,10 +2094,19 @@
         // 修正計画の値を表示している日は、受注計画が未入力と分かるよう秀・優を「－」にする
         if (plan && plan.revised) gradePlan = { '秀': null, '優': null };
         if (isStale()) return;
-        ['M', 'L', '2L', '袋', '秀', '優'].forEach(function(size){
+        // 2L（親の行）＝販売予実抽出シートの2L＋3L（管理資料は2L以上を2Lに集計しているため）。
+        // どちらも空欄なら「－」、片方だけなら入っている方。内訳の行（sub2L・sub3L）は2L・3Lをそのまま出す
+        var shown = plan ? {
+          'M': plan['M'], 'L': plan['L'], '袋': plan['袋'],
+          '2L': (plan['2L'] === null && plan['3L'] === null) ? null : (plan['2L'] || 0) + (plan['3L'] || 0),
+          'sub2L': plan['2L'], 'sub3L': plan['3L'],
+        } : {};
+        ['M', 'L', '2L', 'sub2L', 'sub3L', '袋', '秀', '優'].forEach(function(size){
           var cell = document.querySelector('[data-shipment="' + size + '"][data-shipment-offset="' + offset + '"]');
           if (!cell) return;
-          var v = (size === '秀' || size === '優') ? gradePlan[size] : (plan ? plan[size] : null);
+          var v = (size === '秀' || size === '優') ? gradePlan[size] : (plan ? shown[size] : null);
+          if (v !== null && v !== undefined) v = Math.round(v * 100) / 100;
+          if (v === undefined) v = null;
           cell.textContent = fmtStockNumber(v);
           applyZeroClass(cell, v);
         });
@@ -3110,6 +3204,7 @@
   <span class="agg-warn" id="aggWarnUnit" style="display:none;">kgと比率（%）が混在しています</span>
   <span class="agg-warn" id="aggWarnTotal" style="display:none;">合計の行を含むため、二重に数えています</span>
   <span class="agg-warn" id="aggWarnGrade" style="display:none;">秀・優はLの内訳のため、二重に数えています</span>
+  <span class="agg-warn" id="aggWarn2L" style="display:none;">2L・3Lの行は2Lの内訳のため、二重に数えています</span>
   <button type="button" class="agg-clear" id="aggClearBtn">選択を解除</button>
 </div>
 
@@ -3124,7 +3219,7 @@
   var DASH = '－';
   // 選べる表：在庫・出荷予定・収穫予測・在庫予測と、収穫予測・在庫予測の「詳細」
   var SELECTABLE_TABLE_IDS = ['table1', 'table2', 'table2detail', 'table3', 'table3detail'];
-  var SIZE_ROWS = ['M', 'L', '秀', '優', '2L', '袋'];
+  var SIZE_ROWS = ['M', 'L', '秀', '優', '2L', '内訳2L', '内訳3L', '袋'];
 
   // 選べるセル：上の表のtbodyの<td>（数字のセル）。見出し（thead・行頭のサイズ名<th>）と、
   // 入力欄を含むセル（収穫予測の詳細の合計の行）は選べない
@@ -3143,6 +3238,8 @@
   // 比率の注記が付くことがある（例：「秀_60」）ため、先頭のサイズ名だけを取り出す
   function rowLabelOf(cell){
     var tr = cell.closest('tr');
+    // 2Lの内訳の行（見出しは「2L」「3L」）は、親の2Lと区別するため data-row-label（内訳2L・内訳3L）を使う
+    if (tr && tr.dataset && tr.dataset.rowLabel) return tr.dataset.rowLabel;
     var th = tr && tr.querySelector('th');
     var text = th ? th.textContent.trim() : '';
     var m = text.match(/^(合計|2L|秀|優|袋|M|L)/);
@@ -3246,6 +3343,7 @@
       mixedUnit: unitList.length > 1,
       doubleCountTotal: !!rows['合計'] && hasSize,
       doubleCountGrade: !!rows['L'] && (!!rows['秀'] || !!rows['優']),
+      doubleCount2L: !!rows['2L'] && (!!rows['内訳2L'] || !!rows['内訳3L']),
     };
   }
 
@@ -3274,6 +3372,7 @@
     document.getElementById('aggWarnUnit').style.display = agg.mixedUnit ? '' : 'none';
     document.getElementById('aggWarnTotal').style.display = agg.doubleCountTotal ? '' : 'none';
     document.getElementById('aggWarnGrade').style.display = agg.doubleCountGrade ? '' : 'none';
+    document.getElementById('aggWarn2L').style.display = agg.doubleCount2L ? '' : 'none';
     bar.classList.add('show');
     document.body.classList.add('has-agg-bar');
   }
