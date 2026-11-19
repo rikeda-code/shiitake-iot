@@ -632,8 +632,10 @@ function cellHours(v) {
   if (span <= 0) return null;
   return span >= 5 ? span - 1 : span;
 }
+// シフトとして読めない値（画面で赤い波線になる値）。空欄・休みの種類は読める
+const isBadVal = v => !!v && !isLeave(v) && cellHours(v) === null;
 
-function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 2200); }
+function toast(msg, ms) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, ms || 2200); }
 function setStatus(text, kind) {
   $('status').textContent = text;
   $('status').classList.toggle('dirty', kind === 'warn' || kind === true);
@@ -1226,7 +1228,7 @@ function render() {
       if (c.d === 1) cls.push('mstart');
       const sp = supportSplit(v, hr);
       if (isLeave(v)) cls.push('off', leaveCls(v));
-      else if (hr === null) cls.push('bad');
+      else if (isBadVal(v)) cls.push('bad');
       if (sp) cls.push('sup', `sup-${sp.to}`, ...(sp.part ? ['part'] : []));
       // 応援・配送の分は行き先の部門へ、残りは本来の部門へ（行き先が自分の部門なら全部そのまま）
       const moved = sp && sp.to !== div ? sp.h : 0;
@@ -1316,11 +1318,41 @@ function selectionTSV() {
   for (let r = s.r0; r <= s.r1; r++) { const a = []; for (let c = s.c0; c <= s.c1; c++) a.push(data[rows[r].key]?.[cols[c].iso] || ''); out.push(a.join('\t')); }
   return out.join('\n');
 }
+// 貼り付けた文字を表の形に分ける（スプレッドシートのコピーの形）。
+// " で始まるセルは閉じの " まで（改行・タブを含めて）1つのセルとして読み、中の "" は " に戻す。
+// " で囲まれていないセル（閉じの " が無いものも）は今までどおり、タブと改行で分ける
+function parseClipboardTSV(text) {
+  const s = String(text || '').replace(/\r/g, '').replace(/\n$/, '');
+  const g = [[]]; let i = 0;
+  for (;;) {
+    let cell = '';
+    if (s[i] === '"') {
+      let j = i + 1, buf = '', closed = false;
+      while (j < s.length) {
+        if (s[j] === '"') { if (s[j + 1] === '"') { buf += '"'; j += 2; continue; } closed = true; j++; break; }
+        buf += s[j++];
+      }
+      if (closed) { cell = buf; i = j; }
+    }
+    let k = i; while (k < s.length && s[k] !== '\t' && s[k] !== '\n') k++;
+    cell += s.slice(i, k); i = k;
+    g[g.length - 1].push(cell);
+    if (i >= s.length) break;
+    if (s[i] === '\n') g.push([]);
+    i++;
+  }
+  return g;
+}
 function pasteTSV(text) {
   const s = norm(sel); if (!s) return;
-  const g = text.replace(/\r/g, '').replace(/\n$/, '').split('\n').map(l => l.split('\t'));
+  const g = parseClipboardTSV(text);
   const n = cols.length - 1;
-  if (g.length === 1 && g[0].length === 1) {
+  const single = g.length === 1 && g[0].length === 1;
+  // 貼る値（空欄を除く）に、シフトとして読めない値（赤い波線になる値）が1つでもあれば、1セルも書き込まない
+  const vals = single ? [g[0][0]] : g.flatMap((row, i) => row.filter((v, j) => s.r0 + i < rows.length && s.c0 + j <= n));
+  const bad = [...new Set(vals.map(normVal).filter(isBadVal))];
+  if (bad.length) { toast(`シフトとして読めない値があります：${bad.slice(0, 3).map(v => `「${v}」`).join('')}${bad.length > 3 ? ` ほか${bad.length - 3}件` : ''}。貼り付けをやめました`, 6000); return; }
+  if (single) {
     for (let r = s.r0; r <= s.r1; r++) for (let c = s.c0; c <= s.c1; c++) setVal(r, c, normVal(g[0][0]));
   } else {
     g.forEach((row, i) => row.forEach((v, j) => { const r = s.r0 + i, c = s.c0 + j; if (r < rows.length && c <= n) setVal(r, c, normVal(v)); }));
