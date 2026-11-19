@@ -56,7 +56,38 @@ const ROWS = [
 ];
 const SHIFT_DATA_CSV = toCsvText([HEADER].concat(ROWS));
 
-// extra：ほかに返すシート [{ id, gid, body }]（旧のシフト表など）
+// 整理済み_M（ファーム勤務時間 gid 1944296458）。実際の形に合わせる：1〜2行目は締め日・月の行、3行目が見出し
+// （B列の見出しは「F」、入退社年月は '2026/9' の書き方）、4行目から人。部門はここから引く
+const MASTER_GID = '1944296458';
+const MASTER_HEAD = ['', 'F', '雇用区分', '拠点', 'PRJ', '部門', '社員番号', '名前', '入退社年月', '総勤務時間', '有給取得時間', '実質勤務時間'];
+// [B列, 雇用区分, 拠点, 部門, 名前, 入退社年月]
+function mrow(flag, emp, site, dept, name, ym) { return ['', String(flag), emp, site, site, dept, '', name, ym || '', '160:00', '', '160:00']; }
+function toMasterCsv(people) {
+  return toCsvText([
+    ['0：ファイルなし', '', '', '', '', '', '', '', '', '10/10 締め', '', ''],
+    ['', '1：在職中、2：入社予定、3：退職/異動予定、8：他所属、9：退職', '', '', '', '', '', '', '', '2026/09', '', ''],
+    MASTER_HEAD,
+  ].concat(people));
+}
+// 上の ROWS・⑧の人を、シフト_データの部門の列と同じ部門で登録したもの（今までの場面の数字が変わらないように）
+const MASTER_PEOPLE = [
+  mrow(1, '社員', 'いなべ', '栽培', '栽培 一郎'),
+  mrow(1, 'パート', 'いなべ', '配送・栽培', '配送 栽培子'),
+  mrow(1, 'パート', 'いなべ', '出荷', '出荷 花子'),
+  mrow(1, '社員', 'いなべ', '配送・出荷', '配送 出荷男'),
+  mrow(1, '社員', 'いなべ', '生産部長', '部長 太郎'),
+  mrow(1, '社員', 'いなべ', '配送', '配送 専任'),
+  mrow(1, '社員', 'いなべ', '事務', '事務 さん'),
+  mrow(1, 'パート', 'いなべ', '', '空欄 さん'),
+  mrow(1, 'パート', '群馬', '出荷', '群馬 出荷'),
+  mrow(1, '社員', '群馬', '配送・出荷', '群馬 配送出荷'),
+  mrow(1, 'パート', 'いなべ', '栽培', '新 栽培'),
+  mrow(1, 'パート', 'いなべ', '出荷', '新 出荷'),
+];
+const MASTER_CSV = toMasterCsv(MASTER_PEOPLE);
+
+// extra：ほかに返すシート [{ id, gid, body }]（旧のシフト表など）。{ id, gid, abort: true } はつながらない（読めない）ことにする。
+// 整理済み_M は extra に無ければ MASTER_CSV を返す
 async function setupRoutes(page, body, log, extra) {
   await page.route('**/export**', async route => {
     const url = decodeURIComponent(route.request().url());
@@ -68,7 +99,13 @@ async function setupRoutes(page, body, log, extra) {
     const hit = (extra || []).find(x => url.includes(x.id) && url.includes(`gid=${x.gid}`));
     if (hit) {
       if (log) log.push(url);
+      if (hit.abort) { await route.abort('failed'); return; }
       await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: hit.body });
+      return;
+    }
+    if (url.includes(SHIFT_DATA_ID) && url.includes(`gid=${MASTER_GID}`)) {
+      if (log) log.push(url);
+      await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: MASTER_CSV });
       return;
     }
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: '﻿\r\n' });
@@ -389,6 +426,106 @@ async function rowTexts(page, attr) {
     const page = await openPage(browser, '?laborSource=shiftData&div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), SHIFT_DATA_CSV, log);
     check('基準日 11/2 のいなべは切り替え日より前なのでシフト_データを読まない', !log.some(u => u.includes(`gid=${SHIFT_DATA_GID}`)), log);
     await page.close();
+  }
+
+  console.log('=== ⑨ 部門はシフト_データの部門の列ではなく、キーで整理済み_Mの今の登録から引く ===');
+  {
+    // 群馬：基準日 11/8 の7日間（11/8〜11/10 は月度 2026/10、11/11〜11/14 は月度 2026/11）。全員 毎日 8:00-17:00（8h）
+    const DAYS = ['2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14'];
+    const every = (name, sheetDept, shift) => DAYS.map((d, i) => rec(d, '群馬', name, sheetDept, i === 0 && shift ? shift : '8:00-17:00', '8'));
+    const MROWS = [].concat(
+      every('部門 違い', '配送・栽培'),               // シフト_データは「配送・栽培」、整理済み_Mは「栽培」→ 栽培に数える
+      every('未登録 さん', '栽培', '8:00-17:00出荷4h'), // 整理済み_Mにいない → 応援の印があっても数えない
+      every('配送 兼務', '栽培'),                     // 整理済み_Mは「配送・栽培」→ 数えない
+      every('変更 さん', '出荷'),                     // 2行：元の行 B列8 出荷（〜2026/10）、新しい行 B列1 栽培（2026/11〜）
+      every('I空 さん', '出荷'),                      // 2行とも入退社年月が空：いつも B列1 の行の部門（栽培）
+    );
+    const M_CSV = toMasterCsv([
+      mrow(1, 'パート', '群馬', '栽培', '部門 違い'),
+      mrow(1, 'パート', '群馬', '配送・栽培', '配送 兼務'),
+      mrow(8, 'パート', '群馬', '出荷', '変更 さん', '2026/10'),
+      mrow(8, 'パート', '群馬', '出荷', 'I空 さん'),
+      mrow(1, 'パート', '南丹', '栽培', '未登録 さん'), // ほかの拠点にだけいる人は、群馬では「いない」扱い
+      mrow(1, '社員', '群馬', '栽培', '変更 さん', '2026/11'),
+      mrow(1, '社員', '群馬', '栽培', 'I空 さん'),
+    ]);
+    const extra = [{ id: SHIFT_DATA_ID, gid: MASTER_GID, body: M_CSV }];
+    const page = await openPage(browser, '', toCsvText([HEADER].concat(MROWS)), null, extra);
+    const r = await page.evaluate(async () => {
+      const T = window.__test;
+      const basis = new Date(2026, 10, 8);
+      const cult = await T.fetchShiftDataLabor('群馬', '栽培', basis);
+      const ship = await T.fetchShiftDataLabor('群馬', '出荷', basis);
+      return { cult, ship };
+    });
+    // 栽培：部門違い8＋I空8（毎日）＋変更さん8（11/11〜）
+    check('栽培の合計：11/8〜11/10 は 16、11/11〜11/14 は 24（整理済み_Mの部門で数える）',
+      JSON.stringify(r.cult.perDayTotal) === JSON.stringify([16, 16, 16, 24, 24, 24, 24]), r.cult.perDayTotal);
+    check('栽培の出勤人数 2/2/2/3/3/3/3', JSON.stringify(r.cult.perDayAttendance) === JSON.stringify([2, 2, 2, 3, 3, 3, 3]), r.cult.perDayAttendance);
+    const cn = r.cult.personBreakdown.map(p => p.name + '|' + p.dept);
+    check('シフト_データの部門が「配送・栽培」でも、整理済み_Mが「栽培」なら栽培に数え、人別内訳の部門も「栽培」', cn.includes('部門 違い|栽培'), cn);
+    check('整理済み_Mにいないキーの人（未登録 さん）は、応援の印があっても数えない', !cn.some(n => n.indexOf('未登録') === 0) && !r.ship.personBreakdown.some(p => p.name === '未登録 さん'), [cn, r.ship.personBreakdown]);
+    check('整理済み_Mで配送を兼ねる人（配送・栽培）は、シフト_データの部門が「栽培」でも数えない', !cn.some(n => n.indexOf('配送 兼務') === 0), cn);
+    const henko = r.cult.personBreakdown.find(p => p.name === '変更 さん');
+    check('同じキーが2行：新しい行の月度（2026/11 ＝ 11/11〜）より前の日は元の行の部門（出荷）なので栽培には 11/11 から',
+      henko && JSON.stringify(henko.dayHours) === JSON.stringify([0, 0, 0, 8, 8, 8, 8]) && henko.dept === '栽培', henko);
+    check('同じキーが2行：11/8〜11/10 は出荷に数える（出荷の合計 8/8/8/0/0/0/0）',
+      JSON.stringify(r.ship.perDayTotal) === JSON.stringify([8, 8, 8, 0, 0, 0, 0]), r.ship.perDayTotal);
+    const iEmpty = r.cult.personBreakdown.find(p => p.name === 'I空 さん');
+    check('入退社年月が空の2行の人は、いつも B列1 の行の部門（栽培に毎日8h）', iEmpty && JSON.stringify(iEmpty.dayHours) === JSON.stringify([8, 8, 8, 8, 8, 8, 8]) && iEmpty.dept === '栽培', iEmpty);
+    check('出荷の人別内訳は「変更 さん」だけ（部門は出荷）',
+      r.ship.personBreakdown.length === 1 && r.ship.personBreakdown[0].name === '変更 さん' && r.ship.personBreakdown[0].dept === '出荷', r.ship.personBreakdown);
+
+    // 純粋関数：月度で比べる（暦の月ではない）。月度の途中の変更はその月度まるごと新しい部門
+    const p = await page.evaluate(() => {
+      const T = window.__test;
+      const H = ['', 'F', '雇用区分', '拠点', 'PRJ', '部門', '社員番号', '名前', '入退社年月'];
+      const row = a => ({ c: a.map(v => ({ v })) });
+      const master = T.parseShiftMasterRows([
+        row(['', '', '', '', '', '', '', '', '']), row(['', '', '', '', '', '', '', '', '']), row(H),
+        row(['', '8', 'パート', '群馬', '群馬', '出荷', '', '山田　太郎（旧）', '2026/11']),
+        row(['', '1', '社員', '群馬', '群馬', '栽培', '', '山田 太郎', '2026/12']),
+        row(['', '3', 'パート', '群馬', '群馬', '出荷', '', '退職 予定', '2026/12']),
+      ]);
+      const on = (key, iso) => T.shiftMasterDeptOn(master, '群馬', key, iso);
+      return {
+        keys: Object.keys(master),
+        d1204: on('山田太郎', '2026-12-04'), d1210: on('山田太郎', '2026-12-10'), d1211: on('山田太郎', '2026-12-11'),
+        d0110: on('山田太郎', '2027-01-10'), d1111: on('山田太郎', '2026-11-11'),
+        retire: on('退職予定', '2026-12-05'), none: on('いない人', '2026-12-05'),
+        md: [T.shiftMonthDegreeOf('2026-12-10'), T.shiftMonthDegreeOf('2026-12-11'), T.shiftMonthDegreeOf('2027-01-05')],
+      };
+    });
+    check('整理済み_Mのキーは GAS と同じ作り方（文字の幅をそろえ・括弧から後ろを切り・空白を除き・大文字）', p.keys.includes('群馬|山田太郎') && p.keys.length === 2, p.keys);
+    check('月度：12/10 は 2026-11、12/11 は 2026-12、1/5 は 2026-12', JSON.stringify(p.md) === JSON.stringify(['2026-11', '2026-12', '2026-12']), p.md);
+    check('新しい行の入退社年月 2026/12：12/4・12/10（月度 2026/11）は元の行の部門（出荷）。暦の月で比べない', p.d1204 === '出荷' && p.d1210 === '出荷' && p.d1111 === '出荷', p);
+    check('新しい行の入退社年月 2026/12：12/11 からその月度まるごと（〜1/10）新しい行の部門（栽培）', p.d1211 === '栽培' && p.d0110 === '栽培', p);
+    check('B列 1・2 の行が無い人（退職予定の3だけ）は、その行の部門', p.retire === '出荷', p.retire);
+    check('整理済み_Mにいない人は null（数えない）', p.none === null, p.none);
+    await page.close();
+  }
+
+  console.log('=== ⑩ 画面：整理済み_Mを読めないとき、パネルにエラーを出して計算しない ===');
+  {
+    const cases = [
+      { label: 'つながらない', extra: [{ id: SHIFT_DATA_ID, gid: MASTER_GID, abort: true }], word: '整理済み_Mを読めませんでした' },
+      { label: '見出しが無い', extra: [{ id: SHIFT_DATA_ID, gid: MASTER_GID, body: toCsvText([['a', 'b'], ['c', 'd'], ['', 'F', '雇用区分', '拠点', 'PRJ', '所属', '社員番号', '名前']]) }], word: '「部門」' },
+    ];
+    for (const cs of cases) {
+      const page = await openPage(browser, '?laborSource=shiftData&div=' + encodeURIComponent('栽培') + '&site=' + encodeURIComponent('いなべ'), SHIFT_DATA_CSV, null, cs.extra);
+      await rerenderWithoutSwitchDate(page);
+      const err = await page.evaluate(() => document.getElementById('laborError').textContent.trim());
+      check(`栽培（${cs.label}）：パネルにエラーが出る`, err.indexOf('整理済み_M') !== -1 && err.indexOf(cs.word) !== -1, err);
+      const totals = await rowTexts(page, 'data-labor-total-offset');
+      check(`栽培（${cs.label}）：合計は「－」のまま（シフト_データの部門の列で計算しない）`, totals.every(v => v === '－'), totals);
+      await page.click('#businessToggle button[data-business="出荷"]');
+      await page.waitForTimeout(1500);
+      const serr = await page.evaluate(() => document.getElementById('shipLaborError').textContent.trim());
+      check(`出荷（${cs.label}）：パネルにエラーが出る`, serr.indexOf('整理済み_M') !== -1, serr);
+      const st = await rowTexts(page, 'data-shiplabor-total-offset');
+      check(`出荷（${cs.label}）：合計は「－」のまま`, st.every(v => v === '－'), st);
+      await page.close();
+    }
   }
 
   await browser.close();
