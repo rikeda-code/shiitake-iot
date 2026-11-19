@@ -684,10 +684,18 @@
   // シフト_データタブ（「標準労働時間」と同じファイル）。列は見出しの名前で探す（列の位置は使わない）
   var SHIFT_DATA_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '889947728' };
   // 必ず要る見出し。見つからないときは標準労働時間のパネルにエラーとして出す。
-  // キーは無くてもよい（無いときは氏名で人を見分ける）
+  // キーは無くてもよい（無いときは氏名で人を見分ける）。
+  // 部門の列は参考の記録として読むだけで、計算には使わない（部門は下の整理済み_Mから引く）ので必須にしない
   var SHIFT_DATA_HEADERS = { date: '日付', site: '拠点', key: 'キー', name: '氏名', dept: '部門', shift: 'シフト', hours: '実働h' };
-  var SHIFT_DATA_REQUIRED = ['date', 'site', 'name', 'dept', 'shift', 'hours'];
-  // 拠点ごとの部門の振り分け（シフト_データの「部門」の値そのもの）。ここに無い部門
+  var SHIFT_DATA_REQUIRED = ['date', 'site', 'name', 'shift', 'hours'];
+  // 整理済み_M（「ファーム勤務時間」の従業員マスタ）。シフト_データの人の部門は、キーでここの今の登録から引く
+  // （拠点シフト表のGASの hoursRange_ と同じ考え方）。3行目が見出しで、列は見出しの名前で探す（列の位置は使わない）。
+  // F＝B列（1在職中 2入社 3退職/異動予定 8他所属 9退職）、入退社＝入退社年月（ファームの呼び方の月度。2026/11 ＝ 2026/11/11〜12/10）
+  var SHIFT_MASTER_SHEET = { id: '1LtYb1feXR6jtIEfxaADLiTEWpPabKJDDlwoS1V-yuG0', gid: '1944296458' };
+  var SHIFT_MASTER_HEADER_ROW = 3;
+  // exact：見出しがちょうどこの名前の列、それ以外：この名前で始まる列（GAS の masterCols_ と同じ）
+  var SHIFT_MASTER_HEADERS = { flag: { label: 'F', exact: true }, site: { label: '拠点' }, dept: { label: '部門' }, name: { label: '名前' }, start: { label: '入退社' } };
+  // 拠点ごとの部門の振り分け（整理済み_Mの「部門」の値そのもの）。ここに無い部門
   // （配送・配送・栽培・配送・出荷・生産部長・事務・営業・空欄など）の人は数えない
   // （応援の印で栽培・出荷に回した時間だけは数える）。部門を足すときは、その拠点の配列に足す
   // （例：群馬の出荷に配送・出荷の人も入れる → '群馬': { ..., '出荷': ['出荷', '配送・出荷'] }）
@@ -1956,7 +1964,9 @@
   /* ===================== ③標準労働時間（拠点シフト表の「シフト_データ」） =====================
      LABOR_SOURCE_BY_SITE が 'shiftData' の拠点だけで使う（'old' の拠点は下の各拠点の関数のまま）。
      休憩は拠点シフト表のルールで計算済みの「実働h」をそのまま使い、こちらでは計算し直さない。
-     標準労働時間シートとの照合もしない */
+     標準労働時間シートとの照合もしない。
+     人の部門は、シフト_データの部門の列ではなく、キーで整理済み_Mの今の登録から引く（shiftMasterDeptOn()）。
+     整理済み_Mにいない人の行は数えない */
 
   // その拠点の標準労働時間を、シフト_データから読むかどうか
   function useShiftDataLabor(site){
@@ -2107,6 +2117,80 @@
     return out;
   }
 
+  // 日付（'YYYY-MM-DD'）の月度（11日〜翌月10日。始まりの月で呼ぶ）を 'YYYY-MM' で返す（GAS の monthDegreeOf_ と同じ）
+  function shiftMonthDegreeOf(iso){
+    var p = String(iso).split('-').map(Number);
+    var y = p[0], m = p[1];
+    if (p[2] < 11) { m--; if (m < 1) { m = 12; y--; } }
+    return y + '-' + String(m).padStart(2, '0');
+  }
+
+  // 整理済み_Mの入退社年月（'2026/9'・'2026/09'・'2026/9/1'・'2026-09' など）→ 'YYYY-MM'。空・読めないときは ''
+  function parseMasterYm(raw){
+    var m = String(raw == null ? '' : raw).normalize('NFKC').trim().match(/^(\d{4})[\/\-.年](\d{1,2})/);
+    return m ? m[1] + '-' + String(m[2]).padStart(2, '0') : '';
+  }
+
+  // 整理済み_Mの生rows(gviz形式。SHIFT_MASTER_HEADER_ROW 行目＝見出し)を解析する。純粋関数。
+  // 戻り値：{ '拠点|キー': [{ flag, dept, start, name }]（整理済み_Mの上からの順） }。キーは GAS の normalizeName_ と同じ作り方。
+  // 見出しが見つからないときはエラーにする（画面にそのまま出る）
+  function parseShiftMasterRows(rows){
+    rows = rows || [];
+    var hi = SHIFT_MASTER_HEADER_ROW - 1;
+    var header = (rows[hi] && rows[hi].c) || [];
+    var heads = header.map(function(x){ return x ? String(x.v == null ? '' : x.v).normalize('NFKC').trim() : ''; });
+    var idx = {};
+    Object.keys(SHIFT_MASTER_HEADERS).forEach(function(k){
+      var h = SHIFT_MASTER_HEADERS[k];
+      idx[k] = heads.findIndex(function(v){ return h.exact ? v === h.label : v.indexOf(h.label) === 0; });
+    });
+    var missing = Object.keys(idx).filter(function(k){ return idx[k] < 0; })
+      .map(function(k){ return SHIFT_MASTER_HEADERS[k].label; });
+    if (missing.length) {
+      throw new Error('整理済み_Mの' + SHIFT_MASTER_HEADER_ROW + '行目に「' + missing.join('」「') + '」の見出しが見つかりません（部門を整理済み_Mから引けないため、標準労働時間を計算できません）');
+    }
+    var out = {};
+    for (var r = hi + 1; r < rows.length; r++) {
+      var c = (rows[r] && rows[r].c) || [];
+      var cell = function(k){ var x = c[idx[k]]; return x && x.v != null ? String(x.v).trim() : ''; };
+      var name = cell('name');
+      var site = cell('site');
+      if (!name || !site) continue;
+      var id = site + '|' + normalizeName(name);
+      (out[id] = out[id] || []).push({ flag: parseInt(cell('flag'), 10) || 0, dept: cell('dept'), start: parseMasterYm(cell('start')), name: name });
+    }
+    return out;
+  }
+
+  // その人のその日の部門（整理済み_Mの今の登録）。純粋関数。整理済み_Mにその拠点・キーの行が無ければ null。
+  //  ・B列 1・2 の行の部門を基本にする。その行の入退社年月より前の月度の日だけ、元の行（B列 3・8）の部門を使う
+  //    （日付も月度に直して比べるので、月度の途中の変更はその月度まるごと新しい部門。入退社年月が空ならいつの日も 1・2 の行）。
+  //    元の行が2行以上あるときは、入退社年月（その所属の最後の月度）がその日の月度以降のうち一番早い行、無ければ一番下の行
+  //  ・B列 1・2 の行が無い人（退職予定の3だけ、退職済みの9だけ など）は、3の行、無ければ一番上の行の部門
+  function shiftMasterDeptOn(master, site, key, iso){
+    var list = (master || {})[site + '|' + key];
+    if (!list || !list.length) return null;
+    var cur = list.filter(function(x){ return x.flag === 1 || x.flag === 2; })[0];
+    if (!cur) return (list.filter(function(x){ return x.flag === 3; })[0] || list[0]).dept;
+    var ym = shiftMonthDegreeOf(iso);
+    if (!cur.start || ym >= cur.start) return cur.dept;
+    var olds = list.filter(function(x){ return x !== cur && (x.flag === 3 || x.flag === 8); });
+    if (!olds.length) return cur.dept;
+    var later = olds.filter(function(x){ return x.start && x.start >= ym; })
+      .sort(function(a, b){ return a.start < b.start ? -1 : a.start > b.start ? 1 : 0; });
+    return (later[0] || olds[olds.length - 1]).dept;
+  }
+
+  // シフト_データの行に、整理済み_Mの部門を付け直す。純粋関数。
+  // dept＝整理済み_Mの部門（計算・人別内訳に使う）、sheetDept＝シフト_データの部門の列（参考。計算には使わない）、
+  // inMaster＝整理済み_Mにその拠点・キーの人がいるか（いなければ数えない）
+  function applyShiftMasterDepts(records, master){
+    return (records || []).map(function(r){
+      var d = shiftMasterDeptOn(master, r.site, r.key, r.date);
+      return Object.assign({}, r, { sheetDept: r.dept, dept: d === null ? '' : d, inMaster: d !== null });
+    });
+  }
+
   // シフトの後ろに付いた応援・配送の印（SHIFT_DATA_SUPPORT_TAGSの名前）。無ければ''
   function shiftDataSupportTag(shift){
     var m = String(shift || '').normalize('NFKC').trim().match(/(半日配送|配送|栽培8h|栽培4h|出荷8h|出荷4h)$/);
@@ -2158,6 +2242,7 @@
     siteRecs.forEach(function(r){
       var o = isos.indexOf(r.date);
       if (o < 0 || !inRange[o]) return;
+      if (r.inMaster === false) return; // 整理済み_Mにいない人は数えない（applyShiftMasterDepts() で付けた印）
       var isMember = members.indexOf(r.dept) !== -1;
       if (r.hours === null && r.shift && isMember) {
         warningSet['実働hが空欄のため0時間で計算：' + r.name + ' ' + fmtMD(addDays(basisDate, o)) + '（' + r.shift + '）'] = true;
@@ -2165,10 +2250,12 @@
       var h = splitShiftDataHours(site, r.dept, r.shift, r.hours || 0)[div] || 0;
       if (!isMember && !h) return;
       if (!personMap[r.key]) {
-        personMap[r.key] = { name: r.name, dept: r.dept, support: false, rawDayHours: zeroOrNull() };
+        personMap[r.key] = { name: r.name, dept: r.dept, deptDate: r.date, support: false, rawDayHours: zeroOrNull() };
         personOrder.push(r.key);
       }
       var entry = personMap[r.key];
+      // 人別内訳の部門は、7日間のうちいちばん後の日の部門（組織内の変更で途中から部門が変わる人のため）
+      if (r.date > entry.deptDate) { entry.dept = r.dept; entry.deptDate = r.date; }
       if (!isMember) entry.support = true;
       entry.rawDayHours[o] += h;
     });
@@ -2224,12 +2311,18 @@
     };
   }
 
-  // シフト_データの読み込み（ページを開いている間は1回だけ読む。失敗したら次の描画で読み直す）
+  // シフト_データと整理済み_Mの読み込み（ページを開いている間は1回だけ読む。失敗したら次の描画で読み直す）。
+  // 部門は整理済み_Mから引くので、整理済み_Mを読めないときはエラーにする（シフト_データの部門の列に戻して計算しない）
   var shiftDataCache = null;
   function fetchShiftDataRecords(){
     if (!shiftDataCache) {
-      var p = fetchCsvSheet(SHIFT_DATA_SHEET.id, SHIFT_DATA_SHEET.gid)
-        .then(function(json){ return parseShiftDataRows(json.table.rows); });
+      var p = Promise.all([
+        fetchCsvSheet(SHIFT_DATA_SHEET.id, SHIFT_DATA_SHEET.gid)
+          .then(function(json){ return parseShiftDataRows(json.table.rows); }),
+        fetchCsvSheet(SHIFT_MASTER_SHEET.id, SHIFT_MASTER_SHEET.gid)
+          .catch(function(e){ throw new Error('整理済み_Mを読めませんでした（' + (e && e.message || e) + '）。部門を引けないため、標準労働時間を計算できません'); })
+          .then(function(json){ return parseShiftMasterRows(json.table.rows); }),
+      ]).then(function(res){ return applyShiftMasterDepts(res[0], res[1]); });
       p.catch(function(){ if (shiftDataCache === p) shiftDataCache = null; });
       shiftDataCache = p;
     }
@@ -4525,6 +4618,11 @@
     SHIFT_DATA_DIV_DEPTS: SHIFT_DATA_DIV_DEPTS,
     useShiftDataLabor: useShiftDataLabor,
     parseShiftDataRows: parseShiftDataRows,
+    SHIFT_MASTER_SHEET: SHIFT_MASTER_SHEET,
+    shiftMonthDegreeOf: shiftMonthDegreeOf,
+    parseShiftMasterRows: parseShiftMasterRows,
+    shiftMasterDeptOn: shiftMasterDeptOn,
+    applyShiftMasterDepts: applyShiftMasterDepts,
     shiftDataSupportTag: shiftDataSupportTag,
     splitShiftDataHours: splitShiftDataHours,
     computeShiftDataLaborHours: computeShiftDataLaborHours,
