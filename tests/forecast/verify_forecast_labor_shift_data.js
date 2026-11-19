@@ -124,16 +124,16 @@ const MASTER_CSV = toMasterCsv(MASTER_PEOPLE);
 // body：シフトの CSV（1行目＝見出し）。日付の期間ごとに分けて、期間一覧に載っている SD タブとして返す。
 // extra：ほかに返すシート [{ id, gid, body }]（旧のシフト表・期間一覧の差し替えなど）。{ id, gid, abort: true } はつながらない（読めない）ことにする。
 // 整理済み_M は extra に無ければ MASTER_CSV を、期間一覧は extra に無ければ listCsv(SD_TABS) を返す。
-// opt.noGid：work-hours-forecast.html の SHIFT_PERIOD_LIST_GID を空のまま（入れない）にする
+// ページの SHIFT_PERIOD_LIST_GID は、本物の gid が入っていてもテスト用の gid（LIST_GID）に差し替える。
+// opt.noGid：SHIFT_PERIOD_LIST_GID を空にする（未設定のときの確認用）
 async function setupRoutes(page, body, log, extra, opt) {
   opt = opt || {};
   await page.route('**/work-hours-forecast.html*', async route => {
     const res = await route.fetch();
     let html = await res.text();
-    if (!opt.noGid) {
-      if (html.indexOf("var SHIFT_PERIOD_LIST_GID = '';") === -1) throw new Error('SHIFT_PERIOD_LIST_GID の行が見つかりません');
-      html = html.replace("var SHIFT_PERIOD_LIST_GID = '';", `var SHIFT_PERIOD_LIST_GID = '${LIST_GID}';`);
-    }
+    const GID_LINE = /var SHIFT_PERIOD_LIST_GID = '[^']*';/;
+    if (!GID_LINE.test(html)) throw new Error('SHIFT_PERIOD_LIST_GID の行が見つかりません');
+    html = html.replace(GID_LINE, `var SHIFT_PERIOD_LIST_GID = '${opt.noGid ? '' : LIST_GID}';`);
     await route.fulfill({ response: res, body: html });
   });
   const tabs = splitToTabs(body);
