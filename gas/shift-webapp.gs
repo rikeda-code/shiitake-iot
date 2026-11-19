@@ -3,18 +3,34 @@
  *
  * ── 役割 ──────────────────────────────────────────────
  * ・整理済み_M（手書きの従業員マスタ）から拠点ごとのメンバーを読み込む
- * ・シフト（日付×人×時間）を「シフト_データ」シートに保存する
- * ・固定シフト（曜日ごとの基本パターン）を「シフト_固定」シートに保存する
- * ・新人登録／退職を整理済み_Mへ直接書き込む
+ * ・シフト（日付×人×時間）を、DB共有_拠点シフト_データ（DATA_SS_ID）の期間ごとのタブ SD_YYYYMM に保存する
+ *   （YYYYMM は期間＝月度 11日〜翌月10日 の始まりの年月。SD_202611 ＝ 2026/11/11〜12/10）
+ *   タブは GAS が作り、作るたびに「期間一覧」タブ（タブ名・開始日・終了日・gid）に1行足す。
+ *   期間一覧に載っていない SD タブは使わない（同じ名前のタブがあればエラー）
+ * ・固定シフト（曜日ごとの基本パターン）を「シフト_固定」シート（ファーム勤務時間）に保存する
+ * ・新人登録／退職を整理済み_M（ファーム勤務時間）へ直接書き込む
  * ・work-hours-forecast.html の標準労働時間に、日別・人別の実働時間を返す
  * ・旧シフト表（期間ごとのシート）から一度だけ取り込む importLegacyShift()
+ * ・切り替え用：exportToSD（画面のデータベース → SD タブ）・exportToSDDryRun（書き込まずに照らし合わせだけ）
+ *   戻し用：copyBackToOld（SD タブ → 古いシフト_データ）
  *
  * ── 休憩ルール（実働時間の計算）───────────────────────
  *   拘束5時間未満：休憩なし ／ 5時間以上：1時間
  *
+ * ── 保存先の切り替え（ファーム勤務時間のシフト_データ → 期間ごとのタブ）──
+ * 1. 拠点シフト_データのファイルに、GAS で作っていない SD_ タブがあれば名前を変える（試し_SD_202611 など）
+ * 2. このファイルを Apps Script に貼り付けて保存し、関数「setup」を実行 → 「期間一覧」タブができる
+ * 3. 拠点シフト表にログインした画面で IDトークンを取り、スクリプト プロパティ EXPORT_ID_TOKEN に貼る
+ * 4. 「exportToSDDryRun」を実行して照らし合わせの結果を見る → 入力を止める → 「exportToSD」を実行
+ *    → もう一度「exportToSDDryRun」で「（参考）今の SD タブとの違い」が 0 件、①〜④ の件数が書き出しのときと同じことを確かめる
+ * 5. 「デプロイを管理」で今のデプロイを新しいバージョンにする → 「authorizeAccessCheck」を実行
+ * 6. EXPORT_ID_TOKEN を消す。1セル入力して SD タブに入ることを確かめてから、入力を再開する
+ * 戻すとき：スクリプト プロパティ COPY_BACK_FROM に戻す日（yyyy-MM-dd）を入れて「copyBackToOld」を実行し、
+ *   前のバージョンのコードでデプロイし直す
+ *
  * ── デプロイ手順（Apps Scriptエディタで実施）──────────
  * 1. 新規スタンドアロンのApps Scriptプロジェクトを作成し、このファイルを貼り付ける
- * 2. 関数「setup」を1回実行（権限を許可）→ シフト_データ／シフト_固定シートが作られる
+ * 2. 関数「setup」を1回実行（権限を許可）→ シフト_固定シート・期間一覧タブが作られる
  * 3. 関数「importLegacyShift」を1回実行 → 旧シフト表の10/1以降を取り込む
  *    （実行ログに取り込めなかったセル・照合できなかった氏名が出る）
  * 4. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」
@@ -55,8 +71,16 @@ const MASTER_SHEET_NAME = '整理済み_M';
 const MASTER_HEADER_ROW = 3;   // 3行目が列見出し
 const MASTER_FLAG_COL = 2;     // B列：1在職中 2入社 3退職/異動 8他所属 9退職
 const EMP_TYPES = ['社員', 'パート', '技能実習生']; // 整理済み_Mの雇用区分の入力規則と同じ
-const DATA_SHEET_NAME = 'シフト_データ';
-const FIXED_SHEET_NAME = 'シフト_固定';
+const DATA_SHEET_NAME = 'シフト_データ'; // 古い保存先（ファーム勤務時間）。切り替え後は exportToSD の照らし合わせ・copyBackToOld だけで使う
+const FIXED_SHEET_NAME = 'シフト_固定';  // ファーム勤務時間のまま
+// シフトの保存先：DB共有_拠点シフト_データ の期間ごとのタブ SD_YYYYMM と「期間一覧」
+const DATA_SS_ID = '1h71qF-SAp8VJZl4TimbFrikmXAbMod4w_iEA_Yziaq8';
+const PERIOD_TAB_PREFIX = 'SD_';
+const PERIOD_LIST_NAME = '期間一覧';
+const PERIOD_LIST_HEADERS = ['タブ名', '開始日', '終了日', 'gid'];
+// 切り替え用の書き出し（exportToSD）
+const EXPORT_SITES = ['いなべ', '群馬', '南丹'];
+const EXPORT_TOKEN_PROP = 'EXPORT_ID_TOKEN';
 
 // 旧シフト表（いなべ）。期間ごとにシートが作られていたもの。取り込み元としてのみ使う
 const LEGACY_SHEET_ID = '12xrXyXUSbiQVUWsAC7mbrExyWrIw863Oleq_1v81vRw';
@@ -218,15 +242,20 @@ function json_(obj) {
 
 function ss_() { return SpreadsheetApp.openById(MASTER_SHEET_ID); }
 
+// シフト_固定（ファーム勤務時間）と、拠点シフト_データのファイルの「期間一覧」を用意する（シフト_データは作らない）
 function setup() {
   const ss = ss_();
-  [[DATA_SHEET_NAME, DATA_HEADERS], [FIXED_SHEET_NAME, FIXED_HEADERS]].forEach(([name, headers]) => {
-    let sh = ss.getSheetByName(name);
-    if (!sh) sh = ss.insertSheet(name);
-    if (sh.getLastRow() === 0) { sh.appendRow(headers); sh.setFrozenRows(1); }
-    sh.getRange('A:A').setNumberFormat('@'); // 日付は文字列 yyyy-MM-dd で持つ
-    Logger.log(`${name}: gid=${sh.getSheetId()}`);
-  });
+  let fsh = ss.getSheetByName(FIXED_SHEET_NAME);
+  if (!fsh) fsh = ss.insertSheet(FIXED_SHEET_NAME);
+  if (fsh.getLastRow() === 0) { fsh.appendRow(FIXED_HEADERS); fsh.setFrozenRows(1); }
+  fsh.getRange('A:A').setNumberFormat('@');
+  Logger.log(`${FIXED_SHEET_NAME}: gid=${fsh.getSheetId()}`);
+  const ds = ssData_();
+  let lsh = ds.getSheetByName(PERIOD_LIST_NAME);
+  if (!lsh) lsh = ds.insertSheet(PERIOD_LIST_NAME, 0);
+  if (lsh.getLastRow() === 0) { lsh.appendRow(PERIOD_LIST_HEADERS); lsh.setFrozenRows(1); }
+  lsh.getRange('A:C').setNumberFormat('@'); // タブ名・開始日・終了日は文字列
+  Logger.log(`${PERIOD_LIST_NAME}: gid=${lsh.getSheetId()}`);
 }
 
 function fmtDate_(d) { return Utilities.formatDate(d, TZ, 'yyyy-MM-dd'); }
@@ -537,8 +566,13 @@ function undoRetire_(req) {
   return res;
 }
 
-/* ===================== シフト ===================== */
+/* ===================== シフト（保存先：期間ごとのタブ） =====================
+ * シフトは DB共有_拠点シフト_データ（DATA_SS_ID）の期間ごとのタブ SD_YYYYMM に保存する。
+ * YYYYMM は期間（月度：11日〜翌月10日）の始まりの年月。SD_202611 ＝ 2026/11/11〜12/10。
+ * タブは GAS だけが作る（ensurePeriodTab_）。作るたびに「期間一覧」に1行足す。
+ * 期間一覧に無い SD タブ（手で作ったもの・古い写し）は使わずにエラーにする。 */
 
+// 固定シフト（シフト_固定）など、ファーム勤務時間（MASTER_SHEET_ID）にあるシート
 function sheet_(name, headers) {
   const ss = ss_();
   let sh = ss.getSheetByName(name);
@@ -546,20 +580,128 @@ function sheet_(name, headers) {
   return sh;
 }
 
-function readData_() {
-  const sh = sheet_(DATA_SHEET_NAME, DATA_HEADERS);
+function ssData_() { return SpreadsheetApp.openById(DATA_SS_ID); }
+
+// 'yyyy-MM'（期間の始まりの年月）→ 'SD_yyyyMM'
+function periodTabName_(ym) { return PERIOD_TAB_PREFIX + ym.replace('-', ''); }
+// 期間の始まりの日・終わりの日（yyyy-MM-dd）
+function periodStart_(ym) { return `${ym}-11`; }
+function periodEnd_(ym) {
+  let [y, m] = ym.split('-').map(Number);
+  m++; if (m > 12) { m = 1; y++; }
+  return `${y}-${('0' + m).slice(-2)}-10`;
+}
+function nextPeriod_(ym) { return monthDegreeOf_(addDays_(periodEnd_(ym), 1)); }
+const isIsoDate_ = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+
+// from〜to（yyyy-MM-dd）にかかる期間（'yyyy-MM'）を古い順に返す
+function periodsBetween_(from, to) {
+  if (!isIsoDate_(from) || !isIsoDate_(to)) throw new Error(`期間の指定が正しくありません（${from}〜${to}）`);
+  const out = [];
+  if (from > to) return out;
+  const last = monthDegreeOf_(to);
+  for (let ym = monthDegreeOf_(from); ym <= last; ym = nextPeriod_(ym)) out.push(ym);
+  return out;
+}
+
+// 期間一覧を読む：{ タブ名: { row, start, end, gid } }
+function periodList_(ss) {
+  const sh = ss.getSheetByName(PERIOD_LIST_NAME);
+  if (!sh) throw new Error(`拠点シフト_データのファイルに「${PERIOD_LIST_NAME}」タブがありません。setup を実行してください`);
+  const last = sh.getLastRow();
+  const out = {};
+  if (last >= 2) {
+    sh.getRange(2, 1, last - 1, PERIOD_LIST_HEADERS.length).getValues().forEach((r, i) => {
+      const name = String(r[0] || '').trim();
+      if (name && !out[name]) out[name] = { row: i + 2, start: cellDate_(r[1]), end: cellDate_(r[2]), gid: Number(r[3]) };
+    });
+  }
+  return { sh, list: out };
+}
+
+// 期間のタブを探す。期間一覧にあればそのタブ（gid で探し、名前も同じことを確かめる）。
+// 期間一覧に無ければ null（同じ名前のタブがあるときはエラー）
+function findPeriodTab_(ss, ym, listed) {
+  const name = periodTabName_(ym);
+  const sheets = ss.getSheets();
+  const entry = listed.list[name];
+  if (entry) {
+    const sh = sheets.filter(x => x.getSheetId() === entry.gid)[0];
+    if (!sh) throw new Error(`期間一覧にある「${name}」（gid ${entry.gid}）のタブが見つかりません。タブが消されていないか確かめてください`);
+    if (sh.getName() !== name) throw new Error(`期間一覧の「${name}」（gid ${entry.gid}）のタブの名前が「${sh.getName()}」に変わっています。名前を戻してください`);
+    return sh;
+  }
+  if (sheets.some(x => x.getName() === name)) {
+    throw new Error(`「${name}」タブがありますが、期間一覧に載っていません。GAS で作ったタブではないため使いません（手で作ったタブや古い写しなら、名前を変えてください）`);
+  }
+  return null;
+}
+
+// 期間のタブ。期間一覧にあればそのタブ、無ければ作って期間一覧に1行足す。
+// 新しいタブは、いちばん新しい SD タブの左に入れる（SD タブが1つも無ければいちばん右）
+function ensurePeriodTab_(ym) {
+  const ss = ssData_();
+  const listed = periodList_(ss);
+  const found = findPeriodTab_(ss, ym, listed);
+  if (found) return found;
+  const name = periodTabName_(ym);
+  const sds = ss.getSheets().filter(x => /^SD_\d{6}$/.test(x.getName()))
+    .sort((a, b) => b.getName().localeCompare(a.getName()));
+  const sh = sds.length ? ss.insertSheet(name, sds[0].getIndex() - 1) : ss.insertSheet(name, ss.getSheets().length);
+  sh.getRange('A:A').setNumberFormat('@'); // 日付は文字列 yyyy-MM-dd で持つ
+  sh.getRange(1, 1, 1, DATA_HEADERS.length).setValues([DATA_HEADERS]);
+  sh.setFrozenRows(1);
+  listed.sh.appendRow([name, periodStart_(ym), periodEnd_(ym), sh.getSheetId()]);
+  Logger.log(`${name} を作りました（gid=${sh.getSheetId()}）`);
+  return sh;
+}
+
+// 期間のタブの行（8列。日付は yyyy-MM-dd の文字列にそろえる）。タブが無い期間は空
+function readTab_(ym) {
+  const ss = ssData_();
+  const sh = findPeriodTab_(ss, ym, periodList_(ss));
+  return sh ? readRows_(sh) : [];
+}
+function readRows_(sh) {
   const last = sh.getLastRow();
   if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, DATA_HEADERS.length).getValues().map(r => ({
-    date: cellDate_(r[0]), site: String(r[1]), key: String(r[2]), name: String(r[3]),
-    dept: String(r[4]), value: String(r[5]), hours: Number(r[6]) || 0,
+  return sh.getRange(2, 1, last - 1, DATA_HEADERS.length).getValues().map(r => [cellDate_(r[0])].concat(r.slice(1)));
+}
+
+// 期間のタブを rows（8列）で書き直す（日付・拠点の順に並べる）。タブが無ければ作る
+function writeTab_(ym, rows) {
+  const sh = ensurePeriodTab_(ym);
+  writeRows_(sh, rows);
+}
+function writeRows_(sh, rows) {
+  const out = rows.slice().sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+  const last = sh.getLastRow();
+  if (last >= 2) sh.getRange(2, 1, last - 1, DATA_HEADERS.length).clearContent();
+  if (out.length) sh.getRange(2, 1, out.length, DATA_HEADERS.length).setValues(out);
+}
+
+const rowObj_ = r => ({ date: r[0], site: String(r[1]), key: String(r[2]), name: String(r[3]), dept: String(r[4]), value: String(r[5]), hours: Number(r[6]) || 0 });
+
+// from〜to（yyyy-MM-dd）のシフト。かかる期間のタブだけを読む
+function readData_(from, to) {
+  const out = [];
+  periodsBetween_(from, to).forEach(ym => readTab_(ym).forEach(r => {
+    if (r[0] >= from && r[0] <= to) out.push(rowObj_(r));
   }));
+  return out;
+}
+
+// 暦の月（yyyy-MM）の1日〜末日。月度の2つの期間にかかる
+function calendarMonthRange_(month) {
+  if (!/^\d{4}-\d{2}$/.test(month || '')) throw new Error('月を指定してください');
+  const [y, m] = month.split('-').map(Number);
+  return { from: `${month}-01`, to: `${month}-${('0' + new Date(y, m, 0).getDate()).slice(-2)}` };
 }
 
 function loadMonth_(site, month, fresh) {
   const members = readMembers_(fresh).filter(m => m.site === site && m.flag !== 8);
-  const prefix = month; // 'yyyy-MM'
-  const shifts = readData_().filter(r => r.site === site && r.date.indexOf(prefix) === 0)
+  const { from, to } = calendarMonthRange_(month);
+  const shifts = readData_(from, to).filter(r => r.site === site)
     .map(r => ({ key: r.key, date: r.date, value: r.value }));
   const fsh = sheet_(FIXED_SHEET_NAME, FIXED_HEADERS);
   const fixed = {};
@@ -571,67 +713,80 @@ function loadMonth_(site, month, fresh) {
   return { members, shifts, fixed };
 }
 
-// 指定月・拠点の行を置き換える（他の月・拠点の行には触れない）
+// 指定月（暦の月）・拠点の行を置き換える（他の月・拠点の行には触れない）。月は2つの期間のタブにかかる
 function saveShifts_(req) {
   const { site, month, cells } = req;
   if (!site || !/^\d{4}-\d{2}$/.test(month || '')) throw new Error('拠点と月を指定してください');
-  const members = readMembers_();
+  const { from, to } = calendarMonthRange_(month);
   const byKey = {};
-  members.forEach(m => byKey[m.key] = m);
-  const sh = sheet_(DATA_SHEET_NAME, DATA_HEADERS);
-  const last = sh.getLastRow();
-  const keep = last >= 2
-    ? sh.getRange(2, 1, last - 1, DATA_HEADERS.length).getValues()
-        .filter(r => !(String(r[1]) === site && cellDate_(r[0]).indexOf(month) === 0))
-    : [];
+  readMembers_().forEach(m => byKey[m.key] = m);
   const now = new Date();
   const bad = [];
-  const add = [];
+  const addBy = {};
+  let saved = 0;
   (cells || []).forEach(c => {
     const value = normalizeShift_(c.value);
-    if (!value || c.date.indexOf(month) !== 0) return;
+    if (!value || !isIsoDate_(c.date) || c.date.indexOf(month) !== 0) return;
     const h = workHours_(value);
     if (h === null) { bad.push(`${c.date} ${value}`); return; }
     const m = byKey[c.key] || {};
-    add.push([c.date, site, c.key, m.name || c.name || '', m.dept || c.dept || '', value, h, now]);
+    (addBy[monthDegreeOf_(c.date)] = addBy[monthDegreeOf_(c.date)] || []).push([c.date, site, c.key, m.name || c.name || '', m.dept || c.dept || '', value, h, now]);
+    saved++;
   });
-  const rows = keep.map(r => [cellDate_(r[0])].concat(r.slice(1))).concat(add)
-    .sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
-  if (last >= 2) sh.getRange(2, 1, last - 1, DATA_HEADERS.length).clearContent();
-  if (rows.length) sh.getRange(2, 1, rows.length, DATA_HEADERS.length).setValues(rows);
-  return { saved: add.length, skipped: bad };
+  // 先に2つの期間のタブを確かめる（どちらかがエラーなら、どちらにも書かない）
+  const ss = ssData_(), listed = periodList_(ss);
+  const periods = periodsBetween_(from, to);
+  const tabs = periods.map(ym => findPeriodTab_(ss, ym, listed));
+  periods.forEach((ym, pi) => {
+    const sh = tabs[pi];
+    const add = addBy[ym] || [];
+    if (!sh && !add.length) return; // タブも書く行も無い期間は作らない
+    const keep = sh ? readRows_(sh).filter(r => !(String(r[1]) === site && r[0].indexOf(month) === 0)) : [];
+    writeRows_(sh || ensurePeriodTab_(ym), keep.concat(add));
+  });
+  return { saved, skipped: bad };
 }
 
-// 変わったセルだけをシフト_データに反映する（Firestore版のアプリが保存のたびに送る）
+// 変わったセルだけを期間のタブに反映する（Firestore版のアプリが保存のたびに送る）。
+// 1回の保存が2つの期間にまたがることがあるので、期間ごとに分けて、かかるタブだけを読み書きする
 function upsertCells_(req) {
   const { site, cells } = req;
   if (!site || !Array.isArray(cells)) throw new Error('拠点とセルを指定してください');
+  cells.forEach(c => { if (!isIsoDate_(c.date)) throw new Error(`セルの日付の形式が正しくありません（${c.date}）`); });
   const byKey = {};
   readMembers_().forEach(m => byKey[m.key] = m);
-  const sh = sheet_(DATA_SHEET_NAME, DATA_HEADERS);
-  const last = sh.getLastRow();
-  const rows = last >= 2 ? sh.getRange(2, 1, last - 1, DATA_HEADERS.length).getValues().map(r => [cellDate_(r[0])].concat(r.slice(1))) : [];
-  const index = {};
-  rows.forEach((r, i) => { index[`${r[0]}|${r[1]}|${r[2]}`] = i; });
+  const groups = {};
+  cells.forEach(c => { const ym = monthDegreeOf_(c.date); (groups[ym] = groups[ym] || []).push(c); });
+  // 先にかかる期間のタブをすべて確かめる（どれかがエラーなら、どの期間にも書かない）
+  const ss = ssData_(), listed = periodList_(ss);
+  const tabs = {};
+  Object.keys(groups).forEach(ym => { tabs[ym] = findPeriodTab_(ss, ym, listed); });
   const now = new Date();
-  const remove = {};
   let changed = 0;
-  cells.forEach(c => {
-    const id = `${c.date}|${site}|${c.key}`;
-    const value = normalizeShift_(c.value);
-    const i = index[id];
-    if (!value) { if (i !== undefined) { remove[i] = true; changed++; } return; }
-    const h = workHours_(value);
-    if (h === null) return;
-    const m = byKey[c.key] || {};
-    const row = [c.date, site, c.key, m.name || (i !== undefined ? rows[i][3] : ''), m.dept || (i !== undefined ? rows[i][4] : ''), value, h, now];
-    if (i !== undefined) { rows[i] = row; delete remove[i]; } else { index[id] = rows.length; rows.push(row); }
-    changed++;
+  Object.keys(groups).sort().forEach(ym => {
+    const sh = tabs[ym];
+    const rows = sh ? readRows_(sh) : [];
+    const index = {};
+    rows.forEach((r, i) => { index[`${r[0]}|${r[1]}|${r[2]}`] = i; });
+    const remove = {};
+    let n = 0;
+    groups[ym].forEach(c => {
+      const id = `${c.date}|${site}|${c.key}`;
+      const value = normalizeShift_(c.value);
+      const i = index[id];
+      if (!value) { if (i !== undefined) { remove[i] = true; n++; } return; }
+      const h = workHours_(value);
+      if (h === null) return;
+      const m = byKey[c.key] || {};
+      const row = [c.date, site, c.key, m.name || (i !== undefined ? rows[i][3] : ''), m.dept || (i !== undefined ? rows[i][4] : ''), value, h, now];
+      if (i !== undefined) { rows[i] = row; delete remove[i]; } else { index[id] = rows.length; rows.push(row); }
+      n++;
+    });
+    changed += n;
+    if (!n) return; // 変わらない期間は書かない（タブも作らない）
+    writeRows_(sh || ensurePeriodTab_(ym), rows.filter((r, i) => !remove[i]));
   });
-  const out = rows.filter((r, i) => !remove[i]).sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
-  if (last >= 2) sh.getRange(2, 1, last - 1, DATA_HEADERS.length).clearContent();
-  if (out.length) sh.getRange(2, 1, out.length, DATA_HEADERS.length).setValues(out);
-  // 旧シフト表への書き込みに失敗しても、シフト_データの保存は成功として返す
+  // 旧シフト表への書き込みに失敗しても、シフトの保存は成功として返す
   let mirror = null;
   if (site === LEGACY_MIRROR.site) {
     try { mirror = mirrorLegacy_(cells.map(c => ({ key: c.key, date: c.date, value: normalizeShift_(c.value) }))); }
@@ -662,12 +817,193 @@ function hoursRange_(site, from, to) {
   const members = {};
   readMembers_().forEach(m => members[m.key] = m);
   const persons = {};
-  readData_().forEach(r => {
-    if (r.site !== site || r.date < from || r.date > to) return;
+  readData_(from, to).forEach(r => {
+    if (r.site !== site) return;
     const p = persons[r.key] || (persons[r.key] = { name: r.name, dept: (members[r.key] || {}).dept || r.dept, days: {} });
     p.days[r.date] = r.hours;
   });
   return { persons: Object.keys(persons).map(k => persons[k]) };
+}
+
+/* ===================== 切り替え用の書き出し・戻し用 =====================
+ * exportToSD：画面のデータベース（Firestore）の shiftSites/{拠点}/months/{yyyy-MM} の cells を、
+ *   EXPORT_SITES の全月分読み、期間ごとのタブ SD_YYYYMM に書き出す（切り替えの日に1回）。
+ *   古いシフト_データ（ファーム勤務時間）と照らし合わせた結果をログと戻り値に出す。
+ *   エディタからは exportToSDDryRun（書き込まない）・exportToSD（書き込む）を選んで実行する。
+ * copyBackToOld：SD タブの fromIso 以降の行を、古いシフト_データに「日付｜拠点｜キー」で上書きする（戻し用）。
+ *   エディタからはスクリプト プロパティ COPY_BACK_FROM（yyyy-MM-dd）を入れて実行する。 */
+
+function exportToSDDryRun() { return exportToSD({ dryRun: true }); }
+
+// Firestore（REST）から1拠点の months の文書をすべて読む：{ 'yyyy-MM': { key: { iso: value } } }
+function readFirestoreMonths_(site, idToken) {
+  const out = {};
+  let pageToken = '';
+  do {
+    const url = FIRESTORE_DOCS + 'shiftSites/' + encodeURIComponent(site) + '/months?pageSize=300' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    const res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + idToken }, muteHttpExceptions: true });
+    const code = res.getResponseCode();
+    if (code === 401) throw new Error('ログインの証明（EXPORT_ID_TOKEN）の期限が切れています（1時間で切れます）。取り直してスクリプト プロパティに貼り直してください');
+    if (code !== 200) throw new Error(`データベースを読めませんでした（${site}・${code}）：${String(res.getContentText()).slice(0, 200)}`);
+    const body = JSON.parse(res.getContentText() || '{}');
+    (body.documents || []).forEach(doc => {
+      const month = String(doc.name).split('/').pop();
+      const cells = (((doc.fields || {}).cells || {}).mapValue || {}).fields || {};
+      const m = out[month] = {};
+      Object.keys(cells).forEach(key => {
+        const days = ((cells[key].mapValue || {}).fields) || {};
+        Object.keys(days).forEach(iso => {
+          const v = days[iso];
+          if (v && v.stringValue !== undefined) (m[key] = m[key] || {})[iso] = v.stringValue;
+        });
+      });
+    });
+    pageToken = body.nextPageToken || '';
+  } while (pageToken);
+  return out;
+}
+
+// 古いシフト_データ（ファーム勤務時間）の行（8列。日付は yyyy-MM-dd の文字列）
+function oldDataSheet_() {
+  const sh = ss_().getSheetByName(DATA_SHEET_NAME);
+  if (!sh) throw new Error(`ファーム勤務時間に「${DATA_SHEET_NAME}」タブがありません`);
+  return sh;
+}
+
+function exportToSD(opt) {
+  const dryRun = !!(opt && opt.dryRun);
+  const idToken = PropertiesService.getScriptProperties().getProperty(EXPORT_TOKEN_PROP);
+  if (!idToken) {
+    throw new Error(`スクリプト プロパティ「${EXPORT_TOKEN_PROP}」にログインの証明（Firebase の IDトークン）がありません。` +
+      '拠点シフト表（https://shiitake-iot.web.app/site-shift.html）にログインした状態で、F12 の「コンソール」に ' +
+      'firebase.auth().currentUser.getIdToken(true).then(t => copy(t)) と打って Enter（トークンがコピーされます）→ ' +
+      'Apps Script の「プロジェクトの設定」→「スクリプト プロパティ」に、プロパティ ' + EXPORT_TOKEN_PROP + '・値に貼り付けて保存してから、もう一度実行してください');
+  }
+  // 整理済み_M：拠点＋キー（B列の値は問わない）。氏名・部門は B列1・2 の行を優先し、無ければ下の行
+  const memberOf = {};
+  readMembers_(true).forEach(m => {
+    const id = `${m.site}|${m.key}`;
+    const cur = memberOf[id];
+    if (!cur || !([1, 2].indexOf(cur.flag) >= 0 && [1, 2].indexOf(m.flag) < 0)) memberOf[id] = m;
+  });
+  // 古いシフト_データ
+  const oldSh = oldDataSheet_();
+  const oldRows = readRows_(oldSh);
+  const oldBy = {};
+  oldRows.forEach(r => { const id = `${r[0]}|${r[1]}|${r[2]}`; (oldBy[id] = oldBy[id] || []).push(r); });
+
+  const now = new Date();
+  const notIn = {}, bad = [], byPeriod = {}, newBy = {};
+  EXPORT_SITES.forEach(site => {
+    const months = readFirestoreMonths_(site, idToken);
+    Object.keys(months).sort().forEach(month => Object.keys(months[month]).forEach(key => Object.keys(months[month][key]).forEach(iso => {
+      const value = normalizeShift_(months[month][key][iso]);
+      if (!value) return;
+      if (!isIsoDate_(iso)) { bad.push(`${site}｜${key}｜${iso}「${value}」（日付の形式）`); return; }
+      const m = memberOf[`${site}|${key}`];
+      if (!m) { const n = notIn[`${site}|${key}`] = notIn[`${site}|${key}`] || { site, key, count: 0 }; n.count++; return; }
+      const h = workHours_(value);
+      if (h === null) { bad.push(`${site}｜${m.name}｜${iso}「${value}」`); return; }
+      const id = `${iso}|${site}|${key}`;
+      const olds = oldBy[id] || [];
+      const same = olds.filter(r => String(r[5]) === value)[0];
+      const row = [iso, site, key, m.name, m.dept, value, h, same && same[7] ? same[7] : now];
+      newBy[id] = row;
+      const ym = monthDegreeOf_(iso);
+      (byPeriod[ym] = byPeriod[ym] || []).push(row);
+    })));
+  });
+
+  // 照らし合わせ（3拠点の分）
+  const sites = {}; EXPORT_SITES.forEach(s => sites[s] = true);
+  const oldOnly = [], dbOnly = [], diff = [], dup = [];
+  Object.keys(oldBy).sort().forEach(id => {
+    const olds = oldBy[id];
+    if (!sites[olds[0][1]]) return;
+    if (olds.length > 1) dup.push(`${id}（${olds.length}行：${olds.map(r => r[5]).join('／')}）`);
+    const n = newBy[id], o = olds[olds.length - 1]; // 古い方に2行以上あるときは下の行（今の保存が上書きする行）
+    if (!n) oldOnly.push(`${id}「${o[5]}」`);
+    else if (String(o[5]) !== n[5]) diff.push(`${id}「${o[5]}」→「${n[5]}」`);
+  });
+  Object.keys(newBy).sort().forEach(id => { if (!oldBy[id]) dbOnly.push(`${id}「${newBy[id][5]}」`); });
+  // 今の SD タブとの違い（書き出した後にもう一度 dryRun したとき 0 件なら、データベースと SD タブが一致している）。
+  // 期間一覧に無い SD タブがあれば、ここでエラーになる（書き出す前に気づけるように）
+  const sdDiff = [];
+  const dss = ssData_(), listed = periodList_(dss);
+  Object.keys(byPeriod).sort().forEach(ym => {
+    const sh = findPeriodTab_(dss, ym, listed);
+    const cur = {};
+    (sh ? readRows_(sh) : []).forEach(r => { cur[`${r[0]}|${r[1]}|${r[2]}`] = String(r[5]); });
+    const want = {};
+    byPeriod[ym].forEach(r => { want[`${r[0]}|${r[1]}|${r[2]}`] = r[5]; });
+    Object.keys(want).sort().forEach(id => {
+      if (!(id in cur)) sdDiff.push(`${id}「${want[id]}」（SD タブに無い）`);
+      else if (cur[id] !== want[id]) sdDiff.push(`${id}「${cur[id]}」→「${want[id]}」`);
+    });
+    Object.keys(cur).sort().forEach(id => { if (!(id in want)) sdDiff.push(`${id}「${cur[id]}」（SD タブにだけある）`); });
+  });
+  const part = list => ({ count: list.length, first: list.slice(0, 50) });
+  const result = {
+    dryRun,
+    periods: Object.keys(byPeriod).sort().map(ym => ({ tab: periodTabName_(ym), rows: byPeriod[ym].length })),
+    notInMaster: Object.keys(notIn).sort().map(k => notIn[k]),
+    bad: part(bad),
+    compare: { oldOnly: part(oldOnly), dbOnly: part(dbOnly), valueDiff: part(diff), oldDuplicates: part(dup), sdTabs: part(sdDiff) },
+  };
+  Logger.log(`${dryRun ? '【試し（書き込みません）】' : '【書き出し】'}期間ごとの行数：` + result.periods.map(p => `${p.tab} ${p.rows}行`).join('、'));
+  Logger.log(`整理済み_Mにいないため書かない人：${result.notInMaster.length}人` + result.notInMaster.map(x => `\n  ${x.site}｜${x.key}：${x.count}件`).join(''));
+  Logger.log(`シフトとして読めない値：${bad.length}件` + bad.slice(0, 50).map(x => '\n  ' + x).join(''));
+  [['①古い方にだけある', oldOnly], ['②データベースにだけある', dbOnly], ['③値が違う', diff], ['④古い方の重複行', dup], ['（参考）今の SD タブとの違い', sdDiff]].forEach(([label, list]) => {
+    Logger.log(`${label}：${list.length}件（最初の50件）` + list.slice(0, 50).map(x => '\n  ' + x).join(''));
+  });
+  if (dryRun) return result;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    Object.keys(byPeriod).sort().forEach(ym => writeTab_(ym, byPeriod[ym])); // 古い期間から作る（新しいタブが左に並ぶ）
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+  Logger.log('書き出しました');
+  return result;
+}
+
+// 戻し用：SD タブの fromIso 以降の行を、古いシフト_データに「日付｜拠点｜キー」で上書きする（無い行は足す）。
+// 古いシフト_データにだけある fromIso 以降の行は消さずに、件数と一覧を出す
+function copyBackToOld(fromIso) {
+  if (typeof fromIso !== 'string') fromIso = PropertiesService.getScriptProperties().getProperty('COPY_BACK_FROM') || '';
+  if (!isIsoDate_(fromIso)) throw new Error('どの日から戻すかを yyyy-MM-dd で指定してください（エディタから実行するときは、スクリプト プロパティ COPY_BACK_FROM に入れる）');
+  const ss = ssData_();
+  const listed = periodList_(ss);
+  const from = monthDegreeOf_(fromIso);
+  const sdRows = [];
+  Object.keys(listed.list).sort().forEach(name => {
+    const ym = name.replace(PERIOD_TAB_PREFIX, '').replace(/^(\d{4})(\d{2})$/, '$1-$2');
+    if (!/^\d{4}-\d{2}$/.test(ym) || ym < from) return;
+    const sh = findPeriodTab_(ss, ym, listed);
+    readRows_(sh).forEach(r => { if (r[0] >= fromIso) sdRows.push(r); });
+  });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const oldSh = oldDataSheet_();
+    const rows = readRows_(oldSh);
+    const index = {};
+    rows.forEach((r, i) => { const id = `${r[0]}|${r[1]}|${r[2]}`; (index[id] = index[id] || []).push(i); });
+    let replaced = 0, added = 0;
+    const sdIds = {};
+    sdRows.forEach(r => {
+      const id = `${r[0]}|${r[1]}|${r[2]}`;
+      sdIds[id] = true;
+      if (index[id]) { index[id].forEach(i => { rows[i] = r.slice(); }); replaced++; }
+      else { index[id] = [rows.length]; rows.push(r.slice()); added++; }
+    });
+    const oldOnly = Object.keys(index).filter(id => id.slice(0, 10) >= fromIso && !sdIds[id]).sort();
+    writeRows_(oldSh, rows);
+    SpreadsheetApp.flush();
+    Logger.log(`${fromIso}以降：上書き ${replaced}件・追加 ${added}件。古いシフト_データにだけある行（消していません）：${oldOnly.length}件` + oldOnly.slice(0, 50).map(x => '\n  ' + x).join(''));
+    return { from: fromIso, replaced, added, oldOnly: { count: oldOnly.length, first: oldOnly.slice(0, 50) } };
+  } finally { lock.releaseLock(); }
 }
 
 /* ===================== 旧シフト表の取り込み（1回だけ実行） ===================== */
@@ -875,7 +1211,7 @@ function mirrorLegacy_(cells) {
 // 期間の分をシフト_データからまとめて旧シフト表に書く（書き込みを始める前に入っていた分の取り込み用。POST action=mirrorLegacyAll）
 function mirrorLegacyAll_() {
   const M = LEGACY_MIRROR;
-  const cells = readData_().filter(r => r.site === M.site && r.date >= M.from && r.date <= M.to)
+  const cells = readData_(M.from, M.to).filter(r => r.site === M.site)
     .map(r => ({ key: r.key, date: r.date, value: r.value }));
   return mirrorLegacy_(cells);
 }

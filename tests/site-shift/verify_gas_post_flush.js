@@ -19,18 +19,22 @@ function check(name, ok, detail) { results.push({ name, ok }); console.log(`${ok
 // 呼ばれた順番の記録
 let calls = [];
 
-// シフト_データの偽物（実際のタブと同じ8列の見出し・日付は yyyy-MM-dd の文字列）
+// 保存先の偽物：DB共有_拠点シフト_データ の SD_202612（2026/12/11〜2027/1/10）タブ。
+// 実際のタブと同じ8列の見出し・日付は yyyy-MM-dd の文字列（保存先が期間ごとのタブになったため。期間一覧に SD_202612 が載っている状態）
 const HEADERS = ['日付', '拠点', 'キー', '氏名', '部門', 'シフト', '実働h', '更新日時'];
 let grid, failOnWrite;
 function resetSheet() {
   grid = [
     HEADERS,
-    ['2026-11-11', 'いなべ', '林さとみ', '林 さとみ', '栽培', '8:00-17:00', 8, new Date('2026-11-10T09:00:00+09:00')],
-    ['2026-11-11', '群馬', '高山太郎', '高山 太郎', '出荷', '8:00-12:00', 4, new Date('2026-11-10T09:00:00+09:00')],
+    ['2026-12-12', 'いなべ', '林さとみ', '林 さとみ', '栽培', '8:00-17:00', 8, new Date('2026-12-10T09:00:00+09:00')],
+    ['2026-12-12', '群馬', '高山太郎', '高山 太郎', '出荷', '8:00-12:00', 4, new Date('2026-12-10T09:00:00+09:00')],
   ];
   failOnWrite = false;
 }
+const SD_GID = 1495784418;
 const dataSheet = {
+  getName: () => 'SD_202612',
+  getSheetId: () => SD_GID,
   getLastRow: () => grid.length,
   getRange(r, c, nr, nc) {
     return {
@@ -48,11 +52,20 @@ const dataSheet = {
     };
   },
 };
-const ss = { getSheetByName: name => (name === 'シフト_データ' ? dataSheet : null) };
+// 期間一覧（見出し：タブ名・開始日・終了日・gid）
+const listGrid = [['タブ名', '開始日', '終了日', 'gid'], ['SD_202612', '2026-12-11', '2027-01-10', SD_GID]];
+const listSheet = {
+  getName: () => '期間一覧', getSheetId: () => 1, getLastRow: () => listGrid.length,
+  getRange: (r, c, nr, nc) => ({ getValues: () => listGrid.slice(r - 1, r - 1 + nr).map(row => row.slice(c - 1, c - 1 + nc)) }),
+  appendRow(row) { listGrid.push(row); },
+};
+const DATA_SS_ID = '1h71qF-SAp8VJZl4TimbFrikmXAbMod4w_iEA_Yziaq8';
+const dataSs = { getSheetByName: name => ({ 'SD_202612': dataSheet, '期間一覧': listSheet })[name] || null, getSheets: () => [listSheet, dataSheet] };
+const masterSs = { getSheetByName: () => null, getSheets: () => [] };
 
 const context = {
   SpreadsheetApp: {
-    openById: () => ss,
+    openById: id => (id === DATA_SS_ID ? dataSs : masterSs),
     flush() { calls.push('flush'); },
   },
   LockService: {
@@ -91,7 +104,7 @@ check('成功：flush は1回だけ呼ばれる', count('flush') === 1, calls.jo
 check('成功：書き込み → flush → releaseLock の順', idx('setValues') < idx('flush') && idx('flush') < idx('releaseLock'), calls.join(' → '));
 check('成功：最後に呼ばれたのは releaseLock（解いた後に flush しない）', calls[calls.length - 1] === 'releaseLock', calls.join(' → '));
 check('成功：waitLock が最初', calls[0] === 'waitLock', calls.join(' → '));
-check('成功：書いた行がシフト_データにある（8列）', grid.some(r => r[0] === '2026-12-11' && r[2] === '林さとみ' && r[5] === '8:00-17:00' && r.length === 8), JSON.stringify(grid));
+check('成功：書いた行が SD_202612 タブにある（8列）', grid.some(r => r[0] === '2026-12-11' && r[2] === '林さとみ' && r[5] === '8:00-17:00' && r.length === 8), JSON.stringify(grid));
 
 // ② シートへの書き込みでエラー
 resetSheet(); calls = []; failOnWrite = true;
