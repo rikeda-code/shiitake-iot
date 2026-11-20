@@ -417,6 +417,10 @@
     .series-check:has(input:checked) { border-color: #4a5070; color: var(--text); }
     .series-check input { display: none; }
     .schart-wrap { position: relative; height: 300px; }
+    /* 月を横に並べるグラフの外側の入れ物。月が12より多いときに横スクロールになる（monthSlotWidthPlugin） */
+    /* contain:inline-size：中のグラフを広げても、この入れ物自体の幅（と、並べている格子の列の幅）は広がらない */
+    .month-scroll-outer { overflow-x: auto; overflow-y: hidden; min-width: 0; contain: inline-size; }
+    .month-scroll-inner { position: relative; }
 
     /* ── Roster table ── */
     .roster-panel {
@@ -886,12 +890,13 @@ function scheduleProdTableWrapRefresh() {
   if (prodTableWrapRAF) return;
   prodTableWrapRAF = requestAnimationFrame(() => {
     prodTableWrapRAF = null;
+    fitMonthTables();
     refreshProdTableWrapOverflow();
     updateProdStickyColumnOffsets();
   });
 }
 new MutationObserver(scheduleProdTableWrapRefresh).observe(document.getElementById('main'), { childList: true, subtree: true });
-window.addEventListener('resize', scheduleProdTableWrapRefresh);
+window.addEventListener('resize', () => { resetMonthTableFit(); scheduleProdTableWrapRefresh(); });
 
 const SITES = ['いなべ', '群馬', '南丹'];
 const SITE_COLORS = {
@@ -1053,37 +1058,16 @@ function getRealMonths() {
   return allData.months.filter((m, i) => allData.monthYms[i] !== null && allData.monthYms[i] !== undefined);
 }
 
-// 期間の月数が少ないときの「間延び」対策：開始月から常にMONTH_COLUMN_TARGET本の列/棒に
-// 揃えた拡張月リストを返す（開始月〜シート実在最新月がこれを超える場合は、その本数
-// そのまま・縮小せず全て表示する。超過分は呼び出し側で横スクロール対応する）。
-// 3段階の区分：
-//   1. 選択中の期間の月数の範囲内（inRange:true, hasData:true）→ 実データ
-//   2. 期間の月数の範囲外だが、シートに実在する月の範囲内 → 見出しのみ、データは空欄
-//   3. シートの実在最新月を超えた埋め合わせ分 → 見出し自体も空欄（month: ''）
-// 既存の月リスト生成処理（applyPeriodFilter等）を置き換えるものではなく、
-// 呼び出し側で選択的に利用する追加のラップ関数
+// 1か月あたりの幅の基準：12か月を表示したときの幅を上限にする（月が少ないときはその幅のまま
+// 左詰め、月が多いときはその幅で横スクロール）。グラフは monthSlotWidthPlugin、表は fitMonthTables() で
+// そろえる
 const MONTH_COLUMN_TARGET = 12;
 
-function buildExtendedMonthList(selectedMonths, allRealMonths) {
-  if (!selectedMonths.length) return [];
-  const startIdx = allRealMonths.indexOf(selectedMonths[0]);
-  if (startIdx === -1) return selectedMonths.map(m => ({ month: m, inRange: true, hasData: true }));
-
-  const realCountFromStart = allRealMonths.length - startIdx;
-  const totalColumns = Math.max(MONTH_COLUMN_TARGET, realCountFromStart);
-  const selectedCount = selectedMonths.length;
-
-  const extended = [];
-  for (let i = 0; i < totalColumns; i++) {
-    if (i < selectedCount) {
-      extended.push({ month: selectedMonths[i], inRange: true, hasData: true });
-    } else if (i < realCountFromStart) {
-      extended.push({ month: allRealMonths[startIdx + i], inRange: false, hasData: false });
-    } else {
-      extended.push({ month: '', inRange: false, hasData: false });
-    }
-  }
-  return extended;
+// 表示する月のリストを返す。以前は「間延び」対策として、開始月から常に12本の枠（期間の外の月名だけの
+// 空の枠・月名も無い空の枠）を足していたが、期間の月だけを左詰めで出す形にしたため、期間の月だけを返す
+// （呼び出し側は inRange／originalCount をそのまま使えるよう、戻り値の形は変えない）
+function buildExtendedMonthList(selectedMonths, allRealMonths) { // eslint-disable-line no-unused-vars
+  return selectedMonths.map(m => ({ month: m, inRange: true, hasData: true }));
 }
 
 // 「実績工数（業務区分別）」系の積み上げグラフ（要員計画のplanstaffplan2-combined・
@@ -1363,19 +1347,155 @@ function fitChartHeightForHeadcountTotals(chart, axisMax) {
   chart.draw();
 }
 
-// 月数がMONTH_COLUMN_TARGETを超える場合、棒を縮小せず横スクロールで見せるための
-// キャンバスラッパーHTMLを返す（列/棒の最小幅を確保し、超過分は横スクロール）
-function chartWrapHtml(canvasId, monthCount, opts) {
-  const PX_PER_MONTH = 70;
+// 月を横に並べるグラフのキャンバスの入れ物HTMLを返す。外側（month-scroll-outer）は横スクロール用、
+// 内側（month-scroll-inner、キャンバスの親）は高さを持つ。1か月分の幅は monthSlotWidthPlugin が
+// 「12か月を表示したときの幅」にそろえる：月が12より少ないときは描画部分の右に余白を足して左詰めにし、
+// 12より多いときは内側の幅を広げて横スクロールにする（monthCountは使わない。以前の
+// forceResponsive・月70pxの固定幅の分岐は、この仕組みに一本化した）
+function chartWrapHtml(canvasId, monthCount, opts) { // eslint-disable-line no-unused-vars
   const wrapClass = (opts && opts.wrapClass) || 'schart-wrap';
   const heightPx = (opts && opts.heightPx) || 300;
-  // forceResponsive: 月数に関わらず固定幅の横スクロール分岐に入らせず、
-  // 常に親要素の幅に追従するレスポンシブ表示にする（棒が月数に応じて縮小する）
-  if ((opts && opts.forceResponsive) || monthCount <= MONTH_COLUMN_TARGET) {
-    const style = (opts && opts.inlineHeight) ? ` style="height:${heightPx}px"` : '';
-    return `<div class="${wrapClass}"${style}><canvas id="${canvasId}"></canvas></div>`;
-  }
-  return `<div class="${wrapClass}" style="overflow-x:auto;height:${heightPx}px"><div style="position:relative;height:${heightPx}px;min-width:${monthCount * PX_PER_MONTH}px"><canvas id="${canvasId}"></canvas></div></div>`;
+  const style = (opts && opts.inlineHeight) ? ` style="height:${heightPx}px"` : '';
+  return `<div class="month-scroll-outer"><div class="${wrapClass} month-scroll-inner"${style}><canvas id="${canvasId}"></canvas></div></div>`;
+}
+
+// 横軸が月（「YYYY年M月」「YYYY/M」）だけのグラフで、1か月分の幅（描画部分の幅÷月数）を
+// 「12か月を表示したときの幅」にそろえるChart.jsのプラグイン（全グラフ共通に登録する）。
+//  - 月が12より少ない：描画部分の右に、目盛りを出さない幅だけの軸（monthSlotSpacer）を足し、描画部分の幅を
+//    「その軸なしの幅×月数÷12」にする（左詰め。layout.paddingだと凡例の幅まで狭まって凡例が折り返すため、
+//    右側の軸として足す。凡例・吹き出しはキャンバス全体の幅のまま）
+//  - 月が12より多い：入れ物（month-scroll-inner）の幅を「軸などの幅＋（見えている幅−軸などの幅）×月数÷12」
+//    に広げる（外側の month-scroll-outer が横スクロールになる）
+// 横軸が月でないグラフ（週・拠点など）は何もしない
+const MONTH_AXIS_LABEL_RE = /^\d{4}年\d{1,2}月$|^\d{4}\/\d{1,2}$/;
+const monthSlotWidthPlugin = {
+  id: 'monthSlotWidth',
+  afterLayout(chart) {
+    const labels = (chart.data && chart.data.labels) || [];
+    const n = labels.length;
+    if (!n || !labels.every(l => MONTH_AXIS_LABEL_RE.test(String(l)))) return;
+    const area = chart.chartArea;
+    if (!area) return;
+    const st = chart.$monthSlot || (chart.$monthSlot = { pad: 0 });
+    const inner = chart.canvas && chart.canvas.parentElement;
+    const outer = inner && inner.classList.contains('month-scroll-inner') ? inner.parentElement : null;
+    const areaW = area.right - area.left;
+    if (n < MONTH_COLUMN_TARGET) {
+      if (inner && inner.style.width) inner.style.width = '';
+      const fullAreaW = areaW + st.pad; // 足した幅（monthSlotSpacer）を除いたときの描画部分の幅
+      // 12か月のときは、右端の月名のはみ出し分（横軸の paddingRight）が右側の軸の幅より大きければ、その差が
+      // 右の余白になる。足した幅がその余白を兼ねてしまうので、12か月のときの描画部分の幅はその分を引いて求める
+      const scales = Object.values(chart.scales || {});
+      const xScale = scales.find(sc => sc.axis === 'x');
+      const rightAxesW = scales.filter(sc => sc.position === 'right' && sc.id !== 'monthSlotSpacer').reduce((a, sc) => a + (sc.width || 0), 0);
+      const overhang = Math.max(0, ((xScale && xScale.paddingRight) || 0) - rightAxesW);
+      const area12 = fullAreaW - overhang; // 12か月のときの描画部分の幅
+      // 切り上げ：1か月分の幅が12か月のときより広くならないようにする
+      const want = Math.max(0, Math.ceil(fullAreaW - area12 * n / MONTH_COLUMN_TARGET));
+      if (Math.abs(want - st.pad) >= 1) { st.pad = want; scheduleMonthSlotPadding(chart); }
+      return;
+    }
+    if (st.pad) { st.pad = 0; scheduleMonthSlotPadding(chart); return; }
+    if (!outer) return;
+    if (n === MONTH_COLUMN_TARGET) { if (inner.style.width) inner.style.width = ''; return; }
+    const overhead = chart.width - areaW; // 軸・余白など、月の幅以外の部分
+    const visW = outer.clientWidth;
+    if (!visW) return;
+    const need = Math.round(overhead + (visW - overhead) * n / MONTH_COLUMN_TARGET);
+    if (Math.abs(inner.offsetWidth - need) > 1) inner.style.width = need + 'px';
+  },
+};
+// 右側に、目盛り・線を出さず幅だけを持つ軸（monthSlotSpacer）を置き、その幅を st.pad にして描画し直す
+// （afterLayoutの中では描き直せないため、次のマイクロタスクで行う）。weightを大きくして、ほかの右側の軸より
+// 外側に置く（右側の目盛り（kgなど）は描画部分のすぐ右のまま）
+function scheduleMonthSlotPadding(chart) {
+  const st = chart.$monthSlot;
+  if (st.scheduled) return;
+  st.scheduled = true;
+  queueMicrotask(() => {
+    st.scheduled = false;
+    if (!chart.canvas || !chart.ctx) return; // 破棄済み
+    const opts = chart.config.options || (chart.config.options = {});
+    const scales = opts.scales || (opts.scales = {});
+    if (!scales.monthSlotSpacer) {
+      scales.monthSlotSpacer = {
+        type: 'linear', position: 'right', weight: 100, display: true,
+        grid: { display: false, drawOnChartArea: false, drawTicks: false },
+        border: { display: false }, ticks: { display: false }, title: { display: false },
+        afterFit: scale => { scale.width = (chart.$monthSlot && chart.$monthSlot.pad) || 0; },
+      };
+    }
+    try { chart.update('none'); } catch (e) { /* 破棄済みなど */ }
+  });
+}
+if (window.Chart && Chart.register) Chart.register(monthSlotWidthPlugin);
+
+// 月を横に並べる表（見出し行に月の列がある表）の、月の列の幅を「12か月を表示したときの幅」に
+// そろえる。月が12でない表は、一時的に12か月分の列にして（足りなければ最後の月の列を複製し、
+// 多ければ後ろの月の列を隠して）今までどおりの自動の幅で並べ、そのときの各列の幅を測る。
+// その後、元の列に戻し、<colgroup>で「固定の列は測った幅のまま、月の列は12か月のときの平均の幅」に
+// して、表の幅をその合計にする（月が少なければ左詰めで右が空き、多ければ横スクロール）。
+// 12か月ちょうどの表は今までどおり（何もしない）
+const MONTH_HEAD_RE = /^(\d{4})年(\d{1,2})月$|^(\d{4})\/(\d{1,2})(\s|$)/;
+function fitMonthTables() {
+  document.querySelectorAll('#main table').forEach(table => {
+    if (table.dataset.monthFit) return;
+    const headRow = table.querySelector('thead tr') || table.querySelector('tr');
+    if (!headRow) return;
+    const heads = [...headRow.children];
+    const monthIdx = heads.map((c, i) => (MONTH_HEAD_RE.test(c.innerText.replace(/\s+/g, ' ').trim()) ? i : -1)).filter(i => i >= 0);
+    const n = monthIdx.length;
+    if (!n) { table.dataset.monthFit = 'none'; return; }
+    if (!table.offsetWidth) return; // 見えていない（あとで測る）
+    if (heads.some(c => c.colSpan > 1) || monthIdx[n - 1] - monthIdx[0] !== n - 1) { table.dataset.monthFit = 'skip'; return; }
+    if (n === MONTH_COLUMN_TARGET) { table.dataset.monthFit = 'same'; return; }
+    const trailing = heads.length - 1 - monthIdx[n - 1]; // 月の列より右にある固定の列の数
+    // 月の列の位置を行ごとに右から数える（左側の結合セル（rowspan）の影響を受けないように）
+    const rows = [...table.rows].filter(r => r.cells.length >= trailing + n && [...r.cells].slice(r.cells.length - trailing - n, r.cells.length - trailing).every(c => c.colSpan === 1));
+    const added = [], hidden = [];
+    rows.forEach(r => {
+      const cells = [...r.cells];
+      const first = cells.length - trailing - n;
+      if (n < MONTH_COLUMN_TARGET) {
+        const last = cells[first + n - 1];
+        for (let k = 0; k < MONTH_COLUMN_TARGET - n; k++) {
+          const c = last.cloneNode(true);
+          last.after(c);
+          added.push(c);
+        }
+      } else {
+        for (let k = first + MONTH_COLUMN_TARGET; k < first + n; k++) { hidden.push(cells[k]); cells[k].style.display = 'none'; }
+      }
+    });
+    const measured = [...headRow.children].filter(c => c.style.display !== 'none').map(c => c.getBoundingClientRect().width);
+    added.forEach(c => c.remove());
+    hidden.forEach(c => { c.style.display = ''; });
+    const first12 = monthIdx[0];
+    const fixedLeft = measured.slice(0, first12);
+    const month12 = measured.slice(first12, first12 + MONTH_COLUMN_TARGET);
+    const fixedRight = measured.slice(first12 + MONTH_COLUMN_TARGET);
+    const monthW = month12.reduce((a, b) => a + b, 0) / month12.length;
+    const widths = [...fixedLeft, ...Array(n).fill(monthW), ...fixedRight];
+    const total = widths.reduce((a, b) => a + b, 0);
+    const colgroup = document.createElement('colgroup');
+    colgroup.className = 'month-fit-cols';
+    widths.forEach(w => { const col = document.createElement('col'); col.style.width = w.toFixed(1) + 'px'; colgroup.appendChild(col); });
+    table.insertBefore(colgroup, table.firstChild);
+    table.style.tableLayout = 'fixed';
+    table.style.width = total.toFixed(1) + 'px';
+    table.style.minWidth = '0';
+    table.dataset.monthFit = 'fitted';
+  });
+}
+// 画面の幅が変わったら、表の幅を測り直す
+function resetMonthTableFit() {
+  document.querySelectorAll('#main table[data-month-fit]').forEach(table => {
+    if (table.dataset.monthFit === 'fitted') {
+      table.querySelectorAll('colgroup.month-fit-cols').forEach(c => c.remove());
+      table.style.tableLayout = ''; table.style.width = ''; table.style.minWidth = '';
+    }
+    delete table.dataset.monthFit;
+  });
 }
 
 // 指定のフィルター済みデータ（months/employees）にbuildExtendedMonthList()を適用した

@@ -356,7 +356,9 @@ async function readSummaryChart(page, subtab, canvasId, prep) {
   const stdh = await readSummaryChart(p2, 'std-hours', 'stdh_site_0_0', { stdHoursMetric: 'hours', stdHoursSubtab: 'site' });
   const prev = stdh.datasets.find(d => d.label === '前年実績');
   const line = stdh.datasets.find(d => d.label === '標準労働時間');
-  check('標準労働時間＞時間＞拠点別：横軸に期間の外の枠（2026年7月〜）がある（見た目は今回変えない）', stdh.labels.includes('2026年7月') && stdh.labels.includes('2026年10月'), stdh.labels);
+  // 以前は「12本の枠」で期間の外の月名（2026年7月〜）も横軸に出ていた。左詰めの変更（verify_left_align_layout.js）で
+  // 期間の月だけを出すようにしたため、期間の外の枠が無いことを確かめる
+  check('標準労働時間＞時間＞拠点別：横軸は期間の月（2026年4月〜6月）だけで、期間の外の枠は無い', JSON.stringify(stdh.labels) === JSON.stringify(['2026年4月', '2026年5月', '2026年6月']), stdh.labels);
   check('前年実績：期間の中（4〜6月）は出る', prev && inside(stdh.labels, prev.data).every(v => typeof v === 'number' && v > 0), prev && inside(stdh.labels, prev.data));
   check('前年実績：期間の外（2026年7月〜）は出ない', prev && outside(stdh.labels, prev.data).length === 0, prev && outside(stdh.labels, prev.data));
   check('標準労働時間の線：期間の外（2026年8月・10月の振替の増減）は出ない', line && outside(stdh.labels, line.data).length === 0, line && outside(stdh.labels, line.data));
