@@ -225,7 +225,8 @@ async function renderAndRead(page, subtab, canvasId) {
   await setupRoutes(page);
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => (document.getElementById('last-updated')?.textContent || '').includes('最終更新'), null, { timeout: 30000 });
-  await page.evaluate(() => { periodStartMonth = '2025年10月'; periodMonthCount = 12; });
+  // 期間は開始月〜終了月（終了月＝モックの計画の最後の月。予実の比較タブは期間の月だけを表示するため、全部の計画の月を入れる）
+  await page.evaluate(() => { periodStartMonth = '2025年10月'; periodEndMonth = '2027年2月'; });
 
   console.log('\n[1] 判定の部品（トップレベル関数）');
   const unit = await page.evaluate(() => {
