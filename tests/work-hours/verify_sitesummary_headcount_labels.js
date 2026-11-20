@@ -21,9 +21,11 @@
 //      自体は本物を呼び出すことで、再現の正しさを担保する。標準労働時間棒は
 //      PR #520への追加修正で3段それぞれの人数を数えるようになったため、
 //      段ごとの人数とその合計（変更前の「3段合計」の人数と同じ考え方）の両方を検証する。
-// さらに、PR #518で対応したツールチップの高さ調整（fitChartHeightForTooltip等）が、
-// 今回追加したプラグイン（plugins配列に追加）と共存しても引き続き機能することを、
-// 同じ実マウスホバー方式で再確認する。
+// さらに、PR #518 のねらい（吹き出しの全部の行が切れずに見えること）が、今回追加したプラグイン
+// （plugins配列に追加）と共存しても保たれることを、同じ実マウスホバー方式で再確認する。
+// 以前はグラフの高さを吹き出しの高さまで広げて（fitChartHeightForTooltip等）キャンバスの中に収めて
+// いたが、今は吹き出しをページの上（#chart-tip）に出して画面の中に収め、グラフの高さは変えない形に
+// したため、「吹き出しが画面の中に収まり、グラフは広げない」ことで確かめる。
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -59,27 +61,31 @@ async function hoverAndCheckFit(page, chartVar, index) {
   await page.mouse.move(target.x, target.y);
   await page.mouse.move(target.x + 1, target.y);
   await page.waitForTimeout(250);
+  // 吹き出しはページの上（#chart-tip、externalChartTooltip）に出る。ブラウザが描いた大きさ・位置を測る
   const result = await page.evaluate(() => {
-    const chart = window.__hoverChartRef;
-    const canvas = chart.canvas;
-    const rect = canvas.getBoundingClientRect();
-    const tt = chart.tooltip;
-    const finalHeight = (tt._size && tt._size.height) || tt.height || 0;
-    const tooltipBottom = (tt.y || 0) + finalHeight;
-    return { canvasHeight: rect.height, tooltipY: tt.y, tooltipHeight: finalHeight, tooltipBottom, opacity: tt.opacity, numLines: tt.body ? tt.body.length : 0 };
+    const el = document.getElementById('chart-tip');
+    const r = el ? el.getBoundingClientRect() : null;
+    return {
+      shown: !!el && el.classList.contains('on'),
+      tooltipTop: r && r.top, tooltipBottom: r && r.bottom, tooltipLeft: r && r.left, tooltipRight: r && r.right, tooltipHeight: r && r.height,
+      viewportWidth: document.documentElement.clientWidth, viewportHeight: window.innerHeight,
+      numLines: el ? el.querySelectorAll('.tt-line').length : 0,
+    };
   });
-  await page.mouse.move(5, 5);
+  // 後片付け：グラフ（幅900px、画面の左上に固定）の外へマウスを動かし、吹き出しを閉じておく
+  await page.mouse.move(1195, 895);
   await page.waitForTimeout(250);
   return result;
 }
+const tooltipInViewport = r => r.shown && r.tooltipTop >= 0 && r.tooltipLeft >= 0 && r.tooltipBottom <= r.viewportHeight + 0.5 && r.tooltipRight <= r.viewportWidth + 0.5;
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' });
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
   await setupRoutes(page);
   await page.goto('http://localhost:8813/work-hours.html', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => typeof window.siteSummaryHeadcountLabelsPlugin === 'function'
-    && typeof window.fitChartHeightForTooltip === 'function' && typeof window.fitSegmentLabelChartHeight === 'function'
+    && typeof window.externalChartTooltip === 'function'
     && typeof window.getActiveData === 'function' && typeof window.Chart === 'function');
 
   // ========== 準備：テスト用チャート生成ヘルパーと、fillText呼び出しの記録フックを注入 ==========
@@ -505,12 +511,11 @@ async function hoverAndCheckFit(page, chartVar, index) {
   check('(B-5) 30日の月(2026/4)：48h÷(8×30)=0.2人', b5[3] === 0.2, b5);
   check('(B-5) データが無い月(null)はnull(非表示)', b5[4] === null, b5);
 
-  // ========== (C) PR #518のツールチップ高さ調整が、新しいプラグイン追加後も引き続き機能する
-  //            (実マウスホバー方式での回帰確認。拠点サマリ「実績工数」グラフの実際のシーケンス：
-  //            初期650px → fitSegmentLabelChartHeight(白ラベル無しのため420pxへ) →
-  //            fitChartHeightForTooltip。verify_plancompare_tooltip_height.js ⑥-aと同じ
-  //            再現条件に、本タスクで追加したplugins([siteSummaryHeadcountLabelsPlugin()])と
-  //            実績棒への_segmentHeadcountを付けて再現する) ==========
+  // ========== (C) PR #518 のねらい（吹き出しの全部の行が切れずに見える）が、新しいプラグイン追加後も
+  //            保たれる（実マウスホバー方式での回帰確認。拠点サマリ「実績工数」グラフ相当の高さ650pxの
+  //            ラッパーで、verify_plancompare_tooltip_height.js ⑥-aと同じ再現条件に、本タスクで追加した
+  //            plugins([siteSummaryHeadcountLabelsPlugin()])と実績棒への_segmentHeadcountを付けて再現する。
+  //            吹き出しはページの上に出て画面の中に収まり、グラフの高さは変えない) ==========
   await page.evaluate(() => {
     const MONTHS = 8;
     const LONG_IDX = 5;
@@ -561,17 +566,21 @@ async function hoverAndCheckFit(page, chartVar, index) {
       },
       plugins: [window.siteSummaryHeadcountLabelsPlugin()],
     });
-    window.fitSegmentLabelChartHeight(window.__chartHeadcountRealHoverCombined, [], 300);
-    window.fitChartHeightForTooltip(window.__chartHeadcountRealHoverCombined);
   });
   const cFinal = await page.evaluate(() => ({
     height: window.__chartHeadcountRealHoverCombined.height,
     wrapStyleHeight: parseInt(document.getElementById('test-headcount-realhover-combined-wrap').style.height, 10),
   }));
-  check('(C) 人数ラベル用プラグイン追加後も、必要な高さ(420px超)まで正しく広がる', cFinal.height > 420, cFinal);
+  check('(C) 人数ラベル用プラグイン追加後も、グラフの高さはラッパーの高さ(650px)のまま(吹き出しのために広げない)', cFinal.height === 650 && cFinal.wrapStyleHeight === 650, cFinal);
   const cHover = await hoverAndCheckFit(page, '__chartHeadcountRealHoverCombined', 5);
-  check('(C) 本物のマウス操作でも、ツールチップの下端がキャンバスの下端を超えない(PR #518の保証が継続)', cHover.tooltipBottom <= cHover.canvasHeight, cHover);
-  check('(C) ツールチップが実際に多数行表示されている(再現条件が成立している)', cHover.numLines >= 20, cHover);
+  check('(C) 本物のマウス操作でも、吹き出しの下端が画面の下端を超えない(上下左右とも画面の中。PR #518のねらいが継続)', tooltipInViewport(cHover), cHover);
+  check('(C) 吹き出しが実際に多数行表示されている(再現条件が成立している)', cHover.numLines >= 20, cHover);
+  // グラフの動き（アニメーション）が終わってから文字を記録する（以前は高さを広げる処理の中で動きを
+  // 止めていたが、高さを広げる処理をやめたため、動きの途中の棒の大きさでは文字の位置が決まらない）
+  await page.waitForFunction(v => {
+    const ch = window[v];
+    return ch.data.datasets.every((d, di) => (ch.getDatasetMeta(di).data || []).every(el => !Object.values(el.$animations || {}).some(a => a && a._active)));
+  }, '__chartHeadcountRealHoverCombined', { timeout: 10000 });
   const cTexts = await page.evaluate(() => {
     window.__capturedTexts.length = 0;
     window.__chartHeadcountRealHoverCombined.draw();

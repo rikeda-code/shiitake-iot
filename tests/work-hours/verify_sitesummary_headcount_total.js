@@ -4,16 +4,16 @@
 //
 // 検証は三部構成：
 //  (A) ラベルの描画自体（siteSummaryHeadcountLabelsPlugin()・
-//      fitChartHeightForHeadcountTotals()・siteSummaryTotalLabelNeededPx()・
+//      axisHeadroomPx()・siteSummaryTotalLabelNeededPx()・
 //      siteSummaryFormatHeadcount()はいずれもトップレベル関数のためwindow直下から
 //      直接呼べる）を、手組みのデータセット（_segmentHeadcount・
 //      _stackTotalHeadcountを明示的に持たせたもの）に対して本物のChart.jsで
 //      描画させ、CanvasRenderingContext2D.fillText呼び出しを記録して確認する。
 //      一番上のセグメントのさらに上に太字で描かれること、そのセグメントの内訳
 //      ラベルが棒の上側に出ている場合はさらに1行分あけること、0・nullは描画しない
-//      こと、小数は小数1桁・整数は整数のまま表示されること、グラフの高さが足りない
-//      場合はfitChartHeightForHeadcountTotals()が広げて上端で切れない・凡例と
-//      重ならないことを確認する。
+//      こと、小数は小数1桁・整数は整数のまま表示されること、棒が縦軸の上限に近く文字の
+//      余白が足りない場合は、縦軸の上限を上げて（axisHeadroomPlugin。以前はグラフの高さを
+//      広げていた＝fitChartHeightForHeadcountTotals）上端で切れない・凡例と重ならないことを確認する。
 //  (B) 総合計の数え方自体（実績棒：内訳(div別)の縦計と一致すること、絞り込みとの
 //      連動／標準労働時間棒：過去月は青系3段の合計、未来月は3段＋新規要員＋増減の
 //      合計）は
@@ -23,9 +23,9 @@
 //      applyEmpTypeFilter・stdHoursMergeDivForWorkType・normalizeMonth・
 //      normalizeName、いずれもトップレベル関数）とgetActiveData()自体は本物を
 //      呼び出すことで、再現の正しさを担保する。
-//  (C) PR #518で対応したツールチップの高さ調整（fitChartHeightForTooltip等）が、
-//      今回追加した総合計ラベル用の高さ調整（fitChartHeightForHeadcountTotals）と
-//      共存しても引き続き機能することを、実マウスホバー方式で再確認する。
+//  (C) PR #518 のねらい（吹き出しの全部の行が切れずに見えること）が、総合計ラベル（と縦軸の上限の
+//      余白）と共存しても保たれることを、実マウスホバー方式で再確認する（吹き出しはページの上に出して
+//      画面の中に収め、グラフの高さは変えない）。
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -59,30 +59,34 @@ async function hoverAndCheckFit(page, chartVar, index) {
   await page.mouse.move(target.x, target.y);
   await page.mouse.move(target.x + 1, target.y);
   await page.waitForTimeout(250);
+  // 吹き出しはページの上（#chart-tip、externalChartTooltip）に出る。ブラウザが描いた大きさ・位置を測る
   const result = await page.evaluate(() => {
-    const chart = window.__hoverChartRef;
-    const canvas = chart.canvas;
-    const rect = canvas.getBoundingClientRect();
-    const tt = chart.tooltip;
-    const finalHeight = (tt._size && tt._size.height) || tt.height || 0;
-    const tooltipBottom = (tt.y || 0) + finalHeight;
-    return { canvasHeight: rect.height, tooltipY: tt.y, tooltipHeight: finalHeight, tooltipBottom, opacity: tt.opacity, numLines: tt.body ? tt.body.length : 0 };
+    const el = document.getElementById('chart-tip');
+    const r = el ? el.getBoundingClientRect() : null;
+    return {
+      shown: !!el && el.classList.contains('on'),
+      tooltipTop: r && r.top, tooltipBottom: r && r.bottom, tooltipLeft: r && r.left, tooltipRight: r && r.right, tooltipHeight: r && r.height,
+      viewportWidth: document.documentElement.clientWidth, viewportHeight: window.innerHeight,
+      numLines: el ? el.querySelectorAll('.tt-line').length : 0,
+    };
   });
-  await page.mouse.move(5, 5);
+  // 後片付け：グラフ（幅900px、画面の左上に固定）の外へマウスを動かし、吹き出しを閉じておく
+  await page.mouse.move(1195, 895);
   await page.waitForTimeout(250);
   return result;
 }
+const tooltipInViewport = r => r.shown && r.tooltipTop >= 0 && r.tooltipLeft >= 0 && r.tooltipBottom <= r.viewportHeight + 0.5 && r.tooltipRight <= r.viewportWidth + 0.5;
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' });
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
   await setupRoutes(page);
   await page.goto('http://localhost:8813/work-hours.html', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => typeof window.siteSummaryHeadcountLabelsPlugin === 'function'
-    && typeof window.fitChartHeightForHeadcountTotals === 'function'
+    && typeof window.axisHeadroomPx === 'function'
     && typeof window.siteSummaryTotalLabelNeededPx === 'function'
     && typeof window.siteSummaryFormatHeadcount === 'function'
-    && typeof window.fitChartHeightForTooltip === 'function' && typeof window.fitSegmentLabelChartHeight === 'function'
+    && typeof window.externalChartTooltip === 'function'
     && typeof window.getActiveData === 'function' && typeof window.Chart === 'function');
 
   // ========== 準備：テスト用チャート生成ヘルパーと、fillText呼び出しの記録フックを注入 ==========
@@ -237,9 +241,10 @@ async function hoverAndCheckFit(page, chartVar, index) {
   const a4 = await page.evaluate(() => window.__capturedTexts.slice());
   check('(A-4) グラフ上でも小数は「計49.3」、整数は「計34」(「計34.0」ではない)と表示される', a4.some(c => c.text === '計49.3') && a4.some(c => c.text === '計34') && !a4.some(c => c.text === '計34.0'), a4);
 
-  // ========== (A-5) fitChartHeightForHeadcountTotals：総合計(＋内訳)が収まる高さが
-  //            足りない場合、必要な高さまでグラフを広げ、グラフ上端(キャンバス上端)で
-  //            切れず、凡例(chart.chartArea.top＝凡例の下端)とも重ならないこと ==========
+  // ========== (A-5) 縦軸の上限の余白（axisHeadroomPlugin）：総合計(＋内訳)が収まる余白が
+  //            足りない場合（棒が軸の最大に近い）、縦軸の上限を上げて、グラフ上端(キャンバス上端)で
+  //            切れず、凡例(chart.chartArea.top＝凡例の下端)とも重ならないこと。グラフの高さは変えない
+  //            （以前は fitChartHeightForHeadcountTotals でグラフを広げていた） ==========
   const a5 = await page.evaluate(() => {
     const axisMax = 100;
     const wrap = document.getElementById('test-a5-wrap');
@@ -271,24 +276,24 @@ async function hoverAndCheckFit(page, chartVar, index) {
       },
       plugins: [window.siteSummaryHeadcountLabelsPlugin()],
     });
-    const heightBefore = window.__chartA5.height;
-    window.fitChartHeightForHeadcountTotals(window.__chartA5, axisMax);
+    const heightBefore = 150; // ラッパーの高さ
     const heightAfter = window.__chartA5.height;
+    const yMax = window.__chartA5.scales.y.max;
     window.__capturedTexts.length = 0;
     window.__chartA5.draw();
     const texts = window.__capturedTexts.slice();
     const total = texts.find(c => c.text === '計12');
     const breakdown = texts.find(c => c.text === '3人');
     return {
-      heightBefore, heightAfter,
+      heightBefore, heightAfter, axisMax, yMax,
       areaTop: window.__chartA5.chartArea.top,
       legendBottom: window.__chartA5.legend ? window.__chartA5.legend.bottom : null,
       total, breakdown,
     };
   });
-  check('(A-5) ヘッドルームが不足する初期状態から、必要な高さまでグラフが広がる', a5.heightAfter > a5.heightBefore, a5);
+  check('(A-5) ヘッドルームが不足する状態(93/最大100)から、縦軸の上限が文字の入る値まで上がる(グラフの高さは150pxのまま)', a5.yMax > a5.axisMax && a5.heightAfter === a5.heightBefore, a5);
   check('(A-5) 凡例の下端とグラフ描画領域の上端が一致している(この構成の前提確認)', a5.legendBottom === a5.areaTop, a5);
-  check('(A-5) 広げた後、総合計の文字の推定上端(y-11px)が、グラフ描画領域の上端(＝凡例の下端)より上に出ない(凡例と重ならない・上端で切れない)', !!a5.total && (a5.total.y - 11) >= a5.areaTop - 1, a5);
+  check('(A-5) 上限を上げた後、総合計の文字の推定上端(y-11px)が、グラフ描画領域の上端(＝凡例の下端)より上に出ない(凡例と重ならない・上端で切れない)', !!a5.total && (a5.total.y - 11) >= a5.areaTop - 1, a5);
   check('(A-5) 内訳ラベルも描画されている(無効化されていない)', !!a5.breakdown, a5);
 
   // ========== (B) 人数集計ルールの再現テスト ==========
@@ -553,11 +558,10 @@ async function hoverAndCheckFit(page, chartVar, index) {
   check('(B-3) 内訳の3段(lower=2人)・新規要員(1人)がそれぞれ正しく数えられている(前提の成立確認)', b4.tiers3.lower === 2 && b4.newStaff3 === 1, b4);
   check('(B-3) 増減データが無い月(2026/5)は、3段＋新規要員のみの合計になる', b4.total[4] === b4.tiers3.lower + b4.newStaff3, b4);
 
-  // ========== (C) PR #518のツールチップ高さ調整が、総合計ラベル用の高さ調整
-  //            (fitChartHeightForHeadcountTotals)を追加した後も引き続き機能する
-  //            (実マウスホバー方式での回帰確認。verify_sitesummary_headcount_labels.js
-  //            の(C)と同じ再現条件に、総合計ラベル(_stackTotalHeadcount)を追加して
-  //            再現する) ==========
+  // ========== (C) PR #518 のねらい（吹き出しの全部の行が切れずに見える）が、総合計ラベルと縦軸の
+  //            上限の余白を加えた後も保たれる（実マウスホバー方式での回帰確認。
+  //            verify_sitesummary_headcount_labels.js の(C)と同じ再現条件に、総合計ラベル
+  //            (_stackTotalHeadcount)を追加して再現する。グラフの高さは変えない) ==========
   await page.evaluate(() => {
     const MONTHS = 8;
     const LONG_IDX = 5;
@@ -610,18 +614,21 @@ async function hoverAndCheckFit(page, chartVar, index) {
       },
       plugins: [window.siteSummaryHeadcountLabelsPlugin()],
     });
-    window.fitSegmentLabelChartHeight(window.__chartTotalRealHoverCombined, [], axisMax);
-    window.fitChartHeightForTooltip(window.__chartTotalRealHoverCombined);
-    window.fitChartHeightForHeadcountTotals(window.__chartTotalRealHoverCombined, axisMax);
   });
   const cFinal = await page.evaluate(() => ({
     height: window.__chartTotalRealHoverCombined.height,
     wrapStyleHeight: parseInt(document.getElementById('test-total-realhover-combined-wrap').style.height, 10),
   }));
-  check('(C) 総合計ラベル用の高さ調整を追加後も、必要な高さ(420px超)まで正しく広がる', cFinal.height > 420, cFinal);
+  check('(C) 総合計ラベルを追加後も、グラフの高さはラッパーの高さ(650px)のまま(吹き出しのために広げない)', cFinal.height === 650 && cFinal.wrapStyleHeight === 650, cFinal);
   const cHover = await hoverAndCheckFit(page, '__chartTotalRealHoverCombined', 5);
-  check('(C) 本物のマウス操作でも、ツールチップの下端がキャンバスの下端を超えない(PR #518の保証が継続)', cHover.tooltipBottom <= cHover.canvasHeight, cHover);
-  check('(C) ツールチップが実際に多数行表示されている(再現条件が成立している)', cHover.numLines >= 20, cHover);
+  check('(C) 本物のマウス操作でも、吹き出しの下端が画面の下端を超えない(上下左右とも画面の中。PR #518のねらいが継続)', tooltipInViewport(cHover), cHover);
+  check('(C) 吹き出しが実際に多数行表示されている(再現条件が成立している)', cHover.numLines >= 20, cHover);
+  // グラフの動き（アニメーション）が終わってから文字を記録する（以前は高さを広げる処理の中で動きを
+  // 止めていたが、高さを広げる処理をやめたため、動きの途中の棒の大きさでは文字の位置が決まらない）
+  await page.waitForFunction(v => {
+    const ch = window[v];
+    return ch.data.datasets.every((d, di) => (ch.getDatasetMeta(di).data || []).every(el => !Object.values(el.$animations || {}).some(a => a && a._active)));
+  }, '__chartTotalRealHoverCombined', { timeout: 10000 });
   const cTexts = await page.evaluate(() => {
     window.__capturedTexts.length = 0;
     window.__chartTotalRealHoverCombined.draw();

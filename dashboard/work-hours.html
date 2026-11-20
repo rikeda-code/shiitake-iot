@@ -736,16 +736,99 @@
     .std-set-table input.std-input:focus { outline: 1px solid var(--accent-inabe); border-color: var(--accent-inabe); }
     .std-set-table input.std-input { transition: border-color 0.15s; }
     .std-set-table td { vertical-align: middle; }
+
+    /* ── 固定エリア（タイトル＋操作の一式）を低くする ──
+       タイトルの右側に操作の一式を並べ（#header-controls は display:contents で、中の各グループを
+       ヘッダーの横並びに直接加える）、入りきらない幅では折り返す（1920 は1段、ノートPCは2段まで）。
+       チェックボックスは2行に並べて（3〜4個のものは2列）、グループの高さを抑える */
+    header { padding: 8px 32px; gap: 8px 12px; justify-content: flex-start; }
+    header h1 { font-size: 1.15rem; white-space: nowrap; }
+    header .subtitle { font-size: 0.72rem; margin-top: 2px; white-space: nowrap; }
+    .header-title { flex: 0 0 auto; margin-right: 8px; }
+    #header-controls { display: contents; }
+    .header-period-filter, .header-emp-filter { padding: 4px 8px; }
+    .header-emp-filter { gap: 8px; }
+    .header-emp-filter-btns { gap: 2px; }
+    .header-emp-filter-btns .select-btn { padding: 1px 8px; }
+    .header-emp-filter-checks { display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; column-gap: 10px; row-gap: 0; align-content: center; padding-left: 8px; }
+    .header-refresh-group { margin-left: auto; gap: 2px; }
+    #refresh-btn { padding: 6px 16px; font-size: 0.85rem; }
+    #last-updated { font-size: 0.72rem; }
+    .header-cond-btn { display: none; }
+
+    /* タブ・サブタブ：横に並びきらないときは、折り返さずに横スクロールにする
+       （1280px 以上は並びきるため、今までの見た目（選択中のタブが下の線に重なる）のままにする） */
+    .tabs-group, .tabs, .summary-subtabs, #plancmp2-site-tabbar-fixed { flex-wrap: nowrap !important; }
+    .group-btn, .tab-btn, .summary-subtab, .plancmp2-site-tab { flex-shrink: 0; white-space: nowrap; }
+    /* サマリーのサブタブ・拠点のタブは、PC（1366 など）でも並びきらないことがあるため、幅に関係なく横スクロールに
+       する（選択中のタブが下の枠に1px重なる見た目を保つため、下に1pxの余白を足して同じだけ詰める） */
+    .summary-subtabs, #plancmp2-site-tabbar-fixed { overflow-x: auto; overflow-y: hidden; padding-bottom: 1px; margin-bottom: -1px; scrollbar-width: thin; }
+    @media (max-width: 1279px) {
+      .tabs-group, .tabs { overflow-x: auto; overflow-y: hidden; padding-bottom: 1px; margin-bottom: -1px; scrollbar-width: thin; }
+      .transfer-toggle { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }
+      .compare-header-row { flex-wrap: wrap; min-width: 0; }
+      .compare-header-row .transfer-toggle { flex-shrink: 1; min-width: 0; }
+    }
+
+    /* スマホ（横 768 未満）：固定エリアはタイトルと「条件」ボタンだけにし、押すと操作の一式が開く
+       （開いている間だけ場所を取る） */
+    @media (max-width: 767px) {
+      header { padding: 8px 16px; flex-wrap: wrap; align-items: center; }
+      header .subtitle { display: none; }
+      .header-cond-btn {
+        display: inline-flex; align-items: center; gap: 4px; margin-left: auto;
+        padding: 6px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+        color: var(--text); font-size: 0.85rem; font-family: inherit; cursor: pointer;
+      }
+      .header-cond-btn[aria-expanded="true"] { border-color: var(--accent-inabe); color: var(--accent-inabe); }
+      #header-controls { display: none; }
+      header.controls-open #header-controls { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; padding-bottom: 4px; }
+      header.controls-open .header-refresh-group { margin-left: 0; flex-direction: row; }
+      .tabs-group { padding: 8px 16px 0; }
+      .tabs { padding: 4px 16px 0; }
+      .tabs-group-bar { margin: 0 16px; }
+      main { padding: 0 12px 16px; }
+      .group-btn { padding: 6px 16px; }
+      .tab-btn, .summary-subtab { padding: 7px 12px; }
+    }
+
+    /* 月を横に並べるグラフの高さ：画面の見える範囲に合わせて fitChartHeights() が --chart-h を決める
+       （PC・ノートPC：凡例・横軸の見出しを含めて見える範囲にちょうど収まる高さ（最低 300px）、
+       スマホ：画面の高さの55%） */
+    .month-scroll-outer > .month-scroll-inner { height: var(--chart-h, 400px) !important; }
+
+    /* グラフの吹き出し（ページの上に出す。画面の中に収め、長いときは2列以上に並べる） */
+    #chart-tip {
+      position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none;
+      max-width: calc(100vw - 16px);
+      background: #1e2235; border: 1px solid #3a3f5c; border-radius: 6px; padding: 6px 8px;
+      color: #e2e8f0; font-size: 12px; line-height: 1.35; box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+      visibility: hidden;
+    }
+    #chart-tip.on { visibility: visible; }
+    #chart-tip.scroll { pointer-events: auto; overflow-y: auto; }
+    #chart-tip .tt-title { font-weight: 700; margin-bottom: 4px; white-space: nowrap; }
+    #chart-tip .tt-body { column-gap: 14px; }
+    #chart-tip .tt-item { break-inside: avoid; }
+    #chart-tip .tt-line { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    #chart-tip .tt-sub { white-space: nowrap; padding-left: 16px; }
+    #chart-tip .tt-sw { width: 10px; height: 10px; flex-shrink: 0; border: 1px solid; }
+    #chart-tip .tt-extra { margin: 2px 0; white-space: nowrap; }
+    #chart-tip .tt-footer { margin-top: 4px; padding-top: 3px; border-top: 1px solid #3a3f5c; white-space: nowrap; }
+    @media (max-width: 767px) {
+      #chart-tip .tt-line, #chart-tip .tt-sub, #chart-tip .tt-title, #chart-tip .tt-footer, #chart-tip .tt-extra { white-space: normal; }
+    }
   </style>
 </head>
 <body>
 
-<header>
-  <div>
+<header id="app-header">
+  <div class="header-title">
     <h1>⏱ 勤務時間ダッシュボード</h1>
     <div class="subtitle">整理済み_M ／ 個人別・月別 実質勤務時間 (h)</div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
+  <button type="button" class="header-cond-btn" id="header-cond-btn" aria-expanded="false" aria-controls="header-controls" onclick="toggleHeaderControls()">条件 ▾</button>
+  <div id="header-controls">
     <div class="header-period-filter" id="header-period-filter">
       <div class="header-period-filter-col">
         <label class="header-period-filter-label">開始月</label>
@@ -891,6 +974,7 @@ function scheduleProdTableWrapRefresh() {
   prodTableWrapRAF = requestAnimationFrame(() => {
     prodTableWrapRAF = null;
     fitMonthTables();
+    fitChartHeights();
     refreshProdTableWrapOverflow();
     updateProdStickyColumnOffsets();
   });
@@ -1060,8 +1144,11 @@ function getRealMonths() {
 
 // 1か月あたりの幅の基準：画面の幅に14か月がちょうど入る幅（繁忙月を前年の同じ月と1画面で見比べられるように）。
 // 14か月以下は横スクロールなし（少ないときはその幅のまま左詰め）、15か月以上はその幅で横スクロール。
+// ただし1か月分の幅は MONTH_MIN_PX（44px：棒の組と斜めの月名が読める幅）を下回らないようにし、
+// 14か月でも下回る画面（ノートPCの一部・スマホ）は、下限の幅で横スクロールにする。
 // グラフは monthSlotWidthPlugin、表は fitMonthTables() でそろえる
 const MONTH_COLUMN_TARGET = 14;
+const MONTH_MIN_PX = 44;
 
 // 表示する月のリストを返す。以前は「間延び」対策として、開始月から常に12本の枠（期間の外の月名だけの
 // 空の枠・月名も無い空の枠）を足していたが、期間の月だけを左詰めで出す形にしたため、期間の月だけを返す
@@ -1070,103 +1157,270 @@ function buildExtendedMonthList(selectedMonths, allRealMonths) { // eslint-disab
   return selectedMonths.map(m => ({ month: m, inRange: true, hasData: true }));
 }
 
-// 「実績工数（業務区分別）」系の積み上げグラフ（要員計画のplanstaffplan2-combined・
-// 拠点サマリのplansitesum2-combined・3拠点サマリのplansum2-combined）共通：
-// グラフの高さを、セグメント内に2行ラベル（時間・人数等）を描くデータセットが
-// ある場合はそのラベルが収まる範囲で、無い場合は420px固定で自動的に決める。
-// ラベルを描くデータセットがある場合、描画部分(chartArea)に必要な高さは
-// 「ラベル目安高さ(28px)×縦軸MAX÷該当データセットの最小値」で求め、描画部分
-// 以外の高さ(凡例・軸ラベル等)は実際に一度描画したchart.height-chart.chartArea.
-// heightで測る。320〜650pxにクランプする（3グラフで同じ処理を複製しないよう、
-// この2関数を共有する）
-const SEGMENT_LABEL_PX = 28;
-const SEGMENT_CHART_MIN_PX = 320;
-const SEGMENT_CHART_MAX_PX = 650;
-const SEGMENT_CHART_FALLBACK_PX = 420;
-
-function computeSegmentLabelChartHeight(labelValues, axisMax, chromeHeightPx) {
-  const validValues = (labelValues || []).filter(v => v !== null && v !== undefined && v > 0);
-  if (!validValues.length) return SEGMENT_CHART_FALLBACK_PX;
-  const valueMin = Math.min(...validValues);
-  const requiredAreaHeight = SEGMENT_LABEL_PX * axisMax / valueMin;
-  const target = requiredAreaHeight + chromeHeightPx;
-  return Math.max(SEGMENT_CHART_MIN_PX, Math.min(SEGMENT_CHART_MAX_PX, target));
+// ── グラフの高さ ──
+// 月を横に並べるグラフ（chartWrapHtml() の入れ物 .month-scroll-inner）の高さを、画面の見える範囲に合わせて決める。
+//  - PC・ノートPC（横 768 以上）：凡例・横軸の見出しを含めたグラフ全体が、グラフを入れている縦スクロールの
+//    範囲（見える範囲。上に貼り付く見出しがあればその分を除く）にちょうど収まる高さ。最低 CHART_MIN_H_PX
+//  - スマホ（横 768 未満）：画面の高さの MOBILE_CHART_H_RATIO（55%）
+// 同じ画面にグラフが縦に複数並ぶもの（栽培・出荷など）も、1つずつがこの高さ。
+// 以前の「棒の中の文字に合わせて高さを決める（#463・#464）」「吹き出しに合わせて広げる（#518）」
+// 「計◯の文字に合わせて広げる（#521）」は、この決め方に置き換えた（吹き出しはページの上に出し、
+// 計◯・◯人の文字は縦軸の上限に余白を作って入れる。下の externalChartTooltip・axisHeadroomPlugin）
+const CHART_MIN_H_PX = 300;
+const MOBILE_MAX_W = 767;
+const MOBILE_CHART_H_RATIO = 0.55;
+const CHART_FIT_MARGIN_PX = 8;
+function chartScrollBox(el) {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === 'auto' || oy === 'scroll') return p;
+  }
+  return document.getElementById('main');
+}
+// 縦スクロールの範囲のうち、グラフを置ける高さ（上下の余白と、上に貼り付く見出しを除く）。
+// 高さが中身で決まる入れ物（スクロールしない）の場合も、main の見える高さを超えない
+function chartVisibleHeight(box) {
+  const main = document.getElementById('main');
+  const inner = el => {
+    const cs = getComputedStyle(el);
+    let h = el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+    [...el.children].forEach(c => { if (getComputedStyle(c).position === 'sticky') h -= c.offsetHeight; });
+    return h;
+  };
+  const mainH = inner(main);
+  return box === main ? mainH : Math.min(inner(box), mainH);
+}
+function chartTargetHeight(inner) {
+  if (window.innerWidth <= MOBILE_MAX_W) return Math.round(window.innerHeight * MOBILE_CHART_H_RATIO);
+  const box = inner ? chartScrollBox(inner) : document.getElementById('main');
+  return Math.max(CHART_MIN_H_PX, Math.floor(chartVisibleHeight(box) - CHART_FIT_MARGIN_PX));
+}
+function fitChartHeights() {
+  const main = document.getElementById('main');
+  if (!main) return;
+  // 最初の描画用の値（main の見える高さから）。各グラフは、入れているスクロールの範囲に合わせて上書きする
+  document.documentElement.style.setProperty('--chart-h', chartTargetHeight(null) + 'px');
+  document.querySelectorAll('.month-scroll-inner').forEach(inner => {
+    if (!inner.offsetParent) return; // 見えていない
+    const v = chartTargetHeight(inner) + 'px';
+    if (inner.style.getPropertyValue('--chart-h') !== v) inner.style.setProperty('--chart-h', v);
+  });
 }
 
-// chartは320〜650pxのどこかの高さで既に一度描画済みのインスタンスを渡す
-// （chart.height - chart.chartArea.heightで凡例・軸ラベル等の高さを実測するため）。
-// 目標の高さが現在の高さと異なる場合のみ、ラッパー要素の高さを変更しchart.resize()で
-// 再描画する（2回の描画で確定させ、それ以上は繰り返さない）
-function fitSegmentLabelChartHeight(chart, labelValues, axisMax) {
-  const wrapEl = chart.canvas && chart.canvas.parentElement;
-  if (!wrapEl) return;
-  const chromeHeightPx = chart.height - chart.chartArea.height;
-  const target = Math.round(computeSegmentLabelChartHeight(labelValues, axisMax, chromeHeightPx));
-  if (target === chart.height) return;
-  wrapEl.style.height = target + 'px';
-  chart.resize();
+// スマホの「条件」ボタン：押すと操作の一式（開始月〜更新）が開き、もう一度押すと閉じる
+function toggleHeaderControls(force) {
+  const header = document.getElementById('app-header');
+  const btn = document.getElementById('header-cond-btn');
+  if (!header || !btn) return;
+  const open = typeof force === 'boolean' ? force : !header.classList.contains('controls-open');
+  header.classList.toggle('controls-open', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  btn.textContent = open ? '条件 ▴' : '条件 ▾';
+  hideChartTip();
+  scheduleProdTableWrapRefresh();
 }
 
-// 予実＞比較（繁忙期見込み）タブの各グラフ（拠点・業務別／拠点サマリ／3拠点サマリ／
-// 要員計画）は、mode:'index'のツールチップ（キャンバス内に描画される窓）に、表示中の
-// 月によっては業務区分の行が多数（30行程度）並ぶことがあり、グラフの高さがその窓の
-// 高さより低いと下の行が切れて見えなくなる。この関数は、表示中の各月についてツール
-// チップを強制的にアクティブにし、Chart.js自身が計算した窓の高さを実測してから非表示に
-// 戻す（setActiveElements()はツールチップ自身のupdate()を呼ぶため、chart.draw()を挟まずに
-// 高さだけ取れる＝画面がちらつかない）。update()はchart.tooltip.height自体はアニメーション
-// （既定で有効）を介して時間をかけて反映するため、代わりにアニメーション適用前に同じ
-// update()内で同期的に計算される内部の目標サイズ(chart.tooltip._size.height。Chart.js
-// 4.4.3固定のためこのバージョンでのみ有効なことを前提にしている)を読む。その最大値に
-// 余白と凡例・軸ラベル等の高さ(chrome、fitSegmentLabelChartHeightと同じ実測方法)を
-// 足した値が今の高さ（fitSegmentLabelChartHeight等で既に決まっている場合はその結果を
-// 含む）を上回る場合だけ、同じ要領でラッパー要素の高さを変えてchart.resize()する
-// （今の高さより低くすることはない。要員計画の業務区分別のように今の上限が650pxの
-// 場合でも、ツールチップの高さがそれを上回るならそちらを優先する＝maxを取るだけで
-// 自然にそうなる）
-const TOOLTIP_FIT_MARGIN_PX = 20;
-function fitChartHeightForTooltip(chart) {
-  if (!chart || !chart.tooltip) return;
-  const wrapEl = chart.canvas && chart.canvas.parentElement;
-  if (!wrapEl) return;
-  // fitSegmentLabelChartHeight()等、直前にラッパー要素の高さを変えてchart.resize()を
-  // 呼んだ処理があっても、chart.resize()自体はchart.height/chart.chartAreaを次の描画
-  // (requestAnimationFrame経由)まで更新せず、ここで読むとまだ古い値のままになっている
-  // ことがある（実際にその状態で下の判定・計算を行うと、本当の高さより大きい古い値と
-  // 比較してしまい、広げる必要があるのに広げずに返ってしまう＝ツールチップが切れる
-  // 不具合につながっていた）。chart.draw()を挟んで直前の保留中のresize()を即座に
-  // 確定させてから、以降の計算に進む
-  chart.draw();
-  const dataPointCount = chart.data.datasets.reduce((max, ds) => Math.max(max, (ds.data || []).length), 0);
-  let maxTooltipHeight = 0;
-  for (let i = 0; i < dataPointCount; i++) {
-    const activeElements = [];
-    chart.data.datasets.forEach((ds, datasetIndex) => {
-      const v = ds.data && ds.data[i];
-      if (v !== null && v !== undefined) activeElements.push({ datasetIndex, index: i });
-    });
-    if (!activeElements.length) continue;
-    chart.tooltip.setActiveElements(activeElements, { x: 0, y: 0 });
-    const size = chart.tooltip._size;
-    if (size && size.height) {
-      maxTooltipHeight = Math.max(maxTooltipHeight, size.height);
+// ── グラフの吹き出し ──
+// Chart.js の吹き出し（キャンバスの中に描く）を使わず、ページの上（#chart-tip）に出す。グラフの高さに
+// 関係なく、画面の中に収まる位置に置く（指している所の右、入らなければ左。上下も画面の中に収める）。
+// 画面の高さより長いとき（繁忙期の20〜30行など）は、2列（入らなければ3列・4列）に並べ、それでも
+// 入らないときは吹き出しの中で縦にスクロールできる形にする（そのときだけマウスで吹き出しに入れる）。
+// タップ（touchstart）でも出る。グラフ・吹き出しの外をタップするか、画面をスクロールすると消える
+const CHART_TIP_MARGIN_PX = 8;
+const CHART_TIP_MAX_COLS = 4;
+let chartTipHideTimer = null;
+let chartTipTouchCanvas = null; // 最後にタップしたグラフ（タップで出した吹き出しは、外をタップするかスクロールするまで出しておく）
+function chartTipEl() {
+  let el = document.getElementById('chart-tip');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'chart-tip';
+    el.setAttribute('role', 'tooltip');
+    el.addEventListener('mouseleave', () => hideChartTip());
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function hideChartTip() {
+  const el = document.getElementById('chart-tip');
+  if (!el) return;
+  el.classList.remove('on', 'scroll');
+  el.__chart = null;
+}
+function escTip(t) {
+  return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function externalChartTooltip(context) {
+  const { chart, tooltip } = context;
+  const el = chartTipEl();
+  if (!tooltip || tooltip.opacity === 0) {
+    if (el.__chart && el.__chart !== chart) return;
+    // タップのあとにブラウザが出す「マウスがグラフから出た」の合図では消さない
+    if (chartTipTouchCanvas && chartTipTouchCanvas === chart.canvas) return;
+    clearTimeout(chartTipHideTimer);
+    // スクロールできる吹き出しの上にマウスがあるときは消さない（吹き出しから出たときに消える）
+    chartTipHideTimer = setTimeout(() => { if (!(el.classList.contains('scroll') && el.matches(':hover'))) hideChartTip(); }, 60);
+    return;
+  }
+  clearTimeout(chartTipHideTimer);
+  const nonEmpty = a => (a || []).filter(t => t !== '' && t !== null && t !== undefined);
+  let html = '';
+  const title = nonEmpty(tooltip.title);
+  if (title.length) html += `<div class="tt-title">${title.map(escTip).join('<br>')}</div>`;
+  const beforeBody = nonEmpty(tooltip.beforeBody);
+  if (beforeBody.length) html += `<div class="tt-extra">${beforeBody.map(escTip).join('<br>')}</div>`;
+  html += '<div class="tt-body">';
+  (tooltip.body || []).forEach((b, i) => {
+    const before = nonEmpty(b.before), lines = nonEmpty(b.lines), after = nonEmpty(b.after);
+    if (!before.length && !lines.length && !after.length) return;
+    const c = (tooltip.labelColors || [])[i] || {};
+    const bg = typeof c.backgroundColor === 'string' ? c.backgroundColor : 'transparent';
+    const bd = typeof c.borderColor === 'string' ? c.borderColor : bg;
+    html += '<div class="tt-item">'
+      + before.map(t => `<div class="tt-sub">${escTip(t)}</div>`).join('')
+      + lines.map(t => `<div class="tt-line"><span class="tt-sw" style="background:${escTip(bg)};border-color:${escTip(bd)}"></span><span>${escTip(t)}</span></div>`).join('')
+      + after.map(t => `<div class="tt-sub">${escTip(t)}</div>`).join('')
+      + '</div>';
+  });
+  html += '</div>';
+  const afterBody = nonEmpty(tooltip.afterBody);
+  if (afterBody.length) html += `<div class="tt-extra">${afterBody.map(escTip).join('<br>')}</div>`;
+  const footer = nonEmpty(tooltip.footer);
+  if (footer.length) html += `<div class="tt-footer">${footer.map(escTip).join('<br>')}</div>`;
+  el.innerHTML = html;
+  el.__chart = chart;
+  // 大きさを測る（まず1列）
+  el.classList.remove('scroll', 'on');
+  el.style.maxHeight = '';
+  el.style.width = '';
+  el.style.left = '0px';
+  el.style.top = '0px';
+  const body = el.querySelector('.tt-body');
+  body.style.columnCount = '';
+  const M = CHART_TIP_MARGIN_PX;
+  const vw = document.documentElement.clientWidth;
+  const vh = window.innerHeight;
+  let h = el.offsetHeight;
+  if (h > vh - 2 * M) {
+    // 画面の高さに入らない：列を増やして並べる（画面の幅に入る列数まで）
+    const colW = body.offsetWidth;
+    const chrome = el.offsetWidth - colW; // 左右の余白・枠
+    const GAP = 14;
+    let cols = 1;
+    while (cols < CHART_TIP_MAX_COLS && chrome + (cols + 1) * colW + cols * GAP <= vw - 2 * M && h > vh - 2 * M) {
+      cols++;
+      body.style.columnCount = String(cols);
+      el.style.width = Math.ceil(chrome + cols * colW + (cols - 1) * GAP) + 'px';
+      h = el.offsetHeight;
+    }
+    if (h > vh - 2 * M) {
+      // それでも入らない：吹き出しの中で縦にスクロールできる形にする
+      el.style.maxHeight = (vh - 2 * M) + 'px';
+      el.classList.add('scroll');
+      h = el.offsetHeight;
     }
   }
-  // 測定用に有効化したツールチップを非表示に戻す（画面に残さない）
-  chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-  if (maxTooltipHeight <= 0) return;
-  const chromeHeightPx = chart.height - chart.chartArea.height;
-  const target = Math.round(maxTooltipHeight + TOOLTIP_FIT_MARGIN_PX + chromeHeightPx);
-  if (target <= chart.height) return;
-  // setActiveElements()の呼び出しでツールチップのアニメーションが登録された状態のまま
-  // chart.resize()を呼ぶと、Chart.jsがアニメーション完了後までリサイズを遅延させてしまい
-  // 高さが反映されない。stop()でアニメーションを即座に確定させてからresizeする
-  chart.stop();
-  wrapEl.style.height = target + 'px';
-  chart.resize();
-  // ここでもdraw()で即座に確定させる（このまま呼び出し元に戻ると、以降どこかで
-  // chart.height/chart.chartAreaを読む処理があった場合に同じ遅延の影響を受けるため）
-  chart.draw();
+  const w = el.offsetWidth;
+  const r = chart.canvas.getBoundingClientRect();
+  const cx = r.left + tooltip.caretX;
+  const cy = r.top + tooltip.caretY;
+  let left = cx + 14;
+  if (left + w > vw - M) left = cx - 14 - w;
+  left = Math.max(M, Math.min(left, vw - M - w));
+  let top = cy - h / 2;
+  top = Math.max(M, Math.min(top, vh - M - h));
+  el.style.left = Math.round(left) + 'px';
+  el.style.top = Math.round(top) + 'px';
+  el.classList.add('on');
 }
+if (window.Chart && Chart.defaults) {
+  Chart.defaults.plugins.tooltip.enabled = false;
+  Chart.defaults.plugins.tooltip.external = externalChartTooltip;
+}
+// 画面のスクロール（吹き出し自身のスクロールを除く）・大きさの変更・グラフと吹き出しの外のタップで消す
+document.addEventListener('scroll', e => { if (e.target !== document.getElementById('chart-tip')) hideChartTip(); }, true);
+window.addEventListener('resize', () => hideChartTip());
+document.addEventListener('touchstart', e => {
+  const t = e.target;
+  const canvas = t && t.closest ? t.closest('canvas') : null;
+  chartTipTouchCanvas = canvas;
+  if (canvas || (t && t.closest && t.closest('#chart-tip'))) return;
+  hideChartTip();
+}, { passive: true, capture: true });
+// マウスで操作したら、タップのときの扱い（出しておく）をやめる
+document.addEventListener('mousedown', e => { if (!e.sourceCapabilities || !e.sourceCapabilities.firesTouchEvents) chartTipTouchCanvas = null; }, true);
+
+// ── 縦軸の上限の余白 ──
+// 縦軸（左の y・右の y2 など）の上限を、いちばん高い棒（積み上げの合計）・線の点が、描画部分の上端から
+// 余白（px）だけ下に収まる値まで上げる（いちばん高い棒の上に付く「計◯」「◯人」の文字も含めて入る）。
+// 上限を決めている各画面の値（共通の上限など）より低くはしない。上げるときは、今の目盛りの刻みの1/10
+// 単位（例：1000h 刻みなら 100h 単位）に切り上げ、目盛りは Chart.js に作り直させる（上限を指定したときと同じ形）
+const AXIS_TOP_PAD_PX = 10;
+function axisHeadroomPx(chart, scale) {
+  let px = AXIS_TOP_PAD_PX;
+  const hasHeadcountLabels = chart.getSortedVisibleDatasetMetas().some(m => m.vScale === scale && chart.data.datasets[m.index] && chart.data.datasets[m.index]._segmentHeadcount);
+  // siteSummaryHeadcountLabelsPlugin()：いちばん上の部分の「◯人」（入らなければ棒の上）と、その上の「計◯」
+  if (hasHeadcountLabels) px = Math.max(px, siteSummaryTotalLabelNeededPx(true) + 4);
+  return px;
+}
+const axisHeadroomPlugin = {
+  id: 'axisHeadroom',
+  beforeLayout(chart) { chart.$axisHeadroomA = undefined; },
+  // 最初の描画では描画部分の高さがまだ分からず、軸の高さで見積もるため、実際の高さと違っていたら
+  // 1回だけ描き直す（update('none') は動き（アニメーション）の行き先を変えないため、ふつうの update()）
+  afterLayout(chart) {
+    const usedA = chart.$axisHeadroomA;
+    const ca = chart.chartArea;
+    if (usedA === undefined || !ca || chart.$axisHeadroomPending) return;
+    if (Math.abs((ca.bottom - ca.top) - usedA) <= 2) return;
+    chart.$axisHeadroomPending = true;
+    queueMicrotask(() => {
+      chart.$axisHeadroomPending = false;
+      if (!chart.canvas || !chart.ctx) return;
+      try { chart.update(); } catch (e) { /* 破棄済みなど */ }
+    });
+  },
+  afterBuildTicks(chart, args) {
+    const scale = args && args.scale;
+    if (!scale || scale.axis !== 'y' || scale.type !== 'linear' || scale.id === 'monthSlotSpacer' || scale.options.reverse) return;
+    const ticks = scale.ticks || [];
+    if (ticks.length < 2) return;
+    const metas = chart.getSortedVisibleDatasetMetas().filter(m => m.vScale === scale);
+    if (!metas.length) return;
+    let top = -Infinity;
+    metas.forEach(m => {
+      const mm = m.controller.getMinMax(scale, true);
+      if (Number.isFinite(mm.max)) top = Math.max(top, mm.max);
+    });
+    if (!(top > 0)) return;
+    // 描画部分の高さ：前回の描画の値（無ければ軸の高さ）
+    const ca = chart.chartArea;
+    const A = (ca && ca.bottom - ca.top > 0) ? (ca.bottom - ca.top) : scale.height;
+    const L = axisHeadroomPx(chart, scale);
+    if (!(A > L * 2)) return;
+    if (!(ca && ca.bottom - ca.top > 0)) chart.$axisHeadroomA = A; // 見積もりの高さを使った（最初の描画）
+    const min = scale.min;
+    const need = (A * top - L * min) / (A - L); // 値 top の位置が上端から L px 下になる上限
+    // 目盛りの最後（＝上限）で判断する（scale.max は、同じ描画の中で前に作り直した値が残ることがあるため）
+    if (ticks[ticks.length - 1].value >= need) return;
+    const step = Math.abs(ticks[1].value - ticks[0].value);
+    if (!(step > 0)) return;
+    const fine = step >= 10 ? step / 10 : (step >= 1 ? 1 : step);
+    const newMax = Math.ceil(need / fine - 1e-9) * fine;
+    // 目盛りは Chart.js 自身に作り直させる（上限を一時的に newMax にして目盛りを作り、設定は元に戻す。
+    // 目盛りの文字の間引き・上限の目盛りの扱いは、上限を指定したときの今までの見え方と同じになる）
+    const opts = scale.options;
+    const prevMax = opts.max;
+    try {
+      opts.max = newMax;
+      scale.ticks = scale.buildTicks() || [];
+    } finally {
+      opts.max = prevMax;
+    }
+    scale.max = newMax;
+  },
+};
+if (window.Chart && Chart.register) Chart.register(axisHeadroomPlugin);
 
 // 拠点サマリ「実績工数（業務区分別）」(plansitesum2-combined)専用：棒セグメントに
 // 人数（「◯人」）ラベルを描画するafterDatasetsDrawプラグイン。対象は
@@ -1184,8 +1438,8 @@ function fitChartHeightForTooltip(chart) {
 // 一番上のセグメントのさらに上に描く。一番上のセグメントが（収まらず）棒の上側に
 // 内訳ラベルを描いている場合は、その文字のさらに上に1行分あけて描く
 const SITE_SUMMARY_HEADCOUNT_LINE_H = 11;
-// drawTotal()が描く位置と必ず一致させること（fitChartHeightForHeadcountTotals()の
-// 事前計算で同じpx数を使うため）
+// drawTotal()が描く位置と必ず一致させること（axisHeadroomPx() で、縦軸の上限に作る余白の
+// 計算に同じpx数を使うため）
 function siteSummaryTotalLabelNeededPx(hasBreakdownAbove) {
   const LINE_H = SITE_SUMMARY_HEADCOUNT_LINE_H;
   const base = LINE_H * 2; // 棒の上端から1行分あけて(LINE_H)、文字自体の高さ分(LINE_H)
@@ -1243,7 +1497,7 @@ function siteSummaryHeadcountLabelsPlugin() {
     const text = `計${siteSummaryFormatHeadcount(count)}`;
     let y = bar.y - LINE_H; // 棒の上端から1行分あけた位置(文字の下端)
     if (hasBreakdownAbove) y -= (2 + LINE_H); // 内訳の上側ラベルの、さらに上に1行あける
-    // fitChartHeightForHeadcountTotals()で通常は収まる高さまで広げているが、万一の
+    // 縦軸の上限に余白を作っている（axisHeadroomPlugin）ため通常は収まるが、万一の
     // 保険として、内訳の上側ラベルと同じ基準（areaTop+LINE_H）でクランプする
     const minY = areaTop + LINE_H;
     if (y < minY) y = minY;
@@ -1296,67 +1550,16 @@ function siteSummaryHeadcountLabelsPlugin() {
     },
   };
 }
-// siteSummaryHeadcountLabelsPlugin()が描く総合計ラベル（「計◯人」）が、グラフ上端で
-// 切れないよう、必要ならグラフの高さを広げる（fitSegmentLabelChartHeight/
-// fitChartHeightForTooltipと同じ「現在の高さで一度描画→実測→必要なら広げて再描画」の
-// 考え方を踏襲。既存の2関数より後に呼び、今の高さより低くすることはない）。
-// 縦軸MAXが固定のまま高さだけ広げると、積み上げ列の一番上のセグメントの上端(bar.y)が
-// chartArea.topからより遠くなり（headroom = chartArea.height×(1-値/縦軸MAX)）、
-// ラベルを描く余白が増える性質を利用している
-function fitChartHeightForHeadcountTotals(chart, axisMax) {
-  const wrapEl = chart.canvas && chart.canvas.parentElement;
-  if (!wrapEl || !(axisMax > 0)) return;
-  chart.draw();
-  const dataPointCount = chart.data.datasets.reduce((max, ds) => Math.max(max, (ds.data || []).length), 0);
-  let requiredChartAreaHeight = 0;
-  for (let mi = 0; mi < dataPointCount; mi++) {
-    const groups = {};
-    chart.data.datasets.forEach((ds, dsIndex) => {
-      if (!ds._segmentHeadcount) return;
-      if (ds.data[mi] == null) return;
-      const count = ds._segmentHeadcount[mi];
-      if (count == null || count === 0) return;
-      const bar = chart.getDatasetMeta(dsIndex).data[mi];
-      if (!bar || !Number.isFinite(bar.y) || !Number.isFinite(bar.height)) return;
-      const stackKey = ds.stack || 'default';
-      (groups[stackKey] = groups[stackKey] || []).push({ bar, topY: bar.y });
-    });
-    Object.entries(groups).forEach(([stackKey, items]) => {
-      const totalDs = chart.data.datasets.find(d => d._stackTotalHeadcount && (d.stack || 'default') === stackKey);
-      if (!totalDs) return;
-      const total = totalDs._stackTotalHeadcount[mi];
-      if (total == null || total === 0) return;
-      const minTopY = Math.min(...items.map(it => it.topY));
-      const topmost = items.find(it => it.topY === minTopY);
-      const fitsInside = topmost.bar.height >= SITE_SUMMARY_HEADCOUNT_LINE_H + 4;
-      const neededPx = siteSummaryTotalLabelNeededPx(!fitsInside);
-      const stackValue = chart.data.datasets.reduce((s, ds) =>
-        (((ds.stack || 'default') === stackKey && ds.data[mi] != null) ? s + ds.data[mi] : s), 0);
-      if (!(stackValue > 0) || !(stackValue < axisMax)) return;
-      const h = neededPx * axisMax / (axisMax - stackValue);
-      if (h > requiredChartAreaHeight) requiredChartAreaHeight = h;
-    });
-  }
-  if (requiredChartAreaHeight <= 0) return;
-  const chromeHeightPx = chart.height - chart.chartArea.height;
-  const target = Math.round(requiredChartAreaHeight + chromeHeightPx);
-  if (target <= chart.height) return;
-  chart.stop();
-  wrapEl.style.height = Math.min(target, SEGMENT_CHART_MAX_PX) + 'px';
-  chart.resize();
-  chart.draw();
-}
-
 // 月を横に並べるグラフのキャンバスの入れ物HTMLを返す。外側（month-scroll-outer）は横スクロール用、
 // 内側（month-scroll-inner、キャンバスの親）は高さを持つ。1か月分の幅は monthSlotWidthPlugin が
 // 「基準の月数（MONTH_COLUMN_TARGET＝14）を表示したときの幅」にそろえる：月が基準より少ないときは描画部分の
 // 右に余白を足して左詰めにし、基準より多いときは内側の幅を広げて横スクロールにする（monthCountは使わない。以前の
 // forceResponsive・月70pxの固定幅の分岐は、この仕組みに一本化した）
+// 高さは画面ごとの決まった値（heightPx）をやめ、見える範囲に合わせて fitChartHeights() が決める
+// （heightPx・inlineHeight は使わない）
 function chartWrapHtml(canvasId, monthCount, opts) { // eslint-disable-line no-unused-vars
   const wrapClass = (opts && opts.wrapClass) || 'schart-wrap';
-  const heightPx = (opts && opts.heightPx) || 300;
-  const style = (opts && opts.inlineHeight) ? ` style="height:${heightPx}px"` : '';
-  return `<div class="month-scroll-outer"><div class="${wrapClass} month-scroll-inner"${style}><canvas id="${canvasId}"></canvas></div></div>`;
+  return `<div class="month-scroll-outer"><div class="${wrapClass} month-scroll-inner"><canvas id="${canvasId}"></canvas></div></div>`;
 }
 
 // 横軸が月（「YYYY年M月」「YYYY/M」）だけのグラフで、1か月分の幅（描画部分の幅÷月数）を
@@ -1380,29 +1583,30 @@ const monthSlotWidthPlugin = {
     const inner = chart.canvas && chart.canvas.parentElement;
     const outer = inner && inner.classList.contains('month-scroll-inner') ? inner.parentElement : null;
     const areaW = area.right - area.left;
-    if (n < MONTH_COLUMN_TARGET) {
-      if (inner && inner.style.width) inner.style.width = '';
-      const fullAreaW = areaW + st.pad; // 足した幅（monthSlotSpacer）を除いたときの描画部分の幅
-      // 基準の月数のときは、右端の月名のはみ出し分（横軸の paddingRight）が右側の軸の幅より大きければ、その差が
-      // 右の余白になる。足した幅がその余白を兼ねてしまうので、基準の月数のときの描画部分の幅はその分を引いて求める
-      const scales = Object.values(chart.scales || {});
-      const xScale = scales.find(sc => sc.axis === 'x');
-      const rightAxesW = scales.filter(sc => sc.position === 'right' && sc.id !== 'monthSlotSpacer').reduce((a, sc) => a + (sc.width || 0), 0);
-      const overhang = Math.max(0, ((xScale && xScale.paddingRight) || 0) - rightAxesW);
-      const areaBase = fullAreaW - overhang; // 基準の月数のときの描画部分の幅
-      // 切り上げ：1か月分の幅が基準の月数のときより広くならないようにする
-      const want = Math.max(0, Math.ceil(fullAreaW - areaBase * n / MONTH_COLUMN_TARGET));
-      if (Math.abs(want - st.pad) >= 1) { st.pad = want; scheduleMonthSlotPadding(chart); }
+    // 右端の月名のはみ出し分（横軸の paddingRight）が右側の軸の幅より大きければ、その差が右の余白になる。
+    // 足した幅（monthSlotSpacer）がその余白を兼ねるので、軸などの幅（overhead）はその分を足し戻して求める
+    const scales = Object.values(chart.scales || {});
+    const xScale = scales.find(sc => sc.axis === 'x');
+    const rightAxesW = scales.filter(sc => sc.position === 'right' && sc.id !== 'monthSlotSpacer').reduce((a, sc) => a + (sc.width || 0), 0);
+    const overhang = Math.max(0, ((xScale && xScale.paddingRight) || 0) - rightAxesW);
+    const overhead = chart.width - areaW - st.pad + (st.pad > 0 ? Math.min(st.pad, overhang) : 0); // 軸・余白など、月の幅以外の部分
+    const visW = outer ? outer.clientWidth : chart.width;
+    if (!visW) return;
+    // 1か月分の幅：14か月が見えている幅にちょうど入る幅。ただし下限（MONTH_MIN_PX）を下回らない
+    const slot = Math.max(MONTH_MIN_PX, (visW - overhead) / MONTH_COLUMN_TARGET);
+    const needW = overhead + slot * n;
+    if (outer && needW > visW + 1) {
+      // 見えている幅に入らない：右に足す幅をなくし、入れ物の幅を広げて横スクロールにする
+      if (st.pad) { st.pad = 0; scheduleMonthSlotPadding(chart); return; }
+      const w = Math.ceil(needW);
+      if (Math.abs(inner.offsetWidth - w) > 1) inner.style.width = w + 'px';
       return;
     }
-    if (st.pad) { st.pad = 0; scheduleMonthSlotPadding(chart); return; }
-    if (!outer) return;
-    if (n === MONTH_COLUMN_TARGET) { if (inner.style.width) inner.style.width = ''; return; }
-    const overhead = chart.width - areaW; // 軸・余白など、月の幅以外の部分
-    const visW = outer.clientWidth;
-    if (!visW) return;
-    const need = Math.round(overhead + (visW - overhead) * n / MONTH_COLUMN_TARGET);
-    if (Math.abs(inner.offsetWidth - need) > 1) inner.style.width = need + 'px';
+    if (inner && inner.style.width) inner.style.width = '';
+    // 入る：描画部分の右に幅を足して、1か月分の幅を slot にする（左詰め）。切り上げ：slot より広くしない
+    let want = Math.ceil(visW - overhead + overhang - slot * n);
+    if (want <= overhang + 1) want = 0;
+    if (Math.abs(want - st.pad) >= 1) { st.pad = want; scheduleMonthSlotPadding(chart); }
   },
 };
 // 右側に、目盛り・線を出さず幅だけを持つ軸（monthSlotSpacer）を置き、その幅を st.pad にして描画し直す
@@ -1486,7 +1690,7 @@ function fitMonthTables() {
     // 基準の月数で自動の幅にすると画面より広い（数字・月名が長い）ときは、基準の月数がちょうど入るように
     // 月の列の幅を「（置ける幅−固定の列の幅）÷基準の月数」にする（14か月以下で横スクロールを出さないため）
     const fixedSum = [...fixedLeft, ...fixedRight].reduce((a, b) => a + b, 0);
-    if (fixedSum + monthW * MONTH_COLUMN_TARGET > avail + 1) monthW = Math.max(40, Math.floor((avail - fixedSum) / MONTH_COLUMN_TARGET * 10) / 10);
+    if (fixedSum + monthW * MONTH_COLUMN_TARGET > avail + 1) monthW = Math.max(MONTH_MIN_PX, Math.floor((avail - fixedSum) / MONTH_COLUMN_TARGET * 10) / 10);
     const widths = [...fixedLeft, ...Array(n).fill(monthW), ...fixedRight];
     const total = widths.reduce((a, b) => a + b, 0);
     const colgroup = document.createElement('colgroup');
@@ -9823,7 +10027,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
         },
       },
     });
-    fitChartHeightForTooltip(planCmpChartInstances[canvasId]);
   }
 
   // 拠点タブ(いなべ/群馬/南丹/全拠点合計)のHTML断片。固定エリア側(renderSiteTabBarFixed)から呼ぶ。
@@ -9984,7 +10187,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
             },
           },
         });
-        fitChartHeightForTooltip(planCmpChartInstances[`plancmp2-all-${div}`]);
       });
     } else {
       // 単拠点: 栽培・出荷チャート
@@ -10074,7 +10276,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
             },
           },
         });
-        fitChartHeightForTooltip(planCmpChartInstances[key]);
       });
     }
   }
@@ -10449,10 +10650,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
         },
       });
       planCmpChartInstances['sum-combined'] = sumCombinedChart;
-      // このグラフにはセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
-      // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
-      fitSegmentLabelChartHeight(sumCombinedChart, [], sharedMax);
-      fitChartHeightForTooltip(sumCombinedChart);
     }
 
     // 2段目：3拠点分のcomputeSiteTotalData()をmergeSiteTotalDataAcrossSitesで合算し、
@@ -11016,13 +11213,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
       siteSumCombinedChart.options.scales.y2.max = chartVolMax;
       siteSumCombinedChart.update('none');
     }
-    // このグラフにもセグメント内に2行ラベルを描くデータセット(_staffGapBar相当)が
-    // 無いため、常に420px固定(要員計画で要員不足が無い場合と同じフォールバック)になる
-    fitSegmentLabelChartHeight(siteSumCombinedChart, [], chartYMax);
-    fitChartHeightForTooltip(siteSumCombinedChart);
-    // 棒ごとの総合計ラベル（「計◯人」）がグラフ上端で切れないよう、必要なら
-    // さらに高さを広げる（上の2つのfit呼び出しの後に実行し、今の高さより低くはしない）
-    fitChartHeightForHeadcountTotals(siteSumCombinedChart, chartYMax);
 
     if (weekly) {
       renderPlanCmpWeekTable(weekRows);
@@ -11455,7 +11645,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
               // 上端のすぐ外側に置き、そこから上方向に残りの行（時間）を積み上げて描画する
               // （時間の行がセグメント内に隠れて人数だけ見える、という状態を避けるため）
               const fitsInside = bar.height >= totalH + 4;
-              let lastLineY = fitsInside ? (centerY + totalH / 2 - LINE_H / 2) : (bar.y - 6);
+              // 区切りの中に2行が入らないときは描かない（グラフの高さを文字に合わせて広げる仕組みを
+              // やめたため、入る区切りにだけ出す。値は吹き出しで見られる）
+              if (!fitsInside) return;
+              let lastLineY = centerY + totalH / 2 - LINE_H / 2;
               let firstLineY = lastLineY - (lines.length - 1) * LINE_H;
               // 何らかの理由（複数月にまたがる積み上げ・軸スケールの丸め等）で、
               // 計算上の描画位置がグラフの描画可能領域より上にはみ出してしまう場合、
@@ -11485,8 +11678,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
       }],
     });
     planCmpChartInstances['staffplan-combined'] = staffPlanCombinedChart;
-    fitSegmentLabelChartHeight(staffPlanCombinedChart, staffGapData, sharedMax);
-    fitChartHeightForTooltip(staffPlanCombinedChart);
 
     // 2段目：削除した「拠点・業務別」モードの3段目（標準工数合計 vs 勤務時間合計）を
     // そのまま移設。computeSiteTotalData()・renderTotalChart()自体の中身は無変更で、
