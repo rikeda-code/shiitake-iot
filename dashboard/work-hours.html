@@ -1662,14 +1662,33 @@ function buildDataset(json) {
   const monthYms = jissituCols.map(({ ym }) => ym);
 
   const employees = [];
+  // 3拠点以外で拠点の欄が入っている人（志摩・鹿沼・事務など）。通常の集計には入れず、
+  // 整理済み_増減の照合で3拠点の人の中に見つからなかったときだけ探す（応援の照合専用）。
+  // 拠点の欄が空欄の行は入れない
+  const otherSiteEmployees = [];
 
   rows.forEach(row => {
     const cells = row.c || [];
     const base = String(cells[baseIdx]?.v ?? '').trim();
-    if (!VALID_BASES.has(base)) return;
 
     const name = String(cells[nameIdx]?.v ?? cells[nameIdx]?.f ?? '').trim();
     if (!name) return;
+
+    if (!VALID_BASES.has(base)) {
+      if (!base) return;
+      const otherFlagRaw = cells[flagIdx]?.v;
+      otherSiteEmployees.push({
+        name, base,
+        workType: String(cells[workIdx]?.v ?? '').trim(),
+        employment: String(cells[empIdx]?.v ?? '').trim(),
+        empClass: classifyEmp(String(cells[empIdx]?.v ?? '').trim()),
+        flag: (otherFlagRaw === null || otherFlagRaw === undefined || otherFlagRaw === '') ? null
+          : (isNaN(Number(otherFlagRaw)) ? null : Number(otherFlagRaw)),
+        hours: jissituCols.map(({ idx }) => parseDuration(cells[idx])),
+        isOtherSite: true,
+      });
+      return;
+    }
 
     const employment = String(cells[empIdx]?.v ?? '').trim();
     const workType   = String(cells[workIdx]?.v ?? '').trim();
@@ -1712,7 +1731,7 @@ function buildDataset(json) {
   });
 
   const nameLabel = (cols[nameIdx]?.label || '').trim() || '氏名';
-  return { months, monthYms, employees, nameLabel };
+  return { months, monthYms, employees, otherSiteEmployees, nameLabel };
 }
 
 function inferNextMonth(base, occurrence) {
@@ -1794,20 +1813,62 @@ function formatHM(hours) {
   return `${sign}${h}:${String(mm).padStart(2, '0')}`;
 }
 
-// baseData（振替なしのallData）と整理済み_増減レコードから、
-// 個人単位で加減算を反映した employees 配列とアラート一覧を作る
-function computeTransferAdjustments(baseData, adjustRecords) {
-  const { months, monthYms, employees: baseEmployees } = baseData;
-
-  // 深いコピー（hours配列を独立させる）
-  const employees = baseEmployees.map(e => ({ ...e, hours: e.hours.slice() }));
-
+// 整理済み_増減の照合用：正規化した氏名 → 従業員の配列
+function buildTransferNameIndex(employees) {
   const byName = new Map();
   employees.forEach(e => {
     const key = normalizeName(e.name);
     if (!byName.has(key)) byName.set(key, []);
     byName.get(key).push(e);
   });
+  return byName;
+}
+
+// 整理済み_増減の人を整理済み_Mから探す「探す順番」の決まり。整理済み_増減を使う4か所の照合
+// （勤務実績の振替 computeTransferAdjustments()、比較（3拠点）＞時間の●印
+// computeStdTransferDeltaBuckets()、勤務実績＞サマリー＞標準労働時間
+// computeStdHoursSiteTransferDeltaBuckets()、比較（3拠点）＞標準労働時間
+// resolveStdHoursTierAdjustRecords()）はすべてこれを使う：
+//  1. まず3拠点の人（employees）の中から名前で探す
+//  2. 同じ名前が1件も無いときだけ、3拠点以外で拠点の欄が入っている人
+//     （otherSiteEmployees＝allData.otherSiteEmployees）の中から探す
+//  3. 拠点の欄が空欄の人は otherSiteEmployees に入っていないので探さない
+// 戻り値は rec → { candidates（見つかった人の配列。無ければ空）, fromOtherSite }。
+// fromOtherSite の人は元の拠点が通常の集計に入っていないため、各画面とも元の拠点から
+// 引く処理はせず、PRJ の拠点（の段）にだけ足す。同じ名前が複数あるときの絞り込みは
+// 各画面の今の決まりのまま呼び出し側で行う
+function buildTransferLookup(employees, otherSiteEmployees) {
+  const byName = buildTransferNameIndex(employees);
+  const otherByName = buildTransferNameIndex(otherSiteEmployees || []);
+  return rec => {
+    const key = normalizeName(rec.rawName);
+    if (byName.has(key)) return { candidates: byName.get(key), fromOtherSite: false };
+    if (otherByName.has(key)) return { candidates: otherByName.get(key), fromOtherSite: true };
+    return { candidates: [], fromOtherSite: false };
+  };
+}
+
+// 照合の呼び出し側で otherSiteEmployees を省略したときの既定値（読み込み前は空）
+function defaultOtherSiteEmployees() {
+  return (typeof allData !== 'undefined' && allData && allData.otherSiteEmployees) || [];
+}
+
+// 整理済み_増減の人が整理済み_Mで見つからないときのアラート文（勤務実績タブ・
+// 比較（3拠点）＞標準労働時間タブで共通）
+function transferNameNotFoundAlert(rec, reason) {
+  return `氏名不一致：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」に一致する従業員が整理済み_Mシートで見つかりません${reason || ''}`;
+}
+
+// baseData（振替なしのallData）と整理済み_増減レコードから、
+// 個人単位で加減算を反映した employees 配列とアラート一覧を作る。
+// 人を探す順番は buildTransferLookup() の決まり
+function computeTransferAdjustments(baseData, adjustRecords) {
+  const { months, monthYms, employees: baseEmployees } = baseData;
+
+  // 深いコピー（hours配列を独立させる）
+  const employees = baseEmployees.map(e => ({ ...e, hours: e.hours.slice() }));
+
+  const lookup = buildTransferLookup(employees, baseData.otherSiteEmployees);
 
   const alerts = [];
   const additions = []; // { emp, monthIdx, destBase, destRole, hours }
@@ -1816,21 +1877,30 @@ function computeTransferAdjustments(baseData, adjustRecords) {
     const monthIdx = monthYms.indexOf(rec.ym);
     if (monthIdx === -1) return; // 対象月が現在の集計範囲に無い（対象外期間）
 
-    const key = normalizeName(rec.rawName);
-    let matches = byName.get(key);
+    const { candidates, fromOtherSite } = lookup(rec);
+    let matches = candidates;
 
     // 氏名が複数件ヒットする場合（拠点間の恒久異動等）は、B列フラグ＝1のレコードのみに絞り込む
-    if (matches && matches.length > 1) {
+    if (matches.length > 1) {
       matches = matches.filter(e => e.flag === 1);
     }
 
-    if (!matches || matches.length !== 1) {
-      const reason = matches && matches.length > 1 ? '（B列フラグ＝1のレコードが複数あり特定できません）'
-        : (byName.get(key) && byName.get(key).length > 1 ? '（B列フラグ＝1のレコードが見つかりません）' : '');
-      alerts.push(`氏名不一致：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」に一致する従業員が整理済み_Mシートで見つかりません${reason}`);
+    if (matches.length !== 1) {
+      const reason = matches.length > 1 ? '（B列フラグ＝1のレコードが複数あり特定できません）'
+        : (candidates.length > 1 ? '（B列フラグ＝1のレコードが見つかりません）' : '');
+      alerts.push(transferNameNotFoundAlert(rec, reason));
       return;
     }
     const emp = matches[0];
+
+    // 3拠点以外の人：元の拠点は通常の集計に入っていないため、引く処理はしない。
+    // PRJ の拠点への「（応援）」の加算だけを行う
+    if (fromOtherSite) {
+      if (rec.base !== rec.prj) {
+        additions.push({ emp, monthIdx, destBase: rec.prj, destRole: rec.role, hours: rec.hours });
+      }
+      return;
+    }
 
     const before = emp.hours[monthIdx] ?? 0;
     const after = before - rec.hours;
@@ -1880,22 +1950,20 @@ function computeTransferAdjustments(baseData, adjustRecords) {
 // D列＝E列（拠点を跨がない）：本人の業務区分バケットからJ列を減算するのみ。
 // D列≠E列（拠点を跨ぐ）：本人の業務区分バケットから減算し、F列の業務区分を
 // 同様に正規化したバケットへE列拠点で加算する。
-// employeesは振替適用前の生データ（allData.employees）を渡すこと
-function computeStdTransferDeltaBuckets(adjustRecords, employees) {
+// employeesは振替適用前の生データ（allData.employees）を渡すこと。
+// 人を探す順番は buildTransferLookup() の決まり。3拠点以外から見つかった人は、
+// 元の拠点から引かず、PRJ の拠点にだけ足す（見つからない人のアラートはここでは出さない）
+function computeStdTransferDeltaBuckets(adjustRecords, employees, otherSiteEmployees = defaultOtherSiteEmployees()) {
   const deltaMap = new Map();
   const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
   const divLabel = wt => workTypeClass(wt).replace(/^wt-/, '');
 
-  const byName = new Map();
-  employees.forEach(e => {
-    const key = normalizeName(e.name);
-    if (!byName.has(key)) byName.set(key, []);
-    byName.get(key).push(e);
-  });
+  const lookup = buildTransferLookup(employees, otherSiteEmployees);
 
   adjustRecords.forEach(rec => {
-    let matches = byName.get(normalizeName(rec.rawName));
-    if (!matches || matches.length === 0) return;
+    const { candidates, fromOtherSite } = lookup(rec);
+    let matches = candidates;
+    if (matches.length === 0) return;
     if (matches.length > 1) {
       // 同姓同名で複数件ヒットする場合は、振替対象月（rec.ym）に実績がある方を優先する
       const monthIdx = allData.monthYms.indexOf(rec.ym);
@@ -1909,7 +1977,7 @@ function computeStdTransferDeltaBuckets(adjustRecords, employees) {
 
     const empDivClass = divLabel(emp.workType);
     if (!empDivClass) return;
-    addDelta(`${rec.base}|${empDivClass}|${rec.ym}`, -rec.hours);
+    if (!fromOtherSite) addDelta(`${rec.base}|${empDivClass}|${rec.ym}`, -rec.hours);
 
     if (rec.base !== rec.prj) {
       const destDivClass = divLabel(rec.role);
@@ -1928,21 +1996,19 @@ function computeStdTransferDeltaBuckets(adjustRecords, employees) {
 // セクションを分けて表示するため、業務区分をworkTypeClass()で3区分（栽培/出荷/配送）
 // に丸めず、emp.workType／rec.role（整理済み_増減シートF列）の生値（4区分）を
 // そのままバケットキーに使う。戻り値はcomputeStdTransferDeltaBuckets()と同じ
-// Map<"拠点|業務区分|YYYYMM", 時間>
-function computeStdHoursSiteTransferDeltaBuckets(adjustRecords, employees) {
+// Map<"拠点|業務区分|YYYYMM", 時間>。
+// 人を探す順番は buildTransferLookup() の決まり。3拠点以外から見つかった人は、
+// 元の拠点から引かず、PRJ の拠点にだけ足す（見つからない人のアラートはここでは出さない）
+function computeStdHoursSiteTransferDeltaBuckets(adjustRecords, employees, otherSiteEmployees = defaultOtherSiteEmployees()) {
   const deltaMap = new Map();
   const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
 
-  const byName = new Map();
-  employees.forEach(e => {
-    const key = normalizeName(e.name);
-    if (!byName.has(key)) byName.set(key, []);
-    byName.get(key).push(e);
-  });
+  const lookup = buildTransferLookup(employees, otherSiteEmployees);
 
   adjustRecords.forEach(rec => {
-    let matches = byName.get(normalizeName(rec.rawName));
-    if (!matches || matches.length === 0) return;
+    const { candidates, fromOtherSite } = lookup(rec);
+    let matches = candidates;
+    if (matches.length === 0) return;
     if (matches.length > 1) {
       // 同姓同名で複数件ヒットする場合は、振替対象月（rec.ym）に実績がある方を優先する
       const monthIdx = allData.monthYms.indexOf(rec.ym);
@@ -1955,7 +2021,7 @@ function computeStdHoursSiteTransferDeltaBuckets(adjustRecords, employees) {
     const emp = matches[0];
 
     if (!emp.workType) return;
-    addDelta(`${rec.base}|${emp.workType}|${rec.ym}`, -rec.hours);
+    if (!fromOtherSite) addDelta(`${rec.base}|${emp.workType}|${rec.ym}`, -rec.hours);
 
     if (rec.base !== rec.prj && rec.role) {
       addDelta(`${rec.prj}|${rec.role}|${rec.ym}`, rec.hours);
@@ -1989,19 +2055,17 @@ function findFulltimePartTimeRowForEmployee(div, e) {
 // 時間デルタ・人数デルタの計算、およびアラート収集で共有する。
 // 戻り値の各要素は、解決できた場合 { rec, ok:true, emp, empDivClass, tier, destDivClass }
 // （destDivClassはD=Eの場合null）、解決できない場合
-// { rec, ok:false, reason, emp? }（reasonは'ambiguous'/'div-unresolvable'/'tier-unresolvable'。
-// 氏名が整理済み_Mで一件も見つからない場合は、既存のcomputeStdTransferDeltaBuckets()と
-// 同様に無警告でスキップする＝配列に含めない）
-function resolveStdHoursTierAdjustRecords(adjustRecords, employees) {
+// { rec, ok:false, reason, emp? }（reasonは'ambiguous'/'div-unresolvable'/'tier-unresolvable'/
+// 'not-found'）。
+// 人を探す順番は buildTransferLookup() の決まり（同じ名前が複数あるときの決まりはこのタブの
+// 今のまま）。3拠点以外から見つかった人は fromOtherSite:true を付け、元の拠点から引く処理はしない。
+// どちらにも見つからない場合は'not-found'（勤務実績タブと同じく、計上年月が整理済み_Mの
+// 月の範囲にある行だけ）
+function resolveStdHoursTierAdjustRecords(adjustRecords, employees, otherSiteEmployees = defaultOtherSiteEmployees()) {
   const divLabel = wt => workTypeClass(wt).replace(/^wt-/, '');
   const isPartTimeEmp = e => isPartTimeEmployment(e.employment);
 
-  const byName = new Map();
-  employees.forEach(e => {
-    const key = normalizeName(e.name);
-    if (!byName.has(key)) byName.set(key, []);
-    byName.get(key).push(e);
-  });
+  const lookup = buildTransferLookup(employees, otherSiteEmployees);
 
   // 拠点・業務区分・氏名・雇用区分が一致する標準労働時間シート側の行を
   // findFulltimePartTimeRowForEmployee()で特定し、その行のfield値を返す
@@ -2013,8 +2077,13 @@ function resolveStdHoursTierAdjustRecords(adjustRecords, employees) {
 
   const results = [];
   adjustRecords.forEach(rec => {
-    let matches = byName.get(normalizeName(rec.rawName));
-    if (!matches || matches.length === 0) return; // 氏名不一致：無警告でスキップ
+    const { candidates, fromOtherSite } = lookup(rec);
+    let matches = candidates;
+    if (matches.length === 0) {
+      // 氏名不一致：勤務実績タブと同じアラートを出す（計上年月が整理済み_Mの月の範囲にある行だけ）
+      if (allData.monthYms.indexOf(rec.ym) >= 0) results.push({ rec, ok: false, reason: 'not-found' });
+      return;
+    }
 
     if (matches.length > 1) {
       // 同姓同名で複数件ヒットする場合は、振替対象月（rec.ym）に実績がある方を優先する
@@ -2051,7 +2120,7 @@ function resolveStdHoursTierAdjustRecords(adjustRecords, employees) {
     let destDivClass = null;
     if (rec.base !== rec.prj) destDivClass = divLabel(rec.role);
 
-    results.push({ rec, ok: true, emp, empDivClass, tier, destDivClass });
+    results.push({ rec, ok: true, emp, empDivClass, tier, destDivClass, fromOtherSite });
   });
   return results;
 }
@@ -2062,8 +2131,9 @@ function computeStdHoursTierTransferDeltaBuckets(adjustRecords, employees) {
   const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
   resolveStdHoursTierAdjustRecords(adjustRecords, employees)
     .filter(r => r.ok)
-    .forEach(({ rec, empDivClass, tier, destDivClass }) => {
-      addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -rec.hours);
+    .forEach(({ rec, empDivClass, tier, destDivClass, fromOtherSite }) => {
+      // 3拠点以外から見つかった人は、元の拠点から引かない（PRJ の拠点に足すだけ）
+      if (!fromOtherSite) addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -rec.hours);
       if (rec.base !== rec.prj && destDivClass) {
         addDelta(`${rec.prj}|${destDivClass}|${tier}|${rec.ym}`, rec.hours);
       }
@@ -2077,8 +2147,9 @@ function computeStdHoursTierTransferCountDeltaBuckets(adjustRecords, employees) 
   const addDelta = (key, val) => deltaMap.set(key, (deltaMap.get(key) || 0) + val);
   resolveStdHoursTierAdjustRecords(adjustRecords, employees)
     .filter(r => r.ok)
-    .forEach(({ rec, empDivClass, tier, destDivClass }) => {
-      addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -1);
+    .forEach(({ rec, empDivClass, tier, destDivClass, fromOtherSite }) => {
+      // 3拠点以外から見つかった人は、元の拠点から引かない（PRJ の拠点に足すだけ）
+      if (!fromOtherSite) addDelta(`${rec.base}|${empDivClass}|${tier}|${rec.ym}`, -1);
       if (rec.base !== rec.prj && destDivClass) {
         addDelta(`${rec.prj}|${destDivClass}|${tier}|${rec.ym}`, 1);
       }
@@ -2093,7 +2164,9 @@ function collectStdHoursTierTransferAlerts(adjustRecords, employees) {
   resolveStdHoursTierAdjustRecords(adjustRecords, employees)
     .filter(r => !r.ok)
     .forEach(({ rec, reason, emp }) => {
-      if (reason === 'ambiguous') {
+      if (reason === 'not-found') {
+        alerts.push(transferNameNotFoundAlert(rec));
+      } else if (reason === 'ambiguous') {
         alerts.push(`同姓同名で特定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」（対象月に実績がある候補が0件、または2件以上あります）`);
       } else if (reason === 'tier-unresolvable') {
         alerts.push(`アルバイトの区分（フルタイム/パートタイム）が判定できません：整理済み_増減シート${rec.rowNum}行目「${rec.rawName}」`);
