@@ -9,6 +9,9 @@
 //  (5) 「比較（3拠点）＞標準労働時間」タブの照合も同じ順番・同じ決まり。見つからない人には
 //      勤務実績タブと同じ文言のアラートが出る
 //  (6) 通常の集計（allData.employees）には3拠点以外の人が入らない
+//  (7) 探す順番は buildTransferLookup() の1か所で決まり、比較（3拠点）＞時間の●印
+//      （computeStdTransferDeltaBuckets）・勤務実績＞サマリー＞標準労働時間
+//      （computeStdHoursSiteTransferDeltaBuckets）も同じ順番・同じ扱いになる
 //
 // 実際のシートと同じ形のモックを使う：
 //  - 整理済み_M（gviz、headers=3）：A〜I列（B=フラグ数値、D=拠点、H=名前、I=入退社年月）と、
@@ -175,6 +178,14 @@ const ALERT_FUMEI = '氏名不一致：整理済み_増減シート8行目「不
       h202608: e.hours[ymIdx(202608)], h202609: e.hours[ymIdx(202609)], h202610: e.hours[ymIdx(202610)] };
     const tierDelta = computeStdHoursTierTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
     const tierCount = computeStdHoursTierTransferCountDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+    const timeDelta = computeStdTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+    const siteDelta = computeStdHoursSiteTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
+    // 照合の決まりが1か所（buildTransferLookup）で決まっていること：4か所とも同じ人に当たる
+    const lookup = buildTransferLookup(allData.employees, allData.otherSiteEmployees);
+    const lookups = stdTransferAdjustRecords.map(rec => {
+      const { candidates, fromOtherSite } = lookup(rec);
+      return { row: rec.rowNum, found: candidates.map(e => `${e.base}:${e.name}`), fromOtherSite };
+    });
     renderTransferAlerts();
     return {
       baseNames: allData.employees.map(e => `${e.base}:${e.name}`),
@@ -185,6 +196,9 @@ const ALERT_FUMEI = '氏名不一致：整理済み_増減シート8行目「不
       tierDelta: Array.from(tierDelta.entries()),
       tierCount: Array.from(tierCount.entries()),
       tierAlerts: collectStdHoursTierTransferAlerts(stdTransferAdjustRecords, allData.employees),
+      timeDelta: Array.from(timeDelta.entries()),
+      siteDelta: Array.from(siteDelta.entries()),
+      lookups,
     };
   });
   const adj = name => r.adjusted.find(e => e.name === name);
@@ -227,6 +241,30 @@ const ALERT_FUMEI = '氏名不一致：整理済み_増減シート8行目「不
     !r.tierDelta.some(([k]) => k.startsWith('群馬|')) && r.tierDelta.length === 4, r.tierDelta);
   check('見つからない人に勤務実績タブと同じ文言のアラート（2件ちょうど、範囲外の月の人は出ない）',
     JSON.stringify(r.tierAlerts) === JSON.stringify([ALERT_NGUYEN, ALERT_FUMEI]), r.tierAlerts);
+
+  console.log('\n[4] 照合の決まり（buildTransferLookup、4か所で共通）');
+  const lk = row => r.lookups.find(x => x.row === row);
+  check('4行目 PHAM　QUOC VIET：3拠点の行（いなべ）だけが候補（拠点空欄の行は候補にならない）',
+    JSON.stringify(lk(4)) === JSON.stringify({ row: 4, found: ['いなべ:PHAM　QUOC VIET'], fromOtherSite: false }), lk(4));
+  check('5行目 TRUONG CONG THAI：3拠点以外（志摩）から見つかる',
+    JSON.stringify(lk(5)) === JSON.stringify({ row: 5, found: ['志摩:TRUONG CONG THAI'], fromOtherSite: true }), lk(5));
+  check('6行目 NGUYEN　SY TRUONG（拠点空欄の行だけ）・8行目 不明 太郎：見つからない',
+    lk(6).found.length === 0 && lk(8).found.length === 0, [lk(6), lk(8)]);
+  check('7行目 谷口 一真：3拠点（南丹）から見つかる',
+    JSON.stringify(lk(7)) === JSON.stringify({ row: 7, found: ['南丹:谷口 一真'], fromOtherSite: false }), lk(7));
+
+  for (const [title, entries] of [['[5] 比較（3拠点）＞時間の●印（computeStdTransferDeltaBuckets）', r.timeDelta],
+    ['[6] 勤務実績＞サマリー＞標準労働時間（computeStdHoursSiteTransferDeltaBuckets）', r.siteDelta]]) {
+    console.log('\n' + title);
+    const d = k => (entries.find(([key]) => key === k) || [])[1];
+    check('TRUONG CONG THAI：いなべ・栽培 2026/10 に 190:31 を足す', near(d('いなべ|栽培|202610'), hm(190, 31)), entries);
+    check('志摩から引く処理は無い（志摩のキーが無い）', !entries.some(([k]) => k.startsWith('志摩|')), entries);
+    check('PHAM　QUOC VIET は今までどおりいなべから引く（2026/8 −32）', near(d('いなべ|栽培|202608'), -32), entries);
+    check('3拠点の人の応援は今のまま（南丹 −32:38／いなべ ＋32:38）',
+      near(d('南丹|栽培|202609'), -hm(32, 38)) && near(d('いなべ|栽培|202609'), hm(32, 38)), entries);
+    check('見つからない2人の分は入らない（群馬のキーなし、キーは4つだけ）',
+      !entries.some(([k]) => k.startsWith('群馬|')) && entries.length === 4, entries);
+  }
 
   check('ページのエラーなし', pageErrors.length === 0, pageErrors);
   console.log(`\nOK: ${okCount} / NG: ${ngCount}`);
