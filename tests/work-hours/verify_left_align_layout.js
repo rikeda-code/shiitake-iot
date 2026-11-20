@@ -1,15 +1,22 @@
-// dashboard/work-hours.html の、月を横に並べる表・グラフの見た目（左詰め・1か月分の幅）の検証。
-//  (1) 期間 3か月（2026/8〜2026/10）：対象の全画面で、表の列・グラフの1か月分の幅が「12か月表示のときの幅」
+// dashboard/work-hours.html の、月を横に並べる表・グラフの見た目（左詰め・1か月分の幅・見出しと棒の位置）の検証。
+// 1か月分の幅の基準は「画面の幅に14か月がちょうど入る幅」（MONTH_COLUMN_TARGET＝14）。
+//  (1) 期間 3か月（2026/8〜2026/10）：対象の全画面で、表の列・グラフの1か月分の幅が「14か月表示のときの幅」
 //      以下で、左詰め（表・グラフの描画部分の右側が空いている）。横スクロールは出ない
-//  (2) 期間 12か月（2025/11〜2026/10）：今までと同じ（グラフは右に足す幅が0、表は幅を変えない）
-//  (3) 期間 17か月（2025/10〜2027/2）：横スクロールが出て、1か月分の幅が12か月のときと同じ
-//      （勤務実績は実績の月だけ＝13か月）
+//  (2) 期間 14か月（2025/9〜2026/10）：横スクロールが出ず、14か月が1画面に入る（グラフは右に足す幅が0。表は画面に
+//      収まれば自動の幅のまま、収まらなければ月の列を狭めて収める）
+//  (2b) 期間 12か月（2025/11〜2026/10）：左詰めで、1か月分の幅が14か月のときと同じ
+//  (3) 期間 17か月（2025/6〜2026/10）：横スクロールが出て、1か月分の幅が14か月のときと同じ
 //  (4) 勤務実績で、期間の外の空の枠（月名だけ・月名も無い）や空の列が出ない
-// 対象：勤務実績＞拠点（群馬）・サマリー（業務区分別（表）・業務区分別（グラフ）・標準労働時間）・生産実績、
+//  (5) 期間 3・12・14・17か月の全グラフで、各月の見出しの位置とその月の棒（棒の組）の中央がそろい、
+//      値のある棒がその月の枠の外（いちばん右の月なら見出しの右）にはみ出さない
+// 対象：勤務実績＞拠点（群馬）・サマリー（業務区分別（表）・業務区分別（グラフ）・標準労働時間）・生産性・比較（拠点別）・
+//       比較（3拠点）＞時間・生産実績、
 //       予実＞生産計画・予定標準工数(h)・比較（繁忙期見込み）（拠点・業務別／拠点サマリ／3拠点サマリ／表／要員計画）
 //
-// モックは verify_period_from_to.js と同じ（実際のシートと同じ形の gviz。生産実績だけは組み立て済みの形を
-// 読み込みのキャッシュに入れる）。画面の幅は 1600×1000 で測る。
+// モックは verify_period_from_to.js と同じ形（実際のシートと同じ形の gviz。生産実績だけは組み立て済みの形を
+// 読み込みのキャッシュに入れる）。実績・計画の月だけ 2025/6 からに広げている。画面の幅は 1600×1000 で測る。
+// グラフの動き（アニメーション）が終わってから測る（時計は止めない）。
+
 const { chromium } = require('playwright');
 const http = require('http');
 const fs = require('fs');
@@ -27,10 +34,11 @@ function monthsBetween(from, to) {
   while (y * 100 + m <= ymNum(to)) { out.push(`${y}/${m}`); m++; if (m > 12) { m = 1; y++; } }
   return out;
 }
-const M_MONTHS = monthsBetween('2025/8', '2026/10');     // 整理済み_Mの実績の月
-const PLAN_MONTHS = monthsBetween('2025/10', '2027/2');  // 整理済み_計画_更新の計画の月
+// 期間17か月（2025/6〜2026/10）で勤務実績・予実のどちらも17か月になるよう、実績・計画とも2025/6から置く
+const M_MONTHS = monthsBetween('2025/6', '2026/10');     // 整理済み_Mの実績の月
+const PLAN_MONTHS = monthsBetween('2025/6', '2027/2');   // 整理済み_計画_更新の計画の月
 const MERGE_MONTHS = monthsBetween('2026/7', '2027/2');  // 標準労働時間シートの増減の月列
-const ALL_OPTION_LABELS = monthsBetween('2025/8', '2027/2').map(m => { const [y, mo] = m.split('/'); return `${y}年${+mo}月`; });
+const ALL_OPTION_LABELS = monthsBetween('2025/6', '2027/2').map(m => { const [y, mo] = m.split('/'); return `${y}年${+mo}月`; });
 
 /* ===================== 人（すべて群馬・PRJ=群馬） ===================== */
 const ALL_PAST = Object.fromEntries(M_MONTHS.map(m => [m, 160]));
@@ -198,7 +206,9 @@ async function openPage(browser, baseUrl, opts = {}) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   page.__errors = [];
   page.on('pageerror', e => { page.__errors.push(e.message); console.log('  [pageerror]', e.message); });
-  if (opts.now) await page.clock.setFixedTime(opts.now);
+  // 時計は止めずに進める（install）：Chart.js のグラフの動き（アニメーション）は Date.now() で進むため、
+  // setFixedTime で止めると動きが終わらず、棒の位置を正しく測れない
+  if (opts.now) await page.clock.install({ time: opts.now });
   if (opts.session) {
     await page.addInitScript(s => { try { sessionStorage.setItem('shiitake_wh_session_state', s); } catch (e) {} }, JSON.stringify(opts.session));
   }
@@ -225,6 +235,9 @@ const SCREENS = [
   { name: 'サマリー＞業務区分別（表）', prep: "activeMode = 'summary'; renderSummary(); switchToSummarySubtab('table');", wait: 'table' },
   { name: 'サマリー＞業務区分別（グラフ）', prep: "activeMode = 'summary'; renderSummary(); switchToSummarySubtab('work-chart');", wait: 'wc_0_h' },
   { name: 'サマリー＞標準労働時間', prep: "activeMode = 'summary'; stdHoursMetric = 'hours'; stdHoursSubtab = 'site'; renderSummary(); switchToSummarySubtab('std-hours');", wait: 'stdh_site_0_0' },
+  { name: '勤務実績＞生産性', prep: "activeMode = 'productivity'; renderProductivityTab();", wait: 'prd-0' },
+  { name: '勤務実績＞比較＞拠点別', prep: "activeMode = 'compare'; compareSubtab = 'site'; renderCompareTab();", wait: 'cmp-群馬-栽培' },
+  { name: '勤務実績＞比較（3拠点）＞時間', prep: "activeMode = 'comparesite'; compareSiteViewMode = 'time'; renderCompareSiteTab();", wait: 'comparesite-actual' },
   { name: '勤務実績＞生産実績', prep: "activeMode = 'production'; renderProductionTab();", wait: 'table' },
   { name: '予実＞生産計画', prep: "activeMode = 'plan'; renderPlanTab();", wait: 'table' },
   { name: '予実＞予定標準工数(h)', prep: "activeMode = 'planstdhours'; renderPlanStdHoursTab();", wait: 'table' },
@@ -244,8 +257,14 @@ async function measure(page, screen) {
   } else {
     await page.waitForFunction(id => { const el = document.getElementById(id); return el && window.Chart && Chart.getChart(el); }, screen.wait, { timeout: 30000 });
   }
-  // 1か月分の幅をそろえる処理（グラフの描き直し・表の幅合わせ）が終わるのを待つ
-  await page.waitForTimeout(600);
+  // 1か月分の幅をそろえる処理（グラフの描き直し・表の幅合わせ）が終わり、グラフの動き（アニメーション）が止まるのを待つ
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => [...document.querySelectorAll('#main canvas')].every(c => {
+    const ch = window.Chart && Chart.getChart(c);
+    if (!ch) return true;
+    return ch.data.datasets.every((d, di) => (ch.getDatasetMeta(di).data || []).every(el => !Object.values(el.$animations || {}).some(a => a && a._active)));
+  }), null, { timeout: 30000 });
+  await page.waitForTimeout(100);
   return page.evaluate(() => {
     const MONTH_RE = /^\d{4}年\d{1,2}月$|^\d{4}\/\d{1,2}(\s|$)/;
     const scroller = el => {
@@ -257,12 +276,36 @@ async function measure(page, screen) {
     };
     const charts = [...document.querySelectorAll('#main canvas')].map(c => {
       const ch = window.Chart && Chart.getChart(c);
-      if (!ch || !ch.chartArea) return null;
+      if (!ch || !ch.chartArea || !c.offsetWidth) return null; // 隠れているグラフ（別の表示モード）は測らない
       const labels = (ch.data.labels || []).map(String);
       if (!labels.length || !labels.every(l => MONTH_RE.test(l))) return null;
       const a = ch.chartArea;
-      return { id: c.id, n: labels.length, labels, perMonth: (a.right - a.left) / labels.length, canvasW: c.getBoundingClientRect().width,
-        areaRight: a.right, spacer: ch.scales.monthSlotSpacer ? ch.scales.monthSlotSpacer.width : 0, scroll: scroller(c), legendH: ch.legend ? ch.legend.height : 0 };
+      const slot = (a.right - a.left) / labels.length;
+      // 見出しと棒の位置：月ごとに、見出しの位置（横軸の目盛り）と、その月の棒の組（値の無い棒の場所も含む）の
+      // 中央との差。値のある棒が、その月の枠（見出しの位置±1か月分の幅の半分）の外に出ていないか
+      const xs = ch.scales.x;
+      let maxOff = 0, outside = 0, bars = 0;
+      labels.forEach((l, i) => {
+        const tick = xs.getPixelForValue(i);
+        const els = [];
+        ch.data.datasets.forEach((d, di) => {
+          const m = ch.getDatasetMeta(di);
+          if (m.type !== 'bar' || !ch.isDatasetVisible(di)) return;
+          const el = m.data[i];
+          if (!el || !isFinite(el.x)) return;
+          const v = el.$context && el.$context.parsed;
+          els.push({ lo: el.x - (el.width || 0) / 2, hi: el.x + (el.width || 0) / 2, has: !!(v && v.y != null) });
+        });
+        if (!els.length) return;
+        bars++;
+        const lo = Math.min(...els.map(e => e.lo)), hi = Math.max(...els.map(e => e.hi));
+        maxOff = Math.max(maxOff, Math.abs((lo + hi) / 2 - tick));
+        if (els.some(e => e.has && (e.lo < tick - slot / 2 - 0.5 || e.hi > tick + slot / 2 + 0.5))) outside++;
+      });
+      const lastTick = xs.getPixelForValue(labels.length - 1);
+      return { id: c.id, n: labels.length, labels, perMonth: slot, canvasW: c.getBoundingClientRect().width,
+        areaRight: a.right, spacer: ch.scales.monthSlotSpacer ? ch.scales.monthSlotSpacer.width : 0, scroll: scroller(c), legendH: ch.legend ? ch.legend.height : 0,
+        align: { bars, maxOff, outside, lastIn: lastTick > a.left && lastTick < a.right } };
     }).filter(Boolean);
     const tables = [...document.querySelectorAll('#main table')].map(t => {
       const r = t.querySelector('thead tr') || t.querySelector('tr');
@@ -294,58 +337,74 @@ const maxOf = a => Math.max(...a);
     for (const sc of SCREENS) out[sc.name] = await measure(page, sc);
     return out;
   };
-  const r12 = await runAll('2025年11月', '2026年10月');
-  const r3 = await runAll('2026年8月', '2026年10月');
-  const r17 = await runAll('2025年10月', '2027年2月');
+  const PERIODS = {
+    14: ['2025年9月', '2026年10月'],
+    3: ['2026年8月', '2026年10月'],
+    12: ['2025年11月', '2026年10月'],
+    17: ['2025年6月', '2026年10月'],
+  };
+  const R = {};
+  for (const p of [14, 3, 12, 17]) R[p] = await runAll(...PERIODS[p]);
+  const r14 = R[14], r3 = R[3], r12 = R[12], r17 = R[17];
+  const baseChart = (sc, c) => r14[sc.name].charts.find(x => x.id === c.id);
 
-  console.log('\n[1] 期間 3か月（2026/8〜2026/10）：1か月分の幅が12か月以下で、左詰め');
+  console.log('\n[1] 期間 3か月（2026/8〜2026/10）：1か月分の幅が14か月のとき以下で、左詰め');
   for (const sc of SCREENS) {
-    const a = r3[sc.name], b = r12[sc.name];
+    const a = r3[sc.name], b = r14[sc.name];
     if (a.charts.length) {
       const ok = a.charts.every(c => {
-        const base = b.charts.find(x => x.id === c.id);
+        const base = baseChart(sc, c);
         return base && c.n === 3 && c.perMonth <= base.perMonth + 0.5 && c.perMonth >= base.perMonth - 2
           && c.areaRight < c.canvasW * 0.5 && !c.scroll && Math.abs(c.legendH - base.legendH) < 1;
       });
-      check(`${sc.name}：グラフの1か月分の幅は12か月のときと同じ（以下）、描画部分は左半分に収まり右が空く、凡例の高さも同じ`, ok,
-        a.charts.map(c => { const base = b.charts.find(x => x.id === c.id); return [c.id, c.n, +c.perMonth.toFixed(1), base && +base.perMonth.toFixed(1), Math.round(c.areaRight), Math.round(c.canvasW), c.legendH, base && base.legendH]; }));
+      check(`${sc.name}：グラフの1か月分の幅は14か月のときと同じ（以下）、描画部分は左半分に収まり右が空く、凡例の高さも同じ`, ok,
+        a.charts.map(c => { const base = baseChart(sc, c); return [c.id, c.n, +c.perMonth.toFixed(1), base && +base.perMonth.toFixed(1), Math.round(c.areaRight), Math.round(c.canvasW), c.legendH, base && base.legendH]; }));
     }
     if (a.tables.length) {
       const ok = a.tables.every((t, i) => {
         const base = b.tables[i];
         return base && t.months === 3 && maxOf(t.monthW) <= maxOf(base.monthW) + 1 && t.tableW < t.parentW - 50 && !t.scroll && t.fit === 'fitted';
       });
-      check(`${sc.name}：表の月の列の幅は12か月のとき以下、表は左詰めで右が空く`, ok,
+      check(`${sc.name}：表の月の列の幅は14か月のとき以下、表は左詰めで右が空く`, ok,
         a.tables.map((t, i) => [t.months, t.monthW.map(Math.round), b.tables[i] && maxOf(b.tables[i].monthW).toFixed(0), Math.round(t.tableW), t.parentW, t.fit]));
     }
   }
 
-  console.log('\n[2] 期間 12か月（2025/11〜2026/10）：今までと同じ');
+  console.log('\n[2] 期間 14か月（2025/9〜2026/10）：横スクロールが出ず、14か月が1画面に入る');
   for (const sc of SCREENS) {
-    const a = r12[sc.name];
-    if (a.charts.length) check(`${sc.name}：グラフは12本で、右に足す幅は0、横スクロールなし`, a.charts.every(c => c.n === 12 && c.spacer === 0 && !c.scroll), a.charts.map(c => [c.id, c.n, c.spacer, c.scroll]));
-    if (a.tables.length) check(`${sc.name}：表は12列で、幅を変えない（今までどおり）`, a.tables.every(t => t.months === 12 && t.fit === 'same'), a.tables.map(t => [t.months, t.fit]));
+    const a = r14[sc.name];
+    if (a.charts.length) check(`${sc.name}：グラフは14本で、右に足す幅は0、横スクロールなし`, a.charts.every(c => c.n === 14 && c.spacer === 0 && !c.scroll), a.charts.map(c => [c.id, c.n, c.spacer, c.scroll]));
+    if (a.tables.length) check(`${sc.name}：表は14列で、横スクロールなし（画面に収まる表は自動の幅のまま、収まらない表は月の列を狭めて収める）`, a.tables.every(t => t.months === 14 && (t.fit === 'same' || t.fit === 'fitted') && !t.scroll && t.tableW <= t.parentW + 1), a.tables.map(t => [t.months, t.fit, t.scroll, Math.round(t.tableW), t.parentW]));
   }
 
-  console.log('\n[3] 期間 17か月（2025/10〜2027/2）：横スクロールが出て、1か月分の幅が12か月のときと同じ');
+  console.log('\n[2b] 期間 12か月（2025/11〜2026/10）：左詰めで、1か月分の幅が14か月のときと同じ');
   for (const sc of SCREENS) {
-    const a = r17[sc.name], b = r12[sc.name];
-    const isJisseki = !/^(予実|比較（繁忙期)/.test(sc.name);
-    const want = isJisseki ? 13 : 17;
+    const a = r12[sc.name], b = r14[sc.name];
+    if (a.charts.length) check(`${sc.name}：グラフは12本・右に幅を足して左詰め・1か月分の幅は14か月のときと同じ・横スクロールなし`,
+      a.charts.every(c => { const base = baseChart(sc, c); return base && c.n === 12 && c.spacer > 0 && !c.scroll && c.perMonth <= base.perMonth + 0.5 && c.perMonth >= base.perMonth - 2; }),
+      a.charts.map(c => { const base = baseChart(sc, c); return [c.id, c.n, c.spacer, +c.perMonth.toFixed(1), base && +base.perMonth.toFixed(1), c.scroll]; }));
+    if (a.tables.length) check(`${sc.name}：表は12列・左詰め・月の列の幅は14か月のときの平均と同じ`,
+      a.tables.every((t, i) => { const base = b.tables[i]; return base && t.months === 12 && t.fit === 'fitted' && !t.scroll && Math.abs(avg(t.monthW) - avg(base.monthW)) <= 1.5; }),
+      a.tables.map((t, i) => [t.months, t.fit, avg(t.monthW).toFixed(1), b.tables[i] && avg(b.tables[i].monthW).toFixed(1)]));
+  }
+
+  console.log('\n[3] 期間 17か月（2025/6〜2026/10）：横スクロールが出て、1か月分の幅が14か月のときと同じ');
+  for (const sc of SCREENS) {
+    const a = r17[sc.name], b = r14[sc.name];
     if (a.charts.length) {
       const ok = a.charts.every(c => {
-        const base = b.charts.find(x => x.id === c.id);
-        return base && c.n === want && Math.abs(c.perMonth - base.perMonth) <= 1.5 && c.scroll;
+        const base = baseChart(sc, c);
+        return base && c.n === 17 && Math.abs(c.perMonth - base.perMonth) <= 1.5 && c.scroll;
       });
-      check(`${sc.name}：グラフは${want}本・横スクロールあり・1か月分の幅は12か月のときと同じ`, ok,
-        a.charts.map(c => { const base = b.charts.find(x => x.id === c.id); return [c.id, c.n, +c.perMonth.toFixed(1), base && +base.perMonth.toFixed(1), c.scroll]; }));
+      check(`${sc.name}：グラフは17本・横スクロールあり・1か月分の幅は14か月のときと同じ`, ok,
+        a.charts.map(c => { const base = baseChart(sc, c); return [c.id, c.n, +c.perMonth.toFixed(1), base && +base.perMonth.toFixed(1), c.scroll]; }));
     }
     if (a.tables.length) {
       const ok = a.tables.every((t, i) => {
         const base = b.tables[i];
-        return base && t.months === want && Math.abs(avg(t.monthW) - avg(base.monthW)) <= 1.5 && t.scroll && t.fit === 'fitted';
+        return base && t.months === 17 && Math.abs(avg(t.monthW) - avg(base.monthW)) <= 1.5 && t.scroll && t.fit === 'fitted';
       });
-      check(`${sc.name}：表は${want}列・横スクロールあり・月の列の幅は12か月のときの平均と同じ`, ok,
+      check(`${sc.name}：表は17列・横スクロールあり・月の列の幅は14か月のときの平均と同じ`, ok,
         a.tables.map((t, i) => [t.months, avg(t.monthW).toFixed(1), b.tables[i] && avg(b.tables[i].monthW).toFixed(1), t.scroll, t.fit]));
     }
   }
@@ -356,6 +415,18 @@ const maxOf = a => Math.max(...a);
     const okC = a.charts.every(c => c.n === 3 && c.labels.every(l => /^2026年(8|9|10)月$/.test(l)));
     const okT = a.tables.every(t => t.months === 3 && t.emptyHeads === 0);
     check(`${sc.name}：横軸・列は 2026年8月〜10月の3つだけ（空の枠・空の列なし）`, okC && okT, [a.charts.map(c => c.labels), a.tables.map(t => [t.months, t.emptyHeads])]);
+  }
+
+  console.log('\n[5] 全グラフ：各月の見出しの位置と、その月の棒（棒の組）の位置がそろい、いちばん右の月の棒が見出しの外にはみ出さない');
+  for (const p of [3, 12, 14, 17]) {
+    for (const sc of SCREENS) {
+      const cs = R[p][sc.name].charts.filter(c => c.align.bars > 0);
+      if (!cs.length) continue;
+      check(`期間${p}か月 ${sc.name}：棒の組の中央と見出しの位置の差が1.5px以内`, cs.every(c => c.align.maxOff <= 1.5),
+        cs.map(c => [c.id, +c.align.maxOff.toFixed(1)]));
+      check(`期間${p}か月 ${sc.name}：値のある棒はその月の枠の中、いちばん右の月の見出しも描画部分の中`, cs.every(c => c.align.outside === 0 && c.align.lastIn),
+        cs.map(c => [c.id, c.align.outside, c.align.lastIn]));
+    }
   }
 
   check('ページのエラーなし', page.__errors.length === 0, page.__errors);
