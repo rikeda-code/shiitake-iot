@@ -296,8 +296,8 @@ async function openPage(browser, opts) {
   await page.waitForFunction(() => (document.getElementById('last-updated').textContent || '').includes('最終更新'), null, { timeout: 30000 });
   await page.waitForTimeout(200);
   await page.evaluate(() => loadStdSettingsSheetOnce().catch(() => null));
-  // 表示期間は2025年10月から12ヵ月（境目月が2026/10になる場合も同じ範囲を見る）
-  await page.evaluate(() => { periodStartMonth = '2025年10月'; periodMonthCount = 12; });
+  // 表示期間は2025年10月〜2027年2月（モックの計画の最後の月。予実のタブは期間の月だけを表示するため、全部の計画の月を入れる）
+  await page.evaluate(() => { periodStartMonth = '2025年10月'; periodEndMonth = '2027年2月'; });
   return page;
 }
 

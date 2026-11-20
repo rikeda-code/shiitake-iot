@@ -745,12 +745,12 @@
     <div class="header-period-filter" id="header-period-filter">
       <div class="header-period-filter-col">
         <label class="header-period-filter-label">開始月</label>
-        <select id="period-start-select" onchange="onPeriodFilterChange()"></select>
+        <select id="period-start-select" onchange="onPeriodFilterChange('start')"></select>
       </div>
       <span class="header-period-filter-sep">～</span>
       <div class="header-period-filter-col">
-        <label class="header-period-filter-label">表示月数</label>
-        <select id="period-count-select" onchange="onPeriodFilterChange()"></select>
+        <label class="header-period-filter-label">終了月</label>
+        <select id="period-end-select" onchange="onPeriodFilterChange('end')"></select>
       </div>
     </div>
     <div class="header-emp-filter" id="header-site-filter">
@@ -999,8 +999,8 @@ let planCmpSubtab = 'site';        // 比較（繁忙期見込み）タブのサ
 let planCmpSiteTab = null;         // 比較（繁忙期見込み）タブの選択中拠点（更新ボタン押下後も保持）。
                                     // nullの場合はrenderPlanCompareCharts2()側でavailSites[0]に初期化される
 
-let periodStartMonth = null;       // 集計期間フィルターの開始月（allData.monthsの値と同じ文字列。全タブ共通のグローバルな絞り込み）
-let periodMonthCount = 12;         // 集計期間フィルターの表示月数（1〜12）
+let periodStartMonth = null;       // 集計期間フィルターの開始月（「YYYY年M月」の形。allData.monthsと同じ書き方。全タブ共通のグローバルな絞り込み）
+let periodEndMonth = null;         // 集計期間フィルターの終了月（開始月と同じ形）。選択肢は整理済み_Mの実績の月＋整理済み_計画_更新の計画の月
 
 // ページリロード（F5・Ctrl+Shift+R等）時に直前の表示状態を復元するための保持。
 // タブ・ウィンドウを閉じると消えるsessionStorageを使う（複数人で共有する業務データではなく、
@@ -1022,7 +1022,7 @@ function saveSessionState() {
       stdHoursMetric,
       summarySubtab: document.querySelector('.summary-subtab.active')?.dataset.tab || null,
       periodStartMonth,
-      periodMonthCount,
+      periodEndMonth,
       empTypeFilter: empTypeFilter ? [...empTypeFilter] : null,
       // renderEmpTypeFilterUI()が「保存時点で存在した全雇用区分」と「新しく現れた雇用区分」を
       // 区別するために使う一覧。これが無いと、復元直後の初回loadAll()実行時点では
@@ -1053,12 +1053,12 @@ function getRealMonths() {
   return allData.months.filter((m, i) => allData.monthYms[i] !== null && allData.monthYms[i] !== undefined);
 }
 
-// 表示月数が少ないときの「間延び」対策：開始月から常にMONTH_COLUMN_TARGET本の列/棒に
+// 期間の月数が少ないときの「間延び」対策：開始月から常にMONTH_COLUMN_TARGET本の列/棒に
 // 揃えた拡張月リストを返す（開始月〜シート実在最新月がこれを超える場合は、その本数
 // そのまま・縮小せず全て表示する。超過分は呼び出し側で横スクロール対応する）。
 // 3段階の区分：
-//   1. 選択中の表示月数の範囲内（inRange:true, hasData:true）→ 実データ
-//   2. 表示月数の範囲外だが、シートに実在する月の範囲内 → 見出しのみ、データは空欄
+//   1. 選択中の期間の月数の範囲内（inRange:true, hasData:true）→ 実データ
+//   2. 期間の月数の範囲外だが、シートに実在する月の範囲内 → 見出しのみ、データは空欄
 //   3. シートの実在最新月を超えた埋め合わせ分 → 見出し自体も空欄（month: ''）
 // 既存の月リスト生成処理（applyPeriodFilter等）を置き換えるものではなく、
 // 呼び出し側で選択的に利用する追加のラップ関数
@@ -1426,23 +1426,82 @@ function getExtendedDisplayMonths() {
   return { months: extendedMonths.map(e => e.month), originalCount: selectedMonths.length };
 }
 
-// months/monthYms/employees.hours を、選択中の開始月から表示月数分だけスライスする
-// （表示月数が最新月を超える場合は自動的に存在する分だけになる）。
-// 末尾の「実質勤務時間」等、月ではない疑似列（monthYms===null）はスライス対象外とし、常にそのまま残す
+/* ── 集計期間（開始月〜終了月） ───────────────────────────────────
+   選べる月は、整理済み_Mの実績の月（allData.monthYms）と整理済み_計画_更新の計画の月
+   （planData.months）を合わせたもの。期間は年月の数値（YYYYMM）で比べる */
+function ymToPeriodLabel(ym) {
+  return `${Math.floor(ym / 100)}年${ym % 100}月`;
+}
+
+// 期間の選択肢（YYYYMMの昇順）
+function getPeriodOptionYms() {
+  const set = new Set();
+  if (allData) allData.monthYms.forEach(ym => { if (ym !== null && ym !== undefined) set.add(ym); });
+  if (planData) planData.months.forEach(m => { const ym = monthToNum(m); if (ym) set.add(ym); });
+  return [...set].sort((a, b) => a - b);
+}
+
+// 初めて開いたときの期間：開始月＝今日の年の前年の10月（選択肢に無ければいちばん古い月）、
+// 終了月＝整理済み_計画_更新に記載のある最後の月（読めなければ選択肢の最後の月）
+function defaultPeriodYms(optionYms, today) {
+  const wantStart = ((today || new Date()).getFullYear() - 1) * 100 + 10;
+  const start = optionYms.includes(wantStart) ? wantStart : optionYms[0];
+  const planYms = planData ? planData.months.map(monthToNum).filter(Boolean) : [];
+  let end = planYms.length ? Math.max(...planYms) : optionYms[optionYms.length - 1];
+  if (!optionYms.includes(end)) end = optionYms[optionYms.length - 1];
+  if (end < start) end = start;
+  return { start, end };
+}
+
+function periodStartYm() { return periodStartMonth ? monthLabelToYm(periodStartMonth) : null; }
+function periodEndYm() { return periodEndMonth ? monthLabelToYm(periodEndMonth) : null; }
+
+// 月（「YYYY年M月」「YYYY/M」のどちらの形でもよい）が集計期間に入っているか。
+// 期間が未設定のときは常にtrue
+function isMonthInPeriod(m) {
+  const s = periodStartYm(), e = periodEndYm();
+  if (s == null || e == null) return true;
+  if (!m) return false;
+  const ym = monthToNum(m);
+  return ym >= s && ym <= e;
+}
+
+// 予実のタブ用：計画データ（{months, records}）を集計期間の月だけに絞る
+function slicePlanDataToPeriod(data) {
+  if (!data) return data;
+  const idxs = data.months.map((_, i) => i).filter(i => isMonthInPeriod(data.months[i]));
+  return {
+    ...data,
+    months: idxs.map(i => data.months[i]),
+    records: data.records.map(r => ({ ...r, values: idxs.map(i => r.values[i]) })),
+  };
+}
+
+// 勤務実績の「間延び」対策で足した期間の外の枠（mi >= originalCount）の値を空にする
+function maskOutsidePeriod(arr, originalCount) {
+  return arr.map((v, i) => (i < originalCount ? v : null));
+}
+
+// months/monthYms/employees.hours を、集計期間（開始月〜終了月）の実績の月だけに絞る
+// （期間が未来の月にかかっていても、実績の月だけが残る）。
+// 末尾の「実質勤務時間」等、月ではない疑似列（monthYms===null）は対象外とし、常にそのまま残す
 function applyPeriodFilter(data) {
-  if (!periodStartMonth || !data.monthYms) return data;
+  if (!periodStartMonth || !periodEndMonth || !data.monthYms) return data;
   let realCount = data.monthYms.length;
   while (realCount > 0 && (data.monthYms[realCount - 1] === null || data.monthYms[realCount - 1] === undefined)) realCount--;
 
-  const startIdx = data.months.slice(0, realCount).indexOf(periodStartMonth);
-  if (startIdx === -1) {
-    // 選択中の開始月がこのデータセットに存在しない（想定外のデータ欠損等）。
-    // 「フィルタが効かず全件表示になる」誤解を防ぐため、全件ではなく空データを返す
+  const sYm = periodStartYm(), eYm = periodEndYm();
+  const idxs = [];
+  for (let i = 0; i < realCount; i++) {
+    const ym = data.monthYms[i];
+    if (ym >= sYm && ym <= eYm) idxs.push(i);
+  }
+  if (!idxs.length) {
+    // 期間に実績の月が1つも無い（期間がすべて未来の月など）。全件ではなく空データを返す
     return { ...data, months: [], monthYms: [], employees: data.employees.map(e => ({ ...e, hours: [] })) };
   }
-  const endIdx = Math.min(realCount, startIdx + periodMonthCount);
 
-  const sliceKeepTail = arr => arr ? arr.slice(startIdx, endIdx).concat(arr.slice(realCount)) : arr;
+  const sliceKeepTail = arr => arr ? idxs.map(i => arr[i]).concat(arr.slice(realCount)) : arr;
   return {
     ...data,
     months: sliceKeepTail(data.months),
@@ -2177,8 +2236,15 @@ function collectStdHoursTierTransferAlerts(adjustRecords, employees) {
 
 // 現在のトグル状態・雇用区分フィルター・集計期間フィルターに応じたデータを返す
 function getActiveData() {
+  return applyPeriodFilter(getActiveDataAllPeriods());
+}
+
+// getActiveData()から集計期間の絞り込みだけを外したもの。予実＞比較（繁忙期見込み）は、
+// 全部の月で計算してから表示する月だけを期間で選ぶ（予想の基礎にする最新の実績月などが
+// 期間の外にあっても、期間の中の数字が変わらないようにするため）
+function getActiveDataAllPeriods() {
   const base = (transferMode && transferAdjusted) ? { ...allData, employees: transferAdjusted.employees } : allData;
-  return applyPeriodFilter({ ...base, employees: applyEmpTypeFilter(base.employees) });
+  return { ...base, employees: applyEmpTypeFilter(base.employees) };
 }
 
 function setTransferMode(mode) {
@@ -2361,7 +2427,7 @@ function renderTabs(bases) {
   renderSubTabs(bases);
 }
 
-// 「設定」グループを開いている間は、画面上部の絞り込み（開始月・表示月数・拠点・
+// 「設定」グループを開いている間は、画面上部の絞り込み（開始月・終了月・拠点・
 // 業務区分・雇用形態・振替なし／あり）を非表示にする。勤務実績・予実に戻ったら
 // 再表示する（選択状態はグローバル変数のままなので変わらない）
 function updateFilterVisibility() {
@@ -2833,32 +2899,45 @@ function buildCountChart() {
 
 /* ── 集計期間フィルター（全タブ共通のグローバルな絞り込み。画面上段に1つだけ表示） ── */
 // preserveStart/preserveCount を渡すと、更新（再読み込み）前の選択状態を維持する
-function renderPeriodFilterUI(preserveStart, preserveCount) {
-  const realMonths = getRealMonths();
-
-  // デフォルトの開始月：直近（最新）の「10月」。データ更新でより新しい10月が
-  // 現れれば自動的にそちらに切り替わる。10月が1件も無い場合は先頭月にフォールバック
-  let defaultStart = realMonths[0];
-  for (let i = realMonths.length - 1; i >= 0; i--) {
-    if (/10月$/.test(realMonths[i])) { defaultStart = realMonths[i]; break; }
-  }
-  periodStartMonth = (preserveStart && realMonths.includes(preserveStart)) ? preserveStart : defaultStart;
-  periodMonthCount = preserveCount || 12;
-
-  const startSel = document.getElementById('period-start-select');
-  startSel.innerHTML = realMonths.map(m =>
-    `<option value="${m}"${m === periodStartMonth ? ' selected' : ''}>${m}</option>`
-  ).join('');
-
-  const countSel = document.getElementById('period-count-select');
-  countSel.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1).map(n =>
-    `<option value="${n}"${n === periodMonthCount ? ' selected' : ''}>${n} ヵ月</option>`
-  ).join('');
+function renderPeriodFilterUI(preserveStart, preserveEnd) {
+  const optionYms = getPeriodOptionYms();
+  if (!optionYms.length) return;
+  const def = defaultPeriodYms(optionYms);
+  const keep = label => {
+    const ym = label ? monthLabelToYm(label) : null;
+    return ym !== null && optionYms.includes(ym) ? ym : null;
+  };
+  let start = keep(preserveStart) ?? def.start;
+  let end = keep(preserveEnd) ?? def.end;
+  if (end < start) end = start;
+  periodStartMonth = ymToPeriodLabel(start);
+  periodEndMonth = ymToPeriodLabel(end);
+  syncPeriodSelects(optionYms);
 }
 
-function onPeriodFilterChange() {
+function syncPeriodSelects(optionYms) {
+  const opts = (optionYms || getPeriodOptionYms()).map(ymToPeriodLabel);
+  const fill = (id, selected) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = opts.map(m => `<option value="${m}"${m === selected ? ' selected' : ''}>${m}</option>`).join('');
+    sel.value = selected;
+  };
+  fill('period-start-select', periodStartMonth);
+  fill('period-end-select', periodEndMonth);
+}
+
+// changed：'start'（開始月を変えた）／'end'（終了月を変えた）。
+// 終了月が開始月より前になったら、変えなかった方をそろえる（開始月を変えたら終了月＝開始月、
+// 終了月を変えたら開始月＝終了月）
+function onPeriodFilterChange(changed) {
   periodStartMonth = document.getElementById('period-start-select').value;
-  periodMonthCount = parseInt(document.getElementById('period-count-select').value, 10);
+  periodEndMonth = document.getElementById('period-end-select').value;
+  if (periodEndYm() < periodStartYm()) {
+    if (changed === 'end') periodStartMonth = periodEndMonth;
+    else periodEndMonth = periodStartMonth;
+    syncPeriodSelects();
+  }
   saveSessionState();
   rerenderCurrentView();
 }
@@ -3072,7 +3151,7 @@ function countActiveEmployees(emps, mi) {
 }
 
 function renderSummaryTable() {
-  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // 期間の月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
   // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
   const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
@@ -3473,7 +3552,7 @@ function renderEmpChartContent() {
 
 // ①拠点別：拠点ごとに、雇用形態別（社員／技能実習生／パート）の時間・人数を表示（従来通り）
 function renderEmpChartSiteView() {
-  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // 期間の月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
   // （延長分はhoursがnullになりChart.js側で自然に棒なしになる）
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('empchart-content');
@@ -3529,7 +3608,7 @@ function renderEmpChartSiteView() {
 
 // ②拠点サマリ：3拠点合算の同じ総量を、上段は雇用形態軸、下段は拠点軸で切り口を変えて表示
 function renderEmpChartSummaryView() {
-  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // 期間の月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
   // （延長分はhoursがnullになりChart.js側で自然に棒なしになる）
   const { months, employees } = getExtendedActiveData();
   const content = document.getElementById('empchart-content');
@@ -3624,7 +3703,8 @@ function renderSummaryEmpChartDev() {
 }
 
 function renderSummaryEmpChartDevContent(prodData, planData) {
-  const { months, employees } = getExtendedActiveData();
+  // originalCount：期間の月の数。それより後ろの枠（間延び対策で足した期間の外の月）には値を出さない
+  const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
   const activeSites = SITES.filter(s => employees.some(e => e.base === s));
   const visibleRoleTypes = ROLE_TYPES.filter(wt => roleTypeFilter.has(wt));
@@ -3647,7 +3727,7 @@ function renderSummaryEmpChartDevContent(prodData, planData) {
 
   // 業務区分ごとの標準工数（div='栽培' or '出荷'の設定行のみ使用）
   function calcStdForDiv(site, wt, mi) {
-    if (!stdEngine) return null;
+    if (!stdEngine || mi >= originalCount) return null;
     const divRows = stdRowsByDiv[wt] || [];
     if (!divRows.length) return null;
     let total = 0, hasVal = false;
@@ -3663,8 +3743,8 @@ function renderSummaryEmpChartDevContent(prodData, planData) {
   function prodVals(site, metric) {
     const r = records.find(x => x.site === site && x.metric === metric);
     if (!r) return months.map(() => null);
-    return months.map(m => {
-      if (!m) return null;
+    return months.map((m, mi) => {
+      if (!m || mi >= originalCount) return null;
       const pi = prodMonths.indexOf(normalizeMonth(m));
       return (pi >= 0 && r.values[pi] !== null) ? r.values[pi] : null;
     });
@@ -4226,8 +4306,10 @@ function computeStdHoursLine(emps, months) {
 // 月インデックスとは一致しない可能性があるため、workHoursForPlanMonths()と同様に
 // normalizeMonth()でカレンダー月を突き合わせてhours配列をmonths基準に並べ替えてから
 // computeStdHoursLine()に渡す
-function computeStdHoursLineForDivSite(div, site, months) {
-  const { employees, months: activeMonths } = getActiveData();
+// activeData：省略時はgetActiveData()（集計期間で絞ったもの）。予実＞比較（繁忙期見込み）は
+// 期間で絞らないgetActiveDataAllPeriods()を渡し、表示する月だけを期間で選ぶ
+function computeStdHoursLineForDivSite(div, site, months, activeData) {
+  const { employees, months: activeMonths } = activeData || getActiveData();
   const typeFilter = div === '栽培'
     ? wt => workTypeClass(wt) === 'wt-栽培'
     : div === '配送'
@@ -4615,7 +4697,8 @@ function buildStdCountChart(canvasId, months, barDatasets, yMax, opts) {
 // セグメントの絞り込みとして働く（OFFにした業務区分のセグメントが積み上げから
 // 除かれ、合計人数もその分減る）
 function renderStdCountSiteView() {
-  const { months, employees } = getExtendedActiveData();
+  // originalCount：期間の月の数。それより後ろの枠（期間の外の月）には前年実績を出さない
+  const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
   const allSites = SITES.filter(s => employees.some(e => e.base === s));
   const activeSites = allSites.filter(s => siteFilter.has(s));
@@ -4656,7 +4739,7 @@ function renderStdCountSiteView() {
     const siteEmpsAll = allEmpTypeEmployees.filter(e => e.base === site);
     const currentTotalAll = months.map((_, mi) =>
       ROLE_TYPES.reduce((s, wt) => s + (countActiveEmployees(siteEmpsAll.filter(e => e.workType === wt), mi) || 0), 0));
-    const previousTotalAll = computePastYearCountBarWithBuckets(site, months, ALL_EMP_BUCKETS);
+    const previousTotalAll = maskOutsidePeriod(computePastYearCountBarWithBuckets(site, months, ALL_EMP_BUCKETS), originalCount);
     return [currentTotalAll, previousTotalAll];
   });
   const sharedSiteMax = computeSharedAxisMax(siteStacksForMax.flat(), 5, 1.1);
@@ -4667,7 +4750,7 @@ function renderStdCountSiteView() {
 
     const previousDataset = {
       type: 'bar', label: previousSeries.label,
-      data: previousSeries.compute(siteEmps, months, { site }),
+      data: maskOutsidePeriod(previousSeries.compute(siteEmps, months, { site }), originalCount),
       backgroundColor: previousSeries.color + 'cc', borderColor: previousSeries.color, borderWidth: 0,
       stack: 'previous', excludeFromFooterTotal: true,
     };
@@ -4689,7 +4772,8 @@ function renderStdCountSiteView() {
 // 拠点サマリ：前年棒（拠点トグル・雇用形態区分トグル連動の1本棒）＋拠点別に色分けした
 // 当年積み上げ棒（拠点トグル連動）を表示する
 function renderStdCountSummaryView() {
-  const { months, employees } = getExtendedActiveData();
+  // originalCount：期間の月の数。それより後ろの枠（期間の外の月）には前年実績を出さない
+  const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
   // 前年棒・当年棒とも拠点トグルに連動させる（PR #193の時間画面拠点サマリと同じ考え方）
   const activeSites = SITES.filter(s => employees.some(e => e.base === s) && siteFilter.has(s));
@@ -4715,7 +4799,7 @@ function renderStdCountSummaryView() {
   });
 
   const previousSeries = STD_COUNT_BAR_SERIES.find(s => s.key === 'previous');
-  const previousData = computePastYearCountSummaryBar(months);
+  const previousData = maskOutsidePeriod(computePastYearCountSummaryBar(months), originalCount);
   const previousDataset = {
     type: 'bar', label: previousSeries.label, data: previousData,
     backgroundColor: previousSeries.color + 'cc', borderColor: previousSeries.color, borderWidth: 0,
@@ -4745,7 +4829,8 @@ function renderStdHoursContent() {
 // トグルのうち、拠点・業務区分トグルはセクションの表示/非表示に反映し、雇用形態
 // 区分トグルはgetExtendedActiveData()経由で各セクションの集計値自体に反映される
 function renderStdHoursSiteView() {
-  const { months, employees } = getExtendedActiveData();
+  // originalCount：期間の月の数。それより後ろの枠（期間の外の月）には前年実績・振替の増減を出さない
+  const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
   const allSites = SITES.filter(s => employees.some(e => e.base === s));
   const activeSites = allSites.filter(s => siteFilter.has(s));
@@ -4804,7 +4889,7 @@ function renderStdHoursSiteView() {
       const barDatasets = SITE_VIEW_BAR_ORDER.map(key => {
         const s = STD_HOURS_BAR_SERIES.find(ss => ss.key === key);
         return {
-          type: 'bar', label: s.label, data: s.compute(emps, months, { site, workType: wt }),
+          type: 'bar', label: s.label, data: maskOutsidePeriod(s.compute(emps, months, { site, workType: wt }), originalCount),
           backgroundColor: s.color + 'cc', borderColor: s.color, borderWidth: 0,
           // 前年実績・当年稼働実績は積み上げず横並び表示にするため、系列ごとに別のstackにする
           stack: s.key,
@@ -4812,7 +4897,7 @@ function renderStdHoursSiteView() {
           excludeFromFooterTotal: s.key !== 'current',
         };
       });
-      const lineData = applyStdHoursSiteTransferDelta(computeStdHoursLine(emps, months), site, wt);
+      const lineData = maskOutsidePeriod(applyStdHoursSiteTransferDelta(computeStdHoursLine(emps, months), site, wt), originalCount);
       stacksForRole.push(maxMonthlyAcross(months, barDatasets), lineData);
       dataBySiteRole[`${site}|${wt}`] = { barDatasets, lineData };
     });
@@ -4832,7 +4917,8 @@ function renderStdHoursSiteView() {
 // 上部グローバル拠点トグルでは絞り込まない（業務区分・雇用形態区分トグルは
 // 各拠点内の従業員選定に引き続き適用する）
 function renderStdHoursSummaryView() {
-  const { months, employees } = getExtendedActiveData();
+  // originalCount：期間の月の数。それより後ろの枠（期間の外の月）には前年実績・振替の増減を出さない
+  const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('stdhours-content');
   // 前年実績棒を追加するにあたり、当年実績の積み上げ棒・前年実績棒のいずれも
   // 拠点トグルに連動させる（拠点トグルでOFFにした拠点は両方の集計から除外する）
@@ -4861,7 +4947,7 @@ function renderStdHoursSummaryView() {
   });
 
   const previousSeries = STD_HOURS_BAR_SERIES.find(s => s.key === 'previous');
-  const previousData = computePastYearHoursSummaryBar(months);
+  const previousData = maskOutsidePeriod(computePastYearHoursSummaryBar(months), originalCount);
   const previousDataset = {
     type: 'bar', label: previousSeries.label, data: previousData,
     backgroundColor: previousSeries.color + 'cc', borderColor: previousSeries.color, borderWidth: 0,
@@ -4877,7 +4963,7 @@ function renderStdHoursSummaryView() {
   const stdHoursSiteTransferDeltaMap = computeStdHoursSiteTransferDeltaBuckets(stdTransferAdjustRecords, allData.employees);
   const allEmps = employees.filter(e => e.workType && stdHoursRoleVisible(e));
   const rawLineData = computeStdHoursLine(allEmps, months);
-  const lineData = !transferMode ? rawLineData : months.map((month, mi) => {
+  const lineData = maskOutsidePeriod(!transferMode ? rawLineData : months.map((month, mi) => {
     const ym = monthLabelToYm(month);
     const deltaTotal = ym == null ? 0 : activeSites.reduce((s, site) =>
       s + ROLE_TYPES.reduce((s2, wt) => s2 + (stdHoursSiteTransferDeltaMap.get(`${site}|${wt}|${ym}`) || 0), 0), 0);
@@ -4885,7 +4971,7 @@ function renderStdHoursSummaryView() {
     const base = rawLineData[mi];
     const result = base == null ? deltaTotal : base + deltaTotal;
     return Math.round(result * 10) / 10;
-  });
+  }), originalCount);
 
   const sharedMax = computeSharedAxisMax([stackedMonthlyTotals(months, siteBarDatasets), lineData, previousData], 100, 1.1);
 
@@ -4956,7 +5042,7 @@ function buildStdHoursChart(canvasId, months, barDatasets, lineData, yMax, opts)
 
 /* ── Summary: 雇用形態別タブ ───────────────────────────────────── */
 function renderSummaryByEmpType() {
-  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // 期間の月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
   // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
   const { months, employees, originalCount } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
@@ -5139,7 +5225,7 @@ let rosterSortCol = 'site';
 let rosterSortAsc = true;
 
 function renderSummaryRoster() {
-  // 表示月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
+  // 期間の月数が少ないときの間延び対策：開始月から常にMONTH_COLUMN_TARGET本に揃える
   // （実データはそのまま、延長分は見出しのみ・空欄。シート最新月を超えた分は見出しも空欄）
   const { months, employees, originalCount, nameLabel } = getExtendedActiveData();
   const content = document.getElementById('summary-content');
@@ -5203,7 +5289,7 @@ function renderSummaryRoster() {
           <td>${e.employment || '—'}</td>
           <td>${e.name}</td>`;
         months.forEach((_, mi) => {
-          // 延長分（表示月数の範囲外）は空欄、範囲内はデータなしを「—」で表示
+          // 延長分（期間の月数の範囲外）は空欄、範囲内はデータなしを「—」で表示
           if (mi >= originalCount) { tableHtml += '<td class="num"></td>'; return; }
           const h = e.hours[mi];
           tableHtml += `<td class="num">${h !== null ? h.toFixed(1) + ' h' : '—'}</td>`;
@@ -7054,7 +7140,8 @@ function renderPlanTab() {
     fetchProductionSheet().catch(e => { console.error('[生産計画] 生産実績データ取得エラー:', e); return null; }),
   ]).then(([data, prodData]) => {
     const cutoffMonth = getActualCutoffMonth();
-    renderPlanTable(overlayActualOnPlan(data, prodData, cutoffMonth), cutoffMonth);
+    // 期間（開始月〜終了月）の月だけを表示する（実績の重ね合わせは全部の月で行ってから絞る）
+    renderPlanTable(slicePlanDataToPeriod(overlayActualOnPlan(data, prodData, cutoffMonth)), cutoffMonth);
     if (!prodData) {
       main.insertAdjacentHTML('afterbegin', `<div class="error-msg">生産実績データを取得できなかったため、過去月（〜${cutoffMonth}）は「－」で表示しています</div>`);
     }
@@ -7267,6 +7354,8 @@ function renderPlanStdHoursTable(planData, prodData) {
   const availSites = [...new Set(records.map(r => r.site))].filter(s => SITE_COLORS[s]);
   const divCount = {};
   rows.forEach(r => { divCount[r.div] = (divCount[r.div] || 0) + 1; });
+  // 表示する月（期間の月）。計算は全部の月で行い、表示だけを期間で絞る
+  const visIdx = planMonths.map((_, i) => i).filter(i => isMonthInPeriod(planMonths[i]));
 
   if (!availSites.length) {
     main.innerHTML = '<div class="loading">計画データが見つかりませんでした</div>';
@@ -7287,7 +7376,7 @@ function renderPlanStdHoursTable(planData, prodData) {
           <th class="th-left col-site" style="min-width:60px">業務区分</th>
           <th class="th-left col-work" style="min-width:130px">作業区分</th>
           <th class="th-left col-basis" style="min-width:140px">計算根拠</th>
-          ${planMonths.map(m => {
+          ${visIdx.map(i => planMonths[i]).map(m => {
             const isActual = monthToNum(m) <= monthToNum(cutoffMonth);
             return `<th>${m}<div style="font-size:0.62rem;font-weight:400;color:${isActual ? '#34d399' : 'var(--muted)'}">${isActual ? '実績' : '計画'}</div></th>`;
           }).join('')}
@@ -7332,7 +7421,7 @@ function renderPlanStdHoursTable(planData, prodData) {
         <td class="col-metric col-work" style="font-size:0.82rem">${r.task}</td>
         <td class="col-metric col-basis" style="font-size:0.75rem">${statusIcon} <span style="color:var(--muted)">${basisDesc}</span></td>`;
 
-      monthData.forEach(d => {
+      visIdx.map(i => monthData[i]).forEach(d => {
         if (d.h !== null) {
           const disp = d.h < 10 ? d.h.toFixed(1) : Math.round(d.h).toLocaleString('ja-JP');
           html += `<td class="col-num">${disp}<span style="font-size:0.68rem;color:var(--muted)"> h</span></td>`;
@@ -7362,7 +7451,7 @@ function renderPlanStdHoursTable(planData, prodData) {
         <td class="col-site" style="border-right:none"></td>
         <td class="col-work" style="background:var(--surface);border-left:none;border-right:none"></td>
         <td class="col-basis" style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:var(--muted)">${div} 小計</td>`;
-      totals.forEach(t => {
+      visIdx.map(i => totals[i]).forEach(t => {
         html += t !== null
           ? `<td class="col-num" style="color:${color}">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
           : `<td class="col-num empty">—</td>`;
@@ -7379,7 +7468,7 @@ function renderPlanStdHoursTable(planData, prodData) {
       <td class="col-site" style="border-right:none"></td>
       <td class="col-work" style="background:var(--surface);border-left:none;border-right:none"></td>
       <td class="col-basis" style="background:var(--surface);border-left:none;text-align:right;padding-right:10px;color:#e2e8f0">総合計</td>`;
-    grandTotals.forEach(t => {
+    visIdx.map(i => grandTotals[i]).forEach(t => {
       html += t !== null
         ? `<td class="col-num" style="color:#e2e8f0">${t < 10 ? t.toFixed(1) : Math.round(t).toLocaleString('ja-JP')}<span style="font-size:0.68rem;opacity:0.7"> h</span></td>`
         : `<td class="col-num empty">—</td>`;
@@ -7393,7 +7482,7 @@ function renderPlanStdHoursTable(planData, prodData) {
   main.innerHTML = html;
 }
 
-// 期間フィルター（開始月・表示月数）を生産実績（prodData）側の月にも適用する。
+// 期間フィルター（開始月・終了月）を生産実績（prodData）側の月にも適用する。
 // 整理済み_M側・生産実績側とも実質月（暦月）基準のため、オフセットなしの単純一致で
 // 期間フィルター後の勤怠側の月に対応する生産実績側の月だけに絞り込む
 function filterProductionByPeriod({ months, records }) {
@@ -8455,7 +8544,7 @@ async function loadAll() {
   const prevEmpTypeChecked = empTypeFilter ? new Set(empTypeFilter) : null;
   const prevEmpTypeAll = empTypeFilter ? new Set(Object.keys(empTypeColorMap)) : null;
   const prevPeriodStart = periodStartMonth;
-  const prevPeriodCount = periodMonthCount;
+  const prevPeriodEnd = periodEndMonth;
 
   document.getElementById('main').innerHTML = '<div class="loading">データを読み込み中...</div>';
   document.getElementById('tabs').innerHTML = '';
@@ -8483,7 +8572,14 @@ async function loadAll() {
     const json = await fetchSheet();
     allData = buildDataset(json);
     resolveAllDataReady();
-    renderPeriodFilterUI(prevPeriodStart, prevPeriodCount);
+    // 期間の選択肢に計画の月も入れるため、整理済み_計画_更新を先に読む
+    // （読めなかった場合は実績の月だけを選択肢にして続ける）
+    try {
+      await fetchPlanSheet();
+    } catch (planErr) {
+      console.error('[整理済み_計画_更新] 期間の選択肢用の取得エラー:', planErr);
+    }
+    renderPeriodFilterUI(prevPeriodStart, prevPeriodEnd);
     renderEmpTypeFilterUI(prevEmpTypeChecked, prevEmpTypeAll);
     renderRoleTypeFilterUI();
     renderSiteFilterUI();
@@ -8732,7 +8828,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
 
   // 計画月（"2025/12"形式）に対応する実績工数を返す
   function workHoursForPlanMonths(site, typeFilter) {
-    const { employees, months: activeMonths } = getActiveData();
+    const { employees, months: activeMonths } = getActiveDataAllPeriods();
     const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
     return planMonths.map(planMonth => {
       const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -8911,7 +9007,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     const ym = mnum(planMonths[mi]);
     if (ym <= ACTUAL_CUTOFF) {
       const base = divsForPast.reduce((s, div) => {
-        const v = computeStdHoursLineForDivSite(div, site, planMonths)[mi];
+        const v = computeStdHoursLineForDivSite(div, site, planMonths, getActiveDataAllPeriods())[mi];
         return s + (v !== null ? v : 0);
       }, 0);
       if (!transferMode) return base;
@@ -9056,7 +9152,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
   // 既に一意に定まっている。このレコード自身が持つ雇用区分(e.employment)を
   // 使ってティアを判定することで、二重計上を防ぐ
   function computeStdHoursLineForDivSiteByTier(div, site, months, tier) {
-    const { employees, months: activeMonths } = getActiveData();
+    const { employees, months: activeMonths } = getActiveDataAllPeriods();
     const typeFilter = div === '栽培'
       ? wt => workTypeClass(wt) === 'wt-栽培'
       : div === '配送'
@@ -9287,8 +9383,10 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     planCmpChartInstances = {};
   }
 
-  // 表示する月のインデックスセット（任意の月を個別選択可）
-  let planCmpSelected = new Set(planMonths.map((_, i) => i)); // 初期：全月選択
+  // 表示する月のインデックスセット：画面上部の集計期間（開始月〜終了月）の月だけ。
+  // 計算は全部の月で行い、表示（sl／visMonths）だけをこの月に絞る
+  // （以前のこのタブ専用の「表示月」の選択は、上の期間に一本化して無くした）
+  const planCmpSelected = new Set(planMonths.map((_, i) => i).filter(i => isMonthInPeriod(planMonths[i])));
   const sl = arr => arr.filter((_, i) => planCmpSelected.has(i));
   function visMonths() { return planMonths.filter((_, i) => planCmpSelected.has(i)); }
 
@@ -9365,7 +9463,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
   // 絞り込む（内部で'配送・栽培'・'配送・出荷'に展開）。省略時は既存の動作を
   // 完全に維持する（拠点別・表・3拠点サマリ・下段チャートの他の呼び出し元向け）
   function workHoursByEmpForPlanMonths(site, empMatcher, filterDivs) {
-    const { employees, months: activeMonths } = getActiveData();
+    const { employees, months: activeMonths } = getActiveDataAllPeriods();
     const allowedDivs = filterDivs
       ? filterDivs.flatMap(d => d === '配送' ? ['配送・栽培', '配送・出荷'] : [d])
       : [...divs, '配送・栽培', '配送・出荷'];
@@ -9383,7 +9481,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
   // filterDivsを渡した場合はworkHoursByEmpForPlanMonths()と同じ展開ロジックで
   // allowedDivsを決定する
   function headcountByEmpForPlanMonths(site, empMatcher, filterDivs) {
-    const { employees, months: activeMonths } = getActiveData();
+    const { employees, months: activeMonths } = getActiveDataAllPeriods();
     const allowedDivs = filterDivs
       ? filterDivs.flatMap(d => d === '配送' ? ['配送・栽培', '配送・出荷'] : [d])
       : divs;
@@ -10098,7 +10196,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     // のみこちらを使うことで、チェックボックスの切り替えで軸の高さが変動しないようにする
     const ALL_DIVS = ['栽培', '出荷', '配送'];
     function actualHoursForPlanMonthsAllEmpTypes(site, typeFilter) {
-      const { employees, months: activeMonths } = getActiveData();
+      const { employees, months: activeMonths } = getActiveDataAllPeriods();
       const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
       return planMonths.map(planMonth => {
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -10344,7 +10442,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     // （既存のapplyEmpTypeFilter()、empTypeFilterがnullなら絞り込み無し）を
     // 追加しただけ
     function actualHoursForPlanMonthsFiltered(site, typeFilter) {
-      const { employees, months: activeMonths } = getActiveData();
+      const { employees, months: activeMonths } = getActiveDataAllPeriods();
       const emps = applyEmpTypeFilter(employees.filter(e => e.base === site && e.workType && typeFilter(e.workType)));
       return planMonths.map(planMonth => {
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -10477,7 +10575,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     // 現在選択中のまま（拠点を変えればMAXも変わる）
     const ALL_DIVS = ['栽培', '出荷', '配送'];
     function actualHoursForPlanMonthsAllEmpTypes(site, typeFilter) {
-      const { employees, months: activeMonths } = getActiveData();
+      const { employees, months: activeMonths } = getActiveDataAllPeriods();
       const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
       return planMonths.map(planMonth => {
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -10579,7 +10677,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
         if (tier) counts[tier]++;
       }
       if (ym <= ACTUAL_CUTOFF) {
-        const { employees, months: activeMonths } = getActiveData();
+        const { employees, months: activeMonths } = getActiveDataAllPeriods();
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonths[mi]);
         if (ami < 0) return null;
         divs.forEach(div => {
@@ -10875,7 +10973,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     // （既存のapplyEmpTypeFilter()、empTypeFilterがnullなら絞り込み無し）を
     // 追加しただけ
     function actualHoursForPlanMonthsFiltered(site, typeFilter) {
-      const { employees, months: activeMonths } = getActiveData();
+      const { employees, months: activeMonths } = getActiveDataAllPeriods();
       const emps = applyEmpTypeFilter(employees.filter(e => e.base === site && e.workType && typeFilter(e.workType)));
       return planMonths.map(planMonth => {
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -11048,7 +11146,7 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     // 現在選択中のまま（拠点を変えればMAXも変わる）
     const ALL_DIVS = ['栽培', '出荷', '配送'];
     function actualHoursForPlanMonthsAllEmpTypes(site, typeFilter) {
-      const { employees, months: activeMonths } = getActiveData();
+      const { employees, months: activeMonths } = getActiveDataAllPeriods();
       const emps = employees.filter(e => e.base === site && e.workType && typeFilter(e.workType));
       return planMonths.map(planMonth => {
         const ami = activeMonths.findIndex(m => normalizeMonth(m) === planMonth);
@@ -11322,12 +11420,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
     else renderSiteView();
   }
 
-  const dropdownOptionsHtml = planMonths.map((m, i) =>
-    `<label style="display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;border-radius:4px;white-space:nowrap" class="plancmp2-opt" data-idx="${i}">
-      <input type="checkbox" data-idx="${i}" checked style="accent-color:#38bdf8;cursor:pointer"> <span>${m}</span>
-    </label>`
-  ).join('');
-
   main.innerHTML = `
     <div class="compare-shell panel-fit-content">
       <div class="compare-header-row" style="flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
@@ -11336,20 +11428,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
         </div>
         <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定${weeklyMode ? '　（①②は月の値を日数で等分、③は栽培＝収穫量・出荷＝出荷量の比率で週に配分）　④収穫量・出荷量＞収穫帯プランナー90t（週別）' : ''}</div>
         <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:0.78rem;color:var(--muted);flex-shrink:0;${weeklyMode ? 'display:none' : ''}">表示月</span>
-          <div style="position:relative;display:inline-block;${weeklyMode ? 'display:none' : ''}">
-            <button id="plancmp2-dd-btn" style="display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;border:1px solid #3a3f5c;background:#1a1f35;color:#e2e8f0;font-size:0.8rem;cursor:pointer;min-width:160px;justify-content:space-between">
-              <span id="plancmp2-dd-label">全月選択中</span>
-              <span style="font-size:0.6rem">▼</span>
-            </button>
-            <div id="plancmp2-dd-panel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:#1a1f35;border:1px solid #3a3f5c;border-radius:6px;padding:6px 4px;min-width:160px;max-height:min(80vh, calc(100vh - 160px));overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
-              <div style="display:flex;gap:6px;padding:0 4px 6px;border-bottom:1px solid #2a2f4a;margin-bottom:4px">
-                <button id="plancmp2-all" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">全選択</button>
-                <button id="plancmp2-clear" style="flex:1;padding:3px 0;font-size:0.73rem;border-radius:4px;border:1px solid #3a3f5c;background:transparent;color:#8892a4;cursor:pointer">クリア</button>
-              </div>
-              <div id="plancmp2-opts">${dropdownOptionsHtml}</div>
-            </div>
-          </div>
           <div id="plancmp2-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap"></div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;${weeklyMode ? 'display:none' : ''}">
@@ -11372,63 +11450,6 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
   const changeCAttributeAlerts = collectCrossSheetAttributeAlerts(allData.employees, stdTransferAdjustRecords, stdHoursMergeData ? stdHoursMergeData.rows : []);
   const changeCStartYmAlerts = collectB2StartYmAlerts(allData.employees);
   renderChangeCAlertsBox('plancmp2-changeC-alerts', changeCAttributeAlerts, changeCStartYmAlerts);
-
-  function syncDropdownLabel() {
-    const lbl = document.getElementById('plancmp2-dd-label');
-    if (!lbl) return;
-    if (planCmpSelected.size === planMonths.length) lbl.textContent = '全月選択中';
-    else if (planCmpSelected.size === 0) lbl.textContent = '未選択';
-    else {
-      const sorted = [...planCmpSelected].sort((a, b) => a - b);
-      const names = sorted.map(i => planMonths[i]);
-      lbl.textContent = names.length <= 3 ? names.join(', ') : `${names[0]}〜 他${names.length - 1}件`;
-    }
-  }
-
-  function syncCheckboxes() {
-    document.querySelectorAll('#plancmp2-opts input[type=checkbox]').forEach(cb => {
-      cb.checked = planCmpSelected.has(parseInt(cb.dataset.idx));
-    });
-    syncDropdownLabel();
-  }
-
-  // ドロップダウン開閉
-  document.getElementById('plancmp2-dd-btn').addEventListener('click', e => {
-    e.stopPropagation();
-    const panel = document.getElementById('plancmp2-dd-panel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  });
-  document.addEventListener('click', e => {
-    const panel = document.getElementById('plancmp2-dd-panel');
-    if (panel && !panel.contains(e.target) && e.target.id !== 'plancmp2-dd-btn') {
-      panel.style.display = 'none';
-    }
-  }, true);
-
-  // チェックボックス変更
-  document.getElementById('plancmp2-opts').addEventListener('change', e => {
-    const cb = e.target;
-    if (cb.type !== 'checkbox') return;
-    const i = parseInt(cb.dataset.idx);
-    if (cb.checked) {
-      planCmpSelected.add(i);
-    } else {
-      planCmpSelected.delete(i);
-    }
-    syncDropdownLabel();
-    renderContent();
-  });
-
-  document.getElementById('plancmp2-all').onclick = () => {
-    planMonths.forEach((_, i) => planCmpSelected.add(i));
-    syncCheckboxes();
-    renderContent();
-  };
-  document.getElementById('plancmp2-clear').onclick = () => {
-    planCmpSelected = new Set();
-    syncCheckboxes();
-    renderContent();
-  };
 
   document.querySelectorAll('#plancmp2-subtabs .transfer-toggle-btn').forEach(btn => {
     btn.onclick = () => {
@@ -13326,7 +13347,9 @@ let restoredSummarySubtab = null;
   if (s.planCmpSiteTab) planCmpSiteTab = s.planCmpSiteTab;
   if (s.summarySubtab) restoredSummarySubtab = s.summarySubtab;
   if (s.periodStartMonth) periodStartMonth = s.periodStartMonth;
-  if (typeof s.periodMonthCount === 'number') periodMonthCount = s.periodMonthCount;
+  // 以前の「期間の月数」（periodMonthCount）の保存値は使わない（残っていても無視する）。
+  // 終了月の保存値が無い場合は、renderPeriodFilterUI()が既定の終了月にする
+  if (s.periodEndMonth) periodEndMonth = s.periodEndMonth;
   if (Array.isArray(s.empTypeFilter)) empTypeFilter = new Set(s.empTypeFilter);
   // renderEmpTypeFilterUI()が初回loadAll()実行時に「保存時点で存在した雇用区分」を
   // 正しく認識できるよう、empTypeColorMapのキーだけ先に復元しておく（値はダミーでよく、
