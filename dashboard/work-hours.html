@@ -208,6 +208,16 @@
     }
     .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
     .kpi-value { font-size: 1.3rem; font-weight: 700; }
+    /* 勤務実績＞生産性：最新月の生産性（3つの指標×拠点）の表。左寄せで横いっぱいには広げず、行を低くする。
+       狭い窓でも折り返さず、入らないときだけ表の中で横スクロール */
+    .prod-kpi-scroll { flex-shrink: 0; align-self: flex-start; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+    .prod-kpi-table { border-collapse: collapse; width: auto; font-size: 0.75rem; line-height: 1.2; }
+    .prod-kpi-table th, .prod-kpi-table td { border: 1px solid var(--border); padding: 1px 12px; white-space: nowrap; }
+    .prod-kpi-table thead th { background: var(--surface); font-weight: 700; text-align: center; }
+    .prod-kpi-table thead th.prod-kpi-corner { color: var(--muted); font-weight: 600; text-align: left; }
+    .prod-kpi-table tbody th { background: var(--surface); color: var(--text); font-weight: 600; text-align: left; }
+    .prod-kpi-table td { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 0.85rem; min-width: 84px; }
+    .prod-kpi-table td .prod-kpi-unit { font-size: 0.7em; color: var(--muted); font-weight: 400; }
 
     /* Controls */
     .select-btn {
@@ -1003,6 +1013,14 @@ if (window.ResizeObserver) {
   const ro = new ResizeObserver(() => scheduleProdTableWrapRefresh());
   ro.observe(document.getElementById('main'));
   ro.observe(document.querySelector('header'));
+}
+// グラフの上にあって高さが変わりうるもの（生産性の表など）の大きさが変わったときも、グラフの高さを合わせ直す
+// （見える範囲の大きさは変わらないため、上の ResizeObserver では気づけない）。見るのは今の画面のものだけ
+const chartAboveResizeObserver = window.ResizeObserver ? new ResizeObserver(() => scheduleProdTableWrapRefresh()) : null;
+function watchChartAbove(el) {
+  if (!chartAboveResizeObserver) return;
+  chartAboveResizeObserver.disconnect();
+  if (el) chartAboveResizeObserver.observe(el);
 }
 window.addEventListener('resize', () => { resetMonthTableFit(); scheduleProdTableWrapRefresh(); });
 
@@ -8794,13 +8812,10 @@ function renderProductivityCharts(workData, prodData) {
   const lastIdx   = originalCount - 1;
   const lastMonth = months[lastIdx];
 
-  function kpiHtml(label, site, key, unit, decimals = 1) {
+  // 最新月の生産性の表の1マス（数字・小数の桁・単位は以前の枠と同じ）
+  function kpiCellHtml(site, key, unit, decimals = 1) {
     const v = data[site]?.[key]?.[lastIdx];
-    const color = SITE_COLORS[site] || '#e2e8f0';
-    return `<div class="kpi">
-      <div class="kpi-label" style="color:${color}">${site}</div>
-      <div class="kpi-value">${v !== null && v !== undefined ? v.toFixed(decimals) : '—'} <span style="font-size:0.7em;color:var(--muted)">${unit}</span></div>
-    </div>`;
+    return `<td data-site="${site}" data-key="${key}">${v !== null && v !== undefined ? v.toFixed(decimals) : '—'} <span class="prod-kpi-unit">${unit}</span></td>`;
   }
 
   // Chart definitions: productivity line (left Y) + volume/time bars (right Y)
@@ -8867,8 +8882,13 @@ function renderProductivityCharts(workData, prodData) {
         <button id="prd-toggle-time" class="select-btn" style="padding:2px 10px" onclick="switchProdBar('time')">時間</button>
       </span>
     </div>
-    <div class="kpi-row">
-      ${metrics.map(m => sites.map(s => kpiHtml(m.title, s, m.key, m.unit, m.decimals)).join('')).join('')}
+    <div class="prod-kpi-scroll">
+      <table class="prod-kpi-table" id="prod-kpi-table">
+        <thead><tr><th class="prod-kpi-corner">最新月の生産性</th>${sites.map(s => `<th style="color:${SITE_COLORS[s] || '#e2e8f0'}">${s}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${metrics.map(m => `<tr><th scope="row">${m.title}（${m.unit}）</th>${sites.map(s => kpiCellHtml(s, m.key, m.unit, m.decimals)).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
     </div>`;
 
   metrics.forEach((m, i) => {
@@ -8883,6 +8903,7 @@ function renderProductivityCharts(workData, prodData) {
 
   html += `</div>`;
   main.innerHTML = html;
+  watchChartAbove(main.querySelector('.prod-kpi-scroll'));
 
   // Store references for toggle function
   window._prodBarMode = barMode;
