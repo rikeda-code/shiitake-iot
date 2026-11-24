@@ -18,6 +18,11 @@
 //  [8] 「計50」の形（2026/12 の棒 8588h、共通の上限 8600h）で、上限を上げて棒と「計50」が入る
 //  [9] 窓の大きさを途中で変えたとき（大→小、小→大）と、固定エリアの段数が変わる幅の前後で、グラフの高さが
 //      合わせ直され、全体が見える範囲に収まる
+//  [1]（案4）振替・更新・最終更新の一式が、広い窓ではタブの段（勤務実績・予実・設定）の右にあり、狭い窓は「条件」の
+//      中に残る。固定エリアが案4の前（e72ad1a を同じモック・同じ大きさで測った値）より、1607 は低く、ほかは高くならない
+//  [10] 窓の幅を 1920→390→1920 と変えても固定エリアにはみ出し・重なりが無い。タブの段の右に入りきらないとき
+//      （タブのボタンを広げて再現）はヘッダーの中（チェックの右）に戻り、入るようになると戻る。置き場所が変わって
+//      固定エリアの高さが変わると、グラフの高さが合わせ直される
 // 対象の画面は verify_left_align_layout.js と同じ（勤務実績・サマリー・生産性・比較・比較（3拠点）・生産実績、
 // 予実＞生産計画・予定標準工数(h)・比較（繁忙期見込み）の各サブタブ）。期間は 2025/11〜2027/2
 // （勤務実績は実績のある12か月、予実は16か月）。
@@ -250,6 +255,9 @@ const VIEWPORTS = [
 // 変更前（main ad2ed8d の work-hours.html）を、このテストと同じモック・同じ窓の大きさで測った、
 // 固定エリア（タイトル・操作の一式＋タブ。#main の上端の位置）の高さ
 const BEFORE_FIXED_AREA_PX = { '1607x905': 236, '1920x1040': 236, '1440x800': 307, '1280x720': 343, '1100x900': 379, '1700x600': 236, '800x600': 429, '390x844': 512 };
+// 案4（振替・更新・最終更新をタブの段の右へ）の前（e72ad1a）を、このテストと同じモック・同じ窓の大きさで測った
+// 固定エリアの高さ。1607 はこれより低く、ほかの大きさはこれより高くならないこと
+const CURRENT_FIXED_AREA_PX = { '1607x905': 222, '1920x1040': 165, '1440x800': 222, '1280x720': 225, '1100x900': 225, '1700x600': 165, '800x600': 284, '390x844': 136 };
 const MIN_CHART_H = 300;
 const MOBILE_RATIO = 0.55;
 const MONTH_MIN = 44;
@@ -293,6 +301,36 @@ async function measureHeader(page) {
       minHeaderPx: Math.round(minHeaderPx),
       condBtnVisible: !!document.getElementById('header-cond-btn').offsetWidth,
       controlsVisible: !!periodSel.offsetWidth && getComputedStyle(controls).display !== 'none',
+      pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    };
+  });
+}
+
+// 振替・更新・最終更新の一式の置き場所と、固定エリア（ヘッダー・タブの段）のはみ出し・重なり
+async function measureActions(page) {
+  return page.evaluate(() => {
+    const actions = document.getElementById('header-actions');
+    const r = el => { const b = el.getBoundingClientRect(); return { id: el.id || el.className || el.textContent.trim(), left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
+    const visible = el => el.offsetWidth > 0 && el.offsetHeight > 0;
+    const header = document.getElementById('app-header');
+    const headerItems = [...header.querySelectorAll(':scope > .header-title, :scope > .header-cond-btn, #header-controls > *')].filter(visible).map(r);
+    const groupBtns = [...document.querySelectorAll('#tabs-group .group-btn')].filter(visible).map(r);
+    const act = visible(actions) ? r(actions) : null;
+    const items = [...headerItems, ...groupBtns, ...(act && !headerItems.some(h => h.id === act.id) ? [act] : [])];
+    const overlaps = [];
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps.push(a.id + ' × ' + b.id);
+    }
+    const vw = document.documentElement.clientWidth;
+    const outside = items.filter(it => it.left < -1 || it.right > vw + 1).map(it => it.id);
+    const bar = document.querySelector('.tabs-group-bar').getBoundingClientRect();
+    const lastBtn = groupBtns[groupBtns.length - 1];
+    return {
+      parent: actions.parentElement.id, act, overlaps, outside,
+      // タブの段の中（勤務実績・予実・設定の右で、下の線より上）にあるか
+      inTabRow: !!(act && lastBtn && act.left > lastBtn.right && act.bottom <= bar.top + 1 && act.top >= lastBtn.top - 20),
+      lastUpdated: document.getElementById('last-updated').textContent,
       pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     };
   });
@@ -518,6 +556,25 @@ async function measureTooltip(page, canvasId, kind) {
       check(`[1] ${vp.key}：もう一度押すと閉じて、元の高さに戻る`, !closed.controlsVisible && closed.fixedAreaPx === hd.fixedAreaPx, closed);
     }
     check(`[1] ${vp.key}：ページ全体が横にはみ出さない`, !hd.pageHScroll, hd);
+    console.log(`  固定エリア：${hd.fixedAreaPx}px、${hd.rows.length}段`);
+    // 案4：振替・更新・最終更新の一式
+    const CUR = CURRENT_FIXED_AREA_PX[vp.key];
+    if (vp.key === '1607x905') check(`[1] ${vp.key}：固定エリアが案4の前（${CUR}px）より低い（${hd.fixedAreaPx}px）`, hd.fixedAreaPx < CUR, hd);
+    else check(`[1] ${vp.key}：固定エリアが案4の前（${CUR}px）より高くならない（${hd.fixedAreaPx}px）`, hd.fixedAreaPx <= CUR, hd);
+    const ac = await measureActions(page);
+    if (!vp.narrow) {
+      check(`[1] ${vp.key}：振替・更新・最終更新が、タブの段（勤務実績・予実・設定）の右にある`, ac.parent === 'tabs-actions-slot' && ac.inTabRow, ac);
+      check(`[1] ${vp.key}：最終更新の文字は「最終更新: 日時」のまま`, /^最終更新: \S/.test(ac.lastUpdated), ac.lastUpdated);
+    } else {
+      check(`[1] ${vp.key}：狭い窓は、振替・更新・最終更新が「条件」の中に残る`, ac.parent === 'header-controls', ac);
+      await page.click('#header-cond-btn');
+      await page.waitForTimeout(200);
+      const acOpen = await measureActions(page);
+      check(`[1] ${vp.key}：「条件」を開くと、振替・更新・最終更新が見え、はみ出し・重なりが無い`, !!acOpen.act && acOpen.overlaps.length === 0 && acOpen.outside.length === 0 && !acOpen.pageHScroll, acOpen);
+      await page.click('#header-cond-btn');
+      await page.waitForTimeout(200);
+    }
+    check(`[1] ${vp.key}：固定エリア（ヘッダー・タブの段）に、はみ出し・重なりが無い`, ac.overlaps.length === 0 && ac.outside.length === 0 && !ac.pageHScroll, ac);
 
     // ---- [2] タブ・サブタブ：折り返さず、横スクロールで全部選べる ----
     for (const [label, group, prep, sel] of [
@@ -645,6 +702,60 @@ async function measureTooltip(page, canvasId, kind) {
       const wideBack = await fitAt(boundary.wide, 900);
       check('[9] 段数が戻る幅に広げると、グラフも元の高さに合わせ直される', wideBack.rows === wide.rows && wideBack.fit.every((c, i) => Math.abs(c.h - wide.fit[i].h) <= 1), { wide: hOf(wide), back: hOf(wideBack) });
     }
+    allErrors.push(...page.__errors);
+    await context.close();
+  }
+
+  // ---- [10] 案4：窓の幅を変えたときの振替・更新・最終更新の置き場所と、はみ出し・重なり ----
+  console.log('\n========== [10] 振替・更新・最終更新の置き場所 ==========');
+  {
+    const { page, context } = await openPageAt(browser, BASE_URL, { width: 1920, height: 900 });
+    await setPeriod(page, '2025年11月', '2027年2月');
+    const bad = [], places = [];
+    // 狭めながら（1920→390）60px おき＋狭い窓との境目の前後、広げながら（390→1920）は主な幅で確かめる
+    const widths = []; for (let w = 1920; w >= 780; w -= 60) widths.push(w); widths.push(770, 768, 767, 600, 390);
+    const backWidths = [600, 767, 768, 800, 1100, 1280, 1440, 1607, 1920];
+    for (const w of [...widths, ...backWidths]) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.waitForTimeout(60);
+      const ac = await measureActions(page);
+      places.push(`${w}:${ac.parent === 'tabs-actions-slot' ? 'タブ' : 'ヘッダー'}`);
+      const okPlace = w <= 767 ? ac.parent === 'header-controls' : true;
+      if (!okPlace || ac.overlaps.length || ac.outside.length || ac.pageHScroll || (ac.parent === 'tabs-actions-slot' && !ac.inTabRow)) bad.push({ w, ac });
+    }
+    check('[10] 窓の幅を 1920→390→1920 と変えても、固定エリアにはみ出し・重なりが無く、狭い窓では「条件」の中に戻る', bad.length === 0, bad.slice(0, 3));
+    console.log('  置き場所：' + places.slice(0, widths.length).join(' '));
+    // タブの段の右に入りきらないとき（タブのボタンを広げて再現）は、ヘッダーの中（チェックの右）に戻り、崩れない
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.waitForTimeout(200);
+    const before = await measureHeader(page);
+    await page.addStyleTag({ content: '#tabs-group .group-btn { padding-left: 140px !important; padding-right: 140px !important; }' });
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+    await page.waitForTimeout(400);
+    const fb = await measureActions(page);
+    const fbHd = await measureHeader(page);
+    check('[10] タブの段の右に入りきらないときは、ヘッダーの中（チェックの右）に戻り、はみ出し・重なりが無い', fb.parent === 'header-controls' && !!fb.act && fb.overlaps.length === 0 && fb.outside.length === 0, { fb, rows: fbHd.rows });
+    check('[10] ヘッダーの中に戻したときも、固定エリアに余分な高さが無い', fbHd.headerPx <= fbHd.minHeaderPx + 1, fbHd);
+    await page.evaluate(() => { document.querySelectorAll('style').forEach(st => { if (st.textContent.includes('padding-left: 140px')) st.remove(); }); window.dispatchEvent(new Event('resize')); });
+    await page.waitForTimeout(400);
+    const back = await measureActions(page);
+    const backHd = await measureHeader(page);
+    check('[10] 入るようになると、タブの段の右に戻り、固定エリアの高さも元に戻る', back.parent === 'tabs-actions-slot' && back.inTabRow && backHd.fixedAreaPx === before.fixedAreaPx, { back, before: before.fixedAreaPx, after: backHd.fixedAreaPx });
+    // 置き場所が変わって固定エリアの高さが変わると、グラフの高さが合わせ直される（1607：タブの段へ移すと1段になる）
+    const target = SCREENS.find(sc => sc.name === '比較（繁忙期見込み）＞要員計画');
+    await page.setViewportSize({ width: 1607, height: 905 });
+    await page.evaluate(code => { (0, eval)(code); }, target.prep);
+    await page.waitForTimeout(400);
+    await waitCharts(page);
+    const inTabs = { hd: await measureHeader(page), fit: await measureChartFits(page) };
+    await page.addStyleTag({ content: '#tabs-group .group-btn { padding-left: 260px !important; padding-right: 260px !important; }' });
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+    await page.waitForTimeout(600);
+    await waitCharts(page);
+    const inHeader = { ac: await measureActions(page), hd: await measureHeader(page), fit: await measureChartFits(page) };
+    check(`[10] 1607×905 で一式をヘッダーに戻すと固定エリアが高くなり（${inTabs.hd.fixedAreaPx}px → ${inHeader.hd.fixedAreaPx}px）、グラフが低く合わせ直されて全体が収まる`,
+      inHeader.ac.parent === 'header-controls' && inHeader.hd.fixedAreaPx > inTabs.hd.fixedAreaPx && inTabs.fit.length > 0 && inTabs.fit.every(fitOrMin) && inHeader.fit.every(fitOrMin) && inHeader.fit.every((c, i) => c.h < inTabs.fit[i].h),
+      { tabs: inTabs.fit.map(c => c.h), header: inHeader.fit.map(c => c.h) });
     allErrors.push(...page.__errors);
     await context.close();
   }

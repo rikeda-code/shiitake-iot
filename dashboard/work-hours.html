@@ -755,6 +755,16 @@
     #refresh-btn { padding: 6px 16px; font-size: 0.85rem; }
     #last-updated { font-size: 0.72rem; }
     .header-cond-btn { display: none; }
+    /* 振替・更新・最終更新の一式：横に並べ、「最終更新」は小さい文字で2行にする。広い窓ではタブの段の右の
+       空き（.tabs-actions-slot）に置き、入りきらない窓ではチェックの右（ヘッダーの中）に戻す（placeHeaderActions()） */
+    .header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+    .header-actions .header-refresh-group { margin-left: 0; flex-direction: row; align-items: center; gap: 6px; }
+    #last-updated { font-size: 0.65rem; line-height: 1.25; text-align: left; white-space: nowrap; }
+    #last-updated .lu-label, #last-updated .lu-time { display: block; }
+    .tabs-group-row { flex-shrink: 0; display: flex; align-items: flex-end; min-width: 0; }
+    .tabs-group-row > .tabs-group { flex: 1 1 auto; min-width: 0; }
+    .tabs-actions-slot { flex: 0 0 auto; display: flex; align-items: center; padding: 0 32px 4px 0; }
+    .tabs-actions-slot:empty { display: none; }
 
     /* タブ・サブタブ：横に並びきらないときは、折り返さずに横スクロールにする
        （1280px 以上は並びきるため、今までの見た目（選択中のタブが下の線に重なる）のままにする） */
@@ -784,6 +794,7 @@
       #header-controls { display: none; }
       header.controls-open #header-controls { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; padding-bottom: 4px; }
       header.controls-open .header-refresh-group { margin-left: 0; flex-direction: row; }
+      .header-actions { margin-left: 0; }
       .tabs-group { padding: 8px 16px 0; }
       .tabs { padding: 4px 16px 0; }
       .tabs-group-bar { margin: 0 16px; }
@@ -861,18 +872,24 @@
       </div>
       <div class="header-emp-filter-checks" id="header-emp-filter-checks"></div>
     </div>
-    <div class="transfer-toggle" id="transfer-toggle">
-      <button class="transfer-toggle-btn" data-mode="off" onclick="setTransferMode(false)">振替なし</button>
-      <button class="transfer-toggle-btn active" data-mode="on" onclick="setTransferMode(true)">振替あり</button>
-    </div>
-    <div class="header-refresh-group">
-      <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
-      <span id="last-updated"></span>
+    <!-- 振替・更新・最終更新の一式。広い窓ではタブの段の右（#tabs-actions-slot）に移す（placeHeaderActions()） -->
+    <div class="header-actions" id="header-actions">
+      <div class="transfer-toggle" id="transfer-toggle">
+        <button class="transfer-toggle-btn" data-mode="off" onclick="setTransferMode(false)">振替なし</button>
+        <button class="transfer-toggle-btn active" data-mode="on" onclick="setTransferMode(true)">振替あり</button>
+      </div>
+      <div class="header-refresh-group">
+        <button id="refresh-btn" onclick="loadAll()">↻ 更新</button>
+        <span id="last-updated"></span>
+      </div>
     </div>
   </div>
 </header>
 
-<div class="tabs-group" id="tabs-group"></div>
+<div class="tabs-group-row" id="tabs-group-row">
+  <div class="tabs-group" id="tabs-group"></div>
+  <div class="tabs-actions-slot" id="tabs-actions-slot"></div>
+</div>
 <div class="tabs-group-bar"></div>
 <div class="tabs" id="tabs"></div>
 <div id="transfer-alerts"></div>
@@ -2835,7 +2852,38 @@ function updateFilterVisibility() {
       const el = document.getElementById(id);
       if (el) el.style.display = show ? '' : 'none';
     });
+  // 設定タブでは振替が隠れて一式の幅が変わるため、置き場所を決め直す
+  placeHeaderActions();
 }
+
+// 振替・更新・最終更新の一式の置き場所：横 MOBILE_MAX_W より広い窓で、タブの段（勤務実績・予実・設定）の
+// 右の空きに入るときはそこへ、入らないとき・狭い窓（「条件」の中に残す）はヘッダーの中（チェックの右）へ。
+// タブのボタンと一式の幅はどちらに置いても変わらないので、置き場所で判定が揺れることはない
+const TABS_ACTIONS_GAP_PX = 24;
+function placeHeaderActions() {
+  const actions = document.getElementById('header-actions');
+  const slot = document.getElementById('tabs-actions-slot');
+  const controls = document.getElementById('header-controls');
+  const row = document.getElementById('tabs-group-row');
+  const tg = document.getElementById('tabs-group');
+  if (!actions || !slot || !controls || !row || !tg) return;
+  let toTabs = false;
+  if (window.innerWidth > MOBILE_MAX_W) {
+    const need = actions.getBoundingClientRect().width;
+    const btns = [...tg.querySelectorAll('.group-btn')];
+    const cs = getComputedStyle(tg);
+    const used = (parseFloat(cs.paddingLeft) || 0) + btns.reduce((sum, b) => sum + b.getBoundingClientRect().width, 0) + Math.max(0, btns.length - 1) * (parseFloat(cs.columnGap) || 0);
+    const slotPad = parseFloat(getComputedStyle(slot).paddingRight) || 0;
+    toTabs = need > 0 && used + TABS_ACTIONS_GAP_PX + need + slotPad <= row.clientWidth;
+  }
+  const target = toTabs ? slot : controls;
+  if (actions.parentElement !== target) {
+    target.appendChild(actions);
+    scheduleProdTableWrapRefresh();
+  }
+}
+window.addEventListener('resize', () => placeHeaderActions());
+placeHeaderActions();
 
 function renderGroupTabs(bases) {
   const groupEl = document.getElementById('tabs-group');
@@ -9033,8 +9081,9 @@ async function loadAll() {
     document.getElementById('main').innerHTML = '';
     renderActiveTabContent(prevSummarySubtab);
 
-    document.getElementById('last-updated').textContent =
-      `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+    // 「最終更新:」と日時を2行に分けて小さく出す（文字は今までと同じ「最終更新: 日時」）
+    document.getElementById('last-updated').innerHTML =
+      `<span class="lu-label">最終更新:</span> <span class="lu-time">${new Date().toLocaleString('ja-JP')}</span>`;
   } catch (e) {
     document.getElementById('main').innerHTML = `<div class="error-msg">データ取得エラー: ${e.message}</div>`;
     console.error(e);
