@@ -9,6 +9,8 @@
 //  [3] 全グラフで、いちばん高い棒・線の点・上に付く文字（計◯・◯人）が縦軸の上限の中に入る
 //  [4] 全グラフで、グラフの見出し・凡例・グラフ・横軸の見出し（・横スクロールのバー）の全体が、固定エリアと
 //      上に貼り付く行（拠点の切替・サブタブ）の下の見える範囲に収まる（実際にその位置までスクロールして測る）。
+//      グラフが1つだけの画面（比較（3拠点）など）は、開いた直後（スクロールしていない状態）にも、上の見出しの
+//      行（「📊 比較（3拠点）」と切替の行など、上に貼り付かないもの）の下で全体が見えること。
 //      最低の高さ（300px）でも収まらない小さい窓は、最低の高さを優先していること。狭い窓は画面の高さの55%以下
 //  [5] 1か月分の幅が44px以上で、下限の幅で入らないときは横スクロール。表は横スクロール
 //  [6] 各月の見出しと棒の組の位置がそろう（verify_left_align_layout.js と同じ測り方）
@@ -227,6 +229,8 @@ const SCREENS = [
   { name: '勤務実績＞生産性', prep: "activeMode = 'productivity'; renderProductivityTab();", wait: 'prd-0' },
   { name: '勤務実績＞比較＞拠点別', prep: "activeMode = 'compare'; compareSubtab = 'site'; renderCompareTab();", wait: 'cmp-群馬-栽培' },
   { name: '勤務実績＞比較（3拠点）＞時間', prep: "activeMode = 'comparesite'; compareSiteViewMode = 'time'; renderCompareSiteTab();", wait: 'comparesite-actual' },
+  { name: '勤務実績＞比較（3拠点）＞人数', prep: "activeMode = 'comparesite'; compareSiteViewMode = 'count'; renderCompareSiteTab();", wait: 'comparesite-count' },
+  { name: '勤務実績＞比較（3拠点）＞標準労働時間', prep: "activeMode = 'comparesite'; compareSiteViewMode = 'stdhours'; renderCompareSiteTab();", wait: 'comparesite-stdhours' },
   { name: '勤務実績＞生産実績', prep: "activeMode = 'production'; renderProductionTab();", wait: 'table' },
   { name: '予実＞生産計画', prep: "activeMode = 'plan'; renderPlanTab();", wait: 'table' },
   { name: '予実＞予定標準工数(h)', prep: "activeMode = 'planstdhours'; renderPlanStdHoursTab();", wait: 'table' },
@@ -342,6 +346,19 @@ async function measureChartFits(page) {
       const stickies = [...box.querySelectorAll('*')].filter(e => !e.closest('table') && e.offsetHeight && getComputedStyle(e).position === 'sticky' && getComputedStyle(e).top !== 'auto');
       const visTop = () => Math.max(box.getBoundingClientRect().top, main.getBoundingClientRect().top, 0, ...stickies.map(e => e.getBoundingClientRect().bottom));
       const visBottom = () => Math.min(box.getBoundingClientRect().bottom, main.getBoundingClientRect().bottom, window.innerHeight);
+      // グラフが1つだけの画面（比較（3拠点）など）は、開いた直後（スクロールしていない状態）にも、上の見出しの
+      // 行（上に貼り付かないもの）の下で全体が見えること。スクロールして測るだけでは、上に貼り付かない行を
+      // スクロールで隠した状態で「収まる」と判定してしまうため
+      const single = [...box.querySelectorAll('.month-scroll-outer')].filter(o => o.offsetParent).length === 1;
+      let fits0 = true, available0 = Infinity, blockBottom0 = null;
+      if (single) {
+        main.scrollTop = 0; box.scrollTop = 0;
+        const b0 = block.getBoundingClientRect();
+        const bottom0 = visBottom();
+        available0 = Math.round(bottom0 - b0.top);
+        blockBottom0 = Math.round(b0.bottom);
+        fits0 = b0.top >= visTop() - 1 && b0.bottom <= bottom0 + 1;
+      }
       block.scrollIntoView({ block: 'start' });
       for (let k = 0; k < 2; k++) {
         const d = block.getBoundingClientRect().top - visTop();
@@ -351,8 +368,9 @@ async function measureChartFits(page) {
       const top = visTop(), bottom = visBottom();
       const h = Math.round(c.getBoundingClientRect().height);
       out.push({
-        id: c.id, h, blockH: Math.round(br.height), available: Math.round(bottom - top),
-        fits: br.top >= top - 1 && br.bottom <= bottom + 1,
+        id: c.id, h, blockH: Math.round(br.height), available: Math.min(Math.round(bottom - top), available0),
+        fits: br.top >= top - 1 && br.bottom <= bottom + 1 && fits0,
+        single, fits0, blockBottom0,
         headTop: Math.round(br.top), visTop: Math.round(top), blockBottom: Math.round(br.bottom), visBottom: Math.round(bottom),
       });
     }
@@ -383,9 +401,11 @@ async function measureScreen(page, screen) {
       // 棒の上に描く文字（計◯・◯人）：fillText を記録して描き直す
       const texts = [];
       const ctx = ch.ctx, orig = ctx.fillText;
-      ctx.fillText = function (t, x, y, ...rest) { texts.push({ t: String(t), y, base: ctx.textBaseline }); return orig.call(this, t, x, y, ...rest); };
+      // 文字の横の位置は、描くときの座標変換（縦軸の目盛りは移動して描く）を含めて測る（画面の倍率で割る）
+      ctx.fillText = function (t, x, y, ...rest) { const m = ctx.getTransform(); const dpr = ch.currentDevicePixelRatio || 1; texts.push({ t: String(t), y, base: ctx.textBaseline, cx: (m.a * x + m.c * y + m.e) / dpr }); return orig.call(this, t, x, y, ...rest); };
       try { ch.draw(); } finally { ctx.fillText = orig; }
-      const labelTops = texts.filter(t => /^計[\d.]+$|^[\d.]+人$/.test(t.t)).map(t => ({ t: t.t, top: t.base === 'bottom' ? t.y - 11 : (t.base === 'middle' ? t.y - 6 : t.y) }));
+      // 縦軸の目盛り（「0人」「0.5人」など。描画部分の外の左右に描く）は棒の上の文字ではないので除く
+      const labelTops = texts.filter(t => /^計[\d.]+$|^[\d.]+人$/.test(t.t) && t.cx >= a.left - 1 && t.cx <= a.right + 1).map(t => ({ t: t.t, top: t.base === 'bottom' ? t.y - 11 : (t.base === 'middle' ? t.y - 6 : t.y) }));
       // いちばん高い棒・線の点の上端（値のある棒・点だけ）
       let barTop = Infinity, lineTop = Infinity;
       ch.data.datasets.forEach((d, di) => {

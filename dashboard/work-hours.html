@@ -1224,9 +1224,29 @@ function chartBlockExtra(inner) {
   if (!block || block.querySelectorAll('.month-scroll-outer').length !== 1) return Math.max(0, outer.getBoundingClientRect().height - innerH);
   return Math.max(0, block.getBoundingClientRect().height - innerH);
 }
+// グラフが1つだけの画面（比較（3拠点）など）は、開いた直後（スクロールしていない状態）に、上にある
+// 画面の見出しの行（「📊 比較（3拠点）」と切替の行など、上に貼り付かないもの）・お知らせの枠も含めて
+// 見出し〜横軸が見えるようにする。その高さ（スクロールしていない時の、かたまりの上端から見える範囲の
+// 下端まで）から見出しなどの分を引いた高さ。グラフが2つ以上の画面は、それぞれのグラフまでスクロール
+// して見るので、この制限は付けない（null）
+function chartSingleInitialFit(inner, box) {
+  const main = document.getElementById('main');
+  const visible = [...box.querySelectorAll('.month-scroll-outer')].filter(o => o.offsetParent);
+  if (visible.length !== 1) return null;
+  const outer = inner.parentElement;
+  const parent = outer && outer.parentElement;
+  const block = parent && parent.querySelectorAll('.month-scroll-outer').length === 1 ? parent : outer;
+  const bottomOf = el => el.getBoundingClientRect().top + el.clientTop + el.clientHeight;
+  const visBottom = box === main ? bottomOf(main) : Math.min(bottomOf(box), bottomOf(main));
+  const top0 = block.getBoundingClientRect().top + box.scrollTop + (box !== main && main.contains(box) ? main.scrollTop : 0);
+  return visBottom - top0 - chartBlockExtra(inner);
+}
 function chartTargetHeight(inner) {
   const box = inner ? chartScrollBox(inner) : document.getElementById('main');
-  const fit = Math.floor(chartVisibleHeight(box) - (inner ? chartBlockExtra(inner) : 0) - CHART_FIT_MARGIN_PX);
+  let room = chartVisibleHeight(box) - (inner ? chartBlockExtra(inner) : 0);
+  const single = inner ? chartSingleInitialFit(inner, box) : null;
+  if (single != null) room = Math.min(room, single);
+  const fit = Math.floor(room - CHART_FIT_MARGIN_PX);
   if (window.innerWidth <= MOBILE_MAX_W) return Math.max(CHART_MIN_H_PX, Math.min(Math.round(window.innerHeight * MOBILE_CHART_H_RATIO), fit));
   return Math.max(CHART_MIN_H_PX, fit);
 }
