@@ -26,6 +26,11 @@
 //  [12] 予実＞比較（繁忙期見込み）・比較（週間）で、拠点の切替・表示の切替が、説明文（2行）と同じ段の右に右寄せで
 //      並ぶ（左から拠点の切替、表示の切替）。説明文の右に入りきらない窓では説明文の下に回り、はみ出し・重なりが
 //      無い。上に貼り付く行の高さが、説明文と切替の高い方＋上下の余白だけになる（切替だけの段が無い）
+//  [13] 勤務実績＞生産性の上の、最新月の生産性の表：3行（①②③のグラフの見出しと同じ指標名＋単位）×3列（いなべ・
+//      群馬・南丹、拠点の色）で、9つの数字が変更前の枠（main 570e3e0 を同じモックで測った値）と同じ。窓の幅を変えても
+//      （1920・1607・1280・1100・390）行が増えず高さが変わらず、変更前の枠1段より高くない。左寄せで横いっぱいに広げず、
+//      入らない窓では表の中で横スクロール。いちばん上のグラフが開いた直後に収まり、表の高さが変わるとグラフの高さが
+//      合わせ直される
 //  [10] 窓の幅を 1920→390→1920 と変えても固定エリアにはみ出し・重なりが無い。タブの段の右に入りきらないとき
 //      （タブのボタンを広げて再現）はヘッダーの中（チェックの右）に戻り、入るようになると戻る。置き場所が変わって
 //      固定エリアの高さが変わると、グラフの高さが合わせ直される
@@ -90,7 +95,8 @@ function durationCell(h) {
 function numCell(v, digits) { return v == null ? null : { v, f: digits != null ? v.toFixed(digits) : String(v) }; }
 function textCell(v) { return v == null || v === '' ? null : { v: String(v) }; }
 
-function buildMGviz() {
+// mSites：同じ人たちを置く拠点（ふだんは群馬だけ。[13] の生産性の表だけ3拠点にする。群馬の行は今までと同じ）
+function buildMGviz(mSites = ['群馬']) {
   const cols = [
     { id: 'A', label: '0：ファイルなし ', type: 'number' },
     { id: 'B', label: '1：在職中、2：入社予定、3：退職/異動予定、8：他所属、9：退職 F', type: 'number' },
@@ -106,15 +112,15 @@ function buildMGviz() {
     cols.push({ id: `P${i}`, label: '有給取得時間', type: 'datetime' });
     cols.push({ id: `J${i}`, label: '実質勤務時間', type: 'datetime' });
   });
-  const rows = PEOPLE.map((p, i) => {
-    const c = [null, numCell(p.flag), textCell(p.emp), textCell('群馬'), textCell('群馬'), textCell(p.div),
-      numCell(270000 + i), textCell(p.name), dateCell(p.start)];
+  const rows = mSites.flatMap((site, si) => PEOPLE.map((p, i) => {
+    const c = [null, numCell(p.flag), textCell(p.emp), textCell(site), textCell(site), textCell(p.div),
+      numCell(270000 + si * 1000 + i), textCell(si ? `${p.name}${si}` : p.name), dateCell(p.start)];
     M_MONTHS.forEach(m => {
       const h = p.hours[m];
       c.push(durationCell(h)); c.push(h == null ? null : durationCell(0)); c.push(durationCell(h));
     });
     return { c };
-  });
+  }));
   return gvizText({ cols, rows });
 }
 
@@ -189,8 +195,20 @@ const PROD_FAKE = {
     { site: '群馬', cat: '生産実績', metric: '出荷量(kg)', values: M_MONTHS.map(() => 9500) },
   ],
 };
+// [13]（生産性の表）だけで使う、3拠点分の生産実績（実際の生産実績シートを組み立てたものと同じ形。
+// 指標の名前も実際と同じ：収穫量(kg)・出荷量(kg)・合計(点数)）。拠点ごとに値を変えて、表の列の取り違えを見分ける
+const PROD_FAKE_3SITES = {
+  months: M_MONTHS.slice(),
+  records: [
+    ['いなべ', 12000, 10500, 8200], ['群馬', 11000, 9500, 6100], ['南丹', 7000, 6400, 3300],
+  ].flatMap(([site, harvest, ship, pcs]) => [
+    { site, cat: '生産実績', metric: '収穫量(kg)', values: M_MONTHS.map((_, i) => harvest + i * 37) },
+    { site, cat: '生産実績', metric: '出荷量(kg)', values: M_MONTHS.map((_, i) => ship + i * 29) },
+    { site, cat: '生産実績', metric: '合計(点数)', values: M_MONTHS.map((_, i) => pcs + i * 11) },
+  ]),
+};
 
-async function setupRoutes(page) {
+async function setupRoutes(page, opts = {}) {
   await page.route('**/*', async route => {
     const url = route.request().url();
     if (url.startsWith('http://localhost')) return route.continue();
@@ -201,7 +219,7 @@ async function setupRoutes(page) {
     const sheet = u.searchParams.get('sheet');
     if (url.includes('/gviz/tq')) {
       let body = gvizText({ cols: [], rows: [] });
-      if (sheet === '整理済み_M') body = buildMGviz();
+      if (sheet === '整理済み_M') body = buildMGviz(opts.mSites);
       else if (sheet === '整理済み_増減') body = buildAdjustGviz();
       else if (sheet === '時間_過去実績') body = buildPastYearGviz();
       else if (gid === PLAN_GID) body = buildPlanGviz();
@@ -265,17 +283,21 @@ const BEFORE_FIXED_AREA_PX = { '1607x905': 236, '1920x1040': 236, '1440x800': 30
 // 固定エリアの高さ。1607 はこれより低く、ほかの大きさはこれより高くならないこと
 const CURRENT_FIXED_AREA_PX = { '1607x905': 222, '1920x1040': 165, '1440x800': 222, '1280x720': 225, '1100x900': 225, '1700x600': 165, '800x600': 284, '390x844': 136 };
 const MIN_CHART_H = 300;
+// 勤務実績＞生産性の上の数字の枠（変更前、main 570e3e0）を、このテストと同じモックで測った値：
+// 9つの数字（①②③の順に いなべ・群馬・南丹）と、枠1段の高さ
+const BEFORE_KPI_VALUES = ['78.7 kg/h', '82.8 kg/h', '47.5 kg/h', '68.5 kg/h', '62.3 kg/h', '42.9 kg/h', '52 点/h', '39 点/h', '22 点/h'];
+const BEFORE_KPI_ROW_PX = 81;
 const MOBILE_RATIO = 0.55;
 const MONTH_MIN = 44;
 
-async function openPageAt(browser, baseUrl, vp) {
+async function openPageAt(browser, baseUrl, vp, opts = {}) {
   // 端末（スマホ）の扱いにはしない（isMobile なし）。狭い窓はタップでも操作できるようにする
   const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, hasTouch: !!vp.narrow });
   const page = await context.newPage();
   page.__errors = [];
   page.on('pageerror', e => { page.__errors.push(e.message); console.log('  [pageerror]', e.message); });
   await page.clock.install({ time: new Date('2026-11-20T10:00:00+09:00') });
-  await setupRoutes(page);
+  await setupRoutes(page, opts);
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => (document.getElementById('last-updated')?.textContent || '').includes('最終更新'), null, { timeout: 30000 });
   return { page, context };
@@ -372,6 +394,42 @@ async function measurePlanCmpHeader(page) {
       rowGap: parseFloat(cs.rowGap) || 0,
       sticky: cs.position,
       descText: desc.textContent.replace(/\s+/g, ' ').trim(),
+      pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    };
+  });
+}
+
+// 勤務実績＞生産性の上の、最新月の生産性の表
+async function measureProdKpi(page) {
+  return page.evaluate(() => {
+    const t = document.getElementById('prod-kpi-table');
+    if (!t) return null;
+    const wrap = t.closest('.prod-kpi-scroll');
+    const panel = t.closest('.prod-panel');
+    const pcs = getComputedStyle(panel);
+    const tr = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(), pr = panel.getBoundingClientRect();
+    const contentLeft = pr.left + (parseFloat(pcs.borderLeftWidth) || 0) + (parseFloat(pcs.paddingLeft) || 0);
+    const contentW = panel.clientWidth - (parseFloat(pcs.paddingLeft) || 0) - (parseFloat(pcs.paddingRight) || 0);
+    const text = el => el.textContent.replace(/\s+/g, ' ').trim();
+    const toHex = c => { const m = c.match(/\d+/g); return m ? '#' + m.slice(0, 3).map(x => (+x).toString(16).padStart(2, '0')).join('') : c; };
+    const heads = [...t.tHead.rows[0].cells];
+    const body = [...t.tBodies[0].rows];
+    return {
+      h: wr.height, tableH: tr.height, tableW: tr.width,
+      bodyRows: body.length, cols: [...t.rows].map(r => r.cells.length),
+      colHeads: heads.slice(1).map(text),
+      colColors: heads.slice(1).map(c => toHex(getComputedStyle(c).color)),
+      siteColors: heads.slice(1).map(c => (typeof SITE_COLORS !== 'undefined' ? SITE_COLORS : {})[text(c)] || null),
+      rowHeads: body.map(r => text(r.cells[0])),
+      chartTitles: [...document.querySelectorAll('#main .schart-header')].map(h => h.firstChild.textContent.trim()),
+      values: body.flatMap(r => [...r.cells].slice(1).map(text)),
+      // 1行ずつの高さ（文字が折り返していれば高くなる）
+      rowHs: [...t.rows].map(r => Math.round(r.getBoundingClientRect().height * 10) / 10),
+      leftAligned: Math.abs(wr.left - contentLeft) <= 1,
+      notFull: wr.width < contentW - 1 || t.scrollWidth > wrap.clientWidth + 1,
+      tableOverflow: t.scrollWidth > wrap.clientWidth + 1,
+      wrapScrolls: /auto|scroll/.test(getComputedStyle(wrap).overflowX),
+      label: text(document.querySelector('#main .prod-panel > .chart-section-label')),
       pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     };
   });
@@ -833,6 +891,57 @@ async function measureTooltip(page, canvasId, kind) {
     check(`[10] 1607×905 で一式をヘッダーに戻すと固定エリアが高くなり（${inTabs.hd.fixedAreaPx}px → ${inHeader.hd.fixedAreaPx}px）、グラフが低く合わせ直されて全体が収まる`,
       inHeader.ac.parent === 'header-controls' && inHeader.hd.fixedAreaPx > inTabs.hd.fixedAreaPx && inTabs.fit.length > 0 && inTabs.fit.every(fitOrMin) && inHeader.fit.every(fitOrMin) && inHeader.fit.every((c, i) => c.h < inTabs.fit[i].h),
       { tabs: inTabs.fit.map(c => c.h), header: inHeader.fit.map(c => c.h) });
+    allErrors.push(...page.__errors);
+    await context.close();
+  }
+
+  // ---- [13] 勤務実績＞生産性：最新月の生産性の表 ----
+  console.log('\n========== [13] 生産性の表 ==========');
+  {
+    // 3拠点の表にするため、この場面だけ整理済み_Mの人たちを3拠点に置き、生産実績も3拠点分にする
+    const { page, context } = await openPageAt(browser, BASE_URL, { width: 1920, height: 1040 }, { mSites: ['群馬', 'いなべ', '南丹'] });
+    await setPeriod(page, '2025年11月', '2027年2月');
+    const target = SCREENS.find(sc => sc.name === '勤務実績＞生産性');
+    await page.evaluate(prod => { productionDataPromise = Promise.resolve(prod); }, PROD_FAKE_3SITES);
+    await page.evaluate(code => { (0, eval)(code); }, target.prep);
+    await page.waitForFunction(() => !!document.querySelector('#main .prod-panel') && !!document.getElementById('prd-0') && window.Chart && Chart.getChart(document.getElementById('prd-0')), null, { timeout: 30000 });
+    await waitCharts(page);
+    const minCase = c => Math.abs(c.h - MIN_CHART_H) <= 1 && c.available - (c.blockH - c.h) < MIN_CHART_H + 8;
+    let firstH = null;
+    for (const [w, h] of [[1920, 1040], [1607, 905], [1280, 720], [1100, 900], [390, 844]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(600);
+      await waitCharts(page);
+      const k = await measureProdKpi(page);
+      const fit = await measureChartFits(page);
+      const key = `${w}x${h}`;
+      if (!k) { check(`[13] ${key}：生産性の表がある`, false, null); continue; }
+      console.log(`  表の高さ：${k.h.toFixed(1)}px（変更前の枠1段 ${BEFORE_KPI_ROW_PX}px）、行の高さ ${k.rowHs.join('/')}`);
+      check(`[13] ${key}：表が3行×3列（左に指標の名前、上に拠点の名前）`, k.bodyRows === 3 && k.cols.length === 4 && k.cols.every(c => c === 4) && k.colHeads.join('|') === 'いなべ|群馬|南丹', k);
+      check(`[13] ${key}：指標の名前が①②③のグラフの見出しと同じで、単位（kg/h・点/h）が付く`,
+        k.rowHeads.length === 3 && k.rowHeads.every((rh, i) => rh === `${k.chartTitles[i]}（${['kg/h', 'kg/h', '点/h'][i]}）`), { rowHeads: k.rowHeads, chartTitles: k.chartTitles });
+      check(`[13] ${key}：拠点の名前の色が、今までの枠と同じ拠点の色`, k.colColors.every((c, i) => k.siteColors[i] && c.toLowerCase() === k.siteColors[i].toLowerCase()), k);
+      check(`[13] ${key}：9つの数字（小数の桁・単位も）が変更前の枠と同じ`, k.values.join('|') === BEFORE_KPI_VALUES.join('|'), { got: k.values, before: BEFORE_KPI_VALUES });
+      check(`[13] ${key}：「最新月」の表示が今までどおり`, /^📈 生産性 ／ 最新月: \d{4}年\d{1,2}月/.test(k.label), k.label);
+      check(`[13] ${key}：表の高さ（${k.h.toFixed(1)}px）が変更前の枠1段（${BEFORE_KPI_ROW_PX}px）より高くない`, k.h <= BEFORE_KPI_ROW_PX + 0.5, k);
+      if (firstH === null) firstH = k.h;
+      check(`[13] ${key}：窓の幅を変えても表の行が増えず、高さが変わらない（${firstH.toFixed(1)}px → ${k.h.toFixed(1)}px）`, k.cols.length === 4 && Math.abs(k.h - firstH) <= 0.5 && Math.max(...k.rowHs) - Math.min(...k.rowHs) <= 4, k.rowHs);
+      check(`[13] ${key}：表は左寄せで横いっぱいに広げず、入らないときだけ表の中で横スクロール（ページははみ出さない）`, k.leftAligned && k.notFull && (!k.tableOverflow || k.wrapScrolls) && !k.pageHScroll, k);
+      const f0 = fit[0];
+      check(`[13] ${key}：いちばん上のグラフ（${f0 && f0.id}）が、開いた直後の状態で見出しから横軸まで収まる（最低の高さを優先する窓を除く）`, !!f0 && f0.first && (f0.fits0 || minCase(f0)), f0);
+    }
+    // 表の高さが変わったら、下のグラフの高さが合わせ直される（表の行を一時的に高くして確かめる）
+    await page.setViewportSize({ width: 1607, height: 905 });
+    await page.waitForTimeout(600);
+    await waitCharts(page);
+    const before = await measureChartFits(page);
+    await page.addStyleTag({ content: '.prod-kpi-table td { padding-top: 15px !important; }' });
+    await page.waitForTimeout(600);
+    await waitCharts(page);
+    const taller = await measureProdKpi(page);
+    const after = await measureChartFits(page);
+    check(`[13] 1607x905：表が高くなると（${taller.h.toFixed(1)}px）、いちばん上のグラフが低く合わせ直され（${before[0].h}px → ${after[0].h}px）、開いた直後に収まる`,
+      after[0].h < before[0].h && after[0].fits0, { before: before[0], after: after[0] });
     allErrors.push(...page.__errors);
     await context.close();
   }
