@@ -1,14 +1,22 @@
-// dashboard/work-hours.html の「予実＞比較（繁忙期見込み）」タブ各グラフの、ツールチップ
-// （mode:'index'でキャンバス内に描かれる窓）がグラフの高さに収まらず下の行が切れる問題への
-// 対応（fitChartHeightForTooltip・fitSegmentLabelChartHeightと組み合わせた高さ決定）の検証。
+// dashboard/work-hours.html の「予実＞比較（繁忙期見込み）」タブ各グラフの、吹き出し（ツールチップ。
+// mode:'index' で、月によっては業務区分の行が20〜30行以上並ぶ）が切れずに見えることの検証。
+//
+// 以前（#518）は、吹き出しをキャンバスの中に描いていたため、グラフの高さを吹き出しの高さまで広げて
+// 切れないようにしていた（fitChartHeightForTooltip・fitSegmentLabelChartHeight）。今は、グラフの高さを
+// 画面の見える範囲に合わせて決め、吹き出しはページの上（#chart-tip、externalChartTooltip）に出して
+// 画面の中に収める形に変えた。このテストは、同じ①〜⑧の場面で、ねらい（吹き出しの全部の行が切れずに
+// 見えること）を「グラフが広がること」ではなく「吹き出しが画面の中に収まること」で確かめる：
+//  - グラフの高さは吹き出しのために変えない
+//  - 吹き出しの上下左右が画面（ビューポート）の中にある
+//  - 画面の高さに入らないときは2列以上に並べ、それでも入らないときは吹き出しの中でスクロールできる
+//  - 吹き出しの行がすべて出ている・マウスを離すと消える
 //
 // work-hours.html はトップレベル（IIFEで包まれていない）のスクリプトのため、ページを開くだけで
-// fitChartHeightForTooltip・fitSegmentLabelChartHeight・computeSegmentLabelChartHeight が
-// window直下の関数として使える。実際のデータ読み込み（loadAll()）は外部スプレッドシートへの
-// アクセスのため、/export系リクエストは空のCSVでモックして素早く失敗させるだけにとどめ、
-// この検証では「予実＞比較（繁忙期見込み）」の各グラフ生成コードが実際に使っている
-// Chart.js（CDN、同じバージョン）とtooltipコールバックの形（tooltipOpts(true,true)相当）を
-// 直接再現したテスト用チャートを作り、本物のChart.jsに実測させる形で確認する
+// externalChartTooltip（Chart.js の既定の吹き出しとして登録済み）が使える。実際のデータ読み込み
+// （loadAll()）は外部スプレッドシートへのアクセスのため、/export系リクエストは空のCSVでモックして
+// 素早く失敗させるだけにとどめ、「予実＞比較（繁忙期見込み）」の各グラフ生成コードが実際に使っている
+// Chart.js（同じバージョン）と吹き出しのコールバックの形（tooltipOpts(true,true)相当）を直接再現した
+// テスト用チャートを作り、本物のマウス操作で吹き出しを出して、ブラウザが描いた大きさ・位置を測る
 // （行数や1行の高さを見積もりで決め打ちしていないことの確認を兼ねる）。
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -63,23 +71,58 @@ function check(name, cond, extra) {
   else { ngCount++; console.log(`  ${name}: NG${extra !== undefined ? ' (' + JSON.stringify(extra) + ')' : ''}`); }
 }
 
+
+// 本物のマウス操作で、指定のチャートの指定の月に吹き出しを出し、ページの上の吹き出し（#chart-tip）の
+// 大きさ・位置・行数を測る。leave：測ったあとにマウスを離して、吹き出しが消えるかも測る
+async function hoverAndMeasure(page, chartVar, index, opts = {}) {
+  await page.evaluate(({ chartVar }) => { window.__hoverChartRef = window[chartVar]; }, { chartVar });
+  const target = await page.evaluate(({ index }) => {
+    const chart = window.__hoverChartRef;
+    const rect = chart.canvas.getBoundingClientRect();
+    return { x: rect.left + rect.width * ((index + 0.5) / chart.data.labels.length), y: rect.top + rect.height * 0.5 };
+  }, { index });
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.move(target.x + 1, target.y);
+  await page.waitForTimeout(250);
+  const result = await page.evaluate(() => {
+    const chart = window.__hoverChartRef;
+    const el = document.getElementById('chart-tip');
+    const r = el ? el.getBoundingClientRect() : null;
+    const body = el && el.querySelector('.tt-body');
+    return {
+      shown: !!el && el.classList.contains('on') && getComputedStyle(el).visibility === 'visible',
+      top: r && r.top, bottom: r && r.bottom, left: r && r.left, right: r && r.right, height: r && r.height,
+      vw: document.documentElement.clientWidth, vh: window.innerHeight,
+      cols: body ? (parseInt(body.style.columnCount, 10) || 1) : 0,
+      scroll: !!el && el.classList.contains('scroll'),
+      scrollH: el ? el.scrollHeight : 0, clientH: el ? el.clientHeight : 0,
+      numLines: el ? el.querySelectorAll('.tt-line').length : 0,
+      chartHeight: chart.height, wrapStyleHeight: parseInt(chart.canvas.parentElement.style.height, 10),
+    };
+  });
+  if (opts.leave !== false) {
+    // グラフ（幅900px、画面の左上に固定）の外へマウスを動かす
+    const vp = page.viewportSize();
+    await page.mouse.move(vp.width - 5, vp.height - 5);
+    await page.mouse.move(vp.width - 4, vp.height - 4);
+    await page.waitForTimeout(300);
+    result.shownAfterLeave = await page.evaluate(() => { const el = document.getElementById('chart-tip'); return !!el && el.classList.contains('on'); });
+  }
+  return result;
+}
+const inViewport = r => r.shown && r.top >= 0 && r.left >= 0 && r.bottom <= r.vh + 0.5 && r.right <= r.vw + 0.5;
+
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : { executablePath: '/opt/pw-browsers/chromium' });
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
   await setupRoutes(page);
   await page.goto('http://localhost:8813/work-hours.html', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForFunction(() => typeof window.fitChartHeightForTooltip === 'function' && typeof window.fitSegmentLabelChartHeight === 'function' && typeof window.Chart === 'function');
+  await page.waitForFunction(() => typeof window.externalChartTooltip === 'function' && typeof window.Chart === 'function');
 
   // ========== 準備：テスト用チャートを作るヘルパーをページ内に注入 ==========
   await page.evaluate((tooltipOptsSrc) => {
-    // tooltipOptsLike をページ内関数として再構築（文字列化して渡す）
     window.__tooltipOptsLike = new Function('showStdFooter', 'showActualTotal', `return (${tooltipOptsSrc})(showStdFooter, showActualTotal);`);
-
-    // work-hours.html自体のbodyはdisplay:flexのコンテナのため、bodyに直接追加した
-    // テスト用の複数のdivがflexアイテムとして扱われ、兄弟要素の高さに応じて互いの
-    // 高さが圧縮されてしまう（明示的に指定したstyle.heightどおりにならない）。
-    // position:fixedの専用コンテナを作り、その中にテスト用の要素を追加することで、
-    // 本体のflexレイアウトの影響を受けないようにする
+    // work-hours.html の body は display:flex のため、テスト用の要素は position:fixed の専用コンテナに入れる
     let testContainer = document.getElementById('__test_chart_container');
     if (!testContainer) {
       testContainer = document.createElement('div');
@@ -87,20 +130,18 @@ function check(name, cond, extra) {
       testContainer.style.position = 'fixed';
       testContainer.style.top = '0';
       testContainer.style.left = '0';
+      testContainer.style.zIndex = '500';
       document.body.appendChild(testContainer);
     }
+    // 各チャートは画面の原点に固定する（本物のマウス操作で、対象のキャンバスの座標だけを見るため。
+    // 前のチャートは作るときに外す）
     window.__makeChart = function (opts) {
       const { id, heightPx, datasets, labels, tooltipOpts } = opts;
+      testContainer.querySelectorAll(':scope > div').forEach(d => { const c = d.querySelector('canvas'); if (c && window.Chart.getChart(c) && d.id !== id + '-wrap') d.style.display = 'none'; });
       let wrap = document.getElementById(id + '-wrap');
       if (wrap) wrap.remove();
       wrap = document.createElement('div');
       wrap.id = id + '-wrap';
-      // position:fixedの専用コンテナ(__test_chart_container)の「子要素」として普通に
-      // appendすると、通常のフロー(縦積み)のため、テストが増えるほど後のチャートほど
-      // ビューポートの外へ押し出されてしまう。本物のマウス操作(page.mouse.move)で
-      // 検証するテスト用に、各ラッパー自体もposition:fixed;top:0;left:0にして、
-      // 常にビューポート原点に固定する(複数のテスト用チャートが画面上で重なっても、
-      // 自動テストでは対象のキャンバスの座標だけを見るため問題ない)
       wrap.style.position = 'fixed';
       wrap.style.top = '0';
       wrap.style.left = '0';
@@ -110,89 +151,39 @@ function check(name, cond, extra) {
       canvas.id = id;
       wrap.appendChild(canvas);
       testContainer.appendChild(wrap);
-      const ctx = canvas.getContext('2d');
-      const chart = new Chart(ctx, {
+      return new Chart(canvas.getContext('2d'), {
         data: { labels, datasets },
         options: {
-          responsive: true, maintainAspectRatio: false,
-          // チャート自身の初期描画アニメーションが動いている間はchart.resize()が
-          // 次のdraw()まで遅延される(実ブラウザでは次フレームで自然に反映されるが、
-          // テストでは明示的にdraw()を挟まない限り確定しないため、無効化して
-          // 高さの変化を同期的に検証できるようにする)
-          animation: false,
+          responsive: true, maintainAspectRatio: false, animation: false,
           interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { labels: { font: { size: 10 } } },
-            tooltip: tooltipOpts,
-          },
-          scales: {
-            x: { stacked: true },
-            y: { stacked: true, suggestedMin: 0 },
-          },
+          plugins: { legend: { labels: { font: { size: 10 } } }, tooltip: tooltipOpts },
+          scales: { x: { stacked: true }, y: { stacked: true, suggestedMin: 0 } },
         },
       });
-      return chart;
     };
-
-    // 指定indexのmode:'index'相当のアクティブ要素一覧（非nullのデータセットのみ）を作って
-    // ツールチップを強制表示し、Chart.js自身の計算結果を読んでから非表示に戻す
-    // （fitChartHeightForTooltip内部と同じ手順の、独立した検証用コピー）。
-    // chart.tooltip.height自体はアニメーション経由で反映されるため、update()内で
-    // アニメーション適用前に同期的に計算される目標サイズ(_size.height)を読む
-    // （fitChartHeightForTooltip本体と同じ読み方。Chart.js 4.4.3固定が前提）
-    window.__measureTooltipHeightAt = function (chart, index) {
-      const activeElements = [];
-      chart.data.datasets.forEach((ds, datasetIndex) => {
-        const v = ds.data && ds.data[index];
-        if (v !== null && v !== undefined) activeElements.push({ datasetIndex, index });
-      });
-      if (!activeElements.length) return 0;
-      chart.tooltip.setActiveElements(activeElements, { x: 0, y: 0 });
-      const size = chart.tooltip._size;
-      const h = size ? size.height : 0;
-      chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-      return h;
+    window.__showOnly = function (id) {
+      testContainer.querySelectorAll(':scope > div').forEach(d => { d.style.display = d.id === id + '-wrap' ? '' : 'none'; });
     };
   }, tooltipOptsLike.toString());
 
-  // ========== ①長い月（約28行の業務区分）があるチャートは、そのツールチップが
-  //            収まる高さまで広がること（plancmp2等の固定320px想定） ==========
-  await page.evaluate((tooltipArgs) => {
-    const MONTHS = 8;
-    const LONG_IDX = 5;
-    const datasets = [];
-    datasets.push({
-      type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual',
-      data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 120 : (i % 2 === 0 ? 80 : null)),
-    });
+  // ========== ①長い月（約28行の業務区分）があるチャート：吹き出しのためにグラフを広げず、
+  //            吹き出しは画面の中に全部の行が収まる ==========
+  await page.evaluate(() => {
+    const MONTHS = 8, LONG_IDX = 5;
+    const datasets = [{ type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 120 : (i % 2 === 0 ? 80 : null)) }];
     for (let i = 0; i < 28; i++) {
-      datasets.push({
-        type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std',
-        data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (10 + i) : null),
-      });
+      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (10 + i) : null) });
     }
-    window.__chartLongTooltip = window.__makeChart({
-      id: 'test-long-tooltip', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`),
-      datasets, tooltipOpts: window.__tooltipOptsLike(true, true),
-    });
+    window.__chartLongTooltip = window.__makeChart({ id: 'test-long-tooltip', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets, tooltipOpts: window.__tooltipOptsLike(true, true) });
   });
-  const longResult = await page.evaluate(() => {
-    const chart = window.__chartLongTooltip;
-    const beforeHeight = chart.height;
-    const tooltipHeightAtLong = window.__measureTooltipHeightAt(chart, 5);
-    window.fitChartHeightForTooltip(chart);
-    const afterHeight = chart.height;
-    const wrapStyleHeight = parseInt(document.getElementById('test-long-tooltip-wrap').style.height, 10);
-    const activeAfter = chart.tooltip.getActiveElements().length;
-    return { beforeHeight, tooltipHeightAtLong, afterHeight, wrapStyleHeight, activeAfter };
-  });
-  check('①長い月のツールチップが320pxを大きく超える(測定が機能している)', longResult.tooltipHeightAtLong > 320, longResult);
-  check('①グラフの高さが320pxより大きくなる(ツールチップの分だけ広がる)', longResult.afterHeight > longResult.beforeHeight, longResult);
-  check('①広がった高さがツールチップの高さを覆っている(余白込みで上回る)', longResult.afterHeight >= longResult.tooltipHeightAtLong, longResult);
-  check('①ラッパー要素の高さも実際に書き換わっている', longResult.wrapStyleHeight === longResult.afterHeight, longResult);
-  check('①測定用に表示したツールチップが残っていない(非表示に戻っている)', longResult.activeAfter === 0, longResult);
+  const longResult = await hoverAndMeasure(page, '__chartLongTooltip', 5);
+  check('①長い月の吹き出しが320pxを大きく超える(グラフの高さより高い＝以前は広げていた場面になっている)', longResult.height > 320, longResult);
+  check('①グラフの高さは320pxのまま(吹き出しのために広げない)', longResult.chartHeight === 320 && longResult.wrapStyleHeight === 320, longResult);
+  check('①吹き出しの上下左右が画面の中に収まっている', inViewport(longResult), longResult);
+  check('①吹き出しの行がすべて出ている(29行：実績1＋工程28)、切れていない', longResult.numLines === 29 && (!longResult.scroll || longResult.scrollH > longResult.clientH), longResult);
+  check('①マウスを離すと吹き出しが消える(出たまま残らない)', longResult.shownAfterLeave === false, longResult);
 
-  // ========== ②すべての月が短い(行数が少ない)場合は、今の高さ(320px)のまま変わらない ==========
+  // ========== ②すべての月が短い場合：1列のまま、グラフの高さも320pxのまま ==========
   await page.evaluate(() => {
     const MONTHS = 8;
     const datasets = [
@@ -200,248 +191,129 @@ function check(name, cond, extra) {
       { type: 'bar', label: '工程1', _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, () => 30) },
       { type: 'bar', label: '工程2', _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, () => 20) },
     ];
-    window.__chartShortTooltip = window.__makeChart({
-      id: 'test-short-tooltip', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`),
-      datasets, tooltipOpts: window.__tooltipOptsLike(true, true),
-    });
+    window.__chartShortTooltip = window.__makeChart({ id: 'test-short-tooltip', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets, tooltipOpts: window.__tooltipOptsLike(true, true) });
   });
-  const shortResult = await page.evaluate(() => {
-    const chart = window.__chartShortTooltip;
-    const beforeHeight = chart.height;
-    const maxTooltipHeight = Math.max(...Array.from({ length: 8 }, (_, i) => window.__measureTooltipHeightAt(chart, i)));
-    window.fitChartHeightForTooltip(chart);
-    const afterHeight = chart.height;
-    const wrapStyleHeight = parseInt(document.getElementById('test-short-tooltip-wrap').style.height, 10);
-    return { beforeHeight, maxTooltipHeight, afterHeight, wrapStyleHeight };
-  });
-  check('②短い内容のツールチップは320pxの余裕の中に収まっている', shortResult.maxTooltipHeight > 0 && shortResult.maxTooltipHeight < shortResult.beforeHeight, shortResult);
-  check('②グラフの高さが320pxのまま変わらない(必要ないのに広げない)', shortResult.afterHeight === shortResult.beforeHeight, shortResult);
-  check('②ラッパー要素のstyle.heightも320pxのまま', shortResult.wrapStyleHeight === 320, shortResult);
+  const shortResult = await hoverAndMeasure(page, '__chartShortTooltip', 3);
+  check('②短い内容の吹き出しは1列のまま(必要ないのに列を増やさない)', shortResult.shown && shortResult.cols === 1 && !shortResult.scroll && shortResult.height < 320, shortResult);
+  check('②グラフの高さが320pxのまま変わらない', shortResult.chartHeight === 320, shortResult);
+  check('②ラッパー要素のstyle.heightも320pxのまま、吹き出しは画面の中', shortResult.wrapStyleHeight === 320 && inViewport(shortResult), shortResult);
 
-  // ========== ③要員計画(業務区分別)：白い2行ラベルの高さとツールチップの高さの大きい方 ==========
-  // ③-a: ツールチップの必要高さが、白いラベル基準の高さ(上限650px)を上回る場合 → 上限を超えてよい
+  // ========== ③画面の高さより長い吹き出し（ノートPC 1366×768） ==========
+  await page.setViewportSize({ width: 1366, height: 768 });
+  // ③-a：60行（1列では画面の高さに入らない）→ 2列以上に並べて画面に収める
   await page.evaluate(() => {
-    const MONTHS = 8;
-    const LONG_IDX = 3;
-    const datasets = [];
-    datasets.push({
-      type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual',
-      data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 200 : 80),
-    });
-    // 白い2行ラベル用の要員不足セグメント(_staffGapBar相当)。最小値を小さくして
-    // computeSegmentLabelChartHeightの計算結果が上限650pxにクランプされる状況を作る
-    datasets.push({
-      type: 'bar', label: '要員不足', _staffGapBar: true, stack: 'std',
-      data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 1 : 5),
-    });
-    for (let i = 0; i < 40; i++) {
-      datasets.push({
-        type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std',
-        data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null),
-      });
+    const MONTHS = 8, LONG_IDX = 3;
+    const datasets = [{ type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 200 : 80) }];
+    datasets.push({ type: 'bar', label: '要員不足', _staffGapBar: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 1 : 5) });
+    for (let i = 0; i < 60; i++) {
+      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
     }
-    window.__chartStaffplanOverCap = window.__makeChart({
-      id: 'test-staffplan-overcap', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`),
-      datasets, tooltipOpts: window.__tooltipOptsLike(true, true),
-    });
+    window.__chartStaffplanOverCap = window.__makeChart({ id: 'test-staffplan-overcap', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets, tooltipOpts: window.__tooltipOptsLike(true, true) });
   });
-  const overCapResult = await page.evaluate(() => {
-    const chart = window.__chartStaffplanOverCap;
-    const labelValues = chart.data.datasets.find(d => d._staffGapBar).data;
-    const axisMax = 300;
-    window.fitSegmentLabelChartHeight(chart, labelValues, axisMax);
-    const afterLabelFitHeight = chart.height;
-    const expectedLabelFit = window.computeSegmentLabelChartHeight(labelValues, axisMax, chart.height - chart.chartArea.height);
-    const tooltipHeightAtLong = window.__measureTooltipHeightAt(chart, 3);
-    window.fitChartHeightForTooltip(chart);
-    const finalHeight = chart.height;
-    return { afterLabelFitHeight, expectedLabelFit, tooltipHeightAtLong, finalHeight };
+  const overCapResult = await hoverAndMeasure(page, '__chartStaffplanOverCap', 3, { leave: false });
+  const oneColHeight = await page.evaluate(() => {
+    // 同じ内容を1列にしたときの高さ（画面の高さより高いことの確認用）
+    const el = document.getElementById('chart-tip');
+    const clone = el.cloneNode(true);
+    clone.id = '__tip_clone';
+    clone.style.maxHeight = ''; clone.style.width = ''; clone.classList.remove('scroll');
+    clone.querySelector('.tt-body').style.columnCount = '';
+    clone.style.visibility = 'hidden';
+    document.body.appendChild(clone);
+    const h = clone.getBoundingClientRect().height;
+    clone.remove();
+    return h;
   });
-  check('③-a 白いラベル基準の高さがまず650pxの上限にクランプされている', overCapResult.afterLabelFitHeight <= 650 + 1, overCapResult);
-  check('③-a ツールチップの必要高さが650pxの上限を上回る状況になっている', overCapResult.tooltipHeightAtLong + 50 > 650, overCapResult);
-  check('③-a 最終的な高さが650pxの上限を超えている(ツールチップ優先)', overCapResult.finalHeight > 650, overCapResult);
-  check('③-a 最終的な高さがツールチップの高さを覆っている', overCapResult.finalHeight >= overCapResult.tooltipHeightAtLong, overCapResult);
+  overCapResult.oneColHeight = oneColHeight;
+  check('③-a 1列では吹き出しが画面の高さ(768px)より高い状況になっている', oneColHeight > overCapResult.vh, overCapResult);
+  check('③-a 2列以上に並べて、画面の中に収まっている', overCapResult.cols >= 2 && inViewport(overCapResult), overCapResult);
+  check('③-a 列に並べても全部の行が出ている(62行：実績1＋要員不足1＋工程60)', overCapResult.numLines === 62, overCapResult);
+  check('③-a グラフの高さは変えない(320pxのまま)', overCapResult.chartHeight === 320, overCapResult);
 
-  // ③-b: 白いラベル基準の高さだけで、ツールチップの必要高さも既に満たされている場合 →
-  //       ラベル基準の高さのまま(ツールチップのために余計に広げない)
+  // ③-b：列に並べても入らない長さ（250行）→ 吹き出しの中でスクロールでき、画面の外に出ない
+  await page.mouse.move(1360, 760);
+  await page.waitForTimeout(300);
   await page.evaluate(() => {
-    const MONTHS = 8;
-    const datasets = [
-      { type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, () => 80) },
-      { type: 'bar', label: '要員不足', _staffGapBar: true, stack: 'std', data: Array.from({ length: MONTHS }, () => 2) },
-      { type: 'bar', label: '工程1', _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, () => 30) },
-    ];
-    window.__chartStaffplanSmall = window.__makeChart({
-      id: 'test-staffplan-small', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`),
-      datasets, tooltipOpts: window.__tooltipOptsLike(true, true),
-    });
+    const MONTHS = 8, LONG_IDX = 2;
+    const datasets = [{ type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 200 : 80) }];
+    for (let i = 0; i < 250; i++) {
+      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? 1 : null) });
+    }
+    window.__chartStaffplanSmall = window.__makeChart({ id: 'test-staffplan-small', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets, tooltipOpts: window.__tooltipOptsLike(true, true) });
   });
-  const smallCombResult = await page.evaluate(() => {
-    const chart = window.__chartStaffplanSmall;
-    const labelValues = chart.data.datasets.find(d => d._staffGapBar).data;
-    const axisMax = 100;
-    window.fitSegmentLabelChartHeight(chart, labelValues, axisMax);
-    const afterLabelFitHeight = chart.height;
-    window.fitChartHeightForTooltip(chart);
-    const finalHeight = chart.height;
-    return { afterLabelFitHeight, finalHeight };
+  const hugeResult = await hoverAndMeasure(page, '__chartStaffplanSmall', 2, { leave: false });
+  check('③-b 列に並べても入らない長さのときは、吹き出しの中でスクロールでき(全部の行がスクロールの中にある)、画面の外に出ない', hugeResult.scroll && hugeResult.scrollH > hugeResult.clientH && hugeResult.numLines === 251 && inViewport(hugeResult), hugeResult);
+
+  // ========== ④吹き出しが出たまま残らないこと ==========
+  // ④-1：マウスがグラフから離れると消える（③-a のグラフ）
+  await page.evaluate(() => window.__showOnly('test-staffplan-overcap'));
+  await hoverAndMeasure(page, '__chartStaffplanOverCap', 3, { leave: false });
+  await page.mouse.move(1300, 740);
+  await page.waitForTimeout(300);
+  const lingerMouse = await page.evaluate(() => document.getElementById('chart-tip').classList.contains('on'));
+  check('④③-aのグラフ：マウスがグラフから離れると吹き出しが消える', lingerMouse === false, { lingerMouse });
+  // ④-2：画面（グラフを入れたスクロール）がスクロールすると消える
+  await hoverAndMeasure(page, '__chartStaffplanOverCap', 3, { leave: false });
+  const lingerScroll = await page.evaluate(async () => {
+    const before = document.getElementById('chart-tip').classList.contains('on');
+    document.getElementById('main').dispatchEvent(new Event('scroll'));
+    await new Promise(r => setTimeout(r, 50));
+    return { before, after: document.getElementById('chart-tip').classList.contains('on') };
   });
-  check('③-b ツールチップが小さい内容の場合、ラベル基準の高さから変わらない', smallCombResult.finalHeight === smallCombResult.afterLabelFitHeight, smallCombResult);
+  check('④③-bの場面と同じ吹き出し：画面をスクロールすると消える', lingerScroll.before === true && lingerScroll.after === false, lingerScroll);
 
-  // ========== ④測定後にツールチップが表示されたまま残らないこと(③のケースでも確認) ==========
-  // opacityはアニメーション経由で時間をかけて0へ戻るため、残っているかどうかは
-  // アクティブ要素(_active)が空かどうか（＝今後の描画で表示されない状態）で判定する
-  const lingering = await page.evaluate(() => ({
-    overcap: window.__chartStaffplanOverCap.tooltip.getActiveElements().length,
-    small: window.__chartStaffplanSmall.tooltip.getActiveElements().length,
-  }));
-  check('④③-aのグラフにも測定用ツールチップが残っていない', lingering.overcap === 0, lingering);
-  check('④③-bのグラフにも測定用ツールチップが残っていない', lingering.small === 0, lingering);
-
-  // ========== ⑤再計算：短い内容→長い内容に変わると広がり、今の高さより低くはならない ==========
-  const regrowResult = await page.evaluate(() => {
-    const chart = window.__chartShortTooltip; // ②で既にfit済み(320pxのまま)のチャートを再利用
-    const heightBeforeChange = chart.height;
-    // データを長い内容(28工程)に差し替える(拠点・月・表示月数等の切替による再描画を模擬)
+  // ========== ⑤再計算：短い内容→長い内容に変わっても、グラフの高さは変えず、吹き出しは画面の中 ==========
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.evaluate(() => {
+    window.__showOnly('test-short-tooltip');
+    const chart = window.__chartShortTooltip;
     const MONTHS = 8, LONG_IDX = 2;
     const newDatasets = [{ type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 150 : 80) }];
-    for (let i = 0; i < 28; i++) {
-      newDatasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
-    }
+    for (let i = 0; i < 28; i++) newDatasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
     chart.data.datasets = newDatasets;
     chart.update('none');
-    window.fitChartHeightForTooltip(chart);
-    const heightAfterChange = chart.height;
-    return { heightBeforeChange, heightAfterChange };
   });
-  check('⑤内容が長くなる方向に変わると、今の高さより低くならずに広がる', regrowResult.heightAfterChange >= regrowResult.heightBeforeChange && regrowResult.heightAfterChange > 320, regrowResult);
+  const regrowResult = await hoverAndMeasure(page, '__chartShortTooltip', 2);
+  check('⑤内容が長くなる方向に変わっても、グラフの高さは320pxのままで、吹き出しは全部の行(29行)が画面の中', regrowResult.chartHeight === 320 && regrowResult.numLines === 29 && inViewport(regrowResult), regrowResult);
 
-  // ========== ⑥本物のマウス操作での確認（PR #518追加修正：実際にツールチップが
-  //            切れていたplansitesum2-combined/plansum2-combined相当の再現） ==========
-  // キャンバス上の該当月の位置へ実際にマウスを動かしてツールチップを表示させ、
-  // その窓の下端がキャンバスの下端を超えていないこと（chart.tooltip.setActiveElements()を
-  // 直接呼ぶ内部的な測定ではなく、ブラウザの本物のイベント経路を通す）を確認するヘルパー
-  async function hoverAndCheckFit(page, chartVar, datasetIndexForX, index) {
-    await page.evaluate(({ chartVar }) => { window.__hoverChartRef = window[chartVar]; }, { chartVar });
-    // マウスの目標座標は、Chart.js内部の要素位置(chart.getDatasetMeta().data[].x/y)には
-    // 頼らない。resize()直後でdraw()を挟んでいない（＝本来直したい不具合がまだ残っている）
-    // 状態のチャートでは、内部の要素位置も実際のキャンバスの大きさと食い違っている
-    // ことがあり、その場合に内部位置ベースで座標を計算するとキャンバスの外を指して
-    // しまい、本物のマウス操作が何にも当たらずホバー自体が成立しない（＝「ツールチップが
-    // 表示されない」という別の失敗になってしまい、本来確認したい「表示されるが
-    // 下端が切れる」ことを確認できない）。canvasのgetBoundingClientRect()（実際に
-    // ブラウザが描画している大きさそのもの）だけを基準に、X座標は月の位置の比率、
-    // Y座標はキャンバスの中央を使う（mode:'index',intersect:falseのためYはどこでもよい）
-    const target = await page.evaluate(({ index }) => {
-      const chart = window.__hoverChartRef;
-      const totalPoints = chart.data.labels.length;
-      const canvas = chart.canvas;
-      const rect = canvas.getBoundingClientRect();
-      return { x: rect.left + rect.width * ((index + 0.5) / totalPoints), y: rect.top + rect.height * 0.5 };
-    }, { index });
-    await page.mouse.move(target.x, target.y);
-    await page.mouse.move(target.x + 1, target.y); // 確実にmousemoveイベントを発火させる
-    await page.waitForTimeout(250); // ツールチップのフェードインアニメーションの完了を待つ
-    const result = await page.evaluate(() => {
-      const chart = window.__hoverChartRef;
-      const canvas = chart.canvas;
-      const rect = canvas.getBoundingClientRect();
-      const tt = chart.tooltip;
-      // tt.height自体はアニメーション経由で遅れて反映される(fitChartHeightForTooltip本体の
-      // コメントと同じ理由)ため、本物のマウス操作でも最終的な大きさはtt._size.heightを
-      // 読む。位置(tt.y)はアニメーションの影響を受けないため、そのまま使う
-      const finalHeight = (tt._size && tt._size.height) || tt.height || 0;
-      const tooltipBottom = (tt.y || 0) + finalHeight;
-      return { canvasHeight: rect.height, tooltipY: tt.y, tooltipHeight: finalHeight, tooltipBottom, opacity: tt.opacity, numLines: tt.body ? tt.body.length : 0 };
-    });
-    // 後片付け：マウスをどこか離れた位置に動かし、ツールチップを閉じておく
-    await page.mouse.move(5, 5);
-    await page.waitForTimeout(250);
-    return result;
-  }
-
-  // ⑥-a：plansitesum2-combined/plansum2-combined相当の実際のシーケンスを再現する。
-  // 初期ラッパー高さ650px（実際のchartWrapHtml('plansitesum2-combined', ..., {heightPx:650})
-  // と同じ）→ fitSegmentLabelChartHeight(chart, [], axisMax)で白いラベル用データセットが
-  // 無いため420pxへ縮小 → fitChartHeightForTooltip(chart)。ここで必要な高さが「420pxより
-  // 大きく650pxより小さい」範囲になるよう業務区分の行数を調整したデータで、本物の
-  // マウス操作でもツールチップが切れないことを確認する（この範囲でのみ、修正前は
-  // chart.resize()直後のchart.heightが古い650pxのまま読まれてしまい、必要な高さ(420px超)
-  // を正しく計算していても「420pxのままで足りている」と誤判定して広げられない不具合が
-  // あった。650pxを超えるほど長いケースは①のテストで既に確認済みのため、ここでは
-  // あえて420〜650pxの間に収まる行数にしている）
+  // ========== ⑥本物のマウス操作での確認（plansitesum2-combined/plansum2-combined 相当） ==========
+  // ⑥-a：初期の高さ650px相当のラッパー（ノートPC 1366×768 では画面の見える範囲より高いため、
+  //       画面の下の方で吹き出しを出す場面になる）。22工程＋実績2の長い月で、吹き出しが切れない
+  await page.setViewportSize({ width: 1366, height: 768 });
   await page.evaluate(() => {
-    const MONTHS = 8;
-    const LONG_IDX = 5;
+    const MONTHS = 8, LONG_IDX = 5;
     const datasets = [];
     datasets.push({ type: 'bar', label: '栽培（実績）', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 300 : 80) });
     datasets.push({ type: 'bar', label: '出荷（実績）', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 200 : 60) });
-    const N = 22; // 420px超・650px未満の高さが必要になる行数（実測して選定）
-    for (let i = 0; i < N; i++) {
-      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
-    }
-    const wrap = document.getElementById('test-realhover-combined-wrap');
-    if (wrap) wrap.remove();
-    const w = document.createElement('div');
-    w.id = 'test-realhover-combined-wrap';
-    w.style.position = 'fixed'; w.style.top = '0'; w.style.left = '0'; // 本物のマウス操作のため常にビューポート原点に固定
-    w.style.height = '650px'; // chartWrapHtml({heightPx:650, inlineHeight:true})と同じ初期値
-    w.style.width = '900px';
-    const canvas = document.createElement('canvas');
-    canvas.id = 'test-realhover-combined';
-    w.appendChild(canvas);
-    document.getElementById('__test_chart_container').appendChild(w);
-    const ctx = canvas.getContext('2d');
-    window.__chartRealHoverCombined = new Chart(ctx, {
-      data: { labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { labels: { font: { size: 10 } } }, tooltip: window.__tooltipOptsLike(true, true) },
-        scales: { x: { stacked: true }, y: { stacked: true, suggestedMin: 0 } },
-      },
-    });
-    // 実際の呼び出し順を再現：白いラベルが無いため常に420px固定(フォールバック)になる
-    window.fitSegmentLabelChartHeight(window.__chartRealHoverCombined, [], 300);
-    window.fitChartHeightForTooltip(window.__chartRealHoverCombined);
+    for (let i = 0; i < 22; i++) datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
+    window.__chartRealHoverCombined = window.__makeChart({ id: 'test-realhover-combined', heightPx: 650, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets, tooltipOpts: window.__tooltipOptsLike(true, true) });
   });
-  const combinedFinal = await page.evaluate(() => ({
-    height: window.__chartRealHoverCombined.height,
-    wrapStyleHeight: parseInt(document.getElementById('test-realhover-combined-wrap').style.height, 10),
-  }));
-  check('⑥-a 修正後、必要な高さ(420px超)まで正しく広がっている(420pxに留まっていない)', combinedFinal.height > 420, combinedFinal);
-  const combinedHover = await hoverAndCheckFit(page, '__chartRealHoverCombined', 0, 5);
-  check('⑥-a 本物のマウス操作でも、ツールチップの下端がキャンバスの下端を超えない', combinedHover.tooltipBottom <= combinedHover.canvasHeight, combinedHover);
-  check('⑥-a ツールチップが実際に多数行表示されている(再現条件が成立している)', combinedHover.numLines >= 20, combinedHover);
-  check('⑥-a 測定された窓の高さが十分大きい(見かけ上だけ収まっているのではない)', combinedHover.tooltipHeight > 200, combinedHover);
+  const combinedHover = await hoverAndMeasure(page, '__chartRealHoverCombined', 5);
+  check('⑥-a グラフの高さはラッパーの高さ(650px)のまま(吹き出しのために変えない)', combinedHover.chartHeight === 650, combinedHover);
+  check('⑥-a 本物のマウス操作でも、吹き出しの下端が画面の下端を超えない(上下左右とも画面の中)', inViewport(combinedHover), combinedHover);
+  check('⑥-a 吹き出しが実際に多数行表示されている(再現条件が成立している)', combinedHover.numLines >= 20, combinedHover);
+  check('⑥-a 吹き出しの高さが十分大きい(見かけ上だけ収まっているのではない)', combinedHover.height > 200, combinedHover);
 
-  // ⑦ 拠点・業務別(plancmp2相当、固定320px・segment-fitの前段無し)で、項目の多い月を
-  //    含む場合でも、本物のマウス操作でツールチップが切れないこと
+  // ⑦ 拠点・業務別(plancmp2相当、320px)で、項目の多い月でも本物のマウス操作で吹き出しが切れない
   await page.evaluate(() => {
-    const MONTHS = 8;
-    const LONG_IDX = 2;
+    const MONTHS = 8, LONG_IDX = 2;
     const datasets = [{ type: 'bar', label: '実績工数', _actualGroup: true, stack: 'actual', data: Array.from({ length: MONTHS }, (_, i) => i === LONG_IDX ? 150 : 80) }];
-    for (let i = 0; i < 25; i++) {
-      datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
-    }
-    window.__chartPlancmpRealHover = window.__makeChart({
-      id: 'test-plancmp-realhover', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`),
-      datasets, tooltipOpts: window.__tooltipOptsLike(true, true),
-    });
-    window.fitChartHeightForTooltip(window.__chartPlancmpRealHover);
+    for (let i = 0; i < 25; i++) datasets.push({ type: 'bar', label: `工程${i + 1}`, _stdGroup: true, stack: 'std', data: Array.from({ length: MONTHS }, (_, mi) => mi === LONG_IDX ? (5 + i) : null) });
+    window.__chartPlancmpRealHover = window.__makeChart({ id: 'test-plancmp-realhover', heightPx: 320, labels: Array.from({ length: MONTHS }, (_, i) => `月${i}`), datasets, tooltipOpts: window.__tooltipOptsLike(true, true) });
   });
-  const plancmpHover = await hoverAndCheckFit(page, '__chartPlancmpRealHover', 0, 2);
-  check('⑦拠点・業務別相当：項目の多い月でも、本物のマウス操作でツールチップが切れない', plancmpHover.tooltipBottom <= plancmpHover.canvasHeight, plancmpHover);
+  const plancmpHover = await hoverAndMeasure(page, '__chartPlancmpRealHover', 2);
+  check('⑦拠点・業務別相当：項目の多い月でも、本物のマウス操作で吹き出しが画面の中に収まり、全部の行(26行)が出ている', inViewport(plancmpHover) && plancmpHover.numLines === 26, plancmpHover);
 
-  // ⑧ 要員計画(業務区分別、planstaffplan2-combined相当)で、白いラベル基準の高さが
-  //    650px上限にクランプされツールチップの必要高さがそれを上回る状況でも、
-  //    本物のマウス操作でツールチップが切れないこと（③-aの延長、本物のマウス操作での回帰確認）
-  const staffplanHover = await hoverAndCheckFit(page, '__chartStaffplanOverCap', 0, 3);
-  check('⑧要員計画(業務区分別)相当：650px上限超のケースでも、本物のマウス操作でツールチップが切れない', staffplanHover.tooltipBottom <= staffplanHover.canvasHeight, staffplanHover);
+  // ⑧ 要員計画(業務区分別、planstaffplan2-combined相当)：1列では画面に入らない長さでも、
+  //    本物のマウス操作で吹き出しが画面の中に収まる（③-aの、いちばん右の月に近い位置での確認）
+  await page.evaluate(() => window.__showOnly('test-staffplan-overcap'));
+  const staffplanHover = await hoverAndMeasure(page, '__chartStaffplanOverCap', 3);
+  check('⑧要員計画(業務区分別)相当：長い吹き出しでも、本物のマウス操作で画面の中に収まる', inViewport(staffplanHover) && staffplanHover.numLines === 62, staffplanHover);
 
   await browser.close();
 
   console.log(`\n=== 総合判定 ===`);
+  console.log(`OK: ${okCount} / NG: ${ngCount}`);
   console.log(ngCount === 0 ? 'すべてOK' : 'NGあり');
   console.log('DONE');
   process.exit(ngCount === 0 ? 0 : 1);
