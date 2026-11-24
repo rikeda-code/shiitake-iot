@@ -1,15 +1,21 @@
 // dashboard/work-hours.html の、上の固定エリア（タイトル＋操作の一式＋タブ）とグラフの高さ・縦軸の上限・
-// 1か月分の幅の下限・吹き出しを、4通りの画面の大きさ（1920×950・1366×768・1536×864・390×844）で検証する。
-//  [1] 固定エリアの高さが変更前より低い。1920 はタイトルと操作の一式が同じ1段、ノートPCは2段まで、
-//      スマホはタイトルと「条件」ボタンだけで、押すと操作の一式が開き、もう一度押すと閉じる
+// 1か月分の幅の下限・吹き出しを、いろいろな窓の大きさで検証する。決まった画面の大きさは持たず、開いている
+// 窓の見える範囲をその場で測って合わせる作りのため、窓の大きさは 1607×905・1920×1040・1440×800・1280×720・
+// 1100×900（縦長）・1700×600（横長で低い）・800×600・390×844（狭い窓。タップでも操作する）の8通りで測る。
+//  [1] 固定エリアの高さが変更前（main ad2ed8d を同じモック・同じ大きさで測った値）より低い。窓の幅に応じて
+//      自然に折り返し（横 1280 以上は2段まで）、段と段の間に余分な高さが無い。狭い窓（横 768 未満。端末では
+//      なく窓の幅で決まる）はタイトルと「条件」ボタンだけで、押すと操作の一式が開き、もう一度押すと閉じる
 //  [2] タブ（勤務実績・予実・設定と、その下のタブ）・サブタブが折り返さず1段で、横スクロールで全部選べる
 //  [3] 全グラフで、いちばん高い棒・線の点・上に付く文字（計◯・◯人）が縦軸の上限の中に入る
-//  [4] グラフの高さ：PC・ノートPCは凡例・横軸の見出しを含めて見える範囲に収まる高さ（最低300px）、
-//      スマホは画面の高さの55%
+//  [4] 全グラフで、グラフの見出し・凡例・グラフ・横軸の見出し（・横スクロールのバー）の全体が、固定エリアと
+//      上に貼り付く行（拠点の切替・サブタブ）の下の見える範囲に収まる（実際にその位置までスクロールして測る）。
+//      最低の高さ（300px）でも収まらない小さい窓は、最低の高さを優先していること。狭い窓は画面の高さの55%以下
 //  [5] 1か月分の幅が44px以上で、下限の幅で入らないときは横スクロール。表は横スクロール
 //  [6] 各月の見出しと棒の組の位置がそろう（verify_left_align_layout.js と同じ測り方）
-//  [7] 吹き出しが、PCはマウス・スマホはタップで出て、画面の中に収まる
+//  [7] 吹き出しが、マウス（狭い窓はタップ）で出て、画面の中に収まる
 //  [8] 「計50」の形（2026/12 の棒 8588h、共通の上限 8600h）で、上限を上げて棒と「計50」が入る
+//  [9] 窓の大きさを途中で変えたとき（大→小、小→大）と、固定エリアの段数が変わる幅の前後で、グラフの高さが
+//      合わせ直され、全体が見える範囲に収まる
 // 対象の画面は verify_left_align_layout.js と同じ（勤務実績・サマリー・生産性・比較・比較（3拠点）・生産実績、
 // 予実＞生産計画・予定標準工数(h)・比較（繁忙期見込み）の各サブタブ）。期間は 2025/11〜2027/2
 // （勤務実績は実績のある12か月、予実は16か月）。
@@ -234,21 +240,19 @@ const SCREENS = [
 
 // 画面の大きさ（4通り）。mobile：スマホ（タップで操作する）
 const VIEWPORTS = [
-  { key: '1920x950', width: 1920, height: 950, kind: 'pc' },
-  { key: '1366x768', width: 1366, height: 768, kind: 'laptop' },
-  { key: '1536x864', width: 1536, height: 864, kind: 'laptop' },
-  { key: '390x844', width: 390, height: 844, kind: 'mobile' },
-];
-// 変更前（main ad2ed8d の work-hours.html）を、このテストと同じモック・同じ画面の大きさで測った、
+  ['1607x905', 1607, 905], ['1920x1040', 1920, 1040], ['1440x800', 1440, 800], ['1280x720', 1280, 720],
+  ['1100x900', 1100, 900], ['1700x600', 1700, 600], ['800x600', 800, 600], ['390x844', 390, 844],
+].map(([key, width, height]) => ({ key, width, height, narrow: width < 768 }));
+// 変更前（main ad2ed8d の work-hours.html）を、このテストと同じモック・同じ窓の大きさで測った、
 // 固定エリア（タイトル・操作の一式＋タブ。#main の上端の位置）の高さ
-const BEFORE_FIXED_AREA_PX = { '1920x950': 236, '1366x768': 307, '1536x864': 307, '390x844': 512 };
+const BEFORE_FIXED_AREA_PX = { '1607x905': 236, '1920x1040': 236, '1440x800': 307, '1280x720': 343, '1100x900': 379, '1700x600': 236, '800x600': 429, '390x844': 512 };
 const MIN_CHART_H = 300;
 const MOBILE_RATIO = 0.55;
 const MONTH_MIN = 44;
 
 async function openPageAt(browser, baseUrl, vp) {
-  const mobile = vp.kind === 'mobile';
-  const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 3 : 1 });
+  // 端末（スマホ）の扱いにはしない（isMobile なし）。狭い窓はタップでも操作できるようにする
+  const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, hasTouch: !!vp.narrow });
   const page = await context.newPage();
   page.__errors = [];
   page.on('pageerror', e => { page.__errors.push(e.message); console.log('  [pageerror]', e.message); });
@@ -273,12 +277,16 @@ async function measureHeader(page) {
       if (row && it.top < row.bottom - 2) { row.bottom = Math.max(row.bottom, it.bottom); row.items.push(it.cls); }
       else rows.push({ top: it.top, bottom: it.bottom, items: [it.cls] });
     });
+    const hcs = getComputedStyle(header);
+    // 段の高さの合計＋段の間＋上下の余白（これより高ければ、余分な高さがある）
+    const minHeaderPx = rows.reduce((a, r) => a + (r.bottom - r.top), 0) + Math.max(0, rows.length - 1) * (parseFloat(hcs.rowGap) || 0) + (parseFloat(hcs.paddingTop) || 0) + (parseFloat(hcs.paddingBottom) || 0) + (parseFloat(hcs.borderBottomWidth) || 0);
     const controls = document.getElementById('header-controls');
     const periodSel = document.getElementById('period-start-select');
     return {
       fixedAreaPx: Math.round(document.getElementById('main').getBoundingClientRect().top),
       headerPx: Math.round(header.getBoundingClientRect().height),
       rows: rows.map(r => r.items),
+      minHeaderPx: Math.round(minHeaderPx),
       condBtnVisible: !!document.getElementById('header-cond-btn').offsetWidth,
       controlsVisible: !!periodSel.offsetWidth && getComputedStyle(controls).display !== 'none',
       pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
@@ -316,6 +324,46 @@ async function waitCharts(page) {
 }
 
 // 画面のグラフ・表を測る
+// グラフ1つずつについて、見出し（グラフ1つだけを入れているかたまり）からグラフの下端までを、固定エリアと
+// 上に貼り付く行の下に来るようにスクロールして、全体が見える範囲に入るかを測る
+async function measureChartFits(page) {
+  return page.evaluate(() => {
+    const main = document.getElementById('main');
+    const out = [];
+    const canvases = [...main.querySelectorAll('.month-scroll-inner > canvas')].filter(c => c.offsetWidth);
+    for (const c of canvases) {
+      const inner = c.parentElement, outer = inner.parentElement;
+      const parent = outer.parentElement;
+      const block = parent && parent.querySelectorAll('.month-scroll-outer').length === 1 ? parent : outer;
+      let box = main;
+      for (let p = outer.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (/auto|scroll/.test(getComputedStyle(p).overflowY)) { box = p; break; }
+      }
+      const stickies = [...box.querySelectorAll('*')].filter(e => !e.closest('table') && e.offsetHeight && getComputedStyle(e).position === 'sticky' && getComputedStyle(e).top !== 'auto');
+      const visTop = () => Math.max(box.getBoundingClientRect().top, main.getBoundingClientRect().top, 0, ...stickies.map(e => e.getBoundingClientRect().bottom));
+      const visBottom = () => Math.min(box.getBoundingClientRect().bottom, main.getBoundingClientRect().bottom, window.innerHeight);
+      block.scrollIntoView({ block: 'start' });
+      for (let k = 0; k < 2; k++) {
+        const d = block.getBoundingClientRect().top - visTop();
+        if (Math.abs(d) > 0.5) box.scrollTop += d;
+      }
+      const br = block.getBoundingClientRect();
+      const top = visTop(), bottom = visBottom();
+      const h = Math.round(c.getBoundingClientRect().height);
+      out.push({
+        id: c.id, h, blockH: Math.round(br.height), available: Math.round(bottom - top),
+        fits: br.top >= top - 1 && br.bottom <= bottom + 1,
+        headTop: Math.round(br.top), visTop: Math.round(top), blockBottom: Math.round(br.bottom), visBottom: Math.round(bottom),
+      });
+    }
+    main.scrollTop = 0;
+    return out;
+  });
+}
+const MIN_PRIORITY = [];
+// 収まっている、または最低の高さ（300px）でも収まらない小さい窓で最低の高さを優先している
+const fitOrMin = c => c.fits || (Math.abs(c.h - MIN_CHART_H) <= 1 && c.available - (c.blockH - c.h) < MIN_CHART_H + 8);
+
 async function measureScreen(page, screen) {
   await page.evaluate(code => { (0, eval)(code); }, screen.prep);
   if (screen.wait === 'table') {
@@ -390,7 +438,7 @@ async function measureScreen(page, screen) {
       return { w: t.getBoundingClientRect().width, parentW: t.parentElement.clientWidth, hscroll: !!sc };
     });
     return { charts, tables, pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
-  });
+  }).then(async r => ({ ...r, fit: await measureChartFits(page) }));
 }
 
 // 吹き出し：PCはマウス、スマホはタップで出して、画面の中に収まるかを測る
@@ -427,19 +475,19 @@ async function measureTooltip(page, canvasId, kind) {
   const allErrors = [];
 
   for (const vp of VIEWPORTS) {
-    console.log(`\n========== 画面 ${vp.key}（${vp.kind === 'pc' ? 'PC' : vp.kind === 'laptop' ? 'ノートPC' : 'スマホ'}） ==========`);
+    console.log(`\n========== 窓 ${vp.key}${vp.narrow ? '（狭い窓）' : ''} ==========`);
     const { page, context } = await openPageAt(browser, BASE_URL, vp);
     await setPeriod(page, '2025年11月', '2027年2月');
 
     // ---- [1] 固定エリア ----
     const hd = await measureHeader(page);
     check(`[1] ${vp.key}：固定エリアの高さが変更前より低い（${BEFORE_FIXED_AREA_PX[vp.key]}px → ${hd.fixedAreaPx}px）`, hd.fixedAreaPx < BEFORE_FIXED_AREA_PX[vp.key], hd);
-    if (vp.kind === 'pc') {
-      check(`[1] ${vp.key}：タイトルと操作の一式（開始月〜更新）が同じ1段に並ぶ`, hd.rows.length === 1 && hd.rows[0].length >= 7 && !hd.condBtnVisible, hd.rows);
-    } else if (vp.kind === 'laptop') {
-      check(`[1] ${vp.key}：タイトルの右に操作が並び、折り返しても2段まで`, hd.rows.length <= 2 && hd.rows[0].includes('header-title') && hd.rows[0].length >= 2 && !hd.condBtnVisible, hd.rows);
+    if (!vp.narrow) {
+      const maxRows = vp.width >= 1280 ? 2 : 4;
+      check(`[1] ${vp.key}：タイトルの右に操作の一式が並び、窓の幅に応じて折り返す（${hd.rows.length}段、横1280以上は2段まで）`, hd.rows.length <= maxRows && hd.rows[0].includes('header-title') && hd.rows[0].length >= 2 && !hd.condBtnVisible && hd.controlsVisible, hd.rows);
+      check(`[1] ${vp.key}：固定エリアに段の高さ以外の余分な高さが無い（${hd.headerPx}px ≦ 段の高さの合計＋段の間・上下の余白 ${hd.minHeaderPx}px）`, hd.headerPx <= hd.minHeaderPx + 1, hd);
     } else {
-      check(`[1] ${vp.key}：固定エリアはタイトルと「条件」ボタンだけ（操作の一式は閉じている）`, hd.condBtnVisible && !hd.controlsVisible && hd.rows.length === 1 && hd.rows[0].length === 2, hd);
+      check(`[1] ${vp.key}：狭い窓は、固定エリアがタイトルと「条件」ボタンだけ（操作の一式は閉じている）`, hd.condBtnVisible && !hd.controlsVisible && hd.rows.length === 1 && hd.rows[0].length === 2, hd);
       await page.click('#header-cond-btn');
       await page.waitForTimeout(200);
       const opened = await measureHeader(page);
@@ -476,15 +524,11 @@ async function measureTooltip(page, canvasId, kind) {
         check(`[3] ${vp.key} ${sc.name}：いちばん高い棒・線の点・上の文字（計◯・◯人）が縦軸の上限の中`,
           r.charts.every(c => c.barTop >= c.areaTop - 0.5 && (c.lineTop === null || c.lineTop >= c.areaTop - 0.5) && c.labelTops.every(l => l.top >= c.areaTop - 1)),
           r.charts.filter(c => !(c.barTop >= c.areaTop - 0.5 && (c.lineTop === null || c.lineTop >= c.areaTop - 0.5) && c.labelTops.every(l => l.top >= c.areaTop - 1))).map(c => [c.id, c.areaTop, c.barTop, c.lineTop, c.labelTops.filter(l => l.top < c.areaTop - 1)]));
-        // [4] グラフの高さ
-        if (vp.kind === 'mobile') {
-          const want = Math.round(vp.height * MOBILE_RATIO);
-          check(`[4] ${vp.key} ${sc.name}：グラフの高さは画面の高さの55%（${want}px）`, r.charts.every(c => Math.abs(c.h - want) <= 1), r.charts.map(c => [c.id, c.h]));
-        } else {
-          check(`[4] ${vp.key} ${sc.name}：グラフ全体（凡例・横軸の見出しを含む）が見える範囲に収まる高さ（最低${MIN_CHART_H}px）`,
-            r.charts.every(c => c.h >= MIN_CHART_H - 1 && (c.h <= c.visibleH + 1 || c.visibleH < MIN_CHART_H + 8) && Math.abs(c.h - Math.max(MIN_CHART_H, c.visibleH - 8)) <= 2),
-            r.charts.map(c => [c.id, c.h, c.visibleH]));
-        }
+        // [4] グラフの全体（見出し・凡例・横軸の見出し）が見える範囲に収まる（小さい窓は最低の高さを優先）
+        check(`[4] ${vp.key} ${sc.name}：見出し・凡例・グラフ・横軸の見出しの全体が、固定エリアと上に貼り付く行の下の見える範囲に収まる（最低${MIN_CHART_H}pxでも収まらない窓は最低の高さ）`,
+          r.fit.every(fitOrMin) && (!vp.narrow || r.fit.every(c => c.h <= Math.round(vp.height * MOBILE_RATIO) + 1)),
+          r.fit.filter(c => !fitOrMin(c)).concat(vp.narrow ? r.fit.filter(c => c.h > Math.round(vp.height * MOBILE_RATIO) + 1) : []));
+        r.fit.filter(c => !c.fits && fitOrMin(c)).forEach(c => MIN_PRIORITY.push(`${vp.key} ${sc.name} ${c.id}（全体${c.blockH}px／見える範囲${c.available}px）`));
         // [5] 1か月分の幅の下限・横スクロール
         check(`[5] ${vp.key} ${sc.name}：1か月分の幅が${MONTH_MIN}px以上で、下限の幅で入らないときは横スクロール`,
           r.charts.every(c => c.perMonth >= MONTH_MIN - 0.5 && (!c.needScroll || c.scroll)), r.charts.map(c => [c.id, c.n, +c.perMonth.toFixed(1), c.needScroll, c.scroll]));
@@ -500,8 +544,8 @@ async function measureTooltip(page, canvasId, kind) {
     // ---- [7] 吹き出し：PCはマウス、スマホはタップで出て、画面の外にはみ出さない ----
     await page.evaluate(code => { (0, eval)(code); }, SCREENS.find(s => s.name === '比較（繁忙期見込み）＞拠点サマリ').prep);
     await waitCharts(page);
-    const tt = await measureTooltip(page, 'plansitesum2-combined', vp.kind);
-    check(`[7] ${vp.key}：グラフの吹き出しが${vp.kind === 'mobile' ? 'タップ' : 'マウス'}で出て、画面の中に収まる`, tt.shown && tt.lines > 0 && tt.top >= 0 && tt.left >= 0 && tt.bottom <= tt.vh + 0.5 && tt.right <= tt.vw + 0.5, tt);
+    const tt = await measureTooltip(page, 'plansitesum2-combined', vp.narrow ? 'mobile' : 'pc');
+    check(`[7] ${vp.key}：グラフの吹き出しが${vp.narrow ? 'タップ' : 'マウス'}で出て、画面の中に収まる`, tt.shown && tt.lines > 0 && tt.top >= 0 && tt.left >= 0 && tt.bottom <= tt.vh + 0.5 && tt.right <= tt.vw + 0.5, tt);
 
     // ---- [8] 「計50」の形：2026/12 の棒（8588h、縦軸の共通の上限 8600h）の上の「計50」が上限の中に入る ----
     const k50 = await page.evaluate(h => {
@@ -532,14 +576,61 @@ async function measureTooltip(page, canvasId, kind) {
         chart.destroy(); wrap.remove();
         resolve(out);
       }, 50));
-    }, vp.kind === 'mobile' ? Math.round(vp.height * MOBILE_RATIO) : 400);
+    }, vp.narrow ? Math.round(vp.height * MOBILE_RATIO) : 400);
     check(`[8] ${vp.key}：「計50」の形（8588h・共通の上限8600h）：上限を上げて、棒と「計50」が上限の中に入る`, k50.yMax > 8600 && k50.barTop >= k50.areaTop && k50.k50Top !== null && k50.k50Top >= k50.areaTop - 1, k50);
 
     allErrors.push(...page.__errors);
     await context.close();
   }
 
-  check('ページのエラーなし（4通りの画面とも）', allErrors.length === 0, allErrors);
+  // ---- [9] 窓の大きさを途中で変えたとき・固定エリアの段数が変わる幅の前後 ----
+  console.log('\n========== [9] 窓の大きさの変更 ==========');
+  {
+    const { page, context } = await openPageAt(browser, BASE_URL, { width: 1920, height: 1040 });
+    await setPeriod(page, '2025年11月', '2027年2月');
+    const target = SCREENS.find(s => s.name === '比較（繁忙期見込み）＞要員計画');
+    const fitAt = async (w, h) => {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(600);
+      await waitCharts(page);
+      const fit = await measureChartFits(page);
+      const hd = await measureHeader(page);
+      return { w, h, rows: hd.rows.length, fixedAreaPx: hd.fixedAreaPx, fit };
+    };
+    await page.evaluate(code => { (0, eval)(code); }, target.prep);
+    await waitCharts(page);
+    const big1 = await fitAt(1920, 1040);
+    const small = await fitAt(1280, 720);
+    const big2 = await fitAt(1920, 1040);
+    const hOf = r => r.fit.map(c => c.h);
+    check('[9] 大きい窓（1920×1040）：全体が見える範囲に収まる', big1.fit.length > 0 && big1.fit.every(fitOrMin), big1);
+    check('[9] 大→小（1280×720）に変えると、グラフが低く合わせ直され、全体が収まる', small.fit.every(fitOrMin) && small.fit.every((c, i) => c.h < big1.fit[i].h), { big: hOf(big1), small: hOf(small), fit: small.fit });
+    check('[9] 小→大（1920×1040）に戻すと、グラフが高く合わせ直され、元の高さに戻る', big2.fit.every(fitOrMin) && big2.fit.every((c, i) => Math.abs(c.h - big1.fit[i].h) <= 1), { first: hOf(big1), back: hOf(big2) });
+    // 固定エリアの段数が変わる幅を探す（幅を狭めながら、段数が増えるところ）
+    let prev = null, boundary = null;
+    for (let w = 1920; w >= 1000; w -= 20) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.waitForTimeout(80);
+      const rows = (await measureHeader(page)).rows.length;
+      if (prev && rows > prev.rows) { boundary = { wide: prev.w, narrow: w }; break; }
+      prev = { w, rows };
+    }
+    check('[9] 固定エリアの段数が変わる幅が見つかる（前提の確認）', !!boundary, boundary);
+    if (boundary) {
+      const wide = await fitAt(boundary.wide, 900);
+      const narrow = await fitAt(boundary.narrow, 900);
+      check(`[9] 段数が変わる幅の前後（${boundary.wide}px：${wide.rows}段 → ${boundary.narrow}px：${narrow.rows}段）で、固定エリアが高くなった分グラフが低く合わせ直され、どちらも全体が収まる`,
+        narrow.fixedAreaPx > wide.fixedAreaPx && wide.fit.every(fitOrMin) && narrow.fit.every(fitOrMin) && narrow.fit.every((c, i) => c.h < wide.fit[i].h),
+        { wide: { rows: wide.rows, fixed: wide.fixedAreaPx, h: hOf(wide) }, narrow: { rows: narrow.rows, fixed: narrow.fixedAreaPx, h: hOf(narrow) } });
+      const wideBack = await fitAt(boundary.wide, 900);
+      check('[9] 段数が戻る幅に広げると、グラフも元の高さに合わせ直される', wideBack.rows === wide.rows && wideBack.fit.every((c, i) => Math.abs(c.h - wide.fit[i].h) <= 1), { wide: hOf(wide), back: hOf(wideBack) });
+    }
+    allErrors.push(...page.__errors);
+    await context.close();
+  }
+
+  console.log('\n最低の高さ（300px）を優先したグラフ：' + (MIN_PRIORITY.length ? '\n  ' + MIN_PRIORITY.join('\n  ') : 'なし'));
+  check('ページのエラーなし（すべての窓の大きさで）', allErrors.length === 0, allErrors);
   console.log(`\nOK: ${okCount} / NG: ${ngCount}`);
   console.log(ngCount ? 'NGあり' : 'すべてOK');
   console.log('DONE');

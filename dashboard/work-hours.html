@@ -741,7 +741,7 @@
        タイトルの右側に操作の一式を並べ（#header-controls は display:contents で、中の各グループを
        ヘッダーの横並びに直接加える）、入りきらない幅では折り返す（1920 は1段、ノートPCは2段まで）。
        チェックボックスは2行に並べて（3〜4個のものは2列）、グループの高さを抑える */
-    header { padding: 8px 32px; gap: 8px 12px; justify-content: flex-start; }
+    header { padding: 6px 32px; gap: 6px 12px; justify-content: flex-start; }
     header h1 { font-size: 1.15rem; white-space: nowrap; }
     header .subtitle { font-size: 0.72rem; margin-top: 2px; white-space: nowrap; }
     .header-title { flex: 0 0 auto; margin-right: 8px; }
@@ -980,6 +980,13 @@ function scheduleProdTableWrapRefresh() {
   });
 }
 new MutationObserver(scheduleProdTableWrapRefresh).observe(document.getElementById('main'), { childList: true, subtree: true });
+// 固定エリアの段数が変わる・「条件」を開く・タブの段が変わるなどで、見える範囲（#main）の大きさが変わったら、
+// グラフの高さを合わせ直す
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(() => scheduleProdTableWrapRefresh());
+  ro.observe(document.getElementById('main'));
+  ro.observe(document.querySelector('header'));
+}
 window.addEventListener('resize', () => { resetMonthTableFit(); scheduleProdTableWrapRefresh(); });
 
 const SITES = ['いなべ', '群馬', '南丹'];
@@ -1158,11 +1165,18 @@ function buildExtendedMonthList(selectedMonths, allRealMonths) { // eslint-disab
 }
 
 // ── グラフの高さ ──
-// 月を横に並べるグラフ（chartWrapHtml() の入れ物 .month-scroll-inner）の高さを、画面の見える範囲に合わせて決める。
-//  - PC・ノートPC（横 768 以上）：凡例・横軸の見出しを含めたグラフ全体が、グラフを入れている縦スクロールの
-//    範囲（見える範囲。上に貼り付く見出しがあればその分を除く）にちょうど収まる高さ。最低 CHART_MIN_H_PX
-//  - スマホ（横 768 未満）：画面の高さの MOBILE_CHART_H_RATIO（55%）
-// 同じ画面にグラフが縦に複数並ぶもの（栽培・出荷など）も、1つずつがこの高さ。
+// 月を横に並べるグラフ（chartWrapHtml() の入れ物 .month-scroll-inner）の高さを、開いている窓の見える範囲を
+// その場で測って決める（決まった画面の大きさは持たない）。
+//  - グラフの見出し（「実績工数（業務区分別）」など）・凡例（何段に折り返しても。凡例はキャンバスの中）・
+//    グラフ・横軸の見出し・横スクロールのバーまでの全体が、固定エリアの下の見える範囲（グラフを入れている
+//    縦スクロールの範囲から、上に貼り付く行（拠点の切替・サブタブなど）を除いた高さ）にちょうど収まる高さ。
+//    固定エリア・貼り付く行・見出しの高さは決め打ちせず、その時の実際の高さを測る
+//  - 最低 CHART_MIN_H_PX。最低の高さでも収まらない小さい窓では、最低の高さを優先する
+//  - 狭い窓（横 MOBILE_MAX_W 以下。端末ではなく窓の幅で決める）：画面の高さの MOBILE_CHART_H_RATIO（55%）。
+//    ただし見える範囲に収まる高さを超えない
+// 窓の大きさ・固定エリアの段数・見出しの折り返しが変わったら測り直す（scheduleProdTableWrapRefresh() の
+// 中で呼ぶ。#main・固定エリアの大きさの変化も ResizeObserver で見る）。同じ画面にグラフが縦に複数並ぶもの
+// （栽培・出荷など）も、1つずつがこの高さ。
 // 以前の「棒の中の文字に合わせて高さを決める（#463・#464）」「吹き出しに合わせて広げる（#518）」
 // 「計◯の文字に合わせて広げる（#521）」は、この決め方に置き換えた（吹き出しはページの上に出し、
 // 計◯・◯人の文字は縦軸の上限に余白を作って入れる。下の externalChartTooltip・axisHeadroomPlugin）
@@ -1177,23 +1191,44 @@ function chartScrollBox(el) {
   }
   return document.getElementById('main');
 }
-// 縦スクロールの範囲のうち、グラフを置ける高さ（上下の余白と、上に貼り付く見出しを除く）。
-// 高さが中身で決まる入れ物（スクロールしない）の場合も、main の見える高さを超えない
+// 縦スクロールの範囲の上に貼り付く行（position:sticky で top が決まっているもの）の高さの合計。
+// 入れ子になっていても数える（表の中の貼り付くセル・中の別の縦スクロールの範囲は除く）
+function stickyTopHeight(box) {
+  let h = 0;
+  const walk = (el, depth) => {
+    for (const c of el.children) {
+      if (c.tagName === 'TABLE' || c.tagName === 'CANVAS' || c.tagName === 'SCRIPT') continue;
+      const cs = getComputedStyle(c);
+      if (cs.display === 'none') continue;
+      if (cs.position === 'sticky' && cs.top !== 'auto') { h += c.offsetHeight; continue; }
+      if (depth < 8 && !/auto|scroll/.test(cs.overflowY)) walk(c, depth + 1);
+    }
+  };
+  walk(box, 0);
+  return h;
+}
+// グラフを入れている縦スクロールの範囲の見える高さ（上に貼り付く行を除く）。高さが中身で決まる入れ物
+// （スクロールしない）の場合も、main の見える高さを超えない
 function chartVisibleHeight(box) {
   const main = document.getElementById('main');
-  const inner = el => {
-    const cs = getComputedStyle(el);
-    let h = el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
-    [...el.children].forEach(c => { if (getComputedStyle(c).position === 'sticky') h -= c.offsetHeight; });
-    return h;
-  };
-  const mainH = inner(main);
-  return box === main ? mainH : Math.min(inner(box), mainH);
+  const vis = el => el.clientHeight - stickyTopHeight(el);
+  const mainH = vis(main);
+  return box === main ? mainH : Math.min(vis(box), mainH);
+}
+// グラフと一緒に見える必要がある、グラフの見出しなど（グラフ1つだけを入れているかたまり（.schart-section
+// など）の高さから、キャンバスの入れ物の高さを引いた分。横スクロールのバーもここに入る）
+function chartBlockExtra(inner) {
+  const outer = inner.parentElement;
+  const block = outer && outer.parentElement;
+  const innerH = inner.getBoundingClientRect().height;
+  if (!block || block.querySelectorAll('.month-scroll-outer').length !== 1) return Math.max(0, outer.getBoundingClientRect().height - innerH);
+  return Math.max(0, block.getBoundingClientRect().height - innerH);
 }
 function chartTargetHeight(inner) {
-  if (window.innerWidth <= MOBILE_MAX_W) return Math.round(window.innerHeight * MOBILE_CHART_H_RATIO);
   const box = inner ? chartScrollBox(inner) : document.getElementById('main');
-  return Math.max(CHART_MIN_H_PX, Math.floor(chartVisibleHeight(box) - CHART_FIT_MARGIN_PX));
+  const fit = Math.floor(chartVisibleHeight(box) - (inner ? chartBlockExtra(inner) : 0) - CHART_FIT_MARGIN_PX);
+  if (window.innerWidth <= MOBILE_MAX_W) return Math.max(CHART_MIN_H_PX, Math.min(Math.round(window.innerHeight * MOBILE_CHART_H_RATIO), fit));
+  return Math.max(CHART_MIN_H_PX, fit);
 }
 function fitChartHeights() {
   const main = document.getElementById('main');
