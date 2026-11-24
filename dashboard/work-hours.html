@@ -1241,18 +1241,25 @@ function chartBlockExtra(inner) {
   if (!block || block.querySelectorAll('.month-scroll-outer').length !== 1) return Math.max(0, outer.getBoundingClientRect().height - innerH);
   return Math.max(0, block.getBoundingClientRect().height - innerH);
 }
-// グラフが1つだけの画面（比較（3拠点）など）は、開いた直後（スクロールしていない状態）に、上にある
-// 画面の見出しの行（「📊 比較（3拠点）」と切替の行など、上に貼り付かないもの）・お知らせの枠も含めて
-// 見出し〜横軸が見えるようにする。その高さ（スクロールしていない時の、かたまりの上端から見える範囲の
-// 下端まで）から見出しなどの分を引いた高さ。グラフが2つ以上の画面は、それぞれのグラフまでスクロール
-// して見るので、この制限は付けない（null）
+// いちばん上のグラフ（グラフが1つだけの画面はそのグラフ、複数並ぶ画面は1つ目）は、開いた直後（スクロール
+// していない状態）に、上にある画面の見出しの行（「📊 比較（3拠点）」と切替の行、比較（繁忙期見込み）の説明文と
+// 切替の行など）・お知らせの枠も含めて、見出し〜横軸が見えるようにする。その高さ（スクロールしていない時の、
+// かたまりの上端から見える範囲の下端まで）から見出しなどの分を引いた高さ。2つ目以降のグラフは、それぞれの
+// グラフまでスクロールして見るので、この制限は付けない（null）。
+// 1つ目のグラフと横に並ぶグラフ（サマリー＞業務区分別（グラフ）の時間・人数など、同じ段にあるもの）も同じ
+// 扱いにする（片方だけ低くすると、段の高さが高い方に引っ張られて見出しなどの分が正しく測れないため）
+function chartBlockOf(outer) {
+  const parent = outer && outer.parentElement;
+  return parent && parent.querySelectorAll('.month-scroll-outer').length === 1 ? parent : outer;
+}
 function chartSingleInitialFit(inner, box) {
   const main = document.getElementById('main');
   const visible = [...box.querySelectorAll('.month-scroll-outer')].filter(o => o.offsetParent);
-  if (visible.length !== 1) return null;
   const outer = inner.parentElement;
-  const parent = outer && outer.parentElement;
-  const block = parent && parent.querySelectorAll('.month-scroll-outer').length === 1 ? parent : outer;
+  if (!visible.length || !outer) return null;
+  const firstTop = chartBlockOf(visible[0]).getBoundingClientRect().top;
+  const block = chartBlockOf(outer);
+  if (visible[0] !== outer && Math.abs(block.getBoundingClientRect().top - firstTop) > 2) return null;
   const bottomOf = el => el.getBoundingClientRect().top + el.clientTop + el.clientHeight;
   const visBottom = box === main ? bottomOf(main) : Math.min(bottomOf(box), bottomOf(main));
   const top0 = block.getBoundingClientRect().top + box.scrollTop + (box !== main && main.contains(box) ? main.scrollTop : 0);
@@ -11856,16 +11863,18 @@ function renderPlanCompareCharts2(planData, prodData, mergeData, tabOpts) {
 
   main.innerHTML = `
     <div class="compare-shell panel-fit-content">
-      <div class="compare-header-row" style="flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
-        <div class="chart-section-label" style="flex-shrink:0">${weeklyMode ? '📊比較（週間 11〜12月）' : '📊比較（繁忙期見込み）'}／ ファーム勤務時間 &gt; 標準労働時間
-          <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
+      <!-- 説明文（2行）の右に、拠点の切替・表示の切替を同じ段で右寄せに並べる。説明文は 480px 以上の幅があれば
+           切替の左で（必要なら折り返して）見せ、それより狭くなる窓では切替が説明文の下に回る -->
+      <div class="compare-header-row" id="plancmp2-header-row" style="flex-wrap:wrap;gap:8px 16px;position:sticky;top:0;z-index:50;background:var(--surface2);padding:8px 0;margin:-8px 0 0">
+        <div class="plancmp2-header-desc" style="flex:1 1 480px;min-width:0">
+          <div class="chart-section-label" style="flex-shrink:0;white-space:normal;overflow:visible">${weeklyMode ? '📊比較（週間 11〜12月）' : '📊比較（繁忙期見込み）'}／ ファーム勤務時間 &gt; 標準労働時間
+            <span style="font-size:0.72rem;font-weight:400;color:var(--muted);margin-left:8px">実績工数(左棒) VS 標準労働時間 VS 標準工数(右棒)</span>
+          </div>
+          <div style="font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定${weeklyMode ? '　（①②は月の値を日数で等分、③は栽培＝収穫量・出荷＝出荷量の比率で週に配分）　④収穫量・出荷量＞収穫帯プランナー90t（週別）' : ''}</div>
         </div>
-        <div style="flex-basis:100%;font-size:0.7rem;color:var(--muted);line-height:1.2;margin-top:1px">①実績工数(左棒)＞整理済み_M / 整理済み_増減　②標準労働時間＞標準労働時間　③標準工数(右棒)＞標準工数設定${weeklyMode ? '　（①②は月の値を日数で等分、③は栽培＝収穫量・出荷＝出荷量の比率で週に配分）　④収穫量・出荷量＞収穫帯プランナー90t（週別）' : ''}</div>
-        <div style="flex:1;min-width:0;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="plancmp2-header-switches" id="plancmp2-header-switches" style="display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;flex:0 1 auto;margin-left:auto;min-width:0;max-width:100%">
           <div id="plancmp2-site-tabbar-fixed" style="display:none;gap:6px;flex-wrap:wrap"></div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;${weeklyMode ? 'display:none' : ''}">
-          <div class="transfer-toggle" id="plancmp2-subtabs">
+          <div class="transfer-toggle" id="plancmp2-subtabs" style="${weeklyMode ? 'display:none' : ''}">
             <button class="transfer-toggle-btn${planCmpSubtab === 'site' ? ' active' : ''}" data-tab="site">拠点・業務別</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'sitesummary' ? ' active' : ''}" data-tab="sitesummary">拠点サマリ</button>
             <button class="transfer-toggle-btn${planCmpSubtab === 'summary' ? ' active' : ''}" data-tab="summary">3拠点サマリ</button>
