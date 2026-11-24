@@ -9,8 +9,9 @@
 //  [3] 全グラフで、いちばん高い棒・線の点・上に付く文字（計◯・◯人）が縦軸の上限の中に入る
 //  [4] 全グラフで、グラフの見出し・凡例・グラフ・横軸の見出し（・横スクロールのバー）の全体が、固定エリアと
 //      上に貼り付く行（拠点の切替・サブタブ）の下の見える範囲に収まる（実際にその位置までスクロールして測る）。
-//      グラフが1つだけの画面（比較（3拠点）など）は、開いた直後（スクロールしていない状態）にも、上の見出しの
-//      行（「📊 比較（3拠点）」と切替の行など、上に貼り付かないもの）の下で全体が見えること。
+//      いちばん上のグラフ（グラフが1つだけの画面はそのグラフ、複数並ぶ画面は1つ目）は、開いた直後（スクロール
+//      していない状態）にも、上の見出しの行（「📊 比較（3拠点）」と切替の行、比較（繁忙期見込み）の説明文と切替の
+//      行など）の下で全体が見えること。
 //      最低の高さ（300px）でも収まらない小さい窓は、最低の高さを優先していること。狭い窓は画面の高さの55%以下
 //  [5] 1か月分の幅が44px以上で、下限の幅で入らないときは横スクロール。表は横スクロール
 //  [6] 各月の見出しと棒の組の位置がそろう（verify_left_align_layout.js と同じ測り方）
@@ -20,6 +21,11 @@
 //      合わせ直され、全体が見える範囲に収まる
 //  [1]（案4）振替・更新・最終更新の一式が、広い窓ではタブの段（勤務実績・予実・設定）の右にあり、狭い窓は「条件」の
 //      中に残る。固定エリアが案4の前（e72ad1a を同じモック・同じ大きさで測った値）より、1607 は低く、ほかは高くならない
+//  [11] グラフが複数並ぶ画面で、いちばん上のグラフは開いた直後の状態で見出しから横軸まで収まり、2つ目以降は
+//      今までどおりスクロールしたときに収まる（最低の高さを優先する窓を除く）
+//  [12] 予実＞比較（繁忙期見込み）・比較（週間）で、拠点の切替・表示の切替が、説明文（2行）と同じ段の右に右寄せで
+//      並ぶ（左から拠点の切替、表示の切替）。説明文の右に入りきらない窓では説明文の下に回り、はみ出し・重なりが
+//      無い。上に貼り付く行の高さが、説明文と切替の高い方＋上下の余白だけになる（切替だけの段が無い）
 //  [10] 窓の幅を 1920→390→1920 と変えても固定エリアにはみ出し・重なりが無い。タブの段の右に入りきらないとき
 //      （タブのボタンを広げて再現）はヘッダーの中（チェックの右）に戻り、入るようになると戻る。置き場所が変わって
 //      固定エリアの高さが変わると、グラフの高さが合わせ直される
@@ -336,6 +342,41 @@ async function measureActions(page) {
   });
 }
 
+// 比較（繁忙期見込み）の上の行：説明文（2行）と、拠点の切替・表示の切替の位置
+async function measurePlanCmpHeader(page) {
+  return page.evaluate(() => {
+    const row = document.getElementById('plancmp2-header-row');
+    const desc = row.querySelector('.plancmp2-header-desc');
+    const sw = document.getElementById('plancmp2-header-switches');
+    const siteBar = document.getElementById('plancmp2-site-tabbar-fixed');
+    const subt = document.getElementById('plancmp2-subtabs');
+    const r = el => el.getBoundingClientRect();
+    const rr = r(row), dr = r(desc), sr = r(sw);
+    const cs = getComputedStyle(row);
+    const parts = [siteBar, subt].filter(e => e.offsetWidth > 0);
+    const vw = document.documentElement.clientWidth;
+    const overlap = parts.some(e => { const b = r(e); return dr.left < b.right - 1 && b.left < dr.right - 1 && dr.top < b.bottom - 1 && b.top < dr.bottom - 1; });
+    const outside = [dr, sr, ...parts.map(r)].some(b => b.left < rr.left - 1 || b.right > rr.right + 1 || b.right > vw + 1);
+    const sb = siteBar.offsetWidth ? r(siteBar) : null, tb = subt.offsetWidth ? r(subt) : null;
+    const order = !sb || !tb || sb.right <= tb.left + 1 || sb.bottom <= tb.top + 1;
+    const swNatural = parts.reduce((a, e) => a + e.scrollWidth, 0) + Math.max(0, parts.length - 1) * (parseFloat(getComputedStyle(sw).columnGap) || 0);
+    return {
+      rowH: rr.height, descH: dr.height, swH: sr.height,
+      sameRow: sr.top < dr.bottom - 1 && sr.left >= dr.right - 1,
+      below: sr.top >= dr.bottom - 1,
+      rightAligned: Math.abs(sr.right - rr.right) <= 1.5,
+      fitsOneRow: dr.width + (parseFloat(cs.columnGap) || 0) + swNatural <= rr.width,
+      overlap, outside, order,
+      siteTabs: !!sb, subtabs: !!tb,
+      pad: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
+      rowGap: parseFloat(cs.rowGap) || 0,
+      sticky: cs.position,
+      descText: desc.textContent.replace(/\s+/g, ' ').trim(),
+      pageHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    };
+  });
+}
+
 // タブ・サブタブ：並び（同じ段＝折り返していない）と、横スクロールで全部のボタンが押せる位置に出せるか
 async function measureTabs(page, selector) {
   return page.evaluate(sel => {
@@ -384,12 +425,14 @@ async function measureChartFits(page) {
       const stickies = [...box.querySelectorAll('*')].filter(e => !e.closest('table') && e.offsetHeight && getComputedStyle(e).position === 'sticky' && getComputedStyle(e).top !== 'auto');
       const visTop = () => Math.max(box.getBoundingClientRect().top, main.getBoundingClientRect().top, 0, ...stickies.map(e => e.getBoundingClientRect().bottom));
       const visBottom = () => Math.min(box.getBoundingClientRect().bottom, main.getBoundingClientRect().bottom, window.innerHeight);
-      // グラフが1つだけの画面（比較（3拠点）など）は、開いた直後（スクロールしていない状態）にも、上の見出しの
-      // 行（上に貼り付かないもの）の下で全体が見えること。スクロールして測るだけでは、上に貼り付かない行を
-      // スクロールで隠した状態で「収まる」と判定してしまうため
-      const single = [...box.querySelectorAll('.month-scroll-outer')].filter(o => o.offsetParent).length === 1;
+      // いちばん上のグラフ（グラフが1つだけの画面はそのグラフ、複数並ぶ画面は1つ目）は、開いた直後（スクロール
+      // していない状態）にも、上の見出しの行（上に貼り付かないもの）の下で全体が見えること。スクロールして測る
+      // だけでは、上の行をスクロールで隠した状態で「収まる」と判定してしまうため
+      const outersInBox = [...box.querySelectorAll('.month-scroll-outer')].filter(o => o.offsetParent);
+      const single = outersInBox.length === 1;
+      const first = outersInBox[0] === outer;
       let fits0 = true, available0 = Infinity, blockBottom0 = null;
-      if (single) {
+      if (first) {
         main.scrollTop = 0; box.scrollTop = 0;
         const b0 = block.getBoundingClientRect();
         const bottom0 = visBottom();
@@ -408,7 +451,7 @@ async function measureChartFits(page) {
       out.push({
         id: c.id, h, blockH: Math.round(br.height), available: Math.min(Math.round(bottom - top), available0),
         fits: br.top >= top - 1 && br.bottom <= bottom + 1 && fits0,
-        single, fits0, blockBottom0,
+        single, first, fits0, blockBottom0, fitsScrolled: br.top >= top - 1 && br.bottom <= bottom + 1,
         headTop: Math.round(br.top), visTop: Math.round(top), blockBottom: Math.round(br.bottom), visBottom: Math.round(bottom),
       });
     }
@@ -613,9 +656,43 @@ async function measureTooltip(page, canvasId, kind) {
         check(`[6] ${vp.key} ${sc.name}：各月の見出しと棒の組の中央の差が1.5px以内、棒が月の枠の外に出ない`,
           r.charts.every(c => c.maxOff <= 1.5 && c.outside === 0), r.charts.map(c => [c.id, +c.maxOff.toFixed(1), c.outside]));
       }
+      if (r.fit.length > 1) {
+        // [11] グラフが複数並ぶ画面：いちばん上は開いた直後に、2つ目以降はスクロールしたときに収まる
+        const f0 = r.fit[0];
+        const minCase = c => Math.abs(c.h - MIN_CHART_H) <= 1 && c.available - (c.blockH - c.h) < MIN_CHART_H + 8;
+        check(`[11] ${vp.key} ${sc.name}：いちばん上のグラフ（${f0.id}）が、開いた直後の状態で見出しから横軸まで見える範囲に収まる（最低の高さを優先する窓を除く）`,
+          f0.first && (f0.fits0 || minCase(f0)), f0);
+        check(`[11] ${vp.key} ${sc.name}：2つ目以降のグラフは、スクロールしたときに収まる（最低の高さを優先する窓を除く）`,
+          r.fit.slice(1).every(c => !c.first && (c.fitsScrolled || minCase(c))), r.fit.slice(1).filter(c => !(c.fitsScrolled || minCase(c))));
+      }
       if (r.tables.length) {
         check(`[5] ${vp.key} ${sc.name}：表は横スクロール（ページ全体ははみ出さない）`, !r.pageHScroll && r.tables.every(t => t.w <= t.parentW + 1 || t.hscroll), r.tables);
       }
+    }
+
+    // ---- [12] 比較（繁忙期見込み）・比較（週間）：説明文の右に切替を並べる ----
+    for (const [label, prep] of [
+      ['拠点・業務別', "activeMode = 'plancompare2'; planCmpSubtab = 'site'; planCmpSiteTab = '群馬'; renderPlanCompareTab2();"],
+      ['拠点サマリ', "activeMode = 'plancompare2'; planCmpSubtab = 'sitesummary'; planCmpSiteTab = '群馬'; renderPlanCompareTab2();"],
+      ['3拠点サマリ', "activeMode = 'plancompare2'; planCmpSubtab = 'summary'; renderPlanCompareTab2();"],
+      ['表', "activeMode = 'plancompare2'; planCmpSubtab = 'table'; renderPlanCompareTab2();"],
+      ['要員計画', "activeMode = 'plancompare2'; planCmpSubtab = 'staffplan'; planCmpSiteTab = '群馬'; renderPlanCompareTab2();"],
+      ['比較（週間）', "activeMode = 'plancompareweek'; planCmpSiteTab = '群馬'; renderPlanCompareTab2({ weekly: true });"],
+    ]) {
+      await page.evaluate(code => { (0, eval)(code); }, prep);
+      await page.waitForTimeout(300);
+      const ph = await measurePlanCmpHeader(page);
+      const name = `[12] ${vp.key} 比較（繁忙期見込み）＞${label}`.replace('比較（繁忙期見込み）＞比較（週間）', '比較（週間）');
+      check(`${name}：説明文の文言がそのまま`, ph.descText.includes('ファーム勤務時間 > 標準労働時間') && ph.descText.includes('①実績工数(左棒)＞整理済み_M / 整理済み_増減') && ph.descText.includes('③標準工数(右棒)＞標準工数設定'), ph.descText);
+      check(`${name}：切替（${ph.siteTabs ? '拠点・' : ''}${ph.subtabs ? '表示' : ''}）が、説明文と重ならず、はみ出さない。左から拠点の切替、表示の切替の順`, !ph.overlap && !ph.outside && ph.order && !ph.pageHScroll, ph);
+      if (!vp.narrow && vp.width >= 1440) {
+        check(`${name}：広い窓では、切替が説明文と同じ段の右に右寄せで並ぶ`, ph.sameRow && ph.rightAligned, ph);
+      } else {
+        check(`${name}：説明文の右に入るときは同じ段の右、入りきらないときは説明文の下に回る（${ph.sameRow ? '同じ段' : '説明文の下'}）`,
+          (ph.sameRow && ph.rightAligned) || (ph.below && !ph.fitsOneRow), ph);
+      }
+      check(`${name}：上に貼り付く行の高さが、${ph.sameRow ? '説明文と切替の高い方' : '説明文＋切替'}＋上下の余白だけ（${Math.round(ph.rowH)}px）`,
+        ph.sticky === 'sticky' && ph.rowH <= (ph.sameRow ? Math.max(ph.descH, ph.swH) : ph.descH + ph.swH + ph.rowGap) + ph.pad + 1, ph);
     }
 
     // ---- [7] 吹き出し：PCはマウス、スマホはタップで出て、画面の外にはみ出さない ----
