@@ -12,7 +12,7 @@
 //  ⑥ 累計の差は開始日から：10/1〜なら 10/31 ＝ 10月の差、10/26〜（7日）なら 11/1 ＝ 10/26〜11/1 の差
 //  ⑦ 移動のある日は「移動 入/出」の列に 🚚 と移動量（南丹 10/23・10/24、群馬 10/20・10/23・10/24）。期間の列の幅は変わらない
 //  ⑧ 調整（手入力）はその日の分だけ入り、調整前・調整後の差と累計に反映される
-//  ⑨ 日の行をクリックすると、その日を含む週の日別のグラフが出る
+//  ⑨ 日の行をクリックすると、その日から7日間（在庫が入っている日まで）の日別のグラフが出る
 //  ⑩ 横スクロール：期間の列（見出しも）だけが左に固定され、背景が塗られて後ろの列と重ならない（PC・スマホ幅）
 // 実行：dashboard フォルダを 8812 番で配信してから
 //       node tests/stock-check/verify_stock_check_daily.js
@@ -210,18 +210,21 @@ const stickyState = page => page.evaluate(() => {
   const i29 = mc.labels.indexOf('10/29（木）');
   check('差のグラフ：日ごと33本・kg（10/29 の棒が表の調整前の差と同じ）', mc.labels.length === 33 && i29 >= 0 && near(mc.sets[0].data[i29], num(d1029.cells[8])), [mc.labels.length, mc.sets[0].data[i29], d1029.cells[8]]);
 
-  // ⑨ 日の行をクリック → その日を含む週
+  // ⑨ 日の行をクリック → その日から7日間（在庫が入っている日まで）
+  await page.click('#tableWrap tr[data-id="D:2026-10-26"]');
+  const dch0 = await chartData(page, 'dailyChart');
+  check('⑨ 10/26（月）をクリック：10/26〜11/1 の7日分（最終日 1731.3 / 907.3。同じ期間の週の行と同じ）', dch0.labels.length === 7 && dch0.labels[0] === '10/26（月）' && dch0.labels[6] === '11/1（日）' && dch0.sets[0].data[6] === 1731.3 && dch0.sets[1].data[6] === 907.3, dch0);
   await page.click('#tableWrap tr[data-id="D:2026-10-29"]');
   const title = await page.textContent('#dailyTitle');
   const dch = await chartData(page, 'dailyChart');
-  check('⑨ 10/29 をクリック：タイトル「南丹 10/29（木）を含む週 10/26〜11/1」', title.indexOf('南丹 10/29（木）を含む週 10/26〜11/1') >= 0, title);
-  check('⑨ 日別のグラフは週の7日分（最終日 1731.3 / 907.3。週の行と同じ）', dch.labels.length === 7 && dch.labels[0] === '10/26（月）' && dch.sets[0].data[6] === 1731.3 && dch.sets[1].data[6] === 907.3, dch);
-  check('⑨ クリックした日（10/29）の点を大きくする', dch.sets[1].r[3] > dch.sets[1].r[0], dch.sets[1].r);
+  check('⑨ 10/29 をクリック：タイトル「南丹 10/29（木）から7日間 10/29〜11/4」', title.indexOf('南丹 10/29（木）から7日間 10/29〜11/4') >= 0, title);
+  check('⑨ 日別のグラフは 10/29 から始まり、在庫のある 11/2 まで（5日分。11/3 以降は在庫が無いので出さない）', dch.labels.length === 5 && dch.labels[0] === '10/29（木）' && dch.labels[4] === '11/2（月）', dch.labels);
+  check('⑨ クリックした日（10/29＝最初の点）を大きくする', dch.sets[1].r[0] > dch.sets[1].r[1], dch.sets[1].r);
   const sel = await page.evaluate(() => document.querySelector('#tableWrap tr.selected').getAttribute('data-id'));
   check('⑨ 選んだ日の行が強調される', sel === 'D:2026-10-29', sel);
   await page.click('#tableWrap tr[data-id="D:2026-11-02"]');
   const dch2 = await chartData(page, 'dailyChart');
-  check('⑨ 11/2 をクリック：週 11/2〜11/8 のうち在庫のある 11/2 まで（1日分）', dch2.labels.length === 1 && (await page.textContent('#dailyTitle')).indexOf('11/2〜11/8') >= 0, dch2.labels);
+  check('⑨ 11/2 をクリック：11/2〜11/8 のうち在庫のある 11/2 まで（1日分）', dch2.labels.length === 1 && (await page.textContent('#dailyTitle')).indexOf('11/2（月）から7日間 11/2〜11/8') >= 0, dch2.labels);
 
   // ⑩ 横スクロール（PC）
   const flexCells = await page.evaluate(() => Array.from(document.querySelectorAll('#tableWrap td, #tableWrap th')).filter(c => getComputedStyle(c).display === 'flex').length);

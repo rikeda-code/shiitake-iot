@@ -281,7 +281,7 @@
     <h2>② 一覧表（行をクリックすると、下に日別のグラフが出ます）</h2>
     <div class="table-wrap" id="tableWrap"><div class="loading">読み込み中…</div></div>
     <p class="note">「暫定」の行は、最終日の在庫が未入力のため、最新の入力日までで計算した途中の値です（薄く表示）。率 ＝ 差 ÷ 期間の収穫量。</p>
-    <p class="note">サイクル「日」：前日の在庫からその日の在庫までの差です（在庫が未入力の日は出しません）。表示期間は開始日・終了日で選びます（「7日」「14日」「30日」は終了日から遡って開始日を入れます）。「移動 入/出」の 🚚 はその日に移動がある印です（マウスを乗せると内訳）。累計の差 ＝ 開始日からその日までの差（日次の差を足したものと同じ）。行をクリックすると、その日を含む週の日別のグラフが出ます。</p>
+    <p class="note">サイクル「日」：前日の在庫からその日の在庫までの差です（在庫が未入力の日は出しません）。表示期間は開始日・終了日で選びます（「7日」「14日」「30日」は終了日から遡って開始日を入れます）。「移動 入/出」の 🚚 はその日に移動がある印です（マウスを乗せると内訳）。累計の差 ＝ 開始日からその日までの差（日次の差を足したものと同じ）。行をクリックすると、その日から7日間の日別のグラフが出ます（在庫が入っている日まで）。</p>
   </section>
 
   <section class="panel" id="dailyPanel">
@@ -985,15 +985,15 @@
       box.innerHTML = '<p class="note">一覧の行（または棒）を選ぶと、そのサイクルの日別の動きが出ます。</p>';
       return;
     }
-    // 日の行は、その日を含む週（月曜〜日曜。在庫が入っている最新の日まで）のグラフを出す
+    // 日の行は、選んだ日から7日間（選んだ日〜6日後。在庫が入っている最新の日まで）のグラフを出す
     var isDay = row.cycle.kind === 'day', a = row.cycle.a, e = row.r.e, fl = row.r.flagDays, pick = null;
     if (isDay){
       pick = row.cycle.a;
-      var wk = weekOf(pick);
-      var wr = computeCycle(state.site, row.days, wk.a, wk.b, state.moves, state.adjustments, row.flags);
-      a = wk.a; e = wr.e || pick;
+      var last = addDays(pick, 6);
+      var wr = computeCycle(state.site, row.days, pick, last, state.moves, state.adjustments, row.flags);
+      a = pick; e = wr.e || pick;
       fl = wr.flagDays || [];
-      title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + 'を含む週 ' + md(wk.a) + '〜' + md(wk.b);
+      title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + 'から7日間 ' + md(pick) + '〜' + md(last);
     } else {
       title.textContent = '③ 日別のグラフ：' + state.site + ' ' + row.cycle.label + (row.cycle.kind === 'month' ? '（月）' : '（週）');
     }
@@ -1012,7 +1012,7 @@
     box.innerHTML = fl.length
       ? '<p class="note" style="margin-top:8px;">要確認の日（' + fl.length + '日）</p><ul class="flaglist">' +
         fl.map(function(d){ return '<li>' + md(d) + '：' + esc((row.flags[d] || []).join(' / ')) + '</li>'; }).join('') + '</ul>'
-      : '<p class="note">' + (isDay ? 'この週' : 'このサイクル') + 'に要確認の日はありません。</p>';
+      : '<p class="note">' + (isDay ? 'この7日間' : 'このサイクル') + 'に要確認の日はありません。</p>';
   }
 
   /* ===================== ギャップの内訳（タブ） ===================== */
