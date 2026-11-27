@@ -781,8 +781,8 @@ async function viewState(page) {
   }
   {
     // 基準日が明日のとき、製品在庫・生在庫は今日（基準日の前日）の在庫を読む。今日の在庫が一部だけ入っているときは、
-    // 入っている分をそのまま出し、入っていないところは今と同じ「－」。在庫予測は今の計算式のまま
-    // （製品在庫＋生在庫。片方だけ入っていれば入っている方だけ。両方とも入っていなければ「－」）
+    // 入っている分をそのまま出し、入っていないところは今と同じ「－」。在庫予測の在庫実績は製品在庫＋生在庫で、
+    // 未入力は0として扱う（片方だけ入っていれば入っている方だけ。両方とも入っていなければ 0.0）
     const partial = { 'M生在庫': true, 'L製品在庫': true, '2L製品在庫': true, '2L生在庫': true };
     const { page } = await setupPage(browser, { keepDetails: true, skipDataWait: true, stockPartial: partial });
     await settle(page);
@@ -796,13 +796,67 @@ async function viewState(page) {
       const n = sel => parseFloat(t(sel).replace(/,/g, ''));
       out.fM0 = n('[data-stock-forecast="M"][data-stock-forecast-offset="0"]');
       out.calcM0 = Math.round((50 + n('[data-harvest="M"][data-harvest-offset="0"]') - n('[data-shipment="M"][data-shipment-offset="0"]')) * 10) / 10;
+      out.calc2L0 = Math.round((0 + n('[data-harvest="2L"][data-harvest-offset="0"]') - n('[data-shipment="2L"][data-shipment-offset="0"]')) * 10) / 10;
       return out;
     });
     check('基準日が明日（11/15）のとき、製品在庫・生在庫の列は今日（11/14）の在庫', v.stockDay.startsWith('11/14'), v.stockDay);
     check('今日の在庫が一部だけ：入っている分はそのまま出る（M製品 50.0・L生 60.0・袋 15.0／5.0）', v.M[0] === '50.0' && v.L[1] === '60.0' && v['袋'][0] === '15.0' && v['袋'][1] === '5.0', v);
     check('今日の在庫が一部だけ：入っていないところは今と同じ「－」（M生・L製品・2L製品・2L生）', v.M[1] === '－' && v.L[0] === '－' && v['2L'][0] === '－' && v['2L'][1] === '－', v);
-    check('在庫予測の在庫実績は今の計算式のまま（M 50.0・L 60.0・袋 20.0、2Lは「－」）', v.M[2] === '50.0' && v.L[2] === '60.0' && v['袋'][2] === '20.0' && v['2L'][2] === '－', v);
-    check('在庫予測：在庫実績が「－」のサイズ（2L）は予測も「－」、入っているサイズ（M）は 在庫実績＋収穫予測−出荷予定', v.f2L.every(x => x === '－') && v.fM0 === v.calcM0, v);
+    check('在庫予測の在庫実績：片方だけ入っていれば入っている方だけ（M 50.0・L 60.0）、両方とも入っていれば合計（袋 20.0）、両方とも未入力は 0.0（2L）', v.M[2] === '50.0' && v.L[2] === '60.0' && v['袋'][2] === '20.0' && v['2L'][2] === '0.0', v);
+    check('在庫予測：両方とも未入力のサイズ（2L）も 0＋収穫予測−出荷予定 で計算され、入っているサイズ（M）は 在庫実績＋収穫予測−出荷予定', parseFloat(v.f2L[0]) === v.calc2L0 && v.fM0 === v.calcM0, v);
+    await page.close();
+  }
+
+  console.log('=== ⑧在庫がまったく未入力のとき：在庫実績は 0.0、在庫予測は 0＋収穫予測−出荷予定、詳細（収穫見込で計算）も計算される ===');
+  {
+    const all = { 'M製品在庫': true, 'M生在庫': true, 'L製品在庫': true, 'L生在庫　秀Ｌ_40　優Ｌ_60': true, '2L製品在庫': true, '2L生在庫': true, '袋製品在庫': true, '袋生在庫': true };
+    const { page } = await setupPage(browser, { stockPartial: all }); // 詳細を開き、収穫予測・在庫予測の数字が出るまで待つ
+    await settle(page);
+    await page.waitForFunction(() => document.querySelector('[data-stock-detail="M"][data-stock-detail-offset="0"]').textContent.trim() !== '－', null, { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const v = await page.evaluate(() => {
+      const t = sel => { const el = document.querySelector(sel); return el ? el.textContent.trim() : null; };
+      const num = s => { const x = parseFloat(String(s).replace(/,/g, '')); return isNaN(x) ? null : x; };
+      const sizes = ['M', 'L', '秀', '優', '2L', '袋'];
+      const out = { table1: {}, actual: {}, ratio: {}, forecast: {}, expect: {}, detail: {}, detailExpect: {} };
+      ['M', 'L', '2L', '袋'].forEach(z => { out.table1[z] = [t(`[data-stock-product="${z}"]`), t(`[data-stock-raw="${z}"]`)]; out.ratio[z] = t(`[data-stock-forecast-ratio="${z}"]`); });
+      sizes.forEach(z => {
+        out.actual[z] = t(`[data-stock-forecast-actual="${z}"]`);
+        out.forecast[z] = Array.from({ length: 9 }, (_, o) => t(`[data-stock-forecast="${z}"][data-stock-forecast-offset="${o}"]`));
+        // 期待値：0 から始めて、収穫予測（数字でなければそこから「－」）−出荷予定（「－」は0）を積み上げる（ページと同じ計算式）
+        let prev = 0; const exp = [];
+        for (let o = 0; o < 9; o++) {
+          const h = num(t(`[data-harvest="${z}"][data-harvest-offset="${o}"]`));
+          const sh = num(t(`[data-shipment="${z}"][data-shipment-offset="${o}"]`)) || 0;
+          const val = (prev !== null && h !== null) ? Math.round((prev + h - sh) * 10) / 10 : null;
+          exp.push(val === null ? '－' : val.toFixed(1)); prev = val;
+        }
+        out.expect[z] = exp;
+      });
+      // 詳細（収穫見込で計算）：在庫実績（0.0）から、詳細の収穫見込（空なら0）−出荷予定を積み上げる
+      ['M', 'L', '2L', '袋'].forEach(z => {
+        out.detail[z] = Array.from({ length: 9 }, (_, o) => t(`[data-stock-detail="${z}"][data-stock-detail-offset="${o}"]`));
+        let prev = 0; const exp = [];
+        for (let o = 0; o < 9; o++) {
+          const h = num(t(`[data-harvest-detail="${z}"][data-harvest-detail-offset="${o}"]`)) || 0;
+          const sh = num(t(`[data-shipment="${z}"][data-shipment-offset="${o}"]`)) || 0;
+          prev = Math.round((prev + h - sh) * 10) / 10; exp.push(prev);
+        }
+        out.detailExpect[z] = exp;
+      });
+      out.head = t('#table1 thead th.today-col');
+      out.note = (Array.from(document.querySelectorAll('.note')).map(e => e.textContent.trim()).find(x => x.indexOf('出荷予定') >= 0)) || '';
+      return out;
+    });
+    check('在庫・出荷予定パネルの製品在庫・生在庫は「－」のまま（表示は変えない）', Object.values(v.table1).every(p => p[0] === '－' && p[1] === '－'), v.table1);
+    check('在庫予測の在庫実績は M・L・秀・優・2L・袋 とも 0.0（「－」にしない）', Object.values(v.actual).every(x => x === '0.0'), v.actual);
+    check('在庫比率は、在庫実績の合計が0なので「－」', Object.values(v.ratio).every(x => x === '－'), v.ratio);
+    check('在庫予測（基準日〜8日後）は 0＋収穫予測−出荷予定 を積み上げた値（M・L・秀・優・2L・袋）', ['M', 'L', '秀', '優', '2L', '袋'].every(z => JSON.stringify(v.forecast[z]) === JSON.stringify(v.expect[z])), { forecast: v.forecast, expect: v.expect });
+    check('在庫予測：基準日（11/15）の M は数字で出る（「－」にならない）', v.forecast.M[0] !== '－' && v.forecast.M[0] !== null, v.forecast.M);
+    check('詳細（収穫見込で計算）の在庫予測も計算される（M・L・2L・袋、9日分とも数字で、在庫実績 0.0 から 収穫見込−出荷予定 を積み上げた値）',
+      ['M', 'L', '2L', '袋'].every(z => v.detail[z].every((x, o) => x !== '－' && parseFloat(String(x).replace(/,/g, '')) === v.detailExpect[z][o])), { detail: v.detail, expect: v.detailExpect });
+    check('見出しの「当日」は「基準日」になっている', v.head === '基準日', v.head);
+    check('パネル右上の説明は「単位：kg　/　基準日〜8日後の出荷予定」', v.note === '単位：kg　/　基準日〜8日後の出荷予定', v.note);
     await page.close();
   }
 

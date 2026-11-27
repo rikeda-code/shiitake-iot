@@ -423,7 +423,7 @@
     <div class="panel-head">
       <h2>在庫 ・ 出荷予定<span class="note site-note" id="table1SiteNote" hidden></span><span class="note site-note" id="table1ShipmentNote" hidden></span></h2>
       <div class="panel-head-right">
-        <span class="note">単位：kg　/　当日〜8日後の出荷予定</span>
+        <span class="note">単位：kg　/　基準日〜8日後の出荷予定</span>
         <div class="day-nav day-nav-compact">
           <button id="prevMonth" aria-label="前月">«</button>
           <button id="prevDay" aria-label="前日">‹</button>
@@ -448,7 +448,7 @@
             <th class="sticky-1">サイズ</th>
             <th>製品在庫</th>
             <th>生在庫</th>
-            <th class="today-col">当日</th>
+            <th class="today-col">基準日</th>
             <th>翌日</th>
             <th>2日後</th>
             <th>3日後</th>
@@ -2331,12 +2331,14 @@
     }
 
     try {
-      // 在庫実績 = 在庫・出荷予定パネルの製品在庫 + 生在庫
+      // 在庫実績 = 在庫・出荷予定パネルの製品在庫 + 生在庫。未入力（「－」）は0として扱う
+      // （両方とも未入力のサイズも在庫0として、在庫実績は0.0・在庫予測は0＋収穫予測−出荷予定で計算する。
+      // 在庫・出荷予定パネルの製品在庫・生在庫の表示は「－」のまま）
       var actual = {};
       sizes.forEach(function(size){
         var product = readDomNumber('[data-stock-product="' + size + '"]');
         var raw = readDomNumber('[data-stock-raw="' + size + '"]');
-        actual[size] = (product !== null || raw !== null) ? (product || 0) + (raw || 0) : null;
+        actual[size] = (product || 0) + (raw || 0);
       });
       var total = (actual['M'] || 0) + (actual['L'] || 0) + (actual['2L'] || 0) + (actual['袋'] || 0);
       var ratio = {};
