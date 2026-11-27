@@ -42,6 +42,9 @@ const SALES_INDEX_GID = '538861653'; // 「シート判別」タブ
 const NOV_MONTH_GID = '333333331';
 const DEC_MONTH_GID = '333333332';
 const PAGE_URL = 'http://localhost:8812/shiitake-shipment-plan.html';
+// 基準日の既定が「明日」になったため、このテストでは今までどおり基準日＝今日（fixTodayTo で決めた日）で開く
+// （URL の base= で基準日を指定する。実績日の既定（前日）は変わらない）
+function withBaseToday(url, y, m, d) { const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return url + (url.includes('?') ? '&' : '?') + 'base=' + iso; }
 const SITES = ['いなべ', '群馬', '南丹'];
 
 const results = [];
@@ -159,7 +162,7 @@ async function setupPage(browser, site, decHeaderPatch) {
     else if (url.includes(SALES_SHEET_ID) && url.includes('gid=' + DEC_MONTH_GID)) body = toCsvText(buildSalesTab({ form: 24, merged: false, maxDay: 31, values: PAGE_DEC, headerPatch: decHeaderPatch }));
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body });
   });
-  await page.goto(PAGE_URL + (site === 'いなべ' ? '' : '?site=' + encodeURIComponent(site)));
+  await page.goto(withBaseToday(PAGE_URL + (site === 'いなべ' ? '' : '?site=' + encodeURIComponent(site)), 2026, 10, 28));
   await page.waitForSelector('#table1');
   return page;
 }

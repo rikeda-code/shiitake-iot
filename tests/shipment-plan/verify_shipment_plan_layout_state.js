@@ -2,7 +2,8 @@
 //  ・タイトル部分（タイトル・拠点ボタン・下の罫線）の画面上部への固定
 //  ・表（table1・table2・table3・収穫予測／在庫予測の詳細）の行の高さを約10%詰めたこと
 //  ・表示状態（拠点・詳細の開閉）のURLのクエリへの保持（リロードしても同じ状態で開く）
-// の検証。モック・日付固定（2026/11/15）・範囲選択の操作の補助関数は
+//  ・基準日（明日まで選べる・開いたときは明日）と「今日／明日」ボタンの表示の切り替え
+// の検証。モック・日付固定（今日＝2026/11/14。基準日は明日の 2026/11/15）・範囲選択の操作の補助関数は
 // verify_shipment_plan_cell_selection.js と同じものをこのファイルに複製して使う（他ファイルへの依存なし）。
 const { chromium } = require('playwright');
 
@@ -58,14 +59,15 @@ const SALES_MONTH_GID = '111111111';
 const FAKE_GAS_URL = 'https://script.google.com/macros/s/TEST_SHIPMENT_HARVEST_FORECAST/exec';
 const PAGE_URL = 'http://localhost:8812/shiitake-shipment-plan.html';
 
-// 2026/11/15(基準日)〜2026/11/23(8日後)。実績日は既定で基準日の前日=11/14。
+// 今日＝2026/11/14。2026/11/15(基準日＝明日)〜2026/11/23(8日後)。実績日は既定で今日の前日=11/13。
 // シナリオ：
-//   - 収穫実績(11/14, 収獲目標値シート): M=100,L=200,2L=50,袋=50 (合計400, 比率 M.25/L.5/2L.125/袋.125)
+//   - 収穫実績(11/13, 収獲目標値シート): M=100,L=200,2L=50,袋=50 (合計400, 比率 M.25/L.5/2L.125/袋.125)
 //   - 収穫_秀優比率: 収穫予測パネル 秀=60%,優=40%(Lに対して) / 在庫予測パネル 秀=30%,優=20%(Lの在庫実績に対して)
 //   - 転写(日別収穫合計予測): 11/15〜11/23は400kg/日固定。ただし11/20(offset5)だけ空欄(未設定)
-//   - 在庫実績(11/14, 椎茸在庫シート): M製品50+生30=80 / L製品100+生60=160(秀L_40 優L_60) / 2L製品20+生10=30 / 袋製品15+生5=20
+//   - 在庫実績(11/14＝今日＝基準日の前日, 椎茸在庫シート): M製品50+生30=80 / L製品100+生60=160(秀L_40 優L_60) / 2L製品20+生10=30 / 袋製品15+生5=20
 //   - 出荷予定(受注シート): M=20,L=40,2L=10,袋=10 を全日固定。秀=10,優=5(いなべ_受注のRAWから)
-function buildStockCsv(baseline) {
+// partial：{ 行の見出し: true } の行は、基準日の前日の値を空欄にする（その日の在庫がまだ一部しか入っていないとき）
+function buildStockCsv(baseline, partial) {
   // 列0,1はラベル列として空読みされる前提の構成とし、列2以降を日付ごとの実データ列にする
   const dates = [];
   for (let i = -3; i <= 3; i++) dates.push(addDays(baseline, i));
@@ -73,7 +75,7 @@ function buildStockCsv(baseline) {
   const rows = [header];
   function row(label, valueAtMinus1) {
     const cells = ['', label];
-    dates.forEach(d => cells.push(sameDay(d, addDays(baseline, -1)) ? valueAtMinus1 : ''));
+    dates.forEach(d => cells.push(sameDay(d, addDays(baseline, -1)) && !(partial && partial[label]) ? valueAtMinus1 : ''));
     rows.push(cells);
   }
   row('M製品在庫', 50);
@@ -175,11 +177,12 @@ function removeNantanSiteData(src) {
 
 async function setupPage(browser, opts) {
   opts = opts || {};
+  // 基準日の既定は明日。今日を 2026/11/14 にして、開いたときの基準日を 2026/11/15（baseline）にする
   const baseline = new Date(2026, 10, 15); // 2026/11/15
   const page = opts.mobile
     ? await (await browser.newContext({ viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true })).newPage()
     : await browser.newPage({ viewport: { width: opts.width || 1280, height: opts.height || 900 } });
-  await fixTodayTo(page, 2026, 10, 15);
+  await fixTodayTo(page, 2026, 10, 14);
   const posts = [];
   const loadQueries = [];
 
@@ -208,11 +211,11 @@ async function setupPage(browser, opts) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ok', values: opts.loadValues || {} }) });
   });
 
-  const actualDate = addDays(baseline, -1); // 実績日の既定値＝基準日の前日
+  const actualDate = addDays(baseline, -2); // 実績日の既定値＝今日（2026/11/14）の前日
   await page.route('**/export**', async route => {
     const url = decodeURIComponent(route.request().url());
     let body = '﻿\r\n';
-    if (url.includes(STOCK_SHEET_ID) && url.includes('gid=' + STOCK_SHEET_GID)) body = buildStockCsv(baseline);
+    if (url.includes(STOCK_SHEET_ID) && url.includes('gid=' + STOCK_SHEET_GID)) body = buildStockCsv(baseline, opts.stockPartial);
     else if (url.includes(STOCK_SHEET_ID) && url.includes('gid=' + ALLOCATION_SHEET_GID)) body = buildAllocationCsv();
     else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + GRADE_RATIO_SHEET_GID)) body = buildGradeRatioCsv();
     else if (url.includes(DB_SHARE_SHEET_ID) && url.includes('gid=' + HARVEST_URL_SHEET_GID)) body = buildHarvestUrlCsv();
@@ -234,7 +237,7 @@ async function setupPage(browser, opts) {
     if (a) a.open = true;
     if (b) b.open = true;
   });
-  // 実績日をモックの実績日（基準日の前日）以外にすると収穫実績のデータが無く表が「－」のままに
+  // 実績日をモックの実績日（今日の前日）以外にすると収穫実績のデータが無く表が「－」のままに
   // なるため、日付を変えるテストでは数字の表示を待たない（skipDataWait）
   if (!opts.skipDataWait) {
     await page.waitForFunction(() => {
@@ -603,7 +606,7 @@ async function viewState(page) {
     await page.close();
   }
 
-  console.log('=== ⑥基準日・実績日をURLのクエリに保ち、リロードしても同じ日付で開く ===');
+  console.log('=== ⑥基準日・実績日をURLのクエリに保ち、リロードしても同じ日付で開く（今日＝2026-11-14） ===');
   {
     const qp = async page => Object.fromEntries(new URLSearchParams(await page.evaluate(() => location.search)));
     const dates = page => page.evaluate(() => ({
@@ -611,11 +614,12 @@ async function viewState(page) {
       baseMax: document.getElementById('refDateInput').max, actualMax: document.getElementById('harvestRefDateInput').max,
       firstCol: document.querySelector('#table1 thead tr.weekday th.dcol.today-col').textContent.trim(),
       nextDisabled: document.getElementById('nextDay').disabled, hNextDisabled: document.getElementById('harvestNextDay').disabled,
+      btn: document.getElementById('todayBtn').textContent.trim(),
     }));
     const { page, loadQueries } = await setupPage(browser, { keepDetails: true });
     await settle(page);
     let d = await dates(page);
-    check('既定：基準日＝今日（2026-11-15）・実績日＝前日（2026-11-14）で、クエリに日付は付かない', d.base === '2026-11-15' && d.actual === '2026-11-14' && !('base' in await qp(page)) && !('actual' in await qp(page)), d);
+    check('既定：基準日＝明日（2026-11-15）・実績日＝前日（2026-11-13）で、クエリに日付は付かない', d.base === '2026-11-15' && d.actual === '2026-11-13' && d.firstCol.startsWith('11/15') && !('base' in await qp(page)) && !('actual' in await qp(page)), d);
     // 基準日を入力欄で、実績日を ‹ ボタンで変える（拠点・詳細も一緒に）
     await page.click('#siteToggle button[data-site="群馬"]');
     await page.click('#harvestDetailSection > summary');
@@ -628,57 +632,59 @@ async function viewState(page) {
     let q = await qp(page);
     d = await dates(page);
     check('基準日（入力欄）・実績日（‹ボタン）を変えるとクエリに反映される（他方の日付は変わらない）',
-      d.base === '2026-11-10' && d.actual === '2026-11-12' && q.base === '2026-11-10' && q.actual === '2026-11-12' && q.site === '群馬' && q.harvestDetail === 'open' && !('stockDetail' in q), { d, q });
+      d.base === '2026-11-10' && d.actual === '2026-11-11' && q.base === '2026-11-10' && q.actual === '2026-11-11' && q.site === '群馬' && q.harvestDetail === 'open' && !('stockDetail' in q), { d, q });
     const hist = await page.evaluate(() => history.length);
     await page.click('#prevDay'); // 基準日 11/09
     await page.click('#nextDay'); // 11/10
-    await page.click('#harvestNextDay'); // 実績日 11/13
+    await page.click('#harvestNextDay'); // 実績日 11/12
     await page.click('#prevMonth'); // 基準日 10/10
     await page.click('#nextMonth'); // 11/10
-    await page.click('#harvestPrevMonth'); // 実績日 10/13
+    await page.click('#harvestPrevMonth'); // 実績日 10/12
     await page.waitForTimeout(200);
     q = await qp(page);
-    check('«・‹・›・» のどれでもクエリが更新され、履歴は増えない', q.base === '2026-11-10' && q.actual === '2026-10-13' && (await page.evaluate(() => history.length)) === hist, { q });
-    await page.click('#harvestNextMonth'); // 実績日 11/13
+    check('«・‹・›・» のどれでもクエリが更新され、履歴は増えない', q.base === '2026-11-10' && q.actual === '2026-10-12' && (await page.evaluate(() => history.length)) === hist, { q });
+    await page.click('#harvestNextMonth'); // 実績日 11/12
     await page.waitForTimeout(100);
     // リロード
     await page.reload();
     await settle(page);
     d = await dates(page);
     const st = await viewState(page);
-    check('リロードすると基準日・実績日がそのまま（2026-11-10・2026-11-13）で、拠点・詳細の状態も一緒に保たれる',
-      d.base === '2026-11-10' && d.actual === '2026-11-13' && d.firstCol.startsWith('11/10') && st.site === '群馬' && st.harvestDetail && !st.stockDetail, { d, st });
-    check('今日でない日付のときは「翌日」ボタンが使え、選べる範囲（max＝今日）は変わらない', !d.nextDisabled && !d.hNextDisabled && d.baseMax === '2026-11-15' && d.actualMax === '2026-11-15', d);
+    check('リロードすると基準日・実績日がそのまま（2026-11-10・2026-11-12）で、拠点・詳細の状態も一緒に保たれる',
+      d.base === '2026-11-10' && d.actual === '2026-11-12' && d.firstCol.startsWith('11/10') && st.site === '群馬' && st.harvestDetail && !st.stockDetail, { d, st });
+    check('明日でない基準日・今日でない実績日のときは「翌日」ボタンが使え、選べる範囲は 基準日＝明日（2026-11-15）・実績日＝今日（2026-11-14）', !d.nextDisabled && !d.hNextDisabled && d.baseMax === '2026-11-15' && d.actualMax === '2026-11-14', d);
     // 翌日に開き直す（今日を1日進める）：クエリの日付はそのまま
-    await fixTodayTo(page, 2026, 10, 16);
+    await fixTodayTo(page, 2026, 10, 15);
     await page.reload();
     await settle(page);
     d = await dates(page);
-    check('翌日に開き直しても、クエリの日付（2026-11-10・2026-11-13）のまま表示され、選べる範囲は新しい今日（2026-11-16）まで', d.base === '2026-11-10' && d.actual === '2026-11-13' && d.baseMax === '2026-11-16', d);
-    // 「今日」「前日」ボタンで既定に戻り、クエリから日付が消える（新しい今日・前日）
+    check('翌日に開き直しても、クエリの日付（2026-11-10・2026-11-12）のまま表示され、選べる範囲は 基準日＝新しい明日（2026-11-16）・実績日＝新しい今日（2026-11-15）まで', d.base === '2026-11-10' && d.actual === '2026-11-12' && d.baseMax === '2026-11-16' && d.actualMax === '2026-11-15', d);
+    // 基準日が過去の日なのでボタンは「明日」。押すと新しい明日になり、クエリから日付が消える
+    check('基準日が過去の日（2026-11-10）のときボタンの表示は「明日」', d.btn === '明日', d);
     await page.click('#todayBtn');
     await page.waitForTimeout(100);
     q = await qp(page); d = await dates(page);
-    check('「今日」ボタンで基準日が新しい今日（2026-11-16）に戻り、クエリから base が消える（実績日はそのまま）', d.base === '2026-11-16' && !('base' in q) && q.actual === '2026-11-13', { d, q });
+    check('「明日」ボタンで基準日が新しい明日（2026-11-16）になり、クエリから base が消える（実績日はそのまま）。ボタンの表示は「今日」に変わる', d.base === '2026-11-16' && !('base' in q) && q.actual === '2026-11-12' && d.btn === '今日', { d, q });
     await page.click('#harvestTodayBtn');
     await page.waitForTimeout(100);
     q = await qp(page); d = await dates(page);
-    check('「前日」ボタンで実績日が新しい前日（2026-11-15）に戻り、クエリから actual も消える（拠点・詳細は残る）', d.actual === '2026-11-15' && !('actual' in q) && q.site === '群馬' && q.harvestDetail === 'open', { d, q });
-    // クエリに日付が無いまま翌日に開き直すと、新しい今日・前日
+    check('「前日」ボタンで実績日が新しい前日（2026-11-14）に戻り、クエリから actual も消える（拠点・詳細は残る）', d.actual === '2026-11-14' && !('actual' in q) && q.site === '群馬' && q.harvestDetail === 'open', { d, q });
+    // クエリに日付が無いまま翌日に開き直すと、新しい明日・前日
     await page.reload();
     await settle(page);
     d = await dates(page);
-    check('クエリに日付が無ければ、翌日に開き直すと新しい今日・前日（2026-11-16・2026-11-15）で表示される', d.base === '2026-11-16' && d.actual === '2026-11-15', d);
+    check('クエリに日付が無ければ、翌日に開き直すと新しい明日・前日（2026-11-16・2026-11-14）で表示される', d.base === '2026-11-16' && d.actual === '2026-11-14', d);
     await page.close();
   }
   {
-    // おかしな日付のクエリ：その日付だけ既定に戻る（他方・拠点・詳細は保たれる）
+    // おかしな日付のクエリ：その日付だけ既定に戻る（他方・拠点・詳細は保たれる）。今日＝2026-11-14
     const cases = [
-      ['?base=2026-13-45&actual=abc', '2026-11-15', '2026-11-14'],
-      ['?base=2026-11-20&actual=2099-01-01', '2026-11-15', '2026-11-14'], // 今日より先は選べない
+      ['?base=2026-13-45&actual=abc', '2026-11-15', '2026-11-13'],
+      ['?base=2026-11-20&actual=2099-01-01', '2026-11-15', '2026-11-13'], // 基準日は明日より先、実績日は今日より先は選べない
+      ['?base=2026-11-15&actual=2026-11-15', '2026-11-15', '2026-11-13'], // 基準日は明日まで使える。実績日の明日は既定
       ['?base=2026-02-30&actual=2026-11-10', '2026-11-15', '2026-11-10'], // 実在しない日（base）だけ既定
-      ['?base=2026-11-10&actual=1999-12-31', '2026-11-10', '2026-11-14'], // 古すぎる日（actual）だけ既定
-      ['?base=&actual=2026-1-5', '2026-11-15', '2026-11-14'],
+      ['?base=2026-11-10&actual=1999-12-31', '2026-11-10', '2026-11-13'], // 古すぎる日（actual）だけ既定
+      ['?base=&actual=2026-1-5', '2026-11-15', '2026-11-13'],
       ['?base=2026-11-10&actual=2026-11-08', '2026-11-10', '2026-11-08'], // 正しい値は両方使われる
     ];
     for (const [q, base, actual] of cases) {
@@ -695,7 +701,12 @@ async function viewState(page) {
       const v = window.__test.validViewDate;
       return ['2026-11-15', '2026-11-16', '2000-01-01', '1999-12-31', '2026-02-29', '2024-02-29', 'x', '', null, '2026-11-1'].map(x => v(x, '2026-11-15'));
     });
-    check('日付の検査：実在し、2000-01-01〜今日の日付だけを通す', JSON.stringify(pure) === JSON.stringify(['2026-11-15', null, '2000-01-01', null, null, '2024-02-29', null, null, null, null]), pure);
+    check('日付の検査：実在し、2000-01-01〜選べる最後の日（ここでは 2026-11-15）の日付だけを通す', JSON.stringify(pure) === JSON.stringify(['2026-11-15', null, '2000-01-01', null, null, '2024-02-29', null, null, null, null]), pure);
+    const rs = await page.evaluate(() => {
+      const r = window.__test.readViewStateFromSearch;
+      return [r('?base=2026-11-15&actual=2026-11-14', '2026-11-14'), r('?base=2026-11-16&actual=2026-11-15', '2026-11-14')].map(x => [x.base, x.actual]);
+    });
+    check('クエリの読み方：今日＝11/14 なら、基準日は明日（11/15）まで・実績日は今日（11/14）まで使い、それより先は既定（null）', JSON.stringify(rs) === JSON.stringify([['2026-11-15', '2026-11-14'], [null, null]]), rs);
     await page.close();
   }
   {
@@ -707,6 +718,91 @@ async function viewState(page) {
     await page.dispatchEvent('#harvestRefDateInput', 'change');
     await page.waitForTimeout(200);
     check('htmlpreview形式のURLでも、日付のクエリは表示するファイルのURLの後ろに付く', (await decodeSearch(page)) === prefix + '?actual=2026-11-05', await decodeSearch(page));
+    await page.close();
+  }
+
+  console.log('=== ⑦「今日／明日」ボタンの表示の切り替え・基準日は明日まで（今日＝2026-11-14） ===');
+  {
+    const st7 = page => page.evaluate(() => ({
+      base: document.getElementById('refDateInput').value,
+      btn: document.getElementById('todayBtn').textContent.trim(),
+      next: document.getElementById('nextDay').disabled, nextM: document.getElementById('nextMonth').disabled,
+      search: decodeURIComponent(location.search),
+    }));
+    const { page } = await setupPage(browser, { keepDetails: true });
+    await settle(page);
+    let s = await st7(page);
+    check('開いたとき：基準日は明日（2026-11-15）で、ボタンの表示は「今日」、› » は押せない', s.base === '2026-11-15' && s.btn === '今日' && s.next && s.nextM, s);
+    await page.click('#todayBtn');
+    await page.waitForTimeout(150);
+    s = await st7(page);
+    check('「今日」を押すと基準日が今日（2026-11-14）になり、ボタンの表示は「明日」、› » が押せる、クエリに base=2026-11-14', s.base === '2026-11-14' && s.btn === '明日' && !s.next && !s.nextM && s.search === '?base=2026-11-14', s);
+    await page.click('#todayBtn');
+    await page.waitForTimeout(150);
+    s = await st7(page);
+    check('基準日が今日のとき「明日」を押すと基準日が明日（2026-11-15）になり、ボタンの表示は「今日」、クエリから base が消える', s.base === '2026-11-15' && s.btn === '今日' && s.next && s.search === '', s);
+    await page.click('#prevDay');
+    await page.click('#prevDay');
+    await page.waitForTimeout(150);
+    s = await st7(page);
+    check('基準日が過去の日（2026-11-13）のとき、ボタンの表示は「明日」', s.base === '2026-11-13' && s.btn === '明日', s);
+    await page.click('#todayBtn');
+    await page.waitForTimeout(150);
+    s = await st7(page);
+    check('基準日が過去の日のとき「明日」を押すと、基準日が明日（2026-11-15）になり、ボタンの表示は「今日」', s.base === '2026-11-15' && s.btn === '今日', s);
+    await page.click('#prevDay'); // 11/14（今日）
+    await page.waitForTimeout(100);
+    s = await st7(page);
+    check('‹ で今日（2026-11-14）にすると、ボタンの表示は「明日」', s.base === '2026-11-14' && s.btn === '明日', s);
+    await page.click('#nextDay'); // 11/15（明日）
+    await page.waitForTimeout(100);
+    s = await st7(page);
+    check('› で明日（2026-11-15）まで進めると、ボタンの表示は「今日」になり、› » は押せなくなる', s.base === '2026-11-15' && s.btn === '今日' && s.next && s.nextM, s);
+    await page.click('#prevMonth'); // 10/15
+    await page.click('#nextMonth'); // 11/15
+    await page.waitForTimeout(100);
+    s = await st7(page);
+    check('« » で1か月戻って進めても明日（2026-11-15）で止まり、ボタンの表示は「今日」', s.base === '2026-11-15' && s.btn === '今日' && s.next, s);
+    await page.fill('#refDateInput', '2026-11-20');
+    await page.dispatchEvent('#refDateInput', 'change');
+    await page.waitForTimeout(150);
+    s = await st7(page);
+    check('明日より先の日（2026-11-20）を入れると明日（2026-11-15）に戻り、ボタンの表示は「今日」', s.base === '2026-11-15' && s.btn === '今日', s);
+    await page.close();
+  }
+  {
+    // クエリで今日・過去の日を指定して開いたときも、開いた直後からボタンの表示が合っている
+    for (const [q, base, btn] of [['?base=2026-11-14', '2026-11-14', '明日'], ['?base=2026-11-01', '2026-11-01', '明日'], ['?base=2026-11-15', '2026-11-15', '今日']]) {
+      const { page } = await setupPage(browser, { keepDetails: true, skipDataWait: true, skipDetailWait: true, query: q });
+      const s = await page.evaluate(() => ({ base: document.getElementById('refDateInput').value, btn: document.getElementById('todayBtn').textContent.trim() }));
+      check(`クエリ ${q} で開くと基準日＝${base}・ボタンの表示は「${btn}」`, s.base === base && s.btn === btn, s);
+      await page.close();
+    }
+  }
+  {
+    // 基準日が明日のとき、製品在庫・生在庫は今日（基準日の前日）の在庫を読む。今日の在庫が一部だけ入っているときは、
+    // 入っている分をそのまま出し、入っていないところは今と同じ「－」。在庫予測は今の計算式のまま
+    // （製品在庫＋生在庫。片方だけ入っていれば入っている方だけ。両方とも入っていなければ「－」）
+    const partial = { 'M生在庫': true, 'L製品在庫': true, '2L製品在庫': true, '2L生在庫': true };
+    const { page } = await setupPage(browser, { keepDetails: true, skipDataWait: true, stockPartial: partial });
+    await settle(page);
+    await page.waitForFunction(() => document.querySelector('[data-stock-product="M"]').textContent.trim() !== '－', null, { timeout: 15000 });
+    await page.waitForTimeout(500);
+    const v = await page.evaluate(() => {
+      const t = sel => document.querySelector(sel).textContent.trim();
+      const out = { stockDay: t('#table1 thead tr.weekday th.dcol[data-offset="-1"]') };
+      ['M', 'L', '2L', '袋'].forEach(z => { out[z] = [t(`[data-stock-product="${z}"]`), t(`[data-stock-raw="${z}"]`), t(`[data-stock-forecast-actual="${z}"]`)]; });
+      out.f2L = Array.from({ length: 9 }, (_, o) => t(`[data-stock-forecast="2L"][data-stock-forecast-offset="${o}"]`));
+      const n = sel => parseFloat(t(sel).replace(/,/g, ''));
+      out.fM0 = n('[data-stock-forecast="M"][data-stock-forecast-offset="0"]');
+      out.calcM0 = Math.round((50 + n('[data-harvest="M"][data-harvest-offset="0"]') - n('[data-shipment="M"][data-shipment-offset="0"]')) * 10) / 10;
+      return out;
+    });
+    check('基準日が明日（11/15）のとき、製品在庫・生在庫の列は今日（11/14）の在庫', v.stockDay.startsWith('11/14'), v.stockDay);
+    check('今日の在庫が一部だけ：入っている分はそのまま出る（M製品 50.0・L生 60.0・袋 15.0／5.0）', v.M[0] === '50.0' && v.L[1] === '60.0' && v['袋'][0] === '15.0' && v['袋'][1] === '5.0', v);
+    check('今日の在庫が一部だけ：入っていないところは今と同じ「－」（M生・L製品・2L製品・2L生）', v.M[1] === '－' && v.L[0] === '－' && v['2L'][0] === '－' && v['2L'][1] === '－', v);
+    check('在庫予測の在庫実績は今の計算式のまま（M 50.0・L 60.0・袋 20.0、2Lは「－」）', v.M[2] === '50.0' && v.L[2] === '60.0' && v['袋'][2] === '20.0' && v['2L'][2] === '－', v);
+    check('在庫予測：在庫実績が「－」のサイズ（2L）は予測も「－」、入っているサイズ（M）は 在庫実績＋収穫予測−出荷予定', v.f2L.every(x => x === '－') && v.fM0 === v.calcM0, v);
     await page.close();
   }
 
