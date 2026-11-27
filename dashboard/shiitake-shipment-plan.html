@@ -808,9 +808,9 @@
 // ── 表示状態（拠点・詳細の開閉）をページのURLのクエリに保ち、リロードしても同じ状態で開く ──
 // クエリ：site＝いなべ／群馬／南丹（いなべは省略）、harvestDetail＝open（収穫予測の詳細を開く。
 // 閉じているときは省略）、stockDetail＝open（在庫予測の詳細を開く。閉じているときは省略）、
-// base＝基準日（YYYY-MM-DD。今日のときは省略）、actual＝実績日（YYYY-MM-DD。前日のときは省略）。
+// base＝基準日（YYYY-MM-DD。明日のときは省略）、actual＝実績日（YYYY-MM-DD。前日のときは省略）。
 // 拠点の切り替え・詳細の開閉・日付の変更のたびに history.replaceState で書き換える（履歴は増やさない）。
-// クエリが無い・値がおかしいときは今までどおり いなべ・詳細は閉じた状態・基準日は今日・実績日は前日
+// クエリが無い・値がおかしいときは いなべ・詳細は閉じた状態・基準日は明日・実績日は前日
 // （日付がおかしいときは、その日付だけ既定に戻す）。翌日以降に開き直しても、クエリの日付のまま表示する。
 // htmlpreview（URLが「?https://github.com/…/shiitake-shipment-plan.html」の形）で開いた場合は、
 // 表示するファイルのURLの後ろに「?site=…」を付ける（htmlpreviewはその後ろのクエリを付けたまま
@@ -831,14 +831,14 @@
     d.setDate(d.getDate() + n);
     return toISO(d);
   }
-  // 日付の値の検査：実在する YYYY-MM-DD で、MIN_DATE_ISO以降・todayISO以前（日付の入力欄の
-  // max＝今日。今日より先は選べない）ならそのまま返し、それ以外はnull。純粋関数
-  function validDate(value, todayISO){
+  // 日付の値の検査：実在する YYYY-MM-DD で、MIN_DATE_ISO以降・maxISO以前（日付の入力欄の max。
+  // 基準日は明日、実績日は今日まで選べる）ならそのまま返し、それ以外はnull。純粋関数
+  function validDate(value, maxISO){
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
     var p = value.split('-').map(Number);
     var d = new Date(p[0], p[1] - 1, p[2]);
     if (toISO(d) !== value) return null;
-    if (value < MIN_DATE_ISO || value > todayISO) return null;
+    if (value < MIN_DATE_ISO || value > maxISO) return null;
     return value;
   }
 
@@ -858,14 +858,15 @@
   }
 
   // クエリから表示状態を読む。おかしい値は既定（いなべ・閉じる）にする。純粋関数
-  // todayISOは省略可（省略時は今日）。日付（base・actual）はおかしい値ならnull（＝既定）
+  // todayISOは省略可（省略時は今日）。日付（base・actual）はおかしい値ならnull（＝既定）。
+  // 基準日（base）は明日まで、実績日（actual）は今日まで
   function readStateFromSearch(search, todayISO){
     var params = new URLSearchParams(splitSearch(search).query);
     var site = params.get('site');
     var state = { site: SITES.indexOf(site) >= 0 ? site : DEFAULT_SITE };
     Object.keys(DETAILS).forEach(function(key){ state[key] = params.get(key) === 'open'; });
     var t = todayISO || toISO(new Date());
-    state.base = validDate(params.get('base'), t);
+    state.base = validDate(params.get('base'), addDaysISO(t, 1));
     state.actual = validDate(params.get('actual'), t);
     return state;
   }
@@ -893,10 +894,11 @@
     Object.keys(DETAILS).forEach(function(key){
       if (state[key]) params.set(key, 'open'); else params.delete(key);
     });
-    // 日付：既定（基準日＝今日、実績日＝前日）のときはクエリを付けない。日付の入力欄が
+    // 日付：既定（基準日＝明日、実績日＝前日）のときはクエリを付けない。日付の入力欄が
     // 空・おかしいときも付けない
     var todayISO = toISO(new Date());
-    if (validDate(state.base, todayISO) && state.base !== todayISO) params.set('base', state.base); else params.delete('base');
+    var tomorrowISO = addDaysISO(todayISO, 1);
+    if (validDate(state.base, tomorrowISO) && state.base !== tomorrowISO) params.set('base', state.base); else params.delete('base');
     if (validDate(state.actual, todayISO) && state.actual !== addDaysISO(todayISO, -1)) params.set('actual', state.actual); else params.delete('actual');
     var url = location.pathname + joinSearch(parts.prefix, params.toString()) + location.hash;
     try { history.replaceState(history.state, '', url); } catch (e) { console.warn('[表示状態] URLを書き換えられませんでした:', e); }
@@ -906,8 +908,8 @@
   // 読み込みは、本体の描画が終わった後のupdateHarvestStockDetail()が選ばれている拠点を見て行うため、
   // 本体が未対応の拠点ならそのままだと読み込み・保存・入力をしない（PR #515 の安全策）が働く）
   var initial = readStateFromSearch(location.search);
-  // 基準日・実績日の初期値。日付の入力欄を既定値（今日・前日）にする下のスクリプトが、
-  // この値があればそれで上書きする（日付の関係・選べる範囲・今日より先を選べない制限はそちらのまま）
+  // 基準日・実績日の初期値。日付の入力欄を既定値（明日・前日）にする下のスクリプトが、
+  // この値があればそれで上書きする（選べる範囲：基準日は明日まで・実績日は今日まで、はそちらのまま）
   window.__initialViewDates = { base: initial.base, actual: initial.actual };
   document.querySelectorAll('#siteToggle button').forEach(function(b){
     b.classList.toggle('active', b.getAttribute('data-site') === initial.site);
@@ -2487,12 +2489,20 @@
   var today = new Date();
   today.setHours(0,0,0,0);
   var todayISO = toISO(today);
+  // 基準日は明日まで選べる。開いたときは明日
+  var tomorrowISO = toISO(addDays(today, 1));
 
   var input = document.getElementById('refDateInput');
-  input.max = todayISO;
-  input.value = todayISO;
+  input.max = tomorrowISO;
+  input.value = tomorrowISO;
   // URLのクエリ（base）に日付があれば、その日付で開く（リロード・翌日以降に開き直したとき）
   if (window.__initialViewDates && window.__initialViewDates.base) input.value = window.__initialViewDates.base;
+
+  // 「今日／明日」ボタン：基準日が明日なら「今日」（押すと今日）、今日・過去の日なら「明日」（押すと明日）
+  var dayBtn = document.getElementById('todayBtn');
+  function dayButtonTarget(){ return input.value === tomorrowISO ? 'today' : 'tomorrow'; }
+  function updateDayButton(){ dayBtn.textContent = dayButtonTarget() === 'today' ? '今日' : '明日'; }
+  updateDayButton();
 
   var dcols = document.querySelectorAll('.dcol');
 
@@ -2502,9 +2512,10 @@
       var offset = parseInt(cell.getAttribute('data-offset'), 10);
       cell.textContent = fmt(addDays(ref, offset));
     });
-    var isToday = input.value === todayISO;
-    document.getElementById('nextDay').disabled = isToday;
-    document.getElementById('nextMonth').disabled = isToday;
+    var isMax = input.value === tomorrowISO;
+    document.getElementById('nextDay').disabled = isMax;
+    document.getElementById('nextMonth').disabled = isMax;
+    updateDayButton();
     // 製品在庫・生在庫列（M・L・2L・袋）は基準日の前日（data-offset="-1"と同じ日）の
     // 実データを表示する
     var stockPromise = (typeof updateStockLiveData === 'function') ? updateStockLiveData(addDays(ref, -1)) : Promise.resolve();
@@ -2528,7 +2539,7 @@
   }
 
   function clamp(){
-    if (input.value > todayISO) input.value = todayISO;
+    if (input.value > tomorrowISO) input.value = tomorrowISO;
   }
 
   document.getElementById('prevDay').addEventListener('click', function(){
@@ -2547,8 +2558,8 @@
     input.value = toISO(addMonths(fromISO(input.value), 1));
     clamp(); render();
   });
-  document.getElementById('todayBtn').addEventListener('click', function(){
-    input.value = todayISO;
+  dayBtn.addEventListener('click', function(){
+    input.value = dayButtonTarget() === 'today' ? todayISO : tomorrowISO;
     render();
   });
   input.addEventListener('change', function(){ clamp(); render(); });

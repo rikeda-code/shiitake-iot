@@ -68,6 +68,9 @@ const TARGET_SHEET_GID = '999999999';
 const SALES_MONTH_GID = '111111111';
 const FAKE_GAS_URL = 'https://script.google.com/macros/s/TEST_SHIPMENT_HARVEST_FORECAST_SITEGATE/exec';
 const PAGE_URL = 'http://localhost:8812/shiitake-shipment-plan.html';
+// 基準日の既定が「明日」になったため、このテストでは今までどおり基準日＝今日（fixTodayTo で決めた日）で開く
+// （URL の base= で基準日を指定する。実績日の既定（前日）は変わらない）
+function withBaseToday(url, y, m, d) { const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return url + (url.includes('?') ? '&' : '?') + 'base=' + iso; }
 
 // 群馬：本体（パネル1〜3）が対応したため、詳細も動く拠点になったことを確認するための
 // モック一式。いなべと見分けがつくよう、あえて違う値にする（ratioはいなべと同じ25%に
@@ -272,7 +275,7 @@ async function setupPage(browser, opts) {
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body });
   });
 
-  await page.goto(PAGE_URL);
+  await page.goto(withBaseToday(PAGE_URL, 2026, 10, 15));
   await page.evaluate(() => {
     const a = document.getElementById('harvestDetailSection');
     const b = document.getElementById('stockDetailSection');

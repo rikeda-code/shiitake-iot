@@ -56,6 +56,9 @@ const TARGET_SHEET_GID = '999999999';
 const SALES_MONTH_GID = '111111111';
 const FAKE_GAS_URL = 'https://script.google.com/macros/s/TEST_SHIPMENT_HARVEST_FORECAST/exec';
 const PAGE_URL = 'http://localhost:8812/shiitake-shipment-plan.html';
+// 基準日の既定が「明日」になったため、このテストでは今までどおり基準日＝今日（fixTodayTo で決めた日）で開く
+// （URL の base= で基準日を指定する。実績日の既定（前日）は変わらない）
+function withBaseToday(url, y, m, d) { const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return url + (url.includes('?') ? '&' : '?') + 'base=' + iso; }
 
 // 2026/11/15(基準日)〜2026/11/23(8日後)。実績日は既定で基準日の前日=11/14。
 // シナリオ：
@@ -212,7 +215,7 @@ async function setupPage(browser, opts) {
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body });
   });
 
-  await page.goto(PAGE_URL);
+  await page.goto(withBaseToday(PAGE_URL, 2026, 10, 15));
   // 詳細パネルは最初閉じた状態（仕様どおり）。テストで中身を操作・確認するため開いておく
   await page.evaluate(() => {
     const a = document.getElementById('harvestDetailSection');

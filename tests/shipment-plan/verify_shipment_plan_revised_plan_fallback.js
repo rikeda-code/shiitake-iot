@@ -57,6 +57,9 @@ const GUNMA_ORDER_GID = '1218802781'; // 「群馬_受注」タブ
 const OCT_MONTH_GID = '222222221';
 const NOV_MONTH_GID = '222222222';
 const PAGE_URL = 'http://localhost:8812/shiitake-shipment-plan.html';
+// 基準日の既定が「明日」になったため、このテストでは今までどおり基準日＝今日（fixTodayTo で決めた日）で開く
+// （URL の base= で基準日を指定する。実績日の既定（前日）は変わらない）
+function withBaseToday(url, y, m, d) { const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return url + (url.includes('?') ? '&' : '?') + 'base=' + iso; }
 
 const results = [];
 function check(name, ok, detail) { results.push({ name, ok }); console.log(`${ok ? 'OK  ' : 'NG  '} ${name}${ok ? '' : '  → ' + JSON.stringify(detail)}`); }
@@ -130,7 +133,7 @@ async function setupPage(browser, query, octValues, novValues, colOffset) {
     }
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body });
   });
-  await page.goto(PAGE_URL + query);
+  await page.goto(withBaseToday(PAGE_URL + query, 2026, 9, 28));
   await page.waitForSelector('#table1');
   return page;
 }

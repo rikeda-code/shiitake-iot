@@ -59,6 +59,9 @@ function check(name, cond, extra) {
 }
 
 const PAGE_URL = 'http://localhost:8812/shiitake-shipment-plan.html';
+// 基準日の既定が「明日」になったため、このテストでは今までどおり基準日＝今日（fixTodayTo で決めた日）で開く
+// （URL の base= で基準日を指定する。実績日の既定（前日）は変わらない）
+function withBaseToday(url, y, m, d) { const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return url + (url.includes('?') ? '&' : '?') + 'base=' + iso; }
 const DB_SHARE_SHEET_ID = '1Hy74BTGp25GwOiomNeYCFQWD3jkdFKDa5aJ6FETP9Tg';
 const STOCK_URL_SHEET_GID = '717295394';
 const HARVEST_URL_SHEET_GID = '1996914203';
@@ -300,7 +303,7 @@ async function setupPage(browser, opts) {
     else if (url.includes(SALES_RAW_SHEET_ID) && url.includes('gid=' + NANTAN_ORDER_GID)) body = buildNantanRawOrderCsv();
     await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body });
   });
-  await page.goto(PAGE_URL + (opts.query || ''));
+  await page.goto(withBaseToday(PAGE_URL + (opts.query || ''), today[0], today[1], today[2]));
   await page.waitForSelector('#table1');
   return { page, loadQueries };
 }
